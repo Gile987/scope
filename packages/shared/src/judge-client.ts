@@ -11,6 +11,7 @@ export interface JudgeEvaluateRequest {
   criteria: string[];
   conversationHistory: ConversationTurn[];
   personaInstructions?: string;
+  scenarioVersion?: 'v1' | 'v2';  // v1 = inline prompts (default), v2 = criteria IDs
 }
 
 /**

@@ -17,6 +17,8 @@ export interface MultiTurnConfig {
   task: string;
   /** Judge evaluation criteria */
   criteria: string[];
+  /** Scenario version (v1 = inline prompts, v2 = criteria IDs) */
+  scenarioVersion?: 'v1' | 'v2';
   /** Maximum number of iterations before giving up */
   maxIterations: number;
   /** Path to the workspace directory to snapshot */
@@ -64,6 +66,7 @@ export async function runMultiTurnLoop(
     processor,
     task,
     criteria,
+    scenarioVersion,
     maxIterations,
     workspacePath,
     judgeClient,
@@ -150,6 +153,7 @@ export async function runMultiTurnLoop(
         criteria,
         conversationHistory: turns,
         personaInstructions,
+        scenarioVersion,
       });
       judgePassed = judgeResult.passed;
       judgeFeedback = judgeResult.feedback;
