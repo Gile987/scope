@@ -38,7 +38,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, scenarioVersion } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -81,6 +81,7 @@ app.post(
           criteria,
           conversationHistory: conversationHistory || [],
           personaInstructions,
+          scenarioVersion: scenarioVersion || 'v1',  // Default to v1 for backward compatibility
         });
 
         const elapsed = Date.now() - startTime;
