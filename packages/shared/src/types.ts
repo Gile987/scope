@@ -33,8 +33,9 @@ export interface Persona {
 }
 
 export interface Scenario {
+  version?: 'v1' | 'v2';  // v1 = simple strings (default), v2 = criteria IDs
   task: string;
-  criteria: string[];
+  criteria: string[];  // v1: prompts, v2: criteria IDs
 }
 
 export interface TraitDescriptions {
@@ -94,4 +95,41 @@ export interface QueueProcessorConfig {
   redisHost: string;
   redisPort: number;
   redisPassword: string;
+}
+
+// --- Enhanced Criteria System types ---
+
+// Criteria definition (loaded from config/criteria/*.yaml for v2 scenarios)
+export interface CriteriaConfig {
+  id: string;
+  prompt: string;
+  dependsOn?: string[];  // Optional parent criteria IDs
+}
+
+// Per-criterion result from judge evaluation
+export interface CriterionResult {
+  criterionId: string;
+  passed: boolean;
+  feedback: string;
+  evaluated: boolean;  // False if skipped due to ancestor failure
+}
+
+// Enhanced evaluation result with per-criterion results
+export interface DetailedEvaluationResult {
+  allPassed: boolean;
+  results: CriterionResult[];
+  evaluatedIds: Set<string>;
+  strategy: 'bundled' | 'independent';
+}
+
+// Judge strategy configuration (from environment/ConfigMap)
+export interface JudgeStrategyConfig {
+  type: 'bundled' | 'independent';
+  maxParallelism?: number;  // For independent strategy (default: 3)
+}
+
+// Feedback configuration (from environment/ConfigMap)
+export interface FeedbackConfig {
+  maxCriteria?: number;  // Max failed criteria to include (default: 1)
+  includeDescendantGuard?: boolean;  // Avoid hinting at dependent criteria (default: true)
 }
