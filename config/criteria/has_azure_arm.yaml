@@ -1,0 +1,7 @@
+id: has_azure_arm
+prompt: |
+  The project uses Azure ARM templates for infrastructure as code.
+  Look for azuredeploy.json, *.arm.json, or JSON files with $schema pointing to Azure deployment schemas.
+depends_on:
+  - has_iac
+  - has_azure

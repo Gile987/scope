@@ -1,6 +1,0 @@
-id: has-get-route
-prompt: |
-  The Express server has a GET route defined (e.g., app.get('/', ...) or router.get('/', ...)).
-  The route should return a response (res.send, res.json, res.render, etc.).
-depends_on:
-  - has-main-file

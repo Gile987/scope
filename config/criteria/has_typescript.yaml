@@ -1,0 +1,6 @@
+id: has_typescript
+prompt: |
+  The project uses TypeScript. Look for tsconfig.json, .ts or .tsx files,
+  or typescript dependency in package.json.
+depends_on:
+  - has_node

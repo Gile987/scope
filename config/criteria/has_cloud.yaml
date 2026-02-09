@@ -1,0 +1,3 @@
+id: has_cloud
+prompt: |
+  The project uses cloud infrastructure or services (Azure, AWS, GCP, or other cloud providers).

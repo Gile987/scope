@@ -1,0 +1,7 @@
+id: has_azure_bicep
+prompt: |
+  The project uses Azure Bicep for infrastructure as code.
+  Look for *.bicep files, bicepconfig.json, or main.bicep entry points.
+depends_on:
+  - has_iac
+  - has_azure

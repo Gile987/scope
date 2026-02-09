@@ -1,0 +1,7 @@
+id: has_azure_swa
+prompt: |
+  The project is configured to deploy to Azure Static Web Apps. Look for
+  staticwebapp.config.json, azure-static-web-apps workflow files, or SWA CLI configuration.
+depends_on:
+  - has_azure
+  - has_node
