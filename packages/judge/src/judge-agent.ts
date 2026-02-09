@@ -1,17 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CopilotClient, defineTool, SessionEvent } from "@github/copilot-sdk";
-import { readFileSync, readdirSync, statSync, existsSync } from "fs";
-import { join, relative } from "path";
-import { execSync } from "child_process";
-import { ConversationTurn } from "shared";
+import {
+  CriteriaConfig,
+  ConversationTurn,
+  DetailedEvaluationResult,
+} from "shared";
+import { getCriteriaRegistry } from "shared/criteria-registry";
+import { CriteriaGraph, normalizeCriteria } from "shared/criteria-graph";
+import { createJudgeStrategy } from "./judge-strategies.js";
+import { FeedbackGenerator } from "./feedback-generator.js";
 
 export interface EvaluationInput {
   workspacePath: string;
   criteria: string[];
   conversationHistory: ConversationTurn[];
   personaInstructions?: string;
+  scenarioVersion?: "v1" | "v2";  // v1 = inline prompts, v2 = criteria IDs
 }
 
 export interface EvaluationResult {
@@ -20,314 +25,134 @@ export interface EvaluationResult {
 }
 
 /**
- * Creates filesystem inspection tools scoped to the given workspace path.
- */
-function createFileTools(workspacePath: string) {
-  const readFile = defineTool("read_file", {
-    description:
-      "Read the contents of a file in the workspace. Returns the full text content. Use relative paths from the workspace root.",
-    parameters: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Relative path to the file from the workspace root",
-        },
-      },
-      required: ["path"],
-    },
-    handler: async (args: { path: string }) => {
-      const fullPath = join(workspacePath, args.path);
-      // Security: prevent path traversal
-      if (!fullPath.startsWith(workspacePath)) {
-        return { error: "Path traversal not allowed" };
-      }
-      if (!existsSync(fullPath)) {
-        return { error: `File not found: ${args.path}` };
-      }
-      try {
-        const stat = statSync(fullPath);
-        if (stat.isDirectory()) {
-          return { error: `${args.path} is a directory, not a file. Use list_directory instead.` };
-        }
-        // Limit file size to prevent overwhelming the context
-        if (stat.size > 100_000) {
-          const content = readFileSync(fullPath, "utf-8").substring(0, 100_000);
-          return { content, truncated: true, totalSize: stat.size };
-        }
-        const content = readFileSync(fullPath, "utf-8");
-        return { content };
-      } catch (err) {
-        return { error: `Failed to read file: ${err}` };
-      }
-    },
-  });
-
-  const listDirectory = defineTool("list_directory", {
-    description:
-      "List the contents of a directory in the workspace. Returns file and directory names with their types and sizes.",
-    parameters: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description:
-            "Relative path to the directory from the workspace root. Use '.' for the root directory.",
-        },
-      },
-      required: ["path"],
-    },
-    handler: async (args: { path: string }) => {
-      const fullPath = join(workspacePath, args.path);
-      if (!fullPath.startsWith(workspacePath)) {
-        return { error: "Path traversal not allowed" };
-      }
-      if (!existsSync(fullPath)) {
-        return { error: `Directory not found: ${args.path}` };
-      }
-      try {
-        const entries = readdirSync(fullPath, { withFileTypes: true });
-        const items = entries
-          .filter((e) => !e.name.startsWith(".") && e.name !== "node_modules")
-          .map((entry) => {
-            const entryPath = join(fullPath, entry.name);
-            try {
-              const stat = statSync(entryPath);
-              return {
-                name: entry.name,
-                type: entry.isDirectory() ? "directory" : "file",
-                size: entry.isFile() ? stat.size : undefined,
-              };
-            } catch {
-              return { name: entry.name, type: "unknown" };
-            }
-          });
-        return { path: args.path, entries: items };
-      } catch (err) {
-        return { error: `Failed to list directory: ${err}` };
-      }
-    },
-  });
-
-  const searchFiles = defineTool("search_files", {
-    description:
-      "Search for text patterns in files within the workspace using grep. Returns matching lines with file paths and line numbers.",
-    parameters: {
-      type: "object",
-      properties: {
-        pattern: {
-          type: "string",
-          description: "Text pattern or regex to search for",
-        },
-        path: {
-          type: "string",
-          description:
-            "Relative path to search in. Defaults to '.' (entire workspace).",
-        },
-        filePattern: {
-          type: "string",
-          description:
-            "Glob pattern to filter files (e.g., '*.ts', '*.py'). Optional.",
-        },
-      },
-      required: ["pattern"],
-    },
-    handler: async (args: {
-      pattern: string;
-      path?: string;
-      filePattern?: string;
-    }) => {
-      const searchPath = join(workspacePath, args.path || ".");
-      if (!searchPath.startsWith(workspacePath)) {
-        return { error: "Path traversal not allowed" };
-      }
-      try {
-        let cmd = `grep -rn --include='${args.filePattern || "*"}' "${args.pattern.replace(/"/g, '\\"')}" "${searchPath}" 2>/dev/null | head -50`;
-        const output = execSync(cmd, { encoding: "utf-8", timeout: 10000 }).trim();
-        if (!output) {
-          return { matches: [], message: "No matches found" };
-        }
-        // Make paths relative to workspace
-        const matches = output.split("\n").map((line) => {
-          const relLine = line.replace(workspacePath + "/", "");
-          return relLine;
-        });
-        return { matches };
-      } catch {
-        return { matches: [], message: "No matches found or search error" };
-      }
-    },
-  });
-
-  const fileExists = defineTool("file_exists", {
-    description: "Check if a file or directory exists in the workspace.",
-    parameters: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Relative path to check",
-        },
-      },
-      required: ["path"],
-    },
-    handler: async (args: { path: string }) => {
-      const fullPath = join(workspacePath, args.path);
-      if (!fullPath.startsWith(workspacePath)) {
-        return { error: "Path traversal not allowed" };
-      }
-      const exists = existsSync(fullPath);
-      let type: string | undefined;
-      if (exists) {
-        const stat = statSync(fullPath);
-        type = stat.isDirectory() ? "directory" : "file";
-      }
-      return { path: args.path, exists, type };
-    },
-  });
-
-  return [readFile, listDirectory, searchFiles, fileExists];
-}
-
-/**
- * Builds the system prompt for the judge agent.
- */
-function buildSystemPrompt(
-  criteria: string[],
-  conversationHistory: ConversationTurn[],
-  personaInstructions?: string
-): string {
-  const criteriaList = criteria
-    .map((c, i) => `  ${i + 1}. ${c}`)
-    .join("\n");
-
-  const historySection =
-    conversationHistory.length > 0
-      ? `\n## Previous Iterations\n${conversationHistory
-          .map(
-            (t) =>
-              `### Iteration ${t.iteration}\n- **Coding agent response**: ${t.codingAgentResponse.substring(0, 500)}${t.codingAgentResponse.length > 500 ? "..." : ""}\n- **Your previous feedback**: ${t.judgeFeedback.substring(0, 500)}${t.judgeFeedback.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`
-          )
-          .join("\n\n")}`
-      : "";
-
-  const personaSection = personaInstructions
-    ? `\n## Persona\n${personaInstructions}\n`
-    : "";
-
-  return `You are an expert code reviewer and judge evaluating whether generated code meets requirements.
-${personaSection}
-## Your Task
-Inspect the workspace using the provided tools (read_file, list_directory, search_files, file_exists) and evaluate whether the code meets ALL of the following criteria:
-
-## Criteria
-${criteriaList}
-${historySection}
-
-## Instructions
-1. Use the tools to thoroughly inspect the workspace — read key files, check directory structure, search for patterns.
-2. Evaluate each criterion carefully.
-3. Be constructive: if the code doesn't fully meet requirements, provide specific, actionable feedback about what needs to change.
-4. Keep your feedback concise and focused on what the coding agent should do next.
-
-## Output Format
-Your response MUST start with one of these two signals:
-
-If ALL criteria are met:
-\`\`\`
-REQUIREMENTS COMPLETE
-[Brief summary of what was done correctly]
-\`\`\`
-
-If criteria are NOT fully met:
-\`\`\`
-REQUIREMENTS NOT MET
-[Specific feedback on what needs to be fixed or improved, written as instructions for the coding agent]
-\`\`\`
-
-Do NOT include both signals. Choose exactly one.`;
-}
-
-/**
- * Runs the judge agent against a workspace snapshot using the Copilot SDK.
+ * Evaluate workspace against criteria using the sophisticated DAG system
+ *
+ * This function:
+ * 1. Normalizes criteria based on scenario version (v1 or v2)
+ * 2. Builds criteria graph and validates DAG
+ * 3. Selects judge strategy from environment (bundled or independent)
+ * 4. Runs judge evaluation
+ * 5. Generates natural language feedback if not all passed
  */
 export async function evaluateWorkspace(
   input: EvaluationInput
 ): Promise<EvaluationResult> {
-  const { workspacePath, criteria, conversationHistory, personaInstructions } = input;
+  // 1. Load strategy config from environment
+  const strategyType =
+    (process.env.JUDGE_STRATEGY as "bundled" | "independent") || "bundled";
+  const maxParallelism = parseInt(process.env.JUDGE_MAX_PARALLELISM || "3");
 
-  const tools = createFileTools(workspacePath);
-  const systemPrompt = buildSystemPrompt(criteria, conversationHistory, personaInstructions);
+  // 2. Load feedback config from environment
+  const maxCriteria = parseInt(process.env.FEEDBACK_MAX_CRITERIA || "1");
+  const includeDescendantGuard =
+    process.env.FEEDBACK_DESCENDANT_GUARD !== "false";
 
-  const client = new CopilotClient();
-  let fullResponse = "";
+  // 3. Determine scenario version and normalize criteria
+  const scenarioVersion = input.scenarioVersion || "v1";
+  let normalizedCriteria: CriteriaConfig[];
 
-  try {
-    const session = await client.createSession({
-      model: process.env.JUDGE_MODEL || "gpt-4.1",
-      streaming: true,
-      tools,
-      systemMessage: { mode: "replace", content: systemPrompt },
-    });
-
-    session.on((event: SessionEvent) => {
-      if (event.type === "assistant.message_delta") {
-        fullResponse += event.data.deltaContent;
-      }
-    });
-
-    await session.sendAndWait({
-      prompt:
-        "Evaluate the workspace against the criteria. Use the file tools to inspect the code, then provide your verdict.",
-    });
-
-    await client.stop();
-  } catch (error) {
-    console.error("[judge-agent] Copilot SDK error:", error);
-    throw new Error(
-      `Judge agent evaluation failed: ${error instanceof Error ? error.message : String(error)}`
+  if (scenarioVersion === "v2") {
+    // v2: criteria are IDs, resolve from registry
+    try {
+      const registry = getCriteriaRegistry();
+      normalizedCriteria = registry.resolve(input.criteria);
+      console.log(
+        `[judge-agent] Loaded ${normalizedCriteria.length} criteria from registry (v2 format)`
+      );
+    } catch (error) {
+      console.error("[judge-agent] Failed to resolve criteria:", error);
+      throw new Error(
+        `Failed to resolve criteria: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  } else {
+    // v1: criteria are prompts, auto-generate IDs
+    normalizedCriteria = normalizeCriteria(input.criteria);
+    console.log(
+      `[judge-agent] Using ${normalizedCriteria.length} criteria (v1 format)`
     );
   }
 
-  // Parse the response
-  return parseJudgeResponse(fullResponse);
-}
-
-/**
- * Parses the judge agent response to extract passed/feedback.
- */
-function parseJudgeResponse(response: string): EvaluationResult {
-  const trimmed = response.trim();
-
-  if (trimmed.includes("REQUIREMENTS COMPLETE")) {
-    // Extract feedback after the signal
-    const feedback = trimmed
-      .replace(/^.*REQUIREMENTS COMPLETE\s*/s, "")
-      .trim();
-    return {
-      passed: true,
-      feedback: feedback || "All requirements met.",
-    };
+  // 4. Build criteria graph (validates DAG)
+  let criteriaGraph: CriteriaGraph;
+  try {
+    criteriaGraph = new CriteriaGraph(normalizedCriteria);
+    console.log(
+      `[judge-agent] Built criteria DAG with ${normalizedCriteria.length} nodes`
+    );
+  } catch (error) {
+    console.error("[judge-agent] Failed to build criteria graph:", error);
+    throw new Error(
+      `Invalid criteria dependencies: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 
-  if (trimmed.includes("REQUIREMENTS NOT MET")) {
-    const feedback = trimmed
-      .replace(/^.*REQUIREMENTS NOT MET\s*/s, "")
-      .trim();
-    return {
-      passed: false,
-      feedback:
-        feedback ||
-        "Requirements not met. Please review the criteria and try again.",
-    };
-  }
-
-  // Fallback: if neither signal found, assume not passed and use full response as feedback
-  console.warn(
-    "[judge-agent] Response did not contain expected signal, treating as not passed"
+  // 5. Select and configure strategy
+  const strategy = createJudgeStrategy(strategyType, { maxParallelism });
+  console.log(
+    `[judge-agent] Using ${strategyType} strategy${strategyType === "independent" ? ` (parallelism=${maxParallelism})` : ""}`
   );
+
+  // 6. Run judge evaluation
+  let judgeResult: DetailedEvaluationResult;
+  try {
+    judgeResult = await strategy.evaluate({
+      workspacePath: input.workspacePath,
+      criteria: normalizedCriteria,
+      criteriaGraph,
+      conversationHistory: input.conversationHistory,
+      personaInstructions: input.personaInstructions,
+    });
+
+    console.log(
+      `[judge-agent] Evaluation complete: ${judgeResult.results.filter((r) => r.passed).length}/${judgeResult.results.length} criteria passed`
+    );
+  } catch (error) {
+    console.error("[judge-agent] Judge evaluation failed:", error);
+    throw new Error(
+      `Judge evaluation failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  // 7. Generate feedback (if not all passed)
+  let feedback: string;
+  if (judgeResult.allPassed) {
+    feedback = "All requirements met.";
+    console.log("[judge-agent] All criteria passed");
+  } else {
+    try {
+      const feedbackGen = new FeedbackGenerator();
+      const feedbackResult = await feedbackGen.generateFeedback({
+        judgeResults: judgeResult.results,
+        criteriaGraph,
+        criteriaRegistry: new Map(
+          normalizedCriteria.map((c) => [c.id, c])
+        ),
+        personaInstructions: input.personaInstructions,
+        maxCriteria,
+        includeDescendantGuard,
+      });
+
+      feedback = feedbackResult.feedback;
+      console.log(
+        `[judge-agent] Generated feedback for ${feedbackResult.selectedCriteriaIds.length} root failures`
+      );
+    } catch (error) {
+      console.error("[judge-agent] Feedback generation failed:", error);
+      // Fallback to raw feedback from judge
+      const failed = judgeResult.results.filter((r) => !r.passed);
+      feedback =
+        failed.length > 0
+          ? failed
+              .slice(0, maxCriteria)
+              .map((r) => r.feedback)
+              .join("\n\n")
+          : "Requirements not met.";
+    }
+  }
+
   return {
-    passed: false,
-    feedback: trimmed || "Judge did not provide a clear evaluation.",
+    passed: judgeResult.allPassed,
+    feedback,
   };
 }
