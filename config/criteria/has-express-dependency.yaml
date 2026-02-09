@@ -1,0 +1,5 @@
+id: has-express-dependency
+prompt: |
+  The package.json file lists express as a dependency (in either dependencies or devDependencies).
+depends_on:
+  - has-package-json

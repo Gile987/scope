@@ -1,0 +1,4 @@
+id: has-package-json
+prompt: |
+  Has a package.json file in the workspace root with valid JSON structure.
+  Check that the file exists and can be parsed as JSON.
