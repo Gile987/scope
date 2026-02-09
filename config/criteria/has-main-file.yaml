@@ -1,0 +1,4 @@
+id: has-main-file
+prompt: |
+  Has a main entry file (e.g., server.js, index.js, app.js) that creates an Express server.
+  Look for require('express') or import express, and app = express() or similar.

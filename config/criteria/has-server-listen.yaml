@@ -1,0 +1,6 @@
+id: has-server-listen
+prompt: |
+  The server listens on a port using app.listen() or server.listen().
+  The port can be hardcoded or from an environment variable (e.g., process.env.PORT).
+depends_on:
+  - has-main-file
