@@ -101,6 +101,8 @@ export class QueueProcessor {
 
   private async processMessage(message: DequeuedMessageItem): Promise<void> {
     let requestId: string | undefined;
+    // Track the current pop receipt — it changes after each updateMessage call
+    let currentPopReceipt = message.popReceipt;
 
     try {
       const decodedContent = Buffer.from(message.messageText, "base64").toString("utf-8");
@@ -113,7 +115,7 @@ export class QueueProcessor {
 
       if (!requestDoc) {
         console.error(`[${this.processor.workerName}] Request ${requestId} not found`);
-        await this.queueClient.deleteMessage(message.messageId, message.popReceipt);
+        await this.safeDeleteMessage(message.messageId, currentPopReceipt);
         return;
       }
 
@@ -130,9 +132,9 @@ export class QueueProcessor {
       const isMultiTurn = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
 
       if (isMultiTurn) {
-        await this.processMultiTurn(requestDoc, message, log);
+        currentPopReceipt = await this.processMultiTurn(requestDoc, message, currentPopReceipt, log);
       } else {
-        await this.processOneShot(requestDoc, message, log);
+        await this.processOneShot(requestDoc, message, currentPopReceipt, log);
       }
     } catch (error) {
       console.error(`[${this.processor.workerName}] Error processing message:`, error);
@@ -161,7 +163,7 @@ export class QueueProcessor {
         }
       }
 
-      await this.queueClient.deleteMessage(message.messageId, message.popReceipt);
+      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
     }
   }
 
@@ -171,6 +173,7 @@ export class QueueProcessor {
   private async processOneShot(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
+    currentPopReceipt: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<void> {
     const requestId = requestDoc._id;
@@ -196,7 +199,7 @@ export class QueueProcessor {
 
     console.log(`[${this.processor.workerName}] Completed request ${requestId}`);
 
-    await this.queueClient.deleteMessage(message.messageId, message.popReceipt);
+    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
   }
 
   /**
@@ -205,8 +208,9 @@ export class QueueProcessor {
   private async processMultiTurn(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
+    currentPopReceipt: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
-  ): Promise<void> {
+  ): Promise<string> {
     const requestId = requestDoc._id;
     const judgeServiceUrl = process.env.JUDGE_SERVICE_URL;
 
@@ -220,15 +224,17 @@ export class QueueProcessor {
       { $set: { status: "iterating", logs: [], turns: [], updatedAt: new Date() } }
     );
 
-    // Extend queue message visibility for long-running multi-turn
+    // Extend queue message visibility for long-running multi-turn.
+    // updateMessage returns a new pop receipt that must be used for subsequent operations.
     const visibilityTimeout = MULTI_TURN_DEFAULTS.VISIBILITY_TIMEOUT_SECONDS;
     try {
-      await this.queueClient.updateMessage(
+      const updateResponse = await this.queueClient.updateMessage(
         message.messageId,
-        message.popReceipt,
+        currentPopReceipt,
         message.messageText,
         visibilityTimeout
       );
+      currentPopReceipt = updateResponse.popReceipt!;
     } catch (error) {
       console.warn(`[${this.processor.workerName}] Failed to extend message visibility: ${error}`);
     }
@@ -294,7 +300,21 @@ export class QueueProcessor {
       `[${this.processor.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
     );
 
-    await this.queueClient.deleteMessage(message.messageId, message.popReceipt);
+    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    return currentPopReceipt;
+  }
+
+  /**
+   * Delete a queue message, logging a warning instead of throwing on failure.
+   * This handles cases where the pop receipt may have become stale (e.g., visibility timeout expired).
+   * The message will eventually expire or be reprocessed with idempotency.
+   */
+  private async safeDeleteMessage(messageId: string, popReceipt: string): Promise<void> {
+    try {
+      await this.queueClient.deleteMessage(messageId, popReceipt);
+    } catch (error) {
+      console.warn(`[${this.processor.workerName}] Failed to delete queue message (may have expired or been reprocessed): ${error}`);
+    }
   }
 
   private sleep(ms: number): Promise<void> {
