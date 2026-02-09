@@ -115,9 +115,20 @@ export class BlobStorage {
     snapshotUrl: string,
     targetDir: string
   ): Promise<void> {
-    // Parse blob name from URL
+    // Parse blob name from URL — handles both Azure and Azurite URL formats:
+    //   Azure:   https://<account>.blob.core.windows.net/snapshots/<blobName>
+    //   Azurite: http://azurite:10000/<account>/snapshots/<blobName>
     const url = new URL(snapshotUrl);
-    const blobName = url.pathname.replace(`/${SNAPSHOTS_CONTAINER}/`, "");
+    const containerPrefix = `/${SNAPSHOTS_CONTAINER}/`;
+    const containerIndex = url.pathname.indexOf(containerPrefix);
+    if (containerIndex === -1) {
+      throw new Error(
+        `Snapshot URL does not contain container '${SNAPSHOTS_CONTAINER}': ${snapshotUrl}`
+      );
+    }
+    const blobName = url.pathname.substring(
+      containerIndex + containerPrefix.length
+    );
     const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
 
     // Download to temp file
