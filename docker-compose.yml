@@ -88,6 +88,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+    restart: on-failure:5
     ports:
       - "3000:80"
     environment:
