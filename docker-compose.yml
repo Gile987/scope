@@ -120,6 +120,8 @@ services:
       FEEDBACK_MAX_CRITERIA: ${FEEDBACK_MAX_CRITERIA:-1}
       FEEDBACK_DESCENDANT_GUARD: ${FEEDBACK_DESCENDANT_GUARD:-true}
       CRITERIA_DIR: /app/config/criteria
+    volumes:
+      - ./config/criteria:/app/config/criteria:ro
     depends_on:
       azurite:
         condition: service_healthy
