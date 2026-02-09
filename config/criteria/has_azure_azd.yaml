@@ -1,0 +1,7 @@
+id: has_azure_azd
+prompt: |
+  The project uses Azure Developer CLI (azd) for infrastructure and deployment.
+  Look for azure.yaml, .azure folder, or azd-specific configuration files.
+depends_on:
+  - has_iac
+  - has_azure

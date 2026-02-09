@@ -1,0 +1,6 @@
+version: v2
+task: Create a Snake game using React
+criteria:
+  - has_react
+  - has_typescript
+  - has_azure_swa

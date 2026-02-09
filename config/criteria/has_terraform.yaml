@@ -1,0 +1,6 @@
+id: has_terraform
+prompt: |
+  The project uses Terraform for infrastructure as code.
+  Look for .tf files, terraform.tfstate, or terraform configuration.
+depends_on:
+  - has_iac

@@ -1,0 +1,6 @@
+id: has_react
+prompt: |
+  The project uses React framework. Look for react dependency in package.json,
+  .jsx or .tsx files with React components.
+depends_on:
+  - has_node

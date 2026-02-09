@@ -1,8 +1,5 @@
 version: v2
 task: Create a Hello World Express API
 criteria:
-  - has-package-json
-  - has-express-dependency
-  - has-main-file
-  - has-get-route
-  - has-server-listen
+  - has_azure_doc
+  - has_azure_azd

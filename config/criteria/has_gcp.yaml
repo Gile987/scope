@@ -1,0 +1,5 @@
+id: has_gcp
+prompt: |
+  The project uses Google Cloud Platform services.
+depends_on:
+  - has_cloud
