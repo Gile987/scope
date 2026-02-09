@@ -1,0 +1,74 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+import { QueueProcessor, WorkerProcessor, QueueProcessorConfig, LogEvent } from "shared";
+import { runACPSession } from "./acp-client.js";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-copilot";
+
+class CopilotProcessor implements WorkerProcessor {
+  readonly workerName = WORKER_NAME;
+
+  async processMessage(
+    message: string,
+    log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>
+  ): Promise<string> {
+    await log("info", "Starting Copilot ACP processor", { inputLength: message.length });
+    
+    try {
+      // Run ACP session with GitHub Copilot
+      const result = await runACPSession(message, {
+        command: "copilot",
+        args: ["--acp"],
+        env: {
+          GITHUB_TOKEN: process.env.GITHUB_TOKEN || "",
+        },
+        cwd: "/workspace",
+        onLog: async (msg) => {
+          await log("debug", msg);
+        },
+      });
+
+      await log("info", "Copilot processing complete", { 
+        stopReason: result.stopReason,
+        responseLength: result.response.length 
+      });
+      
+      return result.response || `[${this.workerName}] No response from Copilot`;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await log("error", `Copilot processing failed: ${errorMessage}`);
+      throw error;
+    }
+  }
+}
+
+async function main(): Promise<void> {
+  // K8s: MONGO_CONNECTION_STRING from secret, STORAGE_CONNECTION_STRING from secret, QUEUE_NAME from deployment env
+  const config: QueueProcessorConfig = {
+    mongoUri: process.env.MONGO_CONNECTION_STRING || process.env.MONGO_URI || "mongodb://localhost:27017",
+    mongoDatabase: process.env.MONGO_DATABASE || "requests-db",
+    mongoCollection: process.env.MONGO_COLLECTION || "requests",
+    storageAccountName: process.env.AZURE_STORAGE_ACCOUNT_NAME || "",
+    storageConnectionString: process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING,
+    queueName: process.env.QUEUE_NAME || process.env.AZURE_STORAGE_QUEUE_NAME || "queue-coder-acp-copilot",
+    batchSize: parseInt(process.env.BATCH_SIZE || "5", 10),
+    pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "1000", 10),
+    redisHost: process.env.REDIS_HOST || "",
+    redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),
+    redisPassword: process.env.REDIS_PASSWORD || "",
+  };
+
+  const processor = new CopilotProcessor();
+  const queueProcessor = new QueueProcessor(config, processor);
+
+  await queueProcessor.start();
+}
+
+main().catch((error) => {
+  console.error("coder-acp-copilot failed to start:", error);
+  process.exit(1);
+});

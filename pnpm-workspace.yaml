@@ -1,0 +1,6 @@
+packages:
+  - "packages/api"
+  - "packages/cli"
+  - "packages/judge"
+  - "packages/shared"
+  - "packages/workers/*"

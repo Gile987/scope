@@ -1,0 +1,22 @@
+task: >
+  Create a Python HTTP-triggered Azure Function. Include infrastructure as code
+  for deploying to Azure and instructions for local testing with Azure Functions
+  Core Tools.
+
+criteria:
+  - |
+    Uses Azure Functions for HTTP-triggered serverless compute
+    - passes: Uses Azure Functions with Python runtime and HTTP trigger configuration
+    - fails: No Azure Functions, uses non-Azure serverless compute, or no HTTP trigger
+  - |
+    Has a requirements.txt or pyproject.toml with Azure Functions dependencies
+    - passes: Dependencies are declared and include azure-functions
+    - fails: Missing dependency declarations
+  - |
+    Contains infrastructure as code targeting Azure
+    - passes: Contains Bicep, Terraform, or azd configuration for Azure deployment
+    - fails: No infrastructure as code or targets non-Azure platform
+  - |
+    Includes local development setup
+    - passes: References Azure Functions Core Tools (func CLI) for local testing
+    - fails: No local development guidance provided

@@ -1,0 +1,7 @@
+task: Create a Hello World Node.js/Express REST API
+
+criteria:
+  - Has a package.json with express as a dependency
+  - Has a main entry file that creates an Express server
+  - Has a GET / route that returns a hello world response
+  - Server listens on a configurable port

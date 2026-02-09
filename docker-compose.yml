@@ -1,0 +1,168 @@
+# =============================================================================
+# Scoped - Local Development Docker Compose
+# =============================================================================
+#
+# Usage:
+#   docker compose up                                    # infra + api + judge
+#   docker compose --profile claude-code up              # + Claude Code worker
+#   docker compose --profile copilot up                  # + Copilot worker
+#   docker compose --profile vscode-web up               # + VS Code Web worker
+#   docker compose --profile claude-code --profile copilot up  # multiple workers
+#   docker compose up mongodb redis azurite              # infra only (run app services natively)
+#
+# Host-native debugging:
+#   1. Start infra only: docker compose up mongodb redis azurite
+#   2. Copy .env.example to .env and fill in API keys
+#   3. Run any service natively: pnpm --filter api dev (uses localhost from .env)
+#
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Shared environment blocks (YAML anchors)
+# ---------------------------------------------------------------------------
+x-common-env: &common-env
+  MONGO_CONNECTION_STRING: mongodb://mongodb:27017
+  MONGO_DATABASE: requests-db
+  MONGO_COLLECTION: requests
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ""
+  AZURE_STORAGE_ACCOUNT_NAME: devstoreaccount1
+  STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;QueueEndpoint=http://azurite:10001/devstoreaccount1;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+
+x-worker-env: &worker-env
+  <<: *common-env
+  JUDGE_SERVICE_URL: http://judge:80
+
+services:
+  # ===========================================================================
+  # Infrastructure services
+  # ===========================================================================
+
+  # MongoDB (compatible with CosmosDB MongoDB API)
+  mongodb:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: requests-db
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (pub/sub for real-time log streaming)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Azurite (Azure Storage emulator - queues + blobs)
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    ports:
+      - "10000:10000"  # Blob
+      - "10001:10001"  # Queue
+      - "10002:10002"  # Table
+    command: azurite --loose --skipApiVersionCheck --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:10001', (r) => process.exit(r.statusCode === 400 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================================================
+  # Application services
+  # ===========================================================================
+
+  # API - REST + SSE endpoint (always starts)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "3000:80"
+    environment:
+      <<: *common-env
+      PORT: "80"
+      AZURE_STORAGE_QUEUE_WORKER_1: queue-coder-acp-claude-code
+      AZURE_STORAGE_QUEUE_WORKER_2: queue-coder-acp-copilot
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+
+  # Judge - evaluation service (always starts)
+  judge:
+    build:
+      context: .
+      dockerfile: Dockerfile.judge
+    ports:
+      - "3001:80"
+    environment:
+      PORT: "80"
+      AZURE_STORAGE_ACCOUNT_NAME: devstoreaccount1
+      STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;QueueEndpoint=http://azurite:10001/devstoreaccount1;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+    depends_on:
+      azurite:
+        condition: service_healthy
+
+  # ===========================================================================
+  # Worker services (opt-in via profiles)
+  # ===========================================================================
+
+  # Claude Code worker (via ACP)
+  coder-acp-claude-code:
+    build:
+      context: .
+      dockerfile: Dockerfile.coder-acp-claude-code
+    profiles: [claude-code]
+    environment:
+      <<: *worker-env
+      WORKER_NAME: coder-acp-claude-code
+      QUEUE_NAME: queue-coder-acp-claude-code
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+      judge:
+        condition: service_started
+
+  # GitHub Copilot worker (via ACP)
+  coder-acp-copilot:
+    build:
+      context: .
+      dockerfile: Dockerfile.coder-acp-copilot
+    profiles: [copilot]
+    environment:
+      <<: *worker-env
+      WORKER_NAME: coder-acp-copilot
+      QUEUE_NAME: queue-coder-acp-copilot
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+      judge:
+        condition: service_started
+
+volumes:
+  mongodb_data:
