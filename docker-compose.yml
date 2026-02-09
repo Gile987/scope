@@ -118,6 +118,7 @@ services:
       - "3001:80"
     environment:
       PORT: "80"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       AZURE_STORAGE_ACCOUNT_NAME: devstoreaccount1
       STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;QueueEndpoint=http://azurite:10001/devstoreaccount1;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
       # Criteria system configuration
