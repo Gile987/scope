@@ -48,6 +48,11 @@ services:
       MONGO_INITDB_DATABASE: requests-db
     volumes:
       - mongodb_data:/data/db
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+    command: mongod --quiet --logpath /dev/null
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
