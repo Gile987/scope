@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -59,5 +59,46 @@ export const api = {
   /** SSE endpoint URL for log streaming */
   logsUrl: (id: string, fromStart = true): string => {
     return `${BASE}/requests/${id}/logs?fromStart=${fromStart}`;
+  },
+
+  // ─── Criteria ──────────────────────────────────────────────────────────────
+
+  /** List all criteria, optionally filtered by search query */
+  listCriteria: (q?: string): Promise<CriteriaDocument[]> => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    const qs = params.toString();
+    return request(`/criteria${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single criterion by ID */
+  getCriterion: (id: string): Promise<CriteriaDocument & { dependents: string[] }> => {
+    return request(`/criteria/${id}`);
+  },
+
+  /** Create a new criterion */
+  createCriterion: (body: { id: string; prompt: string; dependsOn?: string[] }): Promise<CriteriaDocument> => {
+    return request("/criteria", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update an existing criterion */
+  updateCriterion: (id: string, body: { prompt?: string; dependsOn?: string[] }): Promise<CriteriaDocument> => {
+    return request(`/criteria/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Delete a criterion */
+  deleteCriterion: (id: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/criteria/${id}`, { method: "DELETE" });
+  },
+
+  /** Get the full criteria dependency graph */
+  getCriteriaGraph: (): Promise<CriteriaGraphData> => {
+    return request("/criteria/graph");
   },
 };
