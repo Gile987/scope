@@ -76,6 +76,7 @@ interface RequestDocument {
   persona?: { personality: string; experience: string; verbosity: string; type: string };
   createdAt: Date;
   updatedAt?: Date;
+  deletedAt?: Date;
 }
 
 // Queue message interface
@@ -489,14 +490,18 @@ app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: N
   }
 });
 
-// List all requests
+// List all requests (excludes soft-deleted by default)
 app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const workerFilter = req.query.worker as string;
+    const includeDeleted = req.query.includeDeleted === "true";
     
     const filter: Record<string, unknown> = {};
     if (workerFilter && VALID_WORKERS.includes(workerFilter as WorkerType)) {
       filter.workerType = workerFilter;
+    }
+    if (!includeDeleted) {
+      filter.deletedAt = { $exists: false };
     }
 
     const resources = await collection
@@ -505,6 +510,32 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
       .toArray();
 
     res.json(resources.map(r => ({ ...r, id: r._id })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Soft-delete a request
+app.delete("/api/v1/requests/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const result = await collection.updateOne(
+      { _id: id, deletedAt: { $exists: false } },
+      { $set: { deletedAt: new Date() } }
+    );
+
+    if (result.matchedCount === 0) {
+      const exists = await collection.findOne({ _id: id });
+      if (!exists) {
+        res.status(404).json({ error: "Request not found" });
+      } else {
+        res.status(410).json({ error: "Request already deleted" });
+      }
+      return;
+    }
+
+    res.json({ id, deleted: true });
   } catch (error) {
     next(error);
   }

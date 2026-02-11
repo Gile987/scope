@@ -62,6 +62,7 @@ export interface RequestDocument {
   turns?: ConversationTurn[];
   personaInstructions?: string;  // Resolved persona prose (from traits.yaml)
   persona?: Persona;             // Original persona object for traceability
+  deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
 }
 
 // Log event for real-time streaming and persistence

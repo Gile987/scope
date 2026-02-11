@@ -317,12 +317,19 @@ run
   .description("List all requests")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
+  .option("--include-deleted", "Include soft-deleted runs")
   .action(async (options) => {
     try {
       let url = `${options.url}/api/v1/requests`;
+      const params = new URLSearchParams();
       if (options.worker) {
-        url += `?worker=${options.worker}`;
+        params.set("worker", options.worker);
       }
+      if (options.includeDeleted) {
+        params.set("includeDeleted", "true");
+      }
+      const qs = params.toString();
+      if (qs) url += `?${qs}`;
 
       const response = await fetch(url);
 
@@ -381,6 +388,29 @@ run
       })
     );
     waitUntilExit().catch(() => {});
+  });
+
+run
+  .command("delete")
+  .description("Soft-delete a run (can still be listed with --include-deleted)")
+  .requiredOption("-i, --id <id>", "Request ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    const { id, url } = options;
+    try {
+      const response = await fetch(`${url}/api/v1/requests/${id}`, { method: "DELETE" });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      console.log(`${successText('Deleted run')} ${value(id)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
   });
 
 run
