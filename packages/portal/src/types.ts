@@ -76,3 +76,21 @@ export const STATUS_LIST: RunStatus[] = [
   "completed",
   "failed",
 ];
+
+// Criteria types
+export interface CriteriaConfig {
+  id: string;
+  prompt: string;
+  dependsOn?: string[];
+}
+
+export interface CriteriaDocument extends CriteriaConfig {
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface CriteriaGraphData {
+  nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
+  edges: Array<{ source: string; target: string }>;
+}
