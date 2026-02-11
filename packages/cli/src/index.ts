@@ -8,7 +8,7 @@ import EventSource from "eventsource";
 import { execSync } from "child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, createWriteStream, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve, dirname } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
 import { stringify as yamlStringify } from "yaml";
@@ -394,7 +394,9 @@ run
   .action(async (options) => {
     const { id, url } = options;
     const shouldExtract = options.extract || !!options.dir;
-    const outputFile = options.output || `${id}.tar.gz`;
+    const downloadDir = process.env.SCOPE_MT_DOWNLOAD_OUTPUT_DIR;
+    const defaultFile = downloadDir ? join(downloadDir, `${id}.tar.gz`) : `${id}.tar.gz`;
+    const outputFile = options.output || defaultFile;
 
     try {
       // Step 1: Fetch request document
@@ -455,9 +457,10 @@ run
 
         // Step 5: Create the final tar.gz archive
         console.log();
-        const outputPath = join(process.cwd(), outputFile);
+        const outputPath = resolve(outputFile);
+        mkdirSync(dirname(outputPath), { recursive: true });
         execSync(`tar czf "${outputPath}" -C "${stageDir}" "${id}"`, { stdio: "pipe" });
-        console.log(`${successText('Archive:')} ${value(outputFile)}`);
+        console.log(`${successText('Archive:')} ${value(outputPath)}`);
 
         // Step 6: Optionally extract
         if (shouldExtract) {
