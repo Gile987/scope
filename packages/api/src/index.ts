@@ -658,6 +658,7 @@ app.post("/api/v1/criteria/generate-prompt", async (req: Request, res: Response,
       behavior.trim(),
       existingCriteria as { id: string; prompt: string; dependsOn?: string[] }[],
     );
+    console.log("[generate-prompt] LLM result:", JSON.stringify(result));
     res.json(result);
   } catch (err) {
     if (err instanceof Error && err.message.includes("not configured")) {

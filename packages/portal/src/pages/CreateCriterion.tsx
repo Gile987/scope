@@ -365,21 +365,21 @@ export function CreateCriterion() {
           </Card>
 
           {/* Suggested Dependencies */}
-          {!generateMutation.isPending && (suggestedParents.length > 0 || suggestedChildren.length > 0) && (
+          {!generateMutation.isPending && (suggestedParents.length > 0 || suggestedChildren.length > 0 || aiGenerated) && (
             <Card>
               <CardContent className="pt-6 space-y-4">
                 <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
                   Suggested Dependencies (AI)
                 </Label>
 
-                {suggestedParents.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">
-                      Parents{" "}
-                      <span className="font-normal text-muted-foreground">
-                        — this criterion should depend on:
-                      </span>
-                    </p>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">
+                    Parents{" "}
+                    <span className="font-normal text-muted-foreground">
+                      — this criterion should depend on:
+                    </span>
+                  </p>
+                  {suggestedParents.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                       {suggestedParents.map((pid) => (
                         <Badge
@@ -398,20 +398,24 @@ export function CreateCriterion() {
                         </Badge>
                       ))}
                     </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">None suggested</p>
+                  )}
+                  {suggestedParents.length > 0 && (
                     <p className="text-xs text-muted-foreground">
                       Accepted parents are added to this criterion's dependencies
                     </p>
-                  </div>
-                )}
+                  )}
+                </div>
 
-                {suggestedChildren.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">
-                      Children{" "}
-                      <span className="font-normal text-muted-foreground">
-                        — these criteria should depend on the new one:
-                      </span>
-                    </p>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">
+                    Children{" "}
+                    <span className="font-normal text-muted-foreground">
+                      — these criteria should depend on the new one:
+                    </span>
+                  </p>
+                  {suggestedChildren.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                       {suggestedChildren.map((cid) => (
                         <Badge
@@ -434,11 +438,15 @@ export function CreateCriterion() {
                         </Badge>
                       ))}
                     </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">None suggested</p>
+                  )}
+                  {suggestedChildren.length > 0 && (
                     <p className="text-xs text-muted-foreground">
                       Accepted children will be updated to depend on <span className="font-mono">{id}</span> after creation
                     </p>
-                  </div>
-                )}
+                  )}
+                </div>
               </CardContent>
             </Card>
           )}
