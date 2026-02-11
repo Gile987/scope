@@ -74,9 +74,9 @@ services:
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite
     ports:
-      - "10000:10000"  # Blob
-      - "10001:10001"  # Queue
-      - "10002:10002"  # Table
+      - "${AZURITE_BLOB_PORT:-10100}:10000"  # Blob
+      - "${AZURITE_QUEUE_PORT:-10101}:10001"  # Queue
+      - "${AZURITE_TABLE_PORT:-10102}:10002"  # Table
     command: azurite --loose --skipApiVersionCheck --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --silent
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:10001', (r) => process.exit(r.statusCode === 400 ? 0 : 1)).on('error', () => process.exit(1))"]
@@ -95,7 +95,7 @@ services:
       dockerfile: Dockerfile.api
     restart: on-failure:5
     ports:
-      - "3000:80"
+      - "${API_PORT:-3100}:80"
     environment:
       <<: *common-env
       PORT: "80"
@@ -115,7 +115,7 @@ services:
       context: .
       dockerfile: Dockerfile.judge
     ports:
-      - "3001:80"
+      - "${JUDGE_PORT:-3101}:80"
     environment:
       PORT: "80"
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
