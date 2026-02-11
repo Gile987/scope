@@ -276,10 +276,11 @@ export async function evaluateWorkspace(
       }
     });
 
+    const timeout = parseInt(process.env.JUDGE_TIMEOUT || "300000");
     await session.sendAndWait({
       prompt:
         "Evaluate the workspace against the criteria. Use the file tools to inspect the code, then provide your verdict.",
-    });
+    }, timeout);
 
     await client.stop();
   } catch (error) {

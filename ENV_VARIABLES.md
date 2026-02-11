@@ -17,6 +17,12 @@ The sophisticated criteria system can be configured via environment variables in
 
 Maximum number of criteria to evaluate in parallel when using `independent` strategy.
 
+### JUDGE_TIMEOUT
+**Default:** `300000` (5 minutes)
+**Type:** integer (milliseconds)
+
+Timeout for each Copilot SDK `sendAndWait` call. If the LLM takes longer than this to complete a response, the call will fail with a timeout error. Increase this if you see `Timeout after Xms waiting for session.idle` errors.
+
 ## Feedback Configuration
 
 ### FEEDBACK_MAX_CRITERIA
