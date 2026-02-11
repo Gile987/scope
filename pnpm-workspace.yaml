@@ -2,5 +2,6 @@ packages:
   - "packages/api"
   - "packages/cli"
   - "packages/judge"
+  - "packages/portal"
   - "packages/shared"
   - "packages/workers/*"

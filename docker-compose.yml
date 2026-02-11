@@ -143,6 +143,18 @@ services:
   # Worker services (opt-in via profiles)
   # ===========================================================================
 
+  # Portal - Web UI for run management
+  portal:
+    build:
+      context: .
+      dockerfile: Dockerfile.portal
+    profiles: [portal]
+    ports:
+      - "${PORTAL_PORT:-5180}:80"
+    depends_on:
+      api:
+        condition: service_started
+
   # Claude Code worker (via ACP)
   coder-acp-claude-code:
     build:
