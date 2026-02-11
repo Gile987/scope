@@ -98,4 +98,6 @@ export interface CriteriaGraphData {
 export interface GeneratePromptResponse {
   prompt: string;
   suggestedId: string;
+  suggestedParents: string[];
+  suggestedChildren: string[];
 }
