@@ -721,7 +721,9 @@ app.get("/api/v1/criteria", async (_req: Request, res: Response, next: NextFunct
         { prompt: { $regex: q, $options: "i" } },
       ];
     }
-    const criteria = await criteriaCollection.find(filter).sort({ id: 1 }).toArray();
+    const criteria = await criteriaCollection.find(filter).toArray();
+    // Sort in JS (CosmosDB doesn't support sort on non-_id fields without explicit indexing policy)
+    criteria.sort((a, b) => a.id.localeCompare(b.id));
     res.json(criteria);
   } catch (error) {
     next(error);
@@ -731,7 +733,8 @@ app.get("/api/v1/criteria", async (_req: Request, res: Response, next: NextFunct
 // Get criteria DAG graph (nodes + edges)
 app.get("/api/v1/criteria/graph", async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const all = await criteriaCollection.find({ deletedAt: { $exists: false } }).sort({ id: 1 }).toArray();
+    const all = await criteriaCollection.find({ deletedAt: { $exists: false } }).toArray();
+    all.sort((a, b) => a.id.localeCompare(b.id));
     const nodes = all.map(c => ({ id: c.id, prompt: c.prompt, dependsOn: c.dependsOn || [] }));
     const edges: { source: string; target: string }[] = [];
     for (const c of all) {
