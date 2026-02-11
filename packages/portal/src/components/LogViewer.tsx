@@ -65,25 +65,45 @@ export function LogViewer({ runId, enabled = true }: LogViewerProps) {
           {logs.length === 0 && (
             <div className="text-slate-500 italic">No log events yet…</div>
           )}
-          {logs.map((log, i) => (
-            <div key={i} className="flex gap-2 py-0.5 hover:bg-slate-900/50">
-              <span className="text-slate-500 shrink-0 select-none">
-                {new Date(log.timestamp).toLocaleTimeString()}
-              </span>
-              <span
-                className={cn(
-                  "uppercase w-12 shrink-0 font-semibold select-none",
-                  levelColors[log.level] || "text-slate-400"
+          {logs.map((log, i) => {
+            const iteration = log.data?.iteration as number | undefined;
+            const prevIteration = i > 0 ? (logs[i - 1].data?.iteration as number | undefined) : undefined;
+            const showDivider = iteration !== undefined && iteration !== prevIteration;
+
+            return (
+              <div key={i}>
+                {showDivider && (
+                  <div className="flex items-center gap-2 py-1.5 my-1 select-none">
+                    <div className="flex-1 border-t border-slate-700" />
+                    <span className="text-cyan-500 text-[10px] font-semibold tracking-wider uppercase">
+                      Iteration {iteration}
+                    </span>
+                    <div className="flex-1 border-t border-slate-700" />
+                  </div>
                 )}
-              >
-                {log.level}
-              </span>
-              {log.source && (
-                <span className="text-purple-400 shrink-0">[{log.source}]</span>
-              )}
-              <span className="text-slate-200 break-all">{log.message}</span>
-            </div>
-          ))}
+                <div className="flex gap-2 py-0.5 hover:bg-slate-900/50">
+                  <span className="text-slate-500 shrink-0 select-none">
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </span>
+                  <span
+                    className={cn(
+                      "uppercase w-12 shrink-0 font-semibold select-none",
+                      levelColors[log.level] || "text-slate-400"
+                    )}
+                  >
+                    {log.level}
+                  </span>
+                  {iteration !== undefined && (
+                    <span className="text-cyan-400 shrink-0 select-none">iter {iteration}</span>
+                  )}
+                  {log.source && (
+                    <span className="text-purple-400 shrink-0">[{log.source}]</span>
+                  )}
+                  <span className="text-slate-200 break-all">{log.message}</span>
+                </div>
+              </div>
+            );
+          })}
           <div ref={bottomRef} />
         </div>
       </ScrollArea>
