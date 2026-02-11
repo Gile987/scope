@@ -10,7 +10,7 @@ import { render } from "ink";
 import { DemoApp } from "./components/DemoApp.js";
 import { resolveScenarioAndPersona } from "./config-loader.js";
 import { configureHelp } from "./utils/helpFormatter.js";
-import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner } from "./utils/style.js";
+import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "./utils/style.js";
 
 dotenv.config();
 
@@ -131,11 +131,10 @@ program
           // Detect special criterion/DAG log events and render them with status icons
           if (log.data?.type === "criterion_result") {
             const d = log.data;
-            const icon = !d.evaluated ? "⏭️ " : d.passed ? "✅" : "❌";
-            const status = !d.evaluated ? "skipped" : d.passed ? "passed" : "failed";
-            console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter}  ${icon} ${d.criterionId}: ${status}`);
-            if (d.feedback && !d.passed) {
-              console.log(`           ${d.feedback.substring(0, 120)}`);
+            const icon = criterionIcon(d.evaluated, d.passed);
+            console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter} ${icon} ${d.criterionId}`);
+            if (d.feedback && !d.passed && d.evaluated) {
+              console.log(`           ${styleText('gray', d.feedback.substring(0, 120))}`);
             }
             return;
           }
@@ -145,9 +144,8 @@ program
             const results = log.data.results as Array<{ criterionId: string; passed: boolean; evaluated: boolean; feedback: string }>;
             if (results) {
               for (const r of results) {
-                const icon = !r.evaluated ? "⏭️ " : r.passed ? "✅" : "❌";
-                const status = !r.evaluated ? "skipped" : r.passed ? "passed" : "failed";
-                console.log(`              ${icon} ${r.criterionId}: ${status}`);
+                const icon = criterionIcon(r.evaluated, r.passed);
+                console.log(`              ${icon} ${r.criterionId}`);
               }
             }
             return;
@@ -245,9 +243,8 @@ program
 
         if (log.data?.type === "criterion_result") {
           const d = log.data;
-          const icon = !d.evaluated ? "⏭️ " : d.passed ? "✅" : "❌";
-          const status = !d.evaluated ? "skipped" : d.passed ? "passed" : "failed";
-          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter}  ${icon} ${d.criterionId}: ${status}`);
+          const icon = criterionIcon(d.evaluated, d.passed);
+          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter} ${icon} ${d.criterionId}`);
           return;
         }
 
@@ -256,9 +253,8 @@ program
           const results = log.data.results as Array<{ criterionId: string; passed: boolean; evaluated: boolean }>;
           if (results) {
             for (const r of results) {
-              const icon = !r.evaluated ? "⏭️ " : r.passed ? "✅" : "❌";
-              const status = !r.evaluated ? "skipped" : r.passed ? "passed" : "failed";
-              console.log(`              ${icon} ${r.criterionId}: ${status}`);
+              const icon = criterionIcon(r.evaluated, r.passed);
+              console.log(`              ${icon} ${r.criterionId}`);
             }
           }
           return;

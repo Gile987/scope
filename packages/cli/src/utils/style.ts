@@ -64,3 +64,9 @@ export function banner(msg: string): string {
 export function warnBanner(msg: string): string {
   return styleText('bold', styleText('yellow', msg));
 }
+
+/** Format a criterion status with colored, shape-distinct icon */
+export function criterionIcon(evaluated: boolean, passed: boolean): string {
+  if (!evaluated) return styleText('yellow', '○');
+  return passed ? styleText('green', '●') : styleText('red', '✗');
+}
