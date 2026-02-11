@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { ConversationTurn } from "./types.js";
+import { ConversationTurn, CriterionResult } from "./types.js";
 
 /**
  * Request payload for the judge service's /api/v1/evaluate endpoint.
@@ -12,6 +12,7 @@ export interface JudgeEvaluateRequest {
   conversationHistory: ConversationTurn[];
   personaInstructions?: string;
   scenarioVersion?: 'v1' | 'v2';  // v1 = inline prompts (default), v2 = criteria IDs
+  requestId?: string;  // Enables the judge to publish real-time progress via Redis
 }
 
 /**
@@ -20,6 +21,7 @@ export interface JudgeEvaluateRequest {
 export interface JudgeEvaluateResponse {
   passed: boolean;
   feedback: string;
+  criteriaResults?: CriterionResult[];  // Per-criterion results for DAG status tracking
 }
 
 /**
@@ -61,7 +63,11 @@ export class JudgeClient {
       );
     }
 
-    return result;
+    return {
+      passed: result.passed,
+      feedback: result.feedback,
+      criteriaResults: result.criteriaResults,
+    };
   }
 
   /**

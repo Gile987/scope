@@ -8,11 +8,13 @@ import { Collection } from "mongodb";
 import { circuitBreaker, handleAll, ConsecutiveBreaker, CircuitState } from "cockatiel";
 import { LogEvent, RequestDocument } from "./types.js";
 
-export interface LogPublisherConfig {
+export interface RedisConfig {
   redisHost: string;
   redisPort: number;
   redisPassword: string;
 }
+
+export type LogPublisherConfig = RedisConfig;
 
 export class LogPublisher {
   private redis: InstanceType<typeof Redis>;
@@ -96,6 +98,77 @@ export class LogPublisher {
       );
     } catch (error) {
       console.error(`Failed to persist log to MongoDB: ${error}`);
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.redis.quit();
+  }
+}
+
+/**
+ * Lightweight Redis-only log publisher for services that don't own MongoDB persistence.
+ * Used by the judge service to publish real-time criterion evaluation progress.
+ * Workers persist logs to MongoDB via the full LogPublisher — this only publishes to Redis.
+ */
+export class RedisLogPublisher {
+  private redis: InstanceType<typeof Redis>;
+  private redisBreaker = circuitBreaker(handleAll, {
+    halfOpenAfter: 60_000,
+    breaker: new ConsecutiveBreaker(3),
+  });
+
+  constructor(config: RedisConfig) {
+    const useTls = config.redisPassword && config.redisPort !== 6379;
+    this.redis = new Redis({
+      host: config.redisHost,
+      port: config.redisPort,
+      password: config.redisPassword || undefined,
+      ...(useTls ? { tls: { rejectUnauthorized: false } } : {}),
+      maxRetriesPerRequest: 3,
+      retryStrategy: (times: number) => {
+        if (times > 3) return null;
+        return Math.min(times * 1000, 3000);
+      },
+    });
+
+    this.redis.on("error", (err: Error) => {
+      if (this.redisBreaker.state === CircuitState.Closed) {
+        console.error("Redis connection error:", err.message);
+      }
+    });
+
+    this.redisBreaker.onStateChange((state) => {
+      if (state === CircuitState.Open) {
+        console.error("Redis circuit breaker OPEN - stopping publish attempts for 1 minute");
+      } else if (state === CircuitState.HalfOpen) {
+        console.log("Redis circuit breaker HALF-OPEN - testing connection");
+      } else if (state === CircuitState.Closed) {
+        console.log("Redis circuit breaker CLOSED - connection restored");
+      }
+    });
+  }
+
+  async publish(
+    requestId: string,
+    level: LogEvent["level"],
+    message: string,
+    data?: Record<string, unknown>
+  ): Promise<void> {
+    const logEvent: LogEvent = {
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      data,
+    };
+
+    const channel = `logs:${requestId}`;
+    try {
+      await this.redisBreaker.execute(() =>
+        this.redis.publish(channel, JSON.stringify(logEvent))
+      );
+    } catch {
+      // Silently ignore - circuit breaker handles logging state changes
     }
   }
 

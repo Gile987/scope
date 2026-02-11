@@ -4,7 +4,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { evaluateWorkspace } from "./judge-agent.js";
-import { BlobStorage } from "shared";
+import { BlobStorage, RedisLogPublisher } from "shared";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -26,6 +26,19 @@ const blobStorage = new BlobStorage({
   storageConnectionString: storageConnectionString || undefined,
 });
 
+// Redis-only log publisher for real-time criterion progress (optional — no-op if Redis not configured)
+const redisHost = process.env.REDIS_HOST || "";
+const redisPort = parseInt(process.env.REDIS_PORT || "6379", 10);
+const redisPassword = process.env.REDIS_PASSWORD || "";
+
+let logPublisher: RedisLogPublisher | null = null;
+if (redisHost) {
+  logPublisher = new RedisLogPublisher({ redisHost, redisPort, redisPassword });
+  console.log(`[judge] Redis log publisher connected to ${redisHost}:${redisPort}`);
+} else {
+  console.log("[judge] Redis not configured — criterion progress will not be streamed");
+}
+
 // Health check
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "healthy", service: "judge", version: "1.0.0" });
@@ -38,7 +51,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, scenarioVersion } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, scenarioVersion, requestId } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -75,6 +88,20 @@ app.post(
 
         console.log(`[judge] Snapshot extracted to ${workDir}`);
 
+        // Build onProgress callback that publishes criterion results via Redis
+        const onProgress = (requestId && logPublisher)
+          ? (result: import("shared").CriterionResult) => {
+              const statusIcon = !result.evaluated ? "⏭️" : result.passed ? "✅" : "❌";
+              logPublisher!.publish(requestId, "info", `${statusIcon} Criterion: ${result.criterionId}`, {
+                type: "criterion_result",
+                criterionId: result.criterionId,
+                passed: result.passed,
+                evaluated: result.evaluated,
+                feedback: result.feedback,
+              });
+            }
+          : undefined;
+
         // Run the judge agent
         const result = await evaluateWorkspace({
           workspacePath: workDir,
@@ -82,6 +109,7 @@ app.post(
           conversationHistory: conversationHistory || [],
           personaInstructions,
           scenarioVersion: scenarioVersion || 'v1',  // Default to v1 for backward compatibility
+          onProgress,
         });
 
         const elapsed = Date.now() - startTime;

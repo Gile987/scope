@@ -9,6 +9,7 @@ export interface ConversationTurn {
   snapshotUrl: string;
   passed: boolean;
   timestamp: Date;
+  criteriaResults?: CriterionResult[];  // Per-criterion breakdown from DAG evaluation
 }
 
 // Multi-turn configuration constants

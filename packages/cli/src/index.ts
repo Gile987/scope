@@ -122,6 +122,32 @@ program
         try {
           const log = JSON.parse(event.data);
           const timestamp = new Date(log.timestamp).toLocaleTimeString();
+
+          // Detect special criterion/DAG log events and render them with status icons
+          if (log.data?.type === "criterion_result") {
+            const d = log.data;
+            const icon = !d.evaluated ? "⏭️ " : d.passed ? "✅" : "❌";
+            const status = !d.evaluated ? "skipped" : d.passed ? "passed" : "failed";
+            console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}]   ${icon} ${d.criterionId}: ${status}`);
+            if (d.feedback && !d.passed) {
+              console.log(`           ${d.feedback.substring(0, 120)}`);
+            }
+            return;
+          }
+
+          if (log.data?.type === "criteria_dag_status") {
+            console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${log.message}`);
+            const results = log.data.results as Array<{ criterionId: string; passed: boolean; evaluated: boolean; feedback: string }>;
+            if (results) {
+              for (const r of results) {
+                const icon = !r.evaluated ? "⏭️ " : r.passed ? "✅" : "❌";
+                const status = !r.evaluated ? "skipped" : r.passed ? "passed" : "failed";
+                console.log(`              ${icon} ${r.criterionId}: ${status}`);
+              }
+            }
+            return;
+          }
+
           console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${log.message}`);
           if (log.data && Object.keys(log.data).length > 0) {
             const dataStr = JSON.stringify(log.data, null, 2)
@@ -209,6 +235,28 @@ program
       try {
         const log = JSON.parse(event.data);
         const timestamp = new Date(log.timestamp).toLocaleTimeString();
+
+        if (log.data?.type === "criterion_result") {
+          const d = log.data;
+          const icon = !d.evaluated ? "⏭️ " : d.passed ? "✅" : "❌";
+          const status = !d.evaluated ? "skipped" : d.passed ? "passed" : "failed";
+          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}]   ${icon} ${d.criterionId}: ${status}`);
+          return;
+        }
+
+        if (log.data?.type === "criteria_dag_status") {
+          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${log.message}`);
+          const results = log.data.results as Array<{ criterionId: string; passed: boolean; evaluated: boolean }>;
+          if (results) {
+            for (const r of results) {
+              const icon = !r.evaluated ? "⏭️ " : r.passed ? "✅" : "❌";
+              const status = !r.evaluated ? "skipped" : r.passed ? "passed" : "failed";
+              console.log(`              ${icon} ${r.criterionId}: ${status}`);
+            }
+          }
+          return;
+        }
+
         console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${log.message}`);
       } catch {
         console.log(event.data);
