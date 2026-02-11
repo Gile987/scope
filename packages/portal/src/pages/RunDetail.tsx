@@ -35,6 +35,16 @@ export function RunDetail() {
     },
   });
 
+  const isActive = run?.status === "pending" || run?.status === "processing" || run?.status === "iterating";
+
+  // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
+  // Must be called unconditionally (before any early returns) per Rules of Hooks
+  const logStream = useLogStream({
+    id: run?._id ?? "",
+    enabled: isActive && !!run,
+    fromStart: true,
+  });
+
   const copyId = () => {
     navigator.clipboard.writeText(id ?? "");
     setCopied(true);
@@ -66,15 +76,7 @@ export function RunDetail() {
     );
   }
 
-  const isActive = run.status === "pending" || run.status === "processing" || run.status === "iterating";
   const isV2 = run.scenario.version === "v2";
-
-  // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
-  const logStream = useLogStream({
-    id: run._id,
-    enabled: isActive,
-    fromStart: true,
-  });
 
   return (
     <div className="space-y-6">
