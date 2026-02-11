@@ -14,6 +14,14 @@ import { colorLevel, dimTimestamp, errorText, successText, label, value, banner,
 
 dotenv.config();
 
+function printFollowUpCommands(id: string): void {
+  console.log(`\n${label('Run ID:')} ${value(id)}`);
+  console.log(`\n${label('Next steps:')}`);
+  console.log(`  ${dimTimestamp('Check status:')}  pnpm cli run status ${id}`);
+  console.log(`  ${dimTimestamp('Stream logs:')}   pnpm cli run logs ${id}`);
+  console.log(`  ${dimTimestamp('List all runs:')} pnpm cli run list`);
+}
+
 const program = new Command();
 
 const DEFAULT_WORKERS = [
@@ -122,6 +130,7 @@ run
       console.log(`${label('Status:')} ${value(result.status)}`);
 
       if (!stream) {
+        printFollowUpCommands(result.id);
         return;
       }
 
@@ -184,6 +193,7 @@ run
         } catch {
           console.log(`\n${successText('--- Done ---')}`);
         }
+        printFollowUpCommands(result.id);
         eventSource.close();
         process.exit(0);
       });
