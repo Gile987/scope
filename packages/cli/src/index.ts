@@ -707,5 +707,78 @@ criteria
     }
   });
 
+criteria
+  .command("graph")
+  .description("Display the criteria dependency graph as ASCII")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${options.url}/api/v1/criteria/graph`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const graph = await response.json() as {
+        nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
+        edges: Array<{ from: string; to: string }>;
+      };
+
+      if (graph.nodes.length === 0) {
+        console.log(warnBanner("No criteria in the graph."));
+        return;
+      }
+
+      console.log(label(`Criteria DAG — ${graph.nodes.length} nodes, ${graph.edges.length} edges\n`));
+
+      // Topological layering (Kahn's algorithm)
+      const inDegree = new Map<string, number>();
+      const children = new Map<string, string[]>();
+      for (const n of graph.nodes) {
+        inDegree.set(n.id, 0);
+        children.set(n.id, []);
+      }
+      for (const e of graph.edges) {
+        inDegree.set(e.to, (inDegree.get(e.to) ?? 0) + 1);
+        children.get(e.from)?.push(e.to);
+      }
+
+      const layers: string[][] = [];
+      let queue = graph.nodes.filter(n => (inDegree.get(n.id) ?? 0) === 0).map(n => n.id);
+      while (queue.length > 0) {
+        layers.push([...queue]);
+        const next: string[] = [];
+        for (const id of queue) {
+          for (const child of children.get(id) ?? []) {
+            const deg = (inDegree.get(child) ?? 1) - 1;
+            inDegree.set(child, deg);
+            if (deg === 0) next.push(child);
+          }
+        }
+        queue = next;
+      }
+
+      // Render layers
+      for (let i = 0; i < layers.length; i++) {
+        const layerNodes = layers[i];
+        const row = layerNodes.map(id => value(id)).join('  ');
+        console.log(`  ${dimTimestamp(`Layer ${i}:`)}  ${row}`);
+      }
+
+      // Show edges
+      if (graph.edges.length > 0) {
+        console.log(`\n  ${label('Edges:')}`);
+        for (const e of graph.edges) {
+          console.log(`    ${value(e.from)} ${styleText('gray', '→')} ${value(e.to)}`);
+        }
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 
 program.parse();
