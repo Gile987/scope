@@ -21,6 +21,9 @@ import { colorLevel, dimTimestamp, errorText, successText, label, value, banner,
 
 dotenv.config();
 
+/** Strip trailing slashes from a URL to avoid double-slash issues when appending paths */
+const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
+
 function printFollowUpCommands(id: string): void {
   console.log(`\n${label('Run ID:')} ${value(id)}`);
   console.log(`\n${label('Next steps:')}`);
@@ -119,7 +122,7 @@ run
         body.persona = personaObj;
       }
 
-      const response = await fetch(`${url}/api/v1/requests?worker=${worker}`, {
+      const response = await fetch(`${normalizeUrl(url)}/api/v1/requests?worker=${worker}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -145,7 +148,7 @@ run
       // Stream logs
       console.log(`\n${banner('--- Streaming logs ---')}\n`);
 
-      const eventSource = new EventSource(`${url}/api/v1/requests/${result.id}/logs`);
+      const eventSource = new EventSource(`${normalizeUrl(url)}/api/v1/requests/${result.id}/logs`);
 
       eventSource.onmessage = (event) => {
         try {
@@ -232,7 +235,7 @@ run
   .action(async (options) => {
     const { id } = options;
     try {
-      const response = await fetch(`${options.url}/api/v1/requests/${id}`);
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -262,8 +265,8 @@ run
   .action(async (options) => {
     const { id } = options;
     const url = options.fromStart
-      ? `${options.url}/api/v1/requests/${id}/logs?fromStart=true`
-      : `${options.url}/api/v1/requests/${id}/logs`;
+      ? `${normalizeUrl(options.url)}/api/v1/requests/${id}/logs?fromStart=true`
+      : `${normalizeUrl(options.url)}/api/v1/requests/${id}/logs`;
 
     const eventSource = new EventSource(url);
 
@@ -320,7 +323,7 @@ run
   .option("--include-deleted", "Include soft-deleted runs")
   .action(async (options) => {
     try {
-      let url = `${options.url}/api/v1/requests`;
+      let url = `${normalizeUrl(options.url)}/api/v1/requests`;
       const params = new URLSearchParams();
       if (options.worker) {
         params.set("worker", options.worker);
@@ -398,7 +401,7 @@ run
   .action(async (options) => {
     const { id, url } = options;
     try {
-      const response = await fetch(`${url}/api/v1/requests/${id}`, { method: "DELETE" });
+      const response = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}`, { method: "DELETE" });
 
       if (!response.ok) {
         const error = await response.json();
@@ -431,7 +434,7 @@ run
     try {
       // Step 1: Fetch request document
       console.log(`${label('Fetching run')} ${value(id)}...`);
-      const response = await fetch(`${url}/api/v1/requests/${id}`);
+      const response = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error);
@@ -468,7 +471,7 @@ run
 
           process.stdout.write(`  ${label(`iteration-${iter}/`)} downloading...`);
 
-          const snapshotResp = await fetch(`${url}/api/v1/requests/${id}/snapshots/${iter}`);
+          const snapshotResp = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}/snapshots/${iter}`);
           if (!snapshotResp.ok || !snapshotResp.body) {
             console.log(` ${errorText('FAILED')}`);
             console.error(`    ${errorText(`Could not download iteration ${iter}: ${snapshotResp.statusText}`)}`);
@@ -532,7 +535,7 @@ criteria
       const params = new URLSearchParams();
       if (options.query) params.set("q", options.query);
       const qs = params.toString();
-      const response = await fetch(`${options.url}/api/v1/criteria${qs ? `?${qs}` : ""}`);
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria${qs ? `?${qs}` : ""}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -571,7 +574,7 @@ criteria
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
-      const response = await fetch(`${options.url}/api/v1/criteria/${options.id}`);
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -622,7 +625,7 @@ criteria
         body.dependsOn = options.dependsOn;
       }
 
-      const response = await fetch(`${options.url}/api/v1/criteria`, {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -660,7 +663,7 @@ criteria
         process.exit(1);
       }
 
-      const response = await fetch(`${options.url}/api/v1/criteria/${options.id}`, {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -686,7 +689,7 @@ criteria
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
-      const response = await fetch(`${options.url}/api/v1/criteria/${options.id}`, {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`, {
         method: "DELETE",
       });
 
@@ -713,7 +716,7 @@ criteria
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
-      const response = await fetch(`${options.url}/api/v1/criteria/graph`);
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/graph`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -866,7 +869,7 @@ criteria
 
       // Seed via API
       console.log();
-      const response = await fetch(`${options.url}/api/v1/criteria/seed`, {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/seed`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ criteria: allCriteria }),
