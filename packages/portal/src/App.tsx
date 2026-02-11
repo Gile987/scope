@@ -6,6 +6,10 @@ import { Layout } from "@/components/Layout";
 import { RunsList } from "@/pages/RunsList";
 import { RunDetail } from "@/pages/RunDetail";
 import { SubmitRun } from "@/pages/SubmitRun";
+import { CriteriaList } from "@/pages/CriteriaList";
+import { CriterionDetail } from "@/pages/CriterionDetail";
+import { CreateCriterion } from "@/pages/CreateCriterion";
+import { CriteriaGraphView } from "@/pages/CriteriaGraphView";
 
 export function App() {
   return (
@@ -14,6 +18,10 @@ export function App() {
         <Route path="/" element={<RunsList />} />
         <Route path="/runs/new" element={<SubmitRun />} />
         <Route path="/runs/:id" element={<RunDetail />} />
+        <Route path="/criteria" element={<CriteriaList />} />
+        <Route path="/criteria/new" element={<CreateCriterion />} />
+        <Route path="/criteria/graph" element={<CriteriaGraphView />} />
+        <Route path="/criteria/:id" element={<CriterionDetail />} />
       </Route>
     </Routes>
   );

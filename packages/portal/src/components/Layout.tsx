@@ -3,11 +3,12 @@
 
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List } from "lucide-react";
+import { Activity, Plus, List, FlaskConical } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Runs", icon: List },
   { to: "/runs/new", label: "New Run", icon: Plus },
+  { to: "/criteria", label: "Criteria", icon: FlaskConical },
 ];
 
 export function Layout() {
@@ -23,19 +24,25 @@ export function Layout() {
             <span className="hidden font-bold sm:inline-block">Scope MT</span>
           </Link>
           <nav className="flex items-center space-x-6 text-sm font-medium">
-            {navItems.map((item) => (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={cn(
-                  "flex items-center gap-1.5 transition-colors hover:text-foreground/80",
-                  location.pathname === item.to ? "text-foreground" : "text-foreground/60"
-                )}
-              >
-                <item.icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            ))}
+            {navItems.map((item) => {
+              const isActive =
+                item.to === "/"
+                  ? location.pathname === "/"
+                  : location.pathname.startsWith(item.to);
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={cn(
+                    "flex items-center gap-1.5 transition-colors hover:text-foreground/80",
+                    isActive ? "text-foreground" : "text-foreground/60"
+                  )}
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.label}
+                </Link>
+              );
+            })}
           </nav>
         </div>
       </header>
