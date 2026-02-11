@@ -48,6 +48,7 @@ const queueClients: Map<WorkerType, QueueClient> = new Map();
 interface LogEvent {
   timestamp: string;
   level: "info" | "warn" | "error" | "debug";
+  source?: string;
   message: string;
   data?: Record<string, unknown>;
 }

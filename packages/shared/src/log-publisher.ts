@@ -19,12 +19,13 @@ export type LogPublisherConfig = RedisConfig;
 export class LogPublisher {
   private redis: InstanceType<typeof Redis>;
   private collection: Collection<RequestDocument>;
+  private source: string;
   private redisBreaker = circuitBreaker(handleAll, {
     halfOpenAfter: 60_000, // Try again after 1 minute
     breaker: new ConsecutiveBreaker(3), // Open after 3 consecutive failures
   });
 
-  constructor(config: LogPublisherConfig, collection: Collection<RequestDocument>) {
+  constructor(config: LogPublisherConfig, collection: Collection<RequestDocument>, source: string = "coder") {
     // Support both local Redis (no TLS) and Azure Redis (TLS)
     const useTls = config.redisPassword && config.redisPort !== 6379;
     this.redis = new Redis({
@@ -43,6 +44,7 @@ export class LogPublisher {
       },
     });
     this.collection = collection;
+    this.source = source;
 
     // Handle ioredis errors to prevent "Unhandled error event" spam
     this.redis.on("error", (err: Error) => {
@@ -73,6 +75,7 @@ export class LogPublisher {
     const logEvent: LogEvent = {
       timestamp: new Date().toISOString(),
       level,
+      source: this.source,
       message,
       data,
     };
@@ -113,12 +116,13 @@ export class LogPublisher {
  */
 export class RedisLogPublisher {
   private redis: InstanceType<typeof Redis>;
+  private source: string;
   private redisBreaker = circuitBreaker(handleAll, {
     halfOpenAfter: 60_000,
     breaker: new ConsecutiveBreaker(3),
   });
 
-  constructor(config: RedisConfig) {
+  constructor(config: RedisConfig, source: string = "judge") {
     const useTls = config.redisPassword && config.redisPort !== 6379;
     this.redis = new Redis({
       host: config.redisHost,
@@ -131,6 +135,7 @@ export class RedisLogPublisher {
         return Math.min(times * 1000, 3000);
       },
     });
+    this.source = source;
 
     this.redis.on("error", (err: Error) => {
       if (this.redisBreaker.state === CircuitState.Closed) {
@@ -158,6 +163,7 @@ export class RedisLogPublisher {
     const logEvent: LogEvent = {
       timestamp: new Date().toISOString(),
       level,
+      source: this.source,
       message,
       data,
     };
