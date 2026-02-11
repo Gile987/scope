@@ -388,7 +388,7 @@ run
   .description("Download all artifacts of a run (workspaces + run document)")
   .requiredOption("-i, --id <id>", "Request ID")
   .option("-o, --output <path>", "Output file path (default: <id>.tar.gz)")
-  .option("-x, --extract", "Extract the archive after downloading")
+  .option("-e, --extract", "Extract the archive after downloading")
   .option("-d, --dir <path>", "Extraction directory (implies --extract)")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .action(async (options) => {
