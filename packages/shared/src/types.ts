@@ -68,6 +68,7 @@ export interface RequestDocument {
 export interface LogEvent {
   timestamp: string;
   level: "info" | "warn" | "error" | "debug";
+  source?: string;
   message: string;
   data?: Record<string, unknown>;
 }
