@@ -451,8 +451,7 @@ run
           await pipeline(Readable.fromWeb(snapshotResp.body as any), fileStream);
           execSync(`tar xzf "${archivePath}" -C "${iterDir}"`, { stdio: "pipe" });
 
-          const verdict = turn.passed ? successText('● pass') : errorText('✗ fail');
-          process.stdout.write(`\r  ${label(`iteration-${iter}/`)} ${successText('downloaded')}  ${verdict}\n`);
+          process.stdout.write(`\r  ${label(`iteration-${iter}/`)} ${successText('downloaded')}\n`);
         }
 
         // Step 5: Create the final tar.gz archive
