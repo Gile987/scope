@@ -1,26 +1,100 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
-import { Plus, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Stepper } from "@/components/Stepper";
+import { CriteriaPicker } from "@/components/CriteriaPicker";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Loader2,
+  Check,
+  X,
+  Sparkles,
+  RefreshCw,
+  ChevronDown,
+  ChevronRight,
+  Pencil,
+} from "lucide-react";
+
+const STEPS = ["Define Criteria", "Review & Create"];
+
+/** Convert a behavior description to a snake_case ID suggestion */
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^[^a-z]+/, "")
+    .replace(/_+/g, "_")
+    .replace(/_$/, "")
+    .slice(0, 40);
+}
 
 export function CreateCriterion() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [id, setId] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [dependsOnText, setDependsOnText] = useState("");
+  // Wizard step (1 or 2)
+  const [step, setStep] = useState(1);
 
+  // Step 1 fields
+  const [behavior, setBehavior] = useState("");
+  const [id, setId] = useState("");
+  const [idManuallyEdited, setIdManuallyEdited] = useState(false);
+  const [idEditMode, setIdEditMode] = useState(false);
+  const [dependsOn, setDependsOn] = useState<string[]>([]);
+  const [showDeps, setShowDeps] = useState(false);
+
+  // Step 2 fields
+  const [prompt, setPrompt] = useState("");
+  const [aiGenerated, setAiGenerated] = useState(false);
+  const [aiModel, setAiModel] = useState("");
+
+  // ID validation
+  const idValid = useMemo(() => /^[a-z][a-z0-9_]*$/.test(id), [id]);
+  const canContinue = behavior.trim().length > 0 && id.trim().length > 0 && idValid;
+
+  // Auto-suggest ID from behavior (unless manually edited)
+  const handleBehaviorChange = useCallback(
+    (value: string) => {
+      setBehavior(value);
+      if (!idManuallyEdited) {
+        setId(slugify(value));
+      }
+    },
+    [idManuallyEdited],
+  );
+
+  // Generate prompt mutation
+  const generateMutation = useMutation({
+    mutationFn: (behaviorText: string) => api.generateCriteriaPrompt(behaviorText),
+    onSuccess: (data) => {
+      setPrompt(data.prompt);
+      setAiGenerated(true);
+      setAiModel("AI Generated");
+      // Optionally update ID if not manually edited
+      if (!idManuallyEdited && data.suggestedId) {
+        setId(data.suggestedId);
+      }
+    },
+    onError: () => {
+      // LLM unavailable — proceed with empty prompt for manual entry
+      setPrompt("");
+      setAiGenerated(false);
+    },
+  });
+
+  // Create criterion mutation
   const createMutation = useMutation({
     mutationFn: api.createCriterion,
     onSuccess: (data) => {
@@ -29,15 +103,16 @@ export function CreateCriterion() {
     },
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Step 1 → Step 2
+  const handleContinue = () => {
+    setStep(2);
+    // Trigger AI prompt generation
+    generateMutation.mutate(behavior.trim());
+  };
+
+  // Step 2 → Submit
+  const handleCreate = () => {
     if (!id.trim() || !prompt.trim()) return;
-
-    const dependsOn = dependsOnText
-      .split("\n")
-      .map((d) => d.trim())
-      .filter(Boolean);
-
     createMutation.mutate({
       id: id.trim(),
       prompt: prompt.trim(),
@@ -45,91 +120,346 @@ export function CreateCriterion() {
     });
   };
 
+  // Regenerate prompt
+  const handleRegenerate = () => {
+    generateMutation.mutate(behavior.trim());
+  };
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">New Criterion</h1>
-        <p className="text-muted-foreground">Define a new evaluation criterion for the judge</p>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Definition</CardTitle>
-            <CardDescription>The criterion ID must be a unique snake_case identifier</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="id">Criterion ID *</Label>
-              <Input
-                id="id"
-                placeholder="e.g., has_unit_tests"
-                value={id}
-                onChange={(e) => setId(e.target.value)}
-                pattern="[a-z][a-z0-9_]*"
-                className="font-mono"
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                Lowercase letters, numbers, and underscores. Must start with a letter.
-              </p>
+    <div className="max-w-2xl mx-auto">
+      {step === 1 ? (
+        /* ───────────────────── Step 1: Define Criteria ───────────────────── */
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-muted">
+                <Sparkles className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold">Define Criteria</h1>
+                <p className="text-sm text-muted-foreground">
+                  Describe the behavior to evaluate
+                </p>
+              </div>
             </div>
+            <Stepper steps={STEPS} currentStep={1} />
+          </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="prompt">Evaluation Prompt *</Label>
-              <Textarea
-                id="prompt"
-                placeholder="Describe what the judge should check for…"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                rows={6}
-                required
-              />
+          {/* Behavior description */}
+          <Card>
+            <CardContent className="pt-6 space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="behavior" className="text-sm font-semibold">
+                  What behavior do you want to track?
+                </Label>
+                <Textarea
+                  id="behavior"
+                  placeholder="Describe the behavior or pattern you want to detect (e.g., 'uses Azure Bicep for IaC', 'has unit tests', 'follows REST conventions')"
+                  value={behavior}
+                  onChange={(e) => handleBehaviorChange(e.target.value)}
+                  rows={4}
+                  className="resize-none"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Describe what you want the judge to detect in your codebase
+                </p>
+              </div>
+
+              {/* Criteria ID — tag/chip style */}
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">
+                  Criteria ID{" "}
+                  <span className="font-normal text-muted-foreground">
+                    (when judge returns true)
+                  </span>
+                </Label>
+
+                {id && !idEditMode ? (
+                  /* Chip display mode */
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="secondary"
+                      className="gap-1.5 px-3 py-1.5 text-sm font-mono cursor-pointer hover:bg-secondary/80"
+                      onClick={() => setIdEditMode(true)}
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      {id}
+                      <X
+                        className="h-3.5 w-3.5 ml-1 hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setId("");
+                          setIdManuallyEdited(true);
+                          setIdEditMode(true);
+                        }}
+                      />
+                    </Badge>
+                    <button
+                      type="button"
+                      onClick={() => setIdEditMode(true)}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  /* Edit mode */
+                  <div className="space-y-1">
+                    <Input
+                      placeholder="e.g., has_unit_tests"
+                      value={id}
+                      onChange={(e) => {
+                        setId(e.target.value);
+                        setIdManuallyEdited(true);
+                      }}
+                      onBlur={() => {
+                        if (id) setIdEditMode(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && id) {
+                          e.preventDefault();
+                          setIdEditMode(false);
+                        }
+                      }}
+                      pattern="[a-z][a-z0-9_]*"
+                      className="font-mono"
+                      autoFocus={idEditMode}
+                    />
+                    {id && !idValid && (
+                      <p className="text-xs text-destructive">
+                        Must start with a letter. Only lowercase letters, numbers, and underscores.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {!id && !idEditMode && (
+                  <button
+                    type="button"
+                    onClick={() => setIdEditMode(true)}
+                    className="flex items-center gap-2 px-3 py-2 border border-dashed rounded-md text-sm text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors w-full"
+                  >
+                    + Click to select or create criteria ID
+                  </button>
+                )}
+
+                <p className="text-xs text-muted-foreground">
+                  This ID will be attached to evaluations when the judge evaluates them as positive
+                </p>
+              </div>
+
+              {/* Dependencies — collapsible */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDeps(!showDeps)}
+                  className="flex items-center gap-1.5 text-sm font-semibold hover:text-foreground/80 transition-colors"
+                >
+                  {showDeps ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
+                  Dependencies
+                  {dependsOn.length > 0 && (
+                    <Badge variant="secondary" className="ml-1 text-xs">
+                      {dependsOn.length}
+                    </Badge>
+                  )}
+                  <span className="font-normal text-muted-foreground">(optional)</span>
+                </button>
+
+                {showDeps && (
+                  <div className="pl-5">
+                    <CriteriaPicker selected={dependsOn} onChange={setDependsOn} />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Criteria that must pass before this one is evaluated
+                    </p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Actions */}
+          <div className="flex items-center justify-between">
+            <Button variant="ghost" onClick={() => navigate("/criteria")}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleContinue}
+              disabled={!canContinue}
+              className="gap-1.5"
+            >
+              Continue
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      ) : (
+        /* ───────────────────── Step 2: Review & Create ───────────────────── */
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-muted">
+                <Sparkles className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold">Review & Create</h1>
+                <p className="text-sm text-muted-foreground">
+                  Confirm your criteria settings
+                </p>
+              </div>
             </div>
+            <Stepper steps={STEPS} currentStep={2} />
+          </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="deps">
-                Dependencies{" "}
-                <span className="text-muted-foreground font-normal">(optional, one ID per line)</span>
-              </Label>
-              <Textarea
-                id="deps"
-                placeholder="has_node&#10;has_typescript"
-                value={dependsOnText}
-                onChange={(e) => setDependsOnText(e.target.value)}
-                rows={3}
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Criteria that must pass before this one is evaluated. Creates a dependency edge in the graph.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+          {/* Summary card */}
+          <Card>
+            <CardContent className="pt-6 space-y-4">
+              {/* Behavior & metadata row */}
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm font-semibold">
+                    Criteria for: {behavior}
+                  </p>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">
+                    Behavior to track
+                  </p>
+                </div>
 
-        <Separator />
+                <div className="flex items-center gap-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                      Criteria ID
+                    </p>
+                    <Badge variant="secondary" className="font-mono">
+                      {id}
+                    </Badge>
+                  </div>
+                  {dependsOn.length > 0 && (
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                        Dependencies
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {dependsOn.map((dep) => (
+                          <Badge key={dep} variant="outline" className="font-mono text-xs">
+                            {dep}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-        <div className="flex items-center justify-between">
+          {/* Criteria Prompt */}
+          <Card>
+            <CardContent className="pt-6 space-y-4">
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+                  {generateMutation.isPending
+                    ? "Generating criteria prompt…"
+                    : aiGenerated
+                      ? `Criteria Prompt (${aiModel})`
+                      : "Criteria Prompt"}
+                </Label>
+
+                {generateMutation.isPending ? (
+                  <div className="flex items-center justify-center py-12 text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                    <span className="text-sm">Generating evaluation prompt…</span>
+                  </div>
+                ) : (
+                  <Textarea
+                    value={prompt}
+                    onChange={(e) => {
+                      setPrompt(e.target.value);
+                      if (aiGenerated) setAiGenerated(false);
+                    }}
+                    rows={6}
+                    placeholder="Write your evaluation prompt here. Describe what the judge should check for in the codebase…"
+                    className="font-mono text-sm"
+                  />
+                )}
+
+                {generateMutation.isError && (
+                  <p className="text-xs text-amber-600">
+                    AI generation unavailable — write your prompt manually
+                  </p>
+                )}
+              </div>
+
+              {/* Prompt action buttons */}
+              {!generateMutation.isPending && (
+                <div className="flex items-center gap-2">
+                  {prompt && aiGenerated && (
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => setAiGenerated(false)}
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      Accept Prompt
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={handleRegenerate}
+                    disabled={generateMutation.isPending}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Regenerate
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Error display */}
           {createMutation.isError && (
             <p className="text-sm text-destructive">
-              {createMutation.error instanceof Error ? createMutation.error.message : "Creation failed"}
+              {createMutation.error instanceof Error
+                ? createMutation.error.message
+                : "Creation failed"}
             </p>
           )}
-          <div className="flex-1" />
-          <Button
-            type="submit"
-            disabled={!id.trim() || !prompt.trim() || createMutation.isPending}
-            className="gap-1.5"
-          >
-            {createMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4" />
-            )}
-            Create Criterion
-          </Button>
+
+          {/* Actions */}
+          <div className="flex items-center justify-between">
+            <Button
+              variant="ghost"
+              onClick={() => setStep(1)}
+              className="gap-1.5"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
+            <Button
+              onClick={handleCreate}
+              disabled={!prompt.trim() || createMutation.isPending}
+              className="gap-1.5"
+            >
+              {createMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              Create Criteria
+            </Button>
+          </div>
         </div>
-      </form>
+      )}
     </div>
   );
 }
