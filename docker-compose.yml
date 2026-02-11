@@ -101,6 +101,8 @@ services:
       PORT: "80"
       AZURE_STORAGE_QUEUE_WORKER_1: queue-coder-acp-claude-code
       AZURE_STORAGE_QUEUE_WORKER_2: queue-coder-acp-copilot
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4.1}
     depends_on:
       mongodb:
         condition: service_healthy

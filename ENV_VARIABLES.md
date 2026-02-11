@@ -2,6 +2,20 @@
 
 The sophisticated criteria system can be configured via environment variables in docker-compose or .env files.
 
+## LLM Configuration (Criteria Prompt Generation)
+
+### GITHUB_TOKEN
+**Required for AI prompt generation**
+**Type:** string
+
+GitHub personal access token used to authenticate with GitHub Models (`https://models.inference.ai.azure.com`) via the Azure AI Inference SDK. When set, the API can auto-generate evaluation prompts from natural-language behavior descriptions during criteria creation.
+
+### LLM_MODEL
+**Default:** `gpt-4.1`
+**Type:** string
+
+The model name to use for criteria prompt generation via GitHub Models. Examples: `gpt-4.1`, `gpt-4o`, `gpt-4.1-mini`.
+
 ## Judge Strategy Configuration
 
 ### JUDGE_STRATEGY
