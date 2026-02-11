@@ -123,6 +123,41 @@ export class CriteriaRegistry {
   }
 
   /**
+   * Resolve criteria IDs to CriteriaConfig objects, including all transitive ancestors.
+   * This ensures the full DAG is available for CriteriaGraph construction.
+   * Throws an error if any ID (leaf or ancestor) is not found in the registry.
+   */
+  resolveWithAncestors(ids: string[]): CriteriaConfig[] {
+    const collected = new Map<string, CriteriaConfig>();
+    const queue = [...ids];
+
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (collected.has(id)) continue;
+
+      const criteria = this.registry.get(id);
+      if (!criteria) {
+        const availableIds = Array.from(this.registry.keys()).join(', ');
+        throw new Error(
+          `Criteria '${id}' not found in registry. Available criteria: ${availableIds || 'none'}`
+        );
+      }
+      collected.set(id, criteria);
+
+      // Enqueue ancestors
+      if (criteria.dependsOn) {
+        for (const parentId of criteria.dependsOn) {
+          if (!collected.has(parentId)) {
+            queue.push(parentId);
+          }
+        }
+      }
+    }
+
+    return Array.from(collected.values());
+  }
+
+  /**
    * Check if a criterion exists
    */
   has(id: string): boolean {

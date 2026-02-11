@@ -55,7 +55,7 @@ interface LogEvent {
 // Request document interface
 interface RequestDocument {
   _id: string;
-  scenario: { task: string; criteria: string[] };
+  scenario: { task: string; criteria: string[]; version?: 'v1' | 'v2' };
   workerType: WorkerType;
   status: "pending" | "processing" | "iterating" | "completed" | "failed";
   result?: string;
@@ -292,10 +292,11 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
     const workerType = worker as WorkerType;
     const requestId = uuidv4();
 
-    // Normalize scenario: ensure criteria is always an array
-    const scenario = {
+    // Normalize scenario: ensure criteria is always an array, preserve version
+    const scenario: RequestDocument['scenario'] = {
       task: scenarioObj.task as string,
       criteria: Array.isArray(scenarioObj.criteria) ? scenarioObj.criteria as string[] : [],
+      ...(scenarioObj.version === 'v1' || scenarioObj.version === 'v2' ? { version: scenarioObj.version } : {}),
     };
 
     // Create request document

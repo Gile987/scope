@@ -59,9 +59,9 @@ export async function evaluateWorkspace(
     // v2: criteria are IDs, resolve from registry
     try {
       const registry = getCriteriaRegistry();
-      normalizedCriteria = registry.resolve(input.criteria);
+      normalizedCriteria = registry.resolveWithAncestors(input.criteria);
       console.log(
-        `[judge-agent] Loaded ${normalizedCriteria.length} criteria from registry (v2 format)`
+        `[judge-agent] Loaded ${normalizedCriteria.length} criteria (including ancestors) from registry (v2 format)`
       );
     } catch (error) {
       console.error("[judge-agent] Failed to resolve criteria:", error);
