@@ -511,4 +511,201 @@ run
     }
   });
 
+// ─── Criteria management ─────────────────────────────────────────────────────
+
+const criteria = program
+  .command("criteria")
+  .description("Manage evaluation criteria (CRUD, import, graph)")
+  .action(() => {
+    criteria.help();
+  });
+
+configureHelp(criteria);
+
+criteria
+  .command("list")
+  .description("List all criteria")
+  .option("-q, --query <search>", "Filter by ID or prompt text")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const params = new URLSearchParams();
+      if (options.query) params.set("q", options.query);
+      const qs = params.toString();
+      const response = await fetch(`${options.url}/api/v1/criteria${qs ? `?${qs}` : ""}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
+      if (items.length === 0) {
+        console.log(warnBanner("No criteria found."));
+        return;
+      }
+
+      console.log(label(`Found ${items.length} criteria:\n`));
+
+      // Table header
+      const idW = Math.max(24, ...items.map(c => c.id.length)) + 2;
+      console.log(`  ${styleText('bold', 'ID'.padEnd(idW))}${styleText('bold', 'Deps'.padEnd(6))}${'Prompt'}`);
+      console.log(`  ${'─'.repeat(idW)}${'─'.repeat(6)}${'─'.repeat(50)}`);
+
+      for (const c of items) {
+        const deps = (c.dependsOn ?? []).length;
+        const prompt = c.prompt.replace(/\n/g, ' ').substring(0, 60);
+        console.log(`  ${value(c.id.padEnd(idW))}${String(deps).padEnd(6)}${dimTimestamp(prompt)}${c.prompt.length > 60 ? '…' : ''}`);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+criteria
+  .command("get")
+  .description("Get details of a single criterion")
+  .requiredOption("-i, --id <id>", "Criterion ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${options.url}/api/v1/criteria/${options.id}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const c = await response.json() as {
+        id: string; prompt: string; dependsOn?: string[];
+        dependents: string[]; createdAt: string; updatedAt?: string;
+      };
+
+      console.log(`${label('ID:')}        ${value(c.id)}`);
+      console.log(`${label('Prompt:')}`);
+      for (const line of c.prompt.trim().split('\n')) {
+        console.log(`  ${line}`);
+      }
+      if ((c.dependsOn ?? []).length > 0) {
+        console.log(`${label('Depends on:')} ${c.dependsOn!.map(d => value(d)).join(', ')}`);
+      } else {
+        console.log(`${label('Depends on:')} ${dimTimestamp('(none — root criterion)')}`);
+      }
+      if (c.dependents.length > 0) {
+        console.log(`${label('Dependents:')} ${c.dependents.map(d => value(d)).join(', ')}`);
+      }
+      console.log(`${label('Created:')}   ${value(c.createdAt)}`);
+      if (c.updatedAt) console.log(`${label('Updated:')}   ${value(c.updatedAt)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+criteria
+  .command("create")
+  .description("Create a new criterion")
+  .requiredOption("--id <id>", "Criterion ID (lowercase snake_case)")
+  .requiredOption("--prompt <prompt>", "Evaluation prompt for the judge")
+  .option("-d, --depends-on <ids...>", "IDs of parent criteria")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {
+        id: options.id,
+        prompt: options.prompt,
+      };
+      if (options.dependsOn && options.dependsOn.length > 0) {
+        body.dependsOn = options.dependsOn;
+      }
+
+      const response = await fetch(`${options.url}/api/v1/criteria`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const created = await response.json();
+      console.log(`${successText('Created criterion')} ${value(created.id)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+criteria
+  .command("update")
+  .description("Update an existing criterion")
+  .requiredOption("-i, --id <id>", "Criterion ID")
+  .option("--prompt <prompt>", "New evaluation prompt")
+  .option("-d, --depends-on <ids...>", "New parent criteria IDs (replaces all)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {};
+      if (options.prompt !== undefined) body.prompt = options.prompt;
+      if (options.dependsOn !== undefined) body.dependsOn = options.dependsOn;
+
+      if (Object.keys(body).length === 0) {
+        console.error(errorText("Error: provide --prompt and/or --depends-on"));
+        process.exit(1);
+      }
+
+      const response = await fetch(`${options.url}/api/v1/criteria/${options.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      console.log(`${successText('Updated criterion')} ${value(options.id)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+criteria
+  .command("delete")
+  .description("Delete a criterion (soft-delete; fails if other criteria depend on it)")
+  .requiredOption("-i, --id <id>", "Criterion ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${options.url}/api/v1/criteria/${options.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        if (error.dependents) {
+          console.error(errorText(`Cannot delete '${options.id}': depended on by ${error.dependents.join(', ')}`));
+        } else {
+          console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        }
+        process.exit(1);
+      }
+
+      console.log(`${successText('Deleted criterion')} ${value(options.id)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+
 program.parse();
