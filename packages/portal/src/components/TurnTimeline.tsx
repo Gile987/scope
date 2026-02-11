@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Download, CheckCircle2, XCircle, MinusCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { Download, CheckCircle2, XCircle, AlertCircle, MinusCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { ConversationTurn } from "@/types";
@@ -61,8 +61,8 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                       <CheckCircle2 className="h-3 w-3" /> Passed
                     </Badge>
                   ) : (
-                    <Badge variant="destructive" className="gap-1">
-                      <XCircle className="h-3 w-3" /> Failed
+                    <Badge variant="warning" className="gap-1">
+                      <AlertCircle className="h-3 w-3" /> Incomplete
                     </Badge>
                   )}
                 </div>
