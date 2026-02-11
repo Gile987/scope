@@ -37,7 +37,7 @@ fi
 echo "Using ACR: ${ACR_NAME}"
 
 # Image list
-ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge"
+ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal"
 
 get_dockerfile() {
   local name=$1
