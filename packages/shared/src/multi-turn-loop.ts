@@ -88,10 +88,16 @@ export async function runMultiTurnLoop(
   });
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
+    // Create a per-iteration logger that automatically injects the iteration number
+    // into every log event's data. This ensures all downstream log calls (including
+    // those from inside workers) carry iteration context for the CLI to display.
+    const iterLog: typeof log = async (level, message, data) =>
+      log(level, message, { ...data, iteration });
+
     // Check timeout
     const elapsed = Date.now() - startTime;
     if (elapsed > MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS) {
-      await log("warn", `Multi-turn loop timed out after ${Math.round(elapsed / 1000)}s`, { iteration, elapsedMs: elapsed });
+      await iterLog("warn", `Multi-turn loop timed out after ${Math.round(elapsed / 1000)}s`, { elapsedMs: elapsed });
       return {
         turns,
         passed: false,
@@ -99,19 +105,18 @@ export async function runMultiTurnLoop(
       };
     }
 
-    await log("info", `--- Iteration ${iteration}/${maxIterations} ---`, {
-      iteration,
+    await iterLog("info", `--- Iteration ${iteration}/${maxIterations} ---`, {
       promptLength: nextPrompt.length,
     });
 
     // Step 1: Call the coding agent
-    await log("info", "Calling coding agent...", { iteration });
+    await iterLog("info", "Calling coding agent...");
     let codingResponse: string;
     try {
-      codingResponse = await processor.processMessage(nextPrompt, log);
+      codingResponse = await processor.processMessage(nextPrompt, iterLog);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      await log("error", `Coding agent failed on iteration ${iteration}: ${errorMsg}`, { iteration, error: errorMsg });
+      await iterLog("error", `Coding agent failed: ${errorMsg}`, { error: errorMsg });
       return {
         turns,
         passed: false,
@@ -119,13 +124,12 @@ export async function runMultiTurnLoop(
       };
     }
 
-    await log("info", "Coding agent completed", {
-      iteration,
+    await iterLog("info", "Coding agent completed", {
       responseLength: codingResponse.length,
     });
 
     // Step 2: Snapshot workspace to blob storage
-    await log("info", "Uploading workspace snapshot...", { iteration });
+    await iterLog("info", "Uploading workspace snapshot...");
     let snapshotUrl: string;
     try {
       snapshotUrl = await blobStorage.uploadWorkspaceSnapshot(
@@ -135,7 +139,7 @@ export async function runMultiTurnLoop(
       );
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      await log("error", `Snapshot upload failed: ${errorMsg}`, { iteration, error: errorMsg });
+      await iterLog("error", `Snapshot upload failed: ${errorMsg}`, { error: errorMsg });
       return {
         turns,
         passed: false,
@@ -143,10 +147,10 @@ export async function runMultiTurnLoop(
       };
     }
 
-    await log("info", "Snapshot uploaded", { iteration, snapshotUrl });
+    await iterLog("info", "Snapshot uploaded", { snapshotUrl });
 
     // Step 3: Call the judge
-    await log("info", "Calling judge for evaluation...", { iteration });
+    await iterLog("info", "Calling judge for evaluation...");
     let judgePassed: boolean;
     let judgeFeedback: string;
     let criteriaResults: CriterionResult[] | undefined;
@@ -164,7 +168,7 @@ export async function runMultiTurnLoop(
       criteriaResults = judgeResult.criteriaResults;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      await log("error", `Judge evaluation failed: ${errorMsg}`, { iteration, error: errorMsg });
+      await iterLog("error", `Judge evaluation failed: ${errorMsg}`, { error: errorMsg });
       return {
         turns,
         passed: false,
@@ -177,9 +181,8 @@ export async function runMultiTurnLoop(
       const passed = criteriaResults.filter(r => r.passed).length;
       const failed = criteriaResults.filter(r => r.evaluated && !r.passed).length;
       const skipped = criteriaResults.filter(r => !r.evaluated).length;
-      await log("info", `Criteria DAG: ${passed} passed, ${failed} failed, ${skipped} skipped`, {
+      await iterLog("info", `Criteria DAG: ${passed} passed, ${failed} failed, ${skipped} skipped`, {
         type: "criteria_dag_status",
-        iteration,
         results: criteriaResults.map(r => ({
           criterionId: r.criterionId,
           passed: r.passed,
@@ -208,8 +211,7 @@ export async function runMultiTurnLoop(
     }
 
     if (judgePassed) {
-      await log("info", `Judge PASSED on iteration ${iteration}`, {
-        iteration,
+      await iterLog("info", `Judge PASSED on iteration ${iteration}`, {
         totalIterations: iteration,
         feedback: judgeFeedback,
       });
@@ -221,8 +223,7 @@ export async function runMultiTurnLoop(
     }
 
     // Step 5: Use judge feedback as next coding prompt
-    await log("info", `Judge feedback (iteration ${iteration}): continuing...`, {
-      iteration,
+    await iterLog("info", `Judge feedback (iteration ${iteration}): continuing...`, {
       feedbackLength: judgeFeedback.length,
       feedback: judgeFeedback.substring(0, 500),
     });
