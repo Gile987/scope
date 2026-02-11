@@ -308,8 +308,8 @@ program
         for (const req of requests) {
           const status = req.status === 'completed' ? successText(req.status)
             : req.status === 'failed' ? errorText(req.status)
-            : value(req.status);
-          console.log(`  ${value(req.id)}  ${label('worker=')}${req.workerType}  ${label('status=')}${status}`);
+            : value(req.status ?? 'unknown');
+          console.log(`  ${value(req.id ?? '(no id)')}  ${label('worker=')}${req.workerType ?? 'unknown'}  ${label('status=')}${status}`);
         }
       } else {
         console.log(JSON.stringify(requests, null, 2));
