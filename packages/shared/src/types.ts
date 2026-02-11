@@ -136,3 +136,10 @@ export interface FeedbackConfig {
   maxCriteria?: number;  // Max failed criteria to include (default: 1)
   includeDescendantGuard?: boolean;  // Avoid hinting at dependent criteria (default: true)
 }
+
+// Criteria document stored in MongoDB (extends CriteriaConfig with DB metadata)
+export interface CriteriaDocument extends CriteriaConfig {
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;  // Soft-delete timestamp
+}

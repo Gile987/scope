@@ -16,6 +16,10 @@
     "./criteria-registry": {
       "types": "./dist/criteria-registry.d.ts",
       "import": "./dist/criteria-registry.js"
+    },
+    "./criteria-store": {
+      "types": "./dist/criteria-store.d.ts",
+      "import": "./dist/criteria-store.js"
     }
   },
   "scripts": {
