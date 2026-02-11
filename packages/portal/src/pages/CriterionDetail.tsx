@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -16,7 +17,8 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Save, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X } from "lucide-react";
+import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { formatDate } from "@/lib/utils";
 
 export function CriterionDetail() {
@@ -32,15 +34,62 @@ export function CriterionDetail() {
 
   const [editing, setEditing] = useState(false);
   const [prompt, setPrompt] = useState("");
-  const [dependsOnText, setDependsOnText] = useState("");
+  const [editDependsOn, setEditDependsOn] = useState<string[]>([]);
+
+  // AI Suggest state
+  const [aiSuggestOpen, setAiSuggestOpen] = useState(false);
+  const [behaviorInput, setBehaviorInput] = useState("");
+  const [suggestedPrompt, setSuggestedPrompt] = useState<string | null>(null);
+  const [suggestedParents, setSuggestedParents] = useState<string[]>([]);
+  const [suggestedChildren, setSuggestedChildren] = useState<string[]>([]);
+  const [acceptedChildren, setAcceptedChildren] = useState<string[]>([]);
 
   const updateMutation = useMutation({
     mutationFn: (body: { prompt?: string; dependsOn?: string[] }) =>
       api.updateCriterion(id!, body),
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Update accepted children to depend on this criterion
+      for (const childId of acceptedChildren) {
+        try {
+          const child = await api.getCriterion(childId);
+          const existingDeps = child.dependsOn ?? [];
+          if (!existingDeps.includes(id!)) {
+            await api.updateCriterion(childId, {
+              dependsOn: [...existingDeps, id!],
+            });
+          }
+        } catch {
+          // Non-blocking: child update failures are silently ignored
+        }
+      }
       setEditing(false);
+      setAiSuggestOpen(false);
+      setSuggestedPrompt(null);
+      setSuggestedParents([]);
+      setSuggestedChildren([]);
+      setAcceptedChildren([]);
       queryClient.invalidateQueries({ queryKey: ["criterion", id] });
       queryClient.invalidateQueries({ queryKey: ["criteria"] });
+    },
+  });
+
+  const aiSuggestMutation = useMutation({
+    mutationFn: (behavior: string) => api.generateCriteriaPrompt(behavior, id),
+    onSuccess: (data) => {
+      setSuggestedPrompt(data.prompt);
+      setSuggestedParents(data.suggestedParents);
+      setSuggestedChildren(data.suggestedChildren);
+      // Auto-accept: merge parents into deps, accept all children
+      setEditDependsOn((prev) => [
+        ...new Set([...prev, ...data.suggestedParents]),
+      ]);
+      setAcceptedChildren(data.suggestedChildren);
+    },
+    onError: () => {
+      setSuggestedPrompt(null);
+      setSuggestedParents([]);
+      setSuggestedChildren([]);
+      setAcceptedChildren([]);
     },
   });
 
@@ -55,19 +104,35 @@ export function CriterionDetail() {
   const startEditing = () => {
     if (!criterion) return;
     setPrompt(criterion.prompt);
-    setDependsOnText((criterion.dependsOn ?? []).join("\n"));
+    setEditDependsOn(criterion.dependsOn ?? []);
+    setAiSuggestOpen(false);
+    setBehaviorInput("");
+    setSuggestedPrompt(null);
+    setSuggestedParents([]);
+    setSuggestedChildren([]);
+    setAcceptedChildren([]);
     setEditing(true);
   };
 
   const handleSave = () => {
-    const deps = dependsOnText
-      .split("\n")
-      .map((d) => d.trim())
-      .filter(Boolean);
     updateMutation.mutate({
       prompt: prompt.trim(),
-      dependsOn: deps.length > 0 ? deps : undefined,
+      dependsOn: editDependsOn.length > 0 ? editDependsOn : undefined,
     });
+  };
+
+  const handleAiSuggest = () => {
+    if (!behaviorInput.trim()) return;
+    aiSuggestMutation.mutate(behaviorInput.trim());
+  };
+
+  const handleAcceptPrompt = () => {
+    if (suggestedPrompt) setPrompt(suggestedPrompt);
+    setSuggestedPrompt(null);
+  };
+
+  const handleDismissPrompt = () => {
+    setSuggestedPrompt(null);
   };
 
   if (isLoading) {
@@ -151,16 +216,169 @@ export function CriterionDetail() {
           <CardTitle>Prompt</CardTitle>
           <CardDescription>The evaluation prompt sent to the judge LLM</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           {editing ? (
-            <div className="space-y-3">
+            <>
               <Textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 rows={6}
                 className="font-mono text-sm"
               />
-            </div>
+
+              {/* AI Suggest section */}
+              {!aiSuggestOpen ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => setAiSuggestOpen(true)}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  AI Suggest
+                </Button>
+              ) : (
+                <div className="space-y-3 rounded-md border p-3 bg-muted/30">
+                  <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+                    AI Suggest
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={behaviorInput}
+                      onChange={(e) => setBehaviorInput(e.target.value)}
+                      placeholder="Describe the behavior to refine suggestions..."
+                      className="text-sm"
+                      onKeyDown={(e) => e.key === "Enter" && handleAiSuggest()}
+                    />
+                    <Button
+                      size="sm"
+                      onClick={handleAiSuggest}
+                      disabled={aiSuggestMutation.isPending || !behaviorInput.trim()}
+                      className="gap-1.5"
+                    >
+                      {aiSuggestMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                      Generate
+                    </Button>
+                  </div>
+
+                  {aiSuggestMutation.isError && (
+                    <p className="text-sm text-destructive">
+                      {aiSuggestMutation.error instanceof Error
+                        ? aiSuggestMutation.error.message
+                        : "AI suggestion failed"}
+                    </p>
+                  )}
+
+                  {/* Suggested prompt */}
+                  {suggestedPrompt && (
+                    <div className="space-y-2 border rounded-md p-3 bg-background">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+                          Suggested Prompt
+                        </Label>
+                        <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1 text-xs"
+                            onClick={handleAcceptPrompt}
+                          >
+                            <Check className="h-3 w-3" /> Accept
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1 text-xs"
+                            onClick={handleDismissPrompt}
+                          >
+                            <X className="h-3 w-3" /> Dismiss
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="whitespace-pre-wrap text-sm font-mono bg-muted/50 rounded p-2">
+                        {suggestedPrompt}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Suggested parents */}
+                  {suggestedParents.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">
+                        Parents{" "}
+                        <span className="font-normal text-muted-foreground">
+                          — this criterion should depend on:
+                        </span>
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {suggestedParents.map((pid) => (
+                          <Badge
+                            key={pid}
+                            variant={editDependsOn.includes(pid) ? "secondary" : "outline"}
+                            className="gap-1.5 font-mono text-xs"
+                          >
+                            {editDependsOn.includes(pid) && <Check className="h-3 w-3" />}
+                            {pid}
+                            {editDependsOn.includes(pid) && (
+                              <X
+                                className="h-3 w-3 ml-0.5 cursor-pointer hover:text-destructive"
+                                onClick={() =>
+                                  setEditDependsOn((prev) => prev.filter((d) => d !== pid))
+                                }
+                              />
+                            )}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Suggested children */}
+                  {suggestedChildren.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">
+                        Children{" "}
+                        <span className="font-normal text-muted-foreground">
+                          — these criteria should depend on this one:
+                        </span>
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {suggestedChildren.map((cid) => (
+                          <Badge
+                            key={cid}
+                            variant={acceptedChildren.includes(cid) ? "secondary" : "outline"}
+                            className="gap-1.5 font-mono text-xs cursor-pointer"
+                            onClick={() => {
+                              setAcceptedChildren((prev) =>
+                                prev.includes(cid)
+                                  ? prev.filter((c) => c !== cid)
+                                  : [...prev, cid],
+                              );
+                            }}
+                          >
+                            {acceptedChildren.includes(cid) ? (
+                              <Check className="h-3 w-3" />
+                            ) : null}
+                            {cid}
+                            {acceptedChildren.includes(cid) && (
+                              <X className="h-3 w-3 ml-0.5 hover:text-destructive" />
+                            )}
+                          </Badge>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Accepted children will be updated to depend on{" "}
+                        <span className="font-mono">{criterion.id}</span> when you save
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           ) : (
             <p className="whitespace-pre-wrap text-sm">{criterion.prompt}</p>
           )}
@@ -177,19 +395,10 @@ export function CriterionDetail() {
         </CardHeader>
         <CardContent>
           {editing ? (
-            <div className="space-y-2">
-              <Label htmlFor="deps">
-                Dependency IDs <span className="text-muted-foreground font-normal">(one per line)</span>
-              </Label>
-              <Textarea
-                id="deps"
-                value={dependsOnText}
-                onChange={(e) => setDependsOnText(e.target.value)}
-                rows={4}
-                placeholder="has_node&#10;has_typescript"
-                className="font-mono text-sm"
-              />
-            </div>
+            <CriteriaPicker
+              selected={editDependsOn}
+              onChange={setEditDependsOn}
+            />
           ) : (criterion.dependsOn ?? []).length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {criterion.dependsOn!.map((dep) => (
