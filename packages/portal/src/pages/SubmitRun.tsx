@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Send, Loader2 } from "lucide-react";
 import { WORKER_TYPES } from "@/types";
+import { CriteriaPicker } from "@/components/CriteriaPicker";
 
 export function SubmitRun() {
   const navigate = useNavigate();
@@ -21,6 +22,7 @@ export function SubmitRun() {
   // Form state
   const [task, setTask] = useState("");
   const [criteriaText, setCriteriaText] = useState("");
+  const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
   const [version, setVersion] = useState<"v1" | "v2">("v2");
   const [worker, setWorker] = useState<string>("coder-acp-copilot");
   const [maxIterations, setMaxIterations] = useState<string>("10");
@@ -42,10 +44,13 @@ export function SubmitRun() {
     e.preventDefault();
     if (!task.trim()) return;
 
-    const criteria = criteriaText
-      .split("\n")
-      .map((c) => c.trim())
-      .filter(Boolean);
+    const criteria =
+      version === "v2"
+        ? pickedCriteria
+        : criteriaText
+            .split("\n")
+            .map((c) => c.trim())
+            .filter(Boolean);
 
     const hasPersona = personality || experience || verbosity || userType;
 
@@ -125,20 +130,25 @@ export function SubmitRun() {
 
             <div className="space-y-2">
               <Label htmlFor="criteria">
-                Criteria <span className="text-muted-foreground font-normal">(one per line)</span>
+                Criteria{" "}
+                {version === "v2" ? (
+                  <span className="text-muted-foreground font-normal">(select from registry)</span>
+                ) : (
+                  <span className="text-muted-foreground font-normal">(one per line)</span>
+                )}
               </Label>
-              <Textarea
-                id="criteria"
-                placeholder={
-                  version === "v2"
-                    ? "has_azure_doc\nhas_azure_azd\nhas_node"
-                    : "The code must include unit tests\nThe API should return JSON responses"
-                }
-                value={criteriaText}
-                onChange={(e) => setCriteriaText(e.target.value)}
-                rows={4}
-                className="font-mono text-sm"
-              />
+              {version === "v2" ? (
+                <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
+              ) : (
+                <Textarea
+                  id="criteria"
+                  placeholder="The code must include unit tests&#10;The API should return JSON responses"
+                  value={criteriaText}
+                  onChange={(e) => setCriteriaText(e.target.value)}
+                  rows={4}
+                  className="font-mono text-sm"
+                />
+              )}
             </div>
           </CardContent>
         </Card>
