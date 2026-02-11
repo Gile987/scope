@@ -23,8 +23,8 @@ const DEFAULT_WORKERS = [
 ];
 
 program
-  .name("worker-cli")
-  .description("CLI for submitting requests to the worker API")
+  .name("scope-mt")
+  .description("Scope MT — AI coding agent benchmarking CLI")
   .version("1.0.0")
   .action(() => {
     program.help();
@@ -32,7 +32,16 @@ program
 
 configureHelp(program);
 
-program
+const run = program
+  .command("run")
+  .description("Submit, monitor, and manage benchmark runs")
+  .action(() => {
+    run.help();
+  });
+
+configureHelp(run);
+
+run
   .command("submit")
   .description("Submit a request to a worker and stream logs")
   .option("-s, --scenario <path>", "Path to scenario YAML file (provides task + criteria)")
@@ -197,7 +206,7 @@ program
     }
   });
 
-program
+run
   .command("status")
   .description("Get status of a request")
   .argument("<id>", "Request ID")
@@ -225,7 +234,7 @@ program
     }
   });
 
-program
+run
   .command("logs")
   .description("Stream logs for a request")
   .argument("<id>", "Request ID")
@@ -283,7 +292,7 @@ program
     });
   });
 
-program
+run
   .command("list")
   .description("List all requests")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
@@ -325,7 +334,7 @@ program
     }
   });
 
-program
+run
   .command("demo")
   .description("Run concurrent requests to all coders with a live TUI dashboard")
   .requiredOption("-m, --message <message>", "Message/prompt to send to all coders")
