@@ -5,6 +5,13 @@
 import dotenv from "dotenv";
 import { Command } from "commander";
 import EventSource from "eventsource";
+import { execSync } from "child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, createWriteStream, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { pipeline } from "stream/promises";
+import { Readable } from "stream";
+import { stringify as yamlStringify } from "yaml";
 import React from "react";
 import { render } from "ink";
 import { DemoApp } from "./components/DemoApp.js";
@@ -17,8 +24,9 @@ dotenv.config();
 function printFollowUpCommands(id: string): void {
   console.log(`\n${label('Run ID:')} ${value(id)}`);
   console.log(`\n${label('Next steps:')}`);
-  console.log(`  ${dimTimestamp('Check status:')}  pnpm cli run status ${id}`);
-  console.log(`  ${dimTimestamp('Stream logs:')}   pnpm cli run logs ${id}`);
+  console.log(`  ${dimTimestamp('Check status:')}  pnpm cli run status -i ${id}`);
+  console.log(`  ${dimTimestamp('Stream logs:')}   pnpm cli run logs -i ${id}`);
+  console.log(`  ${dimTimestamp('Download:')}      pnpm cli run download -i ${id}`);
   console.log(`  ${dimTimestamp('List all runs:')} pnpm cli run list`);
 }
 
@@ -219,9 +227,10 @@ run
 run
   .command("status")
   .description("Get status of a request")
-  .argument("<id>", "Request ID")
+  .requiredOption("-i, --id <id>", "Request ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .action(async (id, options) => {
+  .action(async (options) => {
+    const { id } = options;
     try {
       const response = await fetch(`${options.url}/api/v1/requests/${id}`);
 
@@ -247,10 +256,11 @@ run
 run
   .command("logs")
   .description("Stream logs for a request")
-  .argument("<id>", "Request ID")
+  .requiredOption("-i, --id <id>", "Request ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("--from-start", "Include historical logs from start")
-  .action(async (id, options) => {
+  .action(async (options) => {
+    const { id } = options;
     const url = options.fromStart
       ? `${options.url}/api/v1/requests/${id}/logs?fromStart=true`
       : `${options.url}/api/v1/requests/${id}/logs`;
@@ -371,6 +381,100 @@ run
       })
     );
     waitUntilExit().catch(() => {});
+  });
+
+run
+  .command("download")
+  .description("Download all artifacts of a run (workspaces + run document)")
+  .requiredOption("-i, --id <id>", "Request ID")
+  .option("-o, --output <path>", "Output file path (default: <id>.tar.gz)")
+  .option("-x, --extract", "Extract the archive after downloading")
+  .option("-d, --dir <path>", "Extraction directory (implies --extract)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    const { id, url } = options;
+    const shouldExtract = options.extract || !!options.dir;
+    const outputFile = options.output || `${id}.tar.gz`;
+
+    try {
+      // Step 1: Fetch request document
+      console.log(`${label('Fetching run')} ${value(id)}...`);
+      const response = await fetch(`${url}/api/v1/requests/${id}`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error);
+        process.exit(1);
+      }
+      const request = await response.json();
+
+      if (!request.turns || request.turns.length === 0) {
+        console.error(errorText("Error: No iterations found for this run"));
+        process.exit(1);
+      }
+
+      console.log(`${label('Status:')} ${value(request.status)}`);
+      console.log(`${label('Worker:')} ${value(request.workerType)}`);
+      console.log(`${label('Iterations:')} ${value(String(request.turns.length))}`);
+      console.log();
+
+      // Step 2: Create temp staging directory
+      const stageDir = mkdtempSync(join(tmpdir(), `scope-mt-${id.substring(0, 8)}-`));
+      const runDir = join(stageDir, id);
+      mkdirSync(runDir, { recursive: true });
+
+      try {
+        // Step 3: Write run document as YAML (exclude bulky logs array)
+        const { logs: _logs, ...runDoc } = request;
+        writeFileSync(join(runDir, "run.yaml"), yamlStringify(runDoc, { lineWidth: 120 }));
+        console.log(`  ${successText('+')} run.yaml`);
+
+        // Step 4: Download each iteration snapshot
+        for (const turn of request.turns) {
+          const iter = turn.iteration;
+          const iterDir = join(runDir, `iteration-${iter}`);
+          mkdirSync(iterDir, { recursive: true });
+
+          process.stdout.write(`  ${label(`iteration-${iter}/`)} downloading...`);
+
+          const snapshotResp = await fetch(`${url}/api/v1/requests/${id}/snapshots/${iter}`);
+          if (!snapshotResp.ok || !snapshotResp.body) {
+            console.log(` ${errorText('FAILED')}`);
+            console.error(`    ${errorText(`Could not download iteration ${iter}: ${snapshotResp.statusText}`)}`);
+            continue;
+          }
+
+          // Save tar.gz to temp then extract into iteration dir
+          const archivePath = join(stageDir, `iter-${iter}.tar.gz`);
+          const fileStream = createWriteStream(archivePath);
+          await pipeline(Readable.fromWeb(snapshotResp.body as any), fileStream);
+          execSync(`tar xzf "${archivePath}" -C "${iterDir}"`, { stdio: "pipe" });
+
+          const passed = turn.passed ? successText('passed') : errorText('failed');
+          process.stdout.write(`\r  ${label(`iteration-${iter}/`)} ${passed}            \n`);
+        }
+
+        // Step 5: Create the final tar.gz archive
+        console.log();
+        const outputPath = join(process.cwd(), outputFile);
+        execSync(`tar czf "${outputPath}" -C "${stageDir}" "${id}"`, { stdio: "pipe" });
+        console.log(`${successText('Archive:')} ${value(outputFile)}`);
+
+        // Step 6: Optionally extract
+        if (shouldExtract) {
+          const extractDir = options.dir || ".";
+          execSync(`tar xzf "${outputPath}" -C "${extractDir}"`, { stdio: "pipe" });
+          console.log(`${successText('Extracted to:')} ${value(join(extractDir, id))}`);
+        }
+
+      } finally {
+        // Cleanup staging directory
+        rmSync(stageDir, { recursive: true, force: true });
+      }
+
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
   });
 
 program.parse();

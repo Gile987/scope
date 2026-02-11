@@ -6,6 +6,7 @@ import cors from "cors";
 import { MongoClient, Db, Collection } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
+import { BlobServiceClient } from "@azure/storage-blob";
 import { v4 as uuidv4 } from "uuid";
 import { createRequire } from "module";
 import dotenv from "dotenv";
@@ -504,6 +505,69 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
       .toArray();
 
     res.json(resources.map(r => ({ ...r, id: r._id })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Download a snapshot for a specific iteration
+app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, iteration } = req.params;
+    const iterNum = parseInt(iteration, 10);
+    if (isNaN(iterNum) || iterNum < 1) {
+      res.status(400).json({ error: "Invalid iteration number" });
+      return;
+    }
+
+    const resource = await collection.findOne({ _id: id });
+    if (!resource) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+
+    const turn = resource.turns?.find(t => t.iteration === iterNum);
+    if (!turn?.snapshotUrl) {
+      res.status(404).json({ error: `No snapshot for iteration ${iterNum}` });
+      return;
+    }
+
+    // Connect to blob storage
+    let blobServiceClient: BlobServiceClient;
+    if (storageConnectionString) {
+      blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+    } else {
+      blobServiceClient = new BlobServiceClient(
+        `https://${storageAccountName}.blob.core.windows.net`,
+        new DefaultAzureCredential()
+      );
+    }
+
+    // Parse blob name from snapshot URL
+    const snapshotUrl = new URL(turn.snapshotUrl);
+    const containerPrefix = "/snapshots/";
+    const containerIndex = snapshotUrl.pathname.indexOf(containerPrefix);
+    if (containerIndex === -1) {
+      res.status(500).json({ error: "Invalid snapshot URL format" });
+      return;
+    }
+    const blobName = snapshotUrl.pathname.substring(containerIndex + containerPrefix.length);
+    const containerClient = blobServiceClient.getContainerClient("snapshots");
+    const blobClient = containerClient.getBlockBlobClient(blobName);
+
+    const downloadResponse = await blobClient.download();
+    if (!downloadResponse.readableStreamBody) {
+      res.status(500).json({ error: "Failed to download snapshot" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "application/gzip");
+    res.setHeader("Content-Disposition", `attachment; filename="${id}-iteration-${iterNum}.tar.gz"`);
+    if (downloadResponse.contentLength) {
+      res.setHeader("Content-Length", downloadResponse.contentLength);
+    }
+
+    downloadResponse.readableStreamBody.pipe(res);
   } catch (error) {
     next(error);
   }
