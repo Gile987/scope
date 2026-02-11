@@ -3,6 +3,7 @@
 
 import {
   CriteriaConfig,
+  CriterionResult,
   ConversationTurn,
   DetailedEvaluationResult,
 } from "shared";
@@ -17,11 +18,14 @@ export interface EvaluationInput {
   conversationHistory: ConversationTurn[];
   personaInstructions?: string;
   scenarioVersion?: "v1" | "v2";  // v1 = inline prompts, v2 = criteria IDs
+  /** Called when an individual criterion result is available (for real-time progress) */
+  onProgress?: (result: CriterionResult) => void;
 }
 
 export interface EvaluationResult {
   passed: boolean;
   feedback: string;
+  criteriaResults: CriterionResult[];  // Per-criterion breakdown
 }
 
 /**
@@ -102,6 +106,7 @@ export async function evaluateWorkspace(
       criteriaGraph,
       conversationHistory: input.conversationHistory,
       personaInstructions: input.personaInstructions,
+      onProgress: input.onProgress,
     });
 
     console.log(
@@ -154,5 +159,6 @@ export async function evaluateWorkspace(
   return {
     passed: judgeResult.allPassed,
     feedback,
+    criteriaResults: judgeResult.results,
   };
 }

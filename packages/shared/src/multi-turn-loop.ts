@@ -3,6 +3,7 @@
 
 import {
   ConversationTurn,
+  CriterionResult,
   WorkerProcessor,
   LogEvent,
   MULTI_TURN_DEFAULTS,
@@ -147,6 +148,7 @@ export async function runMultiTurnLoop(
     await log("info", "Calling judge for evaluation...");
     let judgePassed: boolean;
     let judgeFeedback: string;
+    let criteriaResults: CriterionResult[] | undefined;
     try {
       const judgeResult = await judgeClient.evaluate({
         snapshotUrl,
@@ -154,9 +156,11 @@ export async function runMultiTurnLoop(
         conversationHistory: turns,
         personaInstructions,
         scenarioVersion,
+        requestId,
       });
       judgePassed = judgeResult.passed;
       judgeFeedback = judgeResult.feedback;
+      criteriaResults = judgeResult.criteriaResults;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       await log("error", `Judge evaluation failed: ${errorMsg}`);
@@ -167,6 +171,23 @@ export async function runMultiTurnLoop(
       };
     }
 
+    // Emit DAG summary if criteria results are available
+    if (criteriaResults && criteriaResults.length > 0) {
+      const passed = criteriaResults.filter(r => r.passed).length;
+      const failed = criteriaResults.filter(r => r.evaluated && !r.passed).length;
+      const skipped = criteriaResults.filter(r => !r.evaluated).length;
+      await log("info", `Criteria DAG: ${passed} passed, ${failed} failed, ${skipped} skipped`, {
+        type: "criteria_dag_status",
+        results: criteriaResults.map(r => ({
+          criterionId: r.criterionId,
+          passed: r.passed,
+          evaluated: r.evaluated,
+          feedback: r.feedback,
+        })),
+        allPassed: judgePassed,
+      });
+    }
+
     // Step 4: Record the turn
     const turn: ConversationTurn = {
       iteration,
@@ -175,6 +196,7 @@ export async function runMultiTurnLoop(
       snapshotUrl,
       passed: judgePassed,
       timestamp: new Date(),
+      criteriaResults,
     };
     turns.push(turn);
 

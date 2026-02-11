@@ -20,6 +20,8 @@ export interface JudgeStrategyContext {
   conversationHistory: ConversationTurn[];
   personaInstructions?: string;
   model?: string;
+  /** Called when an individual criterion result is available (for real-time progress) */
+  onProgress?: (result: CriterionResult) => void;
 }
 
 /**
@@ -281,7 +283,7 @@ export class BundledStrategy extends JudgeStrategy {
       "Evaluate the workspace against ALL criteria. Use the file tools to inspect the code, then provide your verdict in JSON format."
     );
 
-    return this.parseJsonResponse(response, criteria);
+    return this.parseJsonResponse(response, criteria, context.onProgress);
   }
 
   private buildSystemPrompt(
@@ -338,7 +340,8 @@ IMPORTANT: Return ONLY the JSON, no additional text before or after.`;
 
   private parseJsonResponse(
     response: string,
-    criteria: CriteriaConfig[]
+    criteria: CriteriaConfig[],
+    onProgress?: (result: CriterionResult) => void,
   ): DetailedEvaluationResult {
     // Try to extract JSON from markdown code blocks
     let jsonStr = response.trim();
@@ -363,24 +366,28 @@ IMPORTANT: Return ONLY the JSON, no additional text before or after.`;
       const evaluatedIds = new Set<string>();
 
       for (const item of data.results) {
-        results.push({
+        const result: CriterionResult = {
           criterionId: item.criterion || "unknown",
           passed: item.passed === true,
           feedback: item.feedback || "",
           evaluated: true,
-        });
+        };
+        results.push(result);
         evaluatedIds.add(item.criterion);
+        onProgress?.(result);
       }
 
       // Add any missing criteria as not evaluated
       for (const criterion of criteria) {
         if (!evaluatedIds.has(criterion.id)) {
-          results.push({
+          const result: CriterionResult = {
             criterionId: criterion.id,
             passed: false,
             feedback: "Not evaluated",
             evaluated: false,
-          });
+          };
+          results.push(result);
+          onProgress?.(result);
         }
       }
 
@@ -438,6 +445,7 @@ export class IndependentStrategy extends JudgeStrategy {
       criteriaGraph,
       conversationHistory,
       personaInstructions,
+      onProgress,
     } = context;
 
     // Get topological order
@@ -481,13 +489,15 @@ export class IndependentStrategy extends JudgeStrategy {
 
       // Skip criteria with failed ancestors
       for (const cid of toSkip) {
-        results.push({
+        const result: CriterionResult = {
           criterionId: cid,
           passed: false,
           feedback: "Skipped: ancestor criterion failed",
           evaluated: false,
-        });
+        };
+        results.push(result);
         pending.delete(cid);
+        onProgress?.(result);
       }
 
       // Evaluate ready batch in parallel
@@ -512,6 +522,7 @@ export class IndependentStrategy extends JudgeStrategy {
             failedIds.add(result.criterionId);
           }
           pending.delete(result.criterionId);
+          onProgress?.(result);
         }
       } else if (toSkip.length === 0) {
         // No ready and no skipped - shouldn't happen but break to prevent infinite loop
