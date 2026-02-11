@@ -634,7 +634,7 @@ app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: R
 // POST /api/v1/criteria/generate-prompt — AI-generate a criteria prompt from a behavior description
 app.post("/api/v1/criteria/generate-prompt", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { behavior } = req.body;
+    const { behavior, currentId } = req.body;
     if (!behavior || typeof behavior !== "string" || !behavior.trim()) {
       return res.status(400).json({ error: "Body must contain a non-empty 'behavior' string" });
     }
@@ -643,7 +643,21 @@ app.post("/api/v1/criteria/generate-prompt", async (req: Request, res: Response,
       return res.status(503).json({ error: "LLM not configured: GITHUB_TOKEN is not set" });
     }
 
-    const result = await generateCriteriaPrompt(behavior.trim());
+    // Fetch existing criteria to give the LLM context for parent/children suggestions
+    const allCriteria = await criteriaCollection
+      .find({ deletedAt: { $exists: false } })
+      .project({ id: 1, prompt: 1, dependsOn: 1, _id: 0 })
+      .toArray();
+
+    // Exclude the current criterion when editing (to avoid self-reference)
+    const existingCriteria = currentId
+      ? allCriteria.filter((c: any) => c.id !== currentId)
+      : allCriteria;
+
+    const result = await generateCriteriaPrompt(
+      behavior.trim(),
+      existingCriteria as { id: string; prompt: string; dependsOn?: string[] }[],
+    );
     res.json(result);
   } catch (err) {
     if (err instanceof Error && err.message.includes("not configured")) {
