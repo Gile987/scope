@@ -466,6 +466,7 @@ run
           const extractDir = options.dir || downloadDir || ".";
           mkdirSync(extractDir, { recursive: true });
           execSync(`tar xzf "${outputPath}" -C "${extractDir}"`, { stdio: "pipe" });
+          rmSync(outputPath, { force: true });
           console.log(`${successText('Extracted to:')} ${value(resolve(extractDir, id))}`);
         }
 
