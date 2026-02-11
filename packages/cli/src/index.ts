@@ -464,9 +464,10 @@ run
 
         // Step 6: Optionally extract
         if (shouldExtract) {
-          const extractDir = options.dir || ".";
+          const extractDir = options.dir || downloadDir || ".";
+          mkdirSync(extractDir, { recursive: true });
           execSync(`tar xzf "${outputPath}" -C "${extractDir}"`, { stdio: "pipe" });
-          console.log(`${successText('Extracted to:')} ${value(join(extractDir, id))}`);
+          console.log(`${successText('Extracted to:')} ${value(resolve(extractDir, id))}`);
         }
 
       } finally {
