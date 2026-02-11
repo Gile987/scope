@@ -199,7 +199,8 @@ ${failureContext}
 
 Your feedback:`;
 
-      await session.sendAndWait({ prompt: userPrompt });
+      const timeout = parseInt(process.env.JUDGE_TIMEOUT || "300000");
+      await session.sendAndWait({ prompt: userPrompt }, timeout);
       await client.stop();
 
       return fullResponse.trim();

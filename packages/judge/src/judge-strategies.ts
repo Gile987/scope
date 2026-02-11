@@ -27,11 +27,16 @@ export interface JudgeStrategyContext {
 /**
  * Base class for judge evaluation strategies
  */
+/** Default timeout for sendAndWait calls (5 minutes) */
+const DEFAULT_JUDGE_TIMEOUT = 300_000;
+
 export abstract class JudgeStrategy {
   protected model: string;
+  protected timeout: number;
 
   constructor(model?: string) {
     this.model = model || process.env.JUDGE_MODEL || "gpt-4.1";
+    this.timeout = parseInt(process.env.JUDGE_TIMEOUT || String(DEFAULT_JUDGE_TIMEOUT));
   }
 
   abstract evaluate(
@@ -241,7 +246,7 @@ export abstract class JudgeStrategy {
         }
       });
 
-      await session.sendAndWait({ prompt: userPrompt });
+      await session.sendAndWait({ prompt: userPrompt }, this.timeout);
       await client.stop();
 
       return fullResponse;
