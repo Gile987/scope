@@ -160,19 +160,19 @@ export function RunDetail() {
               <CardContent className="space-y-3">
                 <div>
                   <h4 className="text-sm font-medium mb-1">Task</h4>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{run.scenario.task}</p>
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{run.scenario?.task ?? "–"}</p>
                 </div>
-                {run.scenario.version && (
+                {run.scenario?.version && (
                   <div>
                     <h4 className="text-sm font-medium mb-1">Version</h4>
                     <Badge variant="outline">{run.scenario.version}</Badge>
                   </div>
                 )}
-                {run.scenario.criteria.length > 0 && (
+                {(run.scenario?.criteria?.length ?? 0) > 0 && (
                   <div>
-                    <h4 className="text-sm font-medium mb-1">Criteria ({run.scenario.criteria.length})</h4>
+                    <h4 className="text-sm font-medium mb-1">Criteria ({run.scenario?.criteria?.length})</h4>
                     <div className="flex flex-wrap gap-1.5">
-                      {run.scenario.criteria.map((c, i) => (
+                      {run.scenario?.criteria?.map((c, i) => (
                         <Badge key={i} variant="secondary" className="font-mono text-xs">
                           {c}
                         </Badge>

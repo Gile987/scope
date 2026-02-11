@@ -123,7 +123,7 @@ export function RunsList() {
                   </Link>
                 </TableCell>
                 <TableCell className="max-w-[300px]">
-                  <span title={run.scenario.task}>{truncate(run.scenario.task, 60)}</span>
+                  <span title={run.scenario?.task ?? "–"}>{truncate(run.scenario?.task ?? "–", 60)}</span>
                 </TableCell>
                 <TableCell>
                   <span className="font-mono text-xs">{run.workerType}</span>
