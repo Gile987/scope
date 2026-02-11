@@ -281,7 +281,7 @@ export function CriteriaGraphView({ scenarioCriteria, logs }: CriteriaGraphViewP
       <div className="absolute bottom-2 right-2 flex items-center gap-3 text-[10px] text-slate-400 bg-slate-950/80 rounded px-2 py-1">
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500" /> Pending</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400" /> Passed</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" /> Failed</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" /> Not Met</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-600" /> Skipped</span>
       </div>
     </div>
