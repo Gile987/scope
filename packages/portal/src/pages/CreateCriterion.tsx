@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { Stepper } from "@/components/Stepper";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import {
@@ -436,16 +437,30 @@ export function CreateCriterion() {
             </Card>
           )}
 
-          {/* Dependencies (manual) */}
+          {/* Dependencies */}
           <Card>
-            <CardContent className="pt-6 space-y-3">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
-                Parent Dependencies
-              </Label>
-              <CriteriaPicker selected={dependsOn} onChange={setDependsOn} />
-              <p className="text-xs text-muted-foreground">
-                Criteria that must pass before this one is evaluated
-              </p>
+            <CardContent className="pt-6 space-y-5">
+              <div className="space-y-3">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+                  Parents
+                </Label>
+                <CriteriaPicker selected={dependsOn} onChange={setDependsOn} />
+                <p className="text-xs text-muted-foreground">
+                  Criteria that must pass before this one is evaluated
+                </p>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-3">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+                  Children
+                </Label>
+                <CriteriaPicker selected={acceptedChildren} onChange={setAcceptedChildren} />
+                <p className="text-xs text-muted-foreground">
+                  These criteria will be updated to depend on <span className="font-mono">{id || "this criterion"}</span> after creation
+                </p>
+              </div>
             </CardContent>
           </Card>
 
