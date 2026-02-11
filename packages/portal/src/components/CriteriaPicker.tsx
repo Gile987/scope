@@ -7,14 +7,16 @@ import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { X } from "lucide-react";
+import { X, Sparkles } from "lucide-react";
 
 interface CriteriaPickerProps {
   selected: string[];
   onChange: (ids: string[]) => void;
+  /** IDs that were AI-suggested — shown with a sparkle indicator */
+  aiSuggested?: string[];
 }
 
-export function CriteriaPicker({ selected, onChange }: CriteriaPickerProps) {
+export function CriteriaPicker({ selected, onChange, aiSuggested = [] }: CriteriaPickerProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -102,6 +104,9 @@ export function CriteriaPicker({ selected, onChange }: CriteriaPickerProps) {
               variant="secondary"
               className="gap-1 font-mono text-xs"
             >
+              {aiSuggested.includes(id) && (
+                <Sparkles className="h-3 w-3 text-amber-500" />
+              )}
               {id}
               <X
                 className="h-3 w-3 cursor-pointer hover:text-destructive"

@@ -350,93 +350,6 @@ export function CreateCriterion() {
             </CardContent>
           </Card>
 
-          {/* Suggested Dependencies */}
-          {!generateMutation.isPending && (suggestedParents.length > 0 || suggestedChildren.length > 0 || aiGenerated) && (
-            <Card>
-              <CardContent className="pt-6 space-y-4">
-                <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
-                  Suggested Dependencies (AI)
-                </Label>
-
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">
-                    Parents{" "}
-                    <span className="font-normal text-muted-foreground">
-                      — this criterion should depend on:
-                    </span>
-                  </p>
-                  {suggestedParents.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {suggestedParents.map((pid) => (
-                        <Badge
-                          key={pid}
-                          variant={dependsOn.includes(pid) ? "secondary" : "outline"}
-                          className="gap-1.5 font-mono text-xs"
-                        >
-                          {dependsOn.includes(pid) && <Check className="h-3 w-3" />}
-                          {pid}
-                          {dependsOn.includes(pid) && (
-                            <X
-                              className="h-3 w-3 ml-0.5 cursor-pointer hover:text-destructive"
-                              onClick={() => setDependsOn((prev) => prev.filter((d) => d !== pid))}
-                            />
-                          )}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground italic">None suggested</p>
-                  )}
-                  {suggestedParents.length > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      Accepted parents are added to this criterion's dependencies
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">
-                    Children{" "}
-                    <span className="font-normal text-muted-foreground">
-                      — these criteria should depend on the new one:
-                    </span>
-                  </p>
-                  {suggestedChildren.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {suggestedChildren.map((cid) => (
-                        <Badge
-                          key={cid}
-                          variant={acceptedChildren.includes(cid) ? "secondary" : "outline"}
-                          className="gap-1.5 font-mono text-xs cursor-pointer"
-                          onClick={() => {
-                            setAcceptedChildren((prev) =>
-                              prev.includes(cid) ? prev.filter((c) => c !== cid) : [...prev, cid],
-                            );
-                          }}
-                        >
-                          {acceptedChildren.includes(cid) ? (
-                            <Check className="h-3 w-3" />
-                          ) : null}
-                          {cid}
-                          {acceptedChildren.includes(cid) && (
-                            <X className="h-3 w-3 ml-0.5 hover:text-destructive" />
-                          )}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground italic">None suggested</p>
-                  )}
-                  {suggestedChildren.length > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      Accepted children will be updated to depend on <span className="font-mono">{id}</span> after creation
-                    </p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
           {/* Dependencies */}
           <Card>
             <CardContent className="pt-6 space-y-5">
@@ -444,7 +357,7 @@ export function CreateCriterion() {
                 <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
                   Parents
                 </Label>
-                <CriteriaPicker selected={dependsOn} onChange={setDependsOn} />
+                <CriteriaPicker selected={dependsOn} onChange={setDependsOn} aiSuggested={suggestedParents} />
                 <p className="text-xs text-muted-foreground">
                   Criteria that must pass before this one is evaluated
                 </p>
@@ -456,7 +369,7 @@ export function CreateCriterion() {
                 <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
                   Children
                 </Label>
-                <CriteriaPicker selected={acceptedChildren} onChange={setAcceptedChildren} />
+                <CriteriaPicker selected={acceptedChildren} onChange={setAcceptedChildren} aiSuggested={suggestedChildren} />
                 <p className="text-xs text-muted-foreground">
                   These criteria will be updated to depend on <span className="font-mono">{id || "this criterion"}</span> after creation
                 </p>
