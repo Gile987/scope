@@ -43,7 +43,18 @@ type WorkerType = (typeof VALID_WORKERS)[number];
 let mongoClient: MongoClient;
 let db: Db;
 let collection: Collection<RequestDocument>;
+let criteriaCollection: Collection<CriteriaDocument>;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
+
+// Criteria document interface
+interface CriteriaDocument {
+  id: string;
+  prompt: string;
+  dependsOn?: string[];
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;
+}
 
 // Log event interface
 interface LogEvent {
@@ -199,6 +210,7 @@ async function initializeClients(): Promise<void> {
   await mongoClient.connect();
   db = mongoClient.db(mongoDatabase);
   collection = db.collection<RequestDocument>(mongoCollection);
+  criteriaCollection = db.collection<CriteriaDocument>("criteria");
   
   // Create index for createdAt (required for sorting in CosmosDB MongoDB API)
   try {
@@ -208,6 +220,18 @@ async function initializeClients(): Promise<void> {
     // Index may already exist
     console.log("Index on createdAt already exists or couldn't be created");
   }
+
+  // Create unique index for criteria ID
+  try {
+    await criteriaCollection.createIndex({ id: 1 }, { unique: true });
+    console.log("Created unique index on criteria.id");
+  } catch (err) {
+    console.log("Index on criteria.id already exists or couldn't be created");
+  }
+
+  // Seed criteria from YAML files on first boot (skipped — use POST /api/v1/criteria/seed)
+  const criteriaCount = await criteriaCollection.countDocuments({ deletedAt: { $exists: false } });
+  console.log(`Criteria collection has ${criteriaCount} documents`);
   
   console.log(`Connected to MongoDB: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
 
@@ -599,6 +623,254 @@ app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: R
     }
 
     downloadResponse.readableStreamBody.pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- Criteria seed & CRUD ---
+
+// POST /api/v1/criteria/seed — bulk seed criteria from a JSON array
+// Body: { criteria: [{ id, prompt, dependsOn? }] }
+app.post("/api/v1/criteria/seed", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { criteria } = req.body;
+    if (!Array.isArray(criteria)) {
+      return res.status(400).json({ error: "Body must contain a 'criteria' array" });
+    }
+
+    let seeded = 0;
+    const errors: string[] = [];
+
+    for (const config of criteria) {
+      if (!config.id || !config.prompt) {
+        errors.push(`Skipping entry without id or prompt`);
+        continue;
+      }
+      try {
+        await criteriaCollection.updateOne(
+          { id: config.id.trim() },
+          {
+            $setOnInsert: {
+              id: config.id.trim(),
+              prompt: config.prompt.trim(),
+              dependsOn: Array.isArray(config.dependsOn) ? config.dependsOn.map((d: any) => String(d).trim()) : [],
+              createdAt: new Date(),
+            },
+          },
+          { upsert: true }
+        );
+        seeded++;
+      } catch (err) {
+        errors.push(`Failed to seed ${config.id}: ${err}`);
+      }
+    }
+
+    res.json({ seeded, errors });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// List all criteria (with optional search)
+app.get("/api/v1/criteria", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const q = _req.query.q as string | undefined;
+    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    if (q) {
+      filter.$or = [
+        { id: { $regex: q, $options: "i" } },
+        { prompt: { $regex: q, $options: "i" } },
+      ];
+    }
+    const criteria = await criteriaCollection.find(filter).sort({ id: 1 }).toArray();
+    res.json(criteria);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get criteria DAG graph (nodes + edges)
+app.get("/api/v1/criteria/graph", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const all = await criteriaCollection.find({ deletedAt: { $exists: false } }).sort({ id: 1 }).toArray();
+    const nodes = all.map(c => ({ id: c.id, prompt: c.prompt, dependsOn: c.dependsOn || [] }));
+    const edges: { from: string; to: string }[] = [];
+    for (const c of all) {
+      if (c.dependsOn) {
+        for (const parentId of c.dependsOn) {
+          edges.push({ from: parentId, to: c.id });
+        }
+      }
+    }
+    res.json({ nodes, edges });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get single criterion by ID
+app.get("/api/v1/criteria/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const criterion = await criteriaCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (!criterion) {
+      res.status(404).json({ error: `Criteria '${id}' not found` });
+      return;
+    }
+
+    // Find dependents (who depends on this criterion)
+    const dependents = await criteriaCollection.find({
+      dependsOn: id,
+      deletedAt: { $exists: false },
+    }).toArray();
+
+    res.json({
+      ...criterion,
+      dependents: dependents.map(d => d.id),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create a new criterion
+app.post("/api/v1/criteria", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, prompt, dependsOn = [] } = req.body;
+
+    if (!id || typeof id !== "string") {
+      res.status(400).json({ error: "id is required and must be a string" });
+      return;
+    }
+    if (!/^[a-z0-9_-]+$/.test(id)) {
+      res.status(400).json({ error: "id must match [a-z0-9_-]+" });
+      return;
+    }
+    if (!prompt || typeof prompt !== "string") {
+      res.status(400).json({ error: "prompt is required and must be a string" });
+      return;
+    }
+    if (!Array.isArray(dependsOn) || !dependsOn.every((d: unknown) => typeof d === "string")) {
+      res.status(400).json({ error: "dependsOn must be an array of strings" });
+      return;
+    }
+
+    // Check for duplicates
+    const existing = await criteriaCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (existing) {
+      res.status(409).json({ error: `Criteria '${id}' already exists` });
+      return;
+    }
+
+    // Validate dependency references
+    for (const depId of dependsOn) {
+      const dep = await criteriaCollection.findOne({ id: depId, deletedAt: { $exists: false } });
+      if (!dep) {
+        res.status(400).json({ error: `Dependency '${depId}' does not exist` });
+        return;
+      }
+    }
+
+    const doc: CriteriaDocument = {
+      id,
+      prompt: prompt.trim(),
+      dependsOn,
+      createdAt: new Date(),
+    };
+
+    await criteriaCollection.insertOne(doc as any);
+    res.status(201).json(doc);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update a criterion
+app.put("/api/v1/criteria/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { prompt, dependsOn } = req.body;
+
+    const existing = await criteriaCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: `Criteria '${id}' not found` });
+      return;
+    }
+
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (prompt !== undefined) {
+      if (typeof prompt !== "string") {
+        res.status(400).json({ error: "prompt must be a string" });
+        return;
+      }
+      update.prompt = prompt.trim();
+    }
+    if (dependsOn !== undefined) {
+      if (!Array.isArray(dependsOn) || !dependsOn.every((d: unknown) => typeof d === "string")) {
+        res.status(400).json({ error: "dependsOn must be an array of strings" });
+        return;
+      }
+      // Validate dependency references
+      for (const depId of dependsOn) {
+        const dep = await criteriaCollection.findOne({ id: depId, deletedAt: { $exists: false } });
+        if (!dep) {
+          res.status(400).json({ error: `Dependency '${depId}' does not exist` });
+          return;
+        }
+      }
+      // Self-reference check
+      if (dependsOn.includes(id)) {
+        res.status(400).json({ error: "A criterion cannot depend on itself" });
+        return;
+      }
+      update.dependsOn = dependsOn;
+    }
+
+    await criteriaCollection.updateOne(
+      { id, deletedAt: { $exists: false } },
+      { $set: update }
+    );
+
+    const updated = await criteriaCollection.findOne({ id, deletedAt: { $exists: false } });
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete a criterion (soft-delete, rejects if has dependents)
+app.delete("/api/v1/criteria/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await criteriaCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: `Criteria '${id}' not found` });
+      return;
+    }
+
+    // Check for dependents
+    const dependents = await criteriaCollection.find({
+      dependsOn: id,
+      deletedAt: { $exists: false },
+    }).toArray();
+
+    if (dependents.length > 0) {
+      const depIds = dependents.map(d => d.id).join(", ");
+      res.status(409).json({
+        error: `Cannot delete '${id}': other criteria depend on it`,
+        dependents: dependents.map(d => d.id),
+      });
+      return;
+    }
+
+    await criteriaCollection.updateOne(
+      { id, deletedAt: { $exists: false } },
+      { $set: { deletedAt: new Date() } }
+    );
+
+    res.json({ id, deleted: true });
   } catch (error) {
     next(error);
   }
