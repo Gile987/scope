@@ -126,13 +126,14 @@ program
           const log = JSON.parse(event.data);
           const timestamp = new Date(log.timestamp).toLocaleTimeString();
           const src = log.source ? `[${log.source}] ` : '';
+          const iter = log.data?.iteration != null ? `[iter ${log.data.iteration}] ` : '';
 
           // Detect special criterion/DAG log events and render them with status icons
           if (log.data?.type === "criterion_result") {
             const d = log.data;
             const icon = !d.evaluated ? "⏭️ " : d.passed ? "✅" : "❌";
             const status = !d.evaluated ? "skipped" : d.passed ? "passed" : "failed";
-            console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}  ${icon} ${d.criterionId}: ${status}`);
+            console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter}  ${icon} ${d.criterionId}: ${status}`);
             if (d.feedback && !d.passed) {
               console.log(`           ${d.feedback.substring(0, 120)}`);
             }
@@ -140,7 +141,7 @@ program
           }
 
           if (log.data?.type === "criteria_dag_status") {
-            console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${log.message}`);
+            console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter}${log.message}`);
             const results = log.data.results as Array<{ criterionId: string; passed: boolean; evaluated: boolean; feedback: string }>;
             if (results) {
               for (const r of results) {
@@ -152,7 +153,7 @@ program
             return;
           }
 
-          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${log.message}`);
+          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter}${log.message}`);
           if (log.data && Object.keys(log.data).length > 0) {
             const dataStr = JSON.stringify(log.data, null, 2)
               .split("\n")
@@ -240,17 +241,18 @@ program
         const log = JSON.parse(event.data);
         const timestamp = new Date(log.timestamp).toLocaleTimeString();
         const src = log.source ? `[${log.source}] ` : '';
+        const iter = log.data?.iteration != null ? `[iter ${log.data.iteration}] ` : '';
 
         if (log.data?.type === "criterion_result") {
           const d = log.data;
           const icon = !d.evaluated ? "⏭️ " : d.passed ? "✅" : "❌";
           const status = !d.evaluated ? "skipped" : d.passed ? "passed" : "failed";
-          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}  ${icon} ${d.criterionId}: ${status}`);
+          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter}  ${icon} ${d.criterionId}: ${status}`);
           return;
         }
 
         if (log.data?.type === "criteria_dag_status") {
-          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${log.message}`);
+          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter}${log.message}`);
           const results = log.data.results as Array<{ criterionId: string; passed: boolean; evaluated: boolean }>;
           if (results) {
             for (const r of results) {
@@ -262,7 +264,7 @@ program
           return;
         }
 
-        console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${log.message}`);
+        console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter}${log.message}`);
       } catch {
         console.log(event.data);
       }

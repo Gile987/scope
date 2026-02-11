@@ -72,7 +72,8 @@ export class QueueProcessor {
         redisPort: this.config.redisPort,
         redisPassword: this.config.redisPassword,
       },
-      this.collection
+      this.collection,
+      this.processor.workerName
     );
 
     while (true) {
