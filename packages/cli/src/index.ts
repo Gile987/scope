@@ -152,12 +152,16 @@ program
           }
 
           console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${src}${iter}${log.message}`);
-          if (log.data && Object.keys(log.data).length > 0) {
-            const dataStr = JSON.stringify(log.data, null, 2)
-              .split("\n")
-              .map((line) => `           ${line}`)
-              .join("\n");
-            console.log(dataStr);
+          if (log.data) {
+            // Filter out keys already rendered in the log line prefix
+            const { iteration: _iter, type: _type, ...rest } = log.data;
+            if (Object.keys(rest).length > 0) {
+              const dataStr = JSON.stringify(rest, null, 2)
+                .split("\n")
+                .map((line) => `           ${line}`)
+                .join("\n");
+              console.log(dataStr);
+            }
           }
         } catch {
           console.log(event.data);
