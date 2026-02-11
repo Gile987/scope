@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -100,5 +100,13 @@ export const api = {
   /** Get the full criteria dependency graph */
   getCriteriaGraph: (): Promise<CriteriaGraphData> => {
     return request("/criteria/graph");
+  },
+
+  /** Generate a criteria prompt from a behavior description using AI */
+  generateCriteriaPrompt: (behavior: string): Promise<GeneratePromptResponse> => {
+    return request("/criteria/generate-prompt", {
+      method: "POST",
+      body: JSON.stringify({ behavior }),
+    });
   },
 };

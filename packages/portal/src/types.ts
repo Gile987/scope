@@ -94,3 +94,8 @@ export interface CriteriaGraphData {
   nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
   edges: Array<{ source: string; target: string }>;
 }
+
+export interface GeneratePromptResponse {
+  prompt: string;
+  suggestedId: string;
+}
