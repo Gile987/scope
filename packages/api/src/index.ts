@@ -86,6 +86,7 @@ interface QueueMessage {
 type SSEClient = {
   res: Response;
   cleanup: () => void;
+  onActivity?: () => void;
 };
 const sseClients: Map<string, Set<SSEClient>> = new Map();
 let sharedSubscriber: InstanceType<typeof Redis> | null = null;
@@ -120,6 +121,7 @@ function getOrCreateSubscriber(): InstanceType<typeof Redis> {
       if (clients) {
         for (const client of clients) {
           client.res.write(`data: ${message}\n\n`);
+          client.onActivity?.();
 
           // Check for completion
           try {
@@ -400,13 +402,34 @@ app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: N
     let cleaned = false;
     let changeStream: ReturnType<typeof collection.watch> | null = null;
     let redisSubscribed = false;
-    
+
+    // Inactivity timeout — resets every time a log message is forwarded
+    const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes of silence
+    let inactivityTimer: ReturnType<typeof setTimeout>;
+
+    const resetInactivityTimer = () => {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => {
+        res.write(`event: timeout\ndata: {"message":"Stream timeout after 5 minutes of inactivity"}\n\n`);
+        client.cleanup();
+      }, INACTIVITY_TIMEOUT_MS);
+    };
+
+    // SSE heartbeat every 30s to prevent proxy/LB disconnects
+    const heartbeat = setInterval(() => {
+      if (!cleaned) {
+        res.write(`:\n\n`); // SSE comment — ignored by EventSource clients
+      }
+    }, 30_000);
+
     const client: SSEClient = {
       res,
+      onActivity: resetInactivityTimer,
       cleanup: () => {
         if (!cleaned) {
           cleaned = true;
-          clearTimeout(timeout);
+          clearTimeout(inactivityTimer);
+          clearInterval(heartbeat);
           if (changeStream) {
             changeStream.close().catch(err => console.error("Error closing change stream:", err));
           }
@@ -417,6 +440,9 @@ app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: N
         }
       },
     };
+
+    // Start the inactivity timer
+    resetInactivityTimer();
 
     // Try Redis subscription if configured (non-blocking - fallback to Change Streams if unavailable)
     if (redisHost) {
@@ -456,12 +482,6 @@ app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: N
 
     // Cleanup on client disconnect
     req.on("close", () => client.cleanup());
-
-    // Timeout after 5 minutes
-    const timeout = setTimeout(() => {
-      res.write(`event: timeout\ndata: {"message":"Stream timeout after 5 minutes"}\n\n`);
-      client.cleanup();
-    }, 5 * 60 * 1000);
 
   } catch (error) {
     next(error);
