@@ -60,6 +60,11 @@ export function CreateCriterion() {
   const [aiGenerated, setAiGenerated] = useState(false);
   const [aiModel, setAiModel] = useState("");
 
+  // AI-suggested dependencies
+  const [suggestedParents, setSuggestedParents] = useState<string[]>([]);
+  const [suggestedChildren, setSuggestedChildren] = useState<string[]>([]);
+  const [acceptedChildren, setAcceptedChildren] = useState<string[]>([]);
+
   // ID validation
   const idValid = useMemo(() => /^[a-z][a-z0-9_]*$/.test(id), [id]);
   const canContinue = behavior.trim().length > 0 && id.trim().length > 0 && idValid;
@@ -86,18 +91,51 @@ export function CreateCriterion() {
       if (!idManuallyEdited && data.suggestedId) {
         setId(data.suggestedId);
       }
+      // Merge suggested parents into dependsOn (additive with manual picks)
+      if (data.suggestedParents?.length) {
+        setSuggestedParents(data.suggestedParents);
+        setDependsOn((prev) => [...new Set([...prev, ...data.suggestedParents])]);
+      } else {
+        setSuggestedParents([]);
+      }
+      // Store suggested children for accept/dismiss
+      if (data.suggestedChildren?.length) {
+        setSuggestedChildren(data.suggestedChildren);
+        setAcceptedChildren(data.suggestedChildren);
+      } else {
+        setSuggestedChildren([]);
+        setAcceptedChildren([]);
+      }
     },
     onError: () => {
       // LLM unavailable — proceed with empty prompt for manual entry
       setPrompt("");
       setAiGenerated(false);
+      setSuggestedParents([]);
+      setSuggestedChildren([]);
+      setAcceptedChildren([]);
     },
   });
 
   // Create criterion mutation
   const createMutation = useMutation({
     mutationFn: api.createCriterion,
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
+      // Update accepted children to depend on the new criterion
+      for (const childId of acceptedChildren) {
+        try {
+          const child = await api.getCriterion(childId);
+          const existingDeps = child.dependsOn ?? [];
+          if (!existingDeps.includes(data.id)) {
+            await api.updateCriterion(childId, {
+              dependsOn: [...existingDeps, data.id],
+            });
+          }
+        } catch {
+          // Non-blocking: child update failure doesn't prevent navigation
+          console.warn(`Failed to update child criterion ${childId}`);
+        }
+      }
       queryClient.invalidateQueries({ queryKey: ["criteria"] });
       navigate(`/criteria/${data.id}`);
     },
@@ -122,6 +160,9 @@ export function CreateCriterion() {
 
   // Regenerate prompt
   const handleRegenerate = () => {
+    setSuggestedParents([]);
+    setSuggestedChildren([]);
+    setAcceptedChildren([]);
     generateMutation.mutate(behavior.trim());
   };
 
@@ -357,6 +398,85 @@ export function CreateCriterion() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Suggested Dependencies */}
+          {!generateMutation.isPending && (suggestedParents.length > 0 || suggestedChildren.length > 0) && (
+            <Card>
+              <CardContent className="pt-6 space-y-4">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+                  Suggested Dependencies (AI)
+                </Label>
+
+                {suggestedParents.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">
+                      Parents{" "}
+                      <span className="font-normal text-muted-foreground">
+                        — this criterion should depend on:
+                      </span>
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {suggestedParents.map((pid) => (
+                        <Badge
+                          key={pid}
+                          variant={dependsOn.includes(pid) ? "secondary" : "outline"}
+                          className="gap-1.5 font-mono text-xs"
+                        >
+                          {dependsOn.includes(pid) && <Check className="h-3 w-3" />}
+                          {pid}
+                          {dependsOn.includes(pid) && (
+                            <X
+                              className="h-3 w-3 ml-0.5 cursor-pointer hover:text-destructive"
+                              onClick={() => setDependsOn((prev) => prev.filter((d) => d !== pid))}
+                            />
+                          )}
+                        </Badge>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Accepted parents are added to this criterion's dependencies
+                    </p>
+                  </div>
+                )}
+
+                {suggestedChildren.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">
+                      Children{" "}
+                      <span className="font-normal text-muted-foreground">
+                        — these criteria should depend on the new one:
+                      </span>
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {suggestedChildren.map((cid) => (
+                        <Badge
+                          key={cid}
+                          variant={acceptedChildren.includes(cid) ? "secondary" : "outline"}
+                          className="gap-1.5 font-mono text-xs cursor-pointer"
+                          onClick={() => {
+                            setAcceptedChildren((prev) =>
+                              prev.includes(cid) ? prev.filter((c) => c !== cid) : [...prev, cid],
+                            );
+                          }}
+                        >
+                          {acceptedChildren.includes(cid) ? (
+                            <Check className="h-3 w-3" />
+                          ) : null}
+                          {cid}
+                          {acceptedChildren.includes(cid) && (
+                            <X className="h-3 w-3 ml-0.5 hover:text-destructive" />
+                          )}
+                        </Badge>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Accepted children will be updated to depend on <span className="font-mono">{id}</span> after creation
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Criteria Prompt */}
           <Card>
