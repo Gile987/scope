@@ -503,7 +503,7 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
       .sort({ createdAt: -1 })
       .toArray();
 
-    res.json(resources);
+    res.json(resources.map(r => ({ ...r, id: r._id })));
   } catch (error) {
     next(error);
   }
