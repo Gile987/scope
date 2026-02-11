@@ -43,7 +43,7 @@ services:
   mongodb:
     image: mongo:7.0
     ports:
-      - "27017:27017"
+      - "${MONGODB_PORT:-27117}:27017"
     environment:
       MONGO_INITDB_DATABASE: requests-db
     volumes:
