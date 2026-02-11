@@ -780,5 +780,144 @@ criteria
     }
   });
 
+criteria
+  .command("import")
+  .description("Import criteria from YAML file(s) into the database (upsert — won't overwrite existing)")
+  .argument("<path>", "Path to a .yaml file or a directory of .yaml files")
+  .option("--dry-run", "Preview what would be imported without sending to API")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (inputPath: string, options) => {
+    try {
+      const absPath = resolve(inputPath);
+      if (!existsSync(absPath)) {
+        console.error(errorText(`Path not found: ${absPath}`));
+        process.exit(1);
+      }
+
+      // Collect YAML files
+      let yamlFiles: string[];
+      if (statSync(absPath).isDirectory()) {
+        yamlFiles = readdirSync(absPath)
+          .filter(f => extname(f) === '.yaml' || extname(f) === '.yml')
+          .sort()
+          .map(f => join(absPath, f));
+        if (yamlFiles.length === 0) {
+          console.error(errorText(`No .yaml files found in ${absPath}`));
+          process.exit(1);
+        }
+        console.log(`${label('Directory:')} ${value(absPath)} (${yamlFiles.length} files)`);
+      } else {
+        yamlFiles = [absPath];
+        console.log(`${label('File:')} ${value(absPath)}`);
+      }
+
+      // Parse all criteria from files (supports multi-document YAML)
+      const allCriteria: Array<{ id: string; prompt: string; dependsOn?: string[] }> = [];
+      const parseErrors: string[] = [];
+
+      for (const file of yamlFiles) {
+        const content = readFileSync(file, 'utf-8');
+        const fname = basename(file);
+
+        try {
+          // Try multi-document parse first (handles --- separators)
+          const docs = parseAllDocuments(content);
+          for (let docIdx = 0; docIdx < docs.length; docIdx++) {
+            const doc = docs[docIdx].toJSON();
+            if (!doc || typeof doc !== 'object') continue;
+
+            const criterion = mapYamlCriterion(doc, fname, docIdx);
+            if (criterion) {
+              allCriteria.push(criterion);
+            } else {
+              parseErrors.push(`${fname}${docs.length > 1 ? ` (doc ${docIdx + 1})` : ''}: missing id or prompt`);
+            }
+          }
+        } catch (e) {
+          parseErrors.push(`${fname}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      if (parseErrors.length > 0) {
+        console.log(`\n${warnBanner('Parse warnings:')}`);
+        for (const err of parseErrors) {
+          console.log(`  ${errorText('⚠')} ${err}`);
+        }
+      }
+
+      if (allCriteria.length === 0) {
+        console.error(errorText('No valid criteria found to import.'));
+        process.exit(1);
+      }
+
+      console.log(`\n${label('Parsed:')} ${value(String(allCriteria.length))} criteria`);
+
+      // Show preview
+      for (const c of allCriteria) {
+        const deps = (c.dependsOn ?? []).length;
+        const depsStr = deps > 0 ? ` ${dimTimestamp(`(${deps} dep${deps > 1 ? 's' : ''})`)}` : '';
+        console.log(`  ${value(c.id)}${depsStr}`);
+      }
+
+      if (options.dryRun) {
+        console.log(`\n${warnBanner('Dry run — no changes made.')}`);
+        return;
+      }
+
+      // Seed via API
+      console.log();
+      const response = await fetch(`${options.url}/api/v1/criteria/seed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ criteria: allCriteria }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const result = await response.json() as { seeded: number; errors: string[] };
+      console.log(`${successText('Seeded:')} ${value(String(result.seeded))} criteria`);
+      if (result.seeded < allCriteria.length) {
+        console.log(`${dimTimestamp(`(${allCriteria.length - result.seeded} already existed — skipped)`)}`);
+      }
+      if (result.errors.length > 0) {
+        console.log(`\n${warnBanner('Seed errors:')}`);
+        for (const err of result.errors) {
+          console.log(`  ${errorText('⚠')} ${err}`);
+        }
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Map a parsed YAML object to a criteria API payload.
+ * Handles snake_case `depends_on` → camelCase `dependsOn` conversion.
+ */
+function mapYamlCriterion(
+  doc: Record<string, unknown>,
+  filename: string,
+  _docIndex: number
+): { id: string; prompt: string; dependsOn?: string[] } | null {
+  const id = doc.id as string | undefined;
+  const prompt = doc.prompt as string | undefined;
+  if (!id || !prompt) return null;
+
+  // Support both snake_case (YAML convention) and camelCase
+  const depsRaw = (doc.depends_on ?? doc.dependsOn) as string[] | undefined;
+  const dependsOn = Array.isArray(depsRaw) ? depsRaw.map(d => String(d).trim()) : undefined;
+
+  return {
+    id: id.trim(),
+    prompt: prompt.trim(),
+    ...(dependsOn && dependsOn.length > 0 ? { dependsOn } : {}),
+  };
+}
 
 program.parse();
+
