@@ -8,6 +8,8 @@ import React from "react";
 import { render } from "ink";
 import { DemoApp } from "./components/DemoApp.js";
 import { resolveScenarioAndPersona } from "./config-loader.js";
+import { configureHelp } from "./utils/helpFormatter.js";
+import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner } from "./utils/style.js";
 
 const program = new Command();
 
@@ -24,6 +26,8 @@ program
   .action(() => {
     program.help();
   });
+
+configureHelp(program);
 
 program
   .command("submit")
@@ -57,15 +61,15 @@ program
         personaInstructions = resolved.personaInstructions;
         personaObj = resolved.persona;
 
-        console.log(`Scenario: ${scenario} (version: ${scenarioVersion || 'v1'})`);
-        if (persona) console.log(`Persona: ${persona}`);
-        console.log(`Task: ${message.substring(0, 100)}${message.length > 100 ? '...' : ''}`);
-        console.log(`Criteria: ${criteria.length} items`);
+        console.log(`${label('Scenario:')} ${value(scenario)} (version: ${value(scenarioVersion || 'v1')})`);
+        if (persona) console.log(`${label('Persona:')} ${value(persona)}`);
+        console.log(`${label('Task:')} ${message.substring(0, 100)}${message.length > 100 ? '...' : ''}`);
+        console.log(`${label('Criteria:')} ${value(String(criteria.length))} items`);
         console.log();
       }
 
       if (!message) {
-        console.error("Error: --message or --scenario is required");
+        console.error(errorText("Error: --message or --scenario is required"));
         process.exit(1);
       }
 
@@ -95,22 +99,22 @@ program
 
       if (!response.ok) {
         const error = await response.json();
-        console.error("Error:", error);
+        console.error(errorText("Error:"), error);
         process.exit(1);
       }
 
       const result = await response.json();
-      console.log(`Request submitted: ${result.id}`);
-      console.log(`Worker: ${result.workerType}`);
-      console.log(`Mode: ${result.mode || 'one-shot'}`);
-      console.log(`Status: ${result.status}`);
+      console.log(`${successText('Request submitted:')} ${value(result.id)}`);
+      console.log(`${label('Worker:')} ${value(result.workerType)}`);
+      console.log(`${label('Mode:')} ${value(result.mode || 'one-shot')}`);
+      console.log(`${label('Status:')} ${value(result.status)}`);
 
       if (!stream) {
         return;
       }
 
       // Stream logs
-      console.log("\n--- Streaming logs ---\n");
+      console.log(`\n${banner('--- Streaming logs ---')}\n`);
 
       const eventSource = new EventSource(`${url}/api/v1/requests/${result.id}/logs`);
 
@@ -118,8 +122,7 @@ program
         try {
           const log = JSON.parse(event.data);
           const timestamp = new Date(log.timestamp).toLocaleTimeString();
-          const level = log.level.toUpperCase().padEnd(5);
-          console.log(`[${timestamp}] [${level}] ${log.message}`);
+          console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${log.message}`);
           if (log.data && Object.keys(log.data).length > 0) {
             const dataStr = JSON.stringify(log.data, null, 2)
               .split("\n")
@@ -135,28 +138,28 @@ program
       eventSource.addEventListener("done", (event) => {
         try {
           const data = JSON.parse((event as MessageEvent).data);
-          console.log(`\n--- Processing ${data.status} ---`);
+          console.log(`\n${successText(`--- Processing ${data.status} ---`)}`);
         } catch {
-          console.log("\n--- Done ---");
+          console.log(`\n${successText('--- Done ---')}`);
         }
         eventSource.close();
         process.exit(0);
       });
 
       eventSource.addEventListener("error", () => {
-        console.error("\n--- Connection error ---");
+        console.error(`\n${errorText('--- Connection error ---')}`);
         eventSource.close();
         process.exit(1);
       });
 
       eventSource.addEventListener("timeout", () => {
-        console.log("\n--- Stream timeout ---");
+        console.log(`\n${warnBanner('--- Stream timeout ---')}`);
         eventSource.close();
         process.exit(0);
       });
 
     } catch (error) {
-      console.error("Error:", error instanceof Error ? error.message : error);
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
     }
   });
@@ -172,14 +175,19 @@ program
 
       if (!response.ok) {
         const error = await response.json();
-        console.error("Error:", error);
+        console.error(errorText("Error:"), error);
         process.exit(1);
       }
 
       const request = await response.json();
-      console.log(JSON.stringify(request, null, 2));
+      console.log(`${label('ID:')} ${value(request.id)}`);
+      console.log(`${label('Worker:')} ${value(request.workerType)}`);
+      console.log(`${label('Status:')} ${value(request.status)}`);
+      if (request.mode) console.log(`${label('Mode:')} ${value(request.mode)}`);
+      if (request.createdAt) console.log(`${label('Created:')} ${value(request.createdAt)}`);
+      if (request.completedAt) console.log(`${label('Completed:')} ${value(request.completedAt)}`);
     } catch (error) {
-      console.error("Error:", error instanceof Error ? error.message : error);
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
     }
   });
@@ -201,21 +209,20 @@ program
       try {
         const log = JSON.parse(event.data);
         const timestamp = new Date(log.timestamp).toLocaleTimeString();
-        const level = log.level.toUpperCase().padEnd(5);
-        console.log(`[${timestamp}] [${level}] ${log.message}`);
+        console.log(`[${dimTimestamp(timestamp)}] [${colorLevel(log.level)}] ${log.message}`);
       } catch {
         console.log(event.data);
       }
     };
 
     eventSource.addEventListener("done", () => {
-      console.log("\n--- Done ---");
+      console.log(`\n${successText('--- Done ---')}`);
       eventSource.close();
       process.exit(0);
     });
 
     eventSource.addEventListener("error", () => {
-      console.error("\n--- Connection error ---");
+      console.error(`\n${errorText('--- Connection error ---')}`);
       eventSource.close();
       process.exit(1);
     });
@@ -237,14 +244,28 @@ program
 
       if (!response.ok) {
         const error = await response.json();
-        console.error("Error:", error);
+        console.error(errorText("Error:"), error);
         process.exit(1);
       }
 
       const requests = await response.json();
-      console.log(JSON.stringify(requests, null, 2));
+      if (Array.isArray(requests) && requests.length === 0) {
+        console.log(warnBanner('No requests found.'));
+        return;
+      }
+      if (Array.isArray(requests)) {
+        console.log(label(`Found ${requests.length} request(s):\n`));
+        for (const req of requests) {
+          const status = req.status === 'completed' ? successText(req.status)
+            : req.status === 'failed' ? errorText(req.status)
+            : value(req.status);
+          console.log(`  ${value(req.id)}  ${label('worker=')}${req.workerType}  ${label('status=')}${status}`);
+        }
+      } else {
+        console.log(JSON.stringify(requests, null, 2));
+      }
     } catch (error) {
-      console.error("Error:", error instanceof Error ? error.message : error);
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
     }
   });
@@ -262,7 +283,7 @@ program
     const countNum = parseInt(count, 10);
 
     if (isNaN(countNum) || countNum < 1) {
-      console.error("Error: count must be a positive integer");
+      console.error(errorText("Error: count must be a positive integer"));
       process.exit(1);
     }
 
