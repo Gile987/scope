@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { List } from "lucide-react";
+import { List, Plus } from "lucide-react";
 import type { CriteriaGraphData } from "@/types";
 import { useRef, useState, useMemo } from "react";
 
@@ -127,11 +127,18 @@ export function CriteriaGraphView() {
             Dependency DAG — {graph.nodes.length} criteria, {graph.edges.length} edges
           </p>
         </div>
-        <Link to="/criteria">
-          <Button variant="outline" className="gap-1.5">
-            <List className="h-4 w-4" /> List View
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link to="/criteria">
+            <Button variant="outline" className="gap-1.5">
+              <List className="h-4 w-4" /> List View
+            </Button>
+          </Link>
+          <Link to="/criteria/new">
+            <Button className="gap-1.5">
+              <Plus className="h-4 w-4" /> New Criterion
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <Card>
