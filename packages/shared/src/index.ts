@@ -9,3 +9,4 @@ export * from "./judge-client.js";
 export * from "./multi-turn-loop.js";
 export * from "./criteria-graph.js";
 export * from "./criteria-registry.js";
+export * from "./criteria-store.js";
