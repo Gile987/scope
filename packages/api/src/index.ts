@@ -10,6 +10,7 @@ import { BlobServiceClient } from "@azure/storage-blob";
 import { v4 as uuidv4 } from "uuid";
 import { createRequire } from "module";
 import dotenv from "dotenv";
+import { isLlmAvailable, generateCriteriaPrompt } from "./llm.js";
 
 const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
@@ -629,6 +630,28 @@ app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: R
 });
 
 // --- Criteria seed & CRUD ---
+
+// POST /api/v1/criteria/generate-prompt — AI-generate a criteria prompt from a behavior description
+app.post("/api/v1/criteria/generate-prompt", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { behavior } = req.body;
+    if (!behavior || typeof behavior !== "string" || !behavior.trim()) {
+      return res.status(400).json({ error: "Body must contain a non-empty 'behavior' string" });
+    }
+
+    if (!isLlmAvailable()) {
+      return res.status(503).json({ error: "LLM not configured: GITHUB_TOKEN is not set" });
+    }
+
+    const result = await generateCriteriaPrompt(behavior.trim());
+    res.json(result);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not configured")) {
+      return res.status(503).json({ error: err.message });
+    }
+    next(err);
+  }
+});
 
 // POST /api/v1/criteria/seed — bulk seed criteria from a JSON array
 // Body: { criteria: [{ id, prompt, dependsOn? }] }
