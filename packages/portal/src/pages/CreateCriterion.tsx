@@ -12,7 +12,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Stepper } from "@/components/Stepper";
-import { CriteriaPicker } from "@/components/CriteriaPicker";
 import {
   ArrowLeft,
   ArrowRight,
@@ -21,8 +20,6 @@ import {
   X,
   Sparkles,
   RefreshCw,
-  ChevronDown,
-  ChevronRight,
   Pencil,
 } from "lucide-react";
 
@@ -53,7 +50,6 @@ export function CreateCriterion() {
   const [idManuallyEdited, setIdManuallyEdited] = useState(false);
   const [idEditMode, setIdEditMode] = useState(false);
   const [dependsOn, setDependsOn] = useState<string[]>([]);
-  const [showDeps, setShowDeps] = useState(false);
 
   // Step 2 fields
   const [prompt, setPrompt] = useState("");
@@ -288,37 +284,6 @@ export function CreateCriterion() {
                 <p className="text-xs text-muted-foreground">
                   This ID will be attached to evaluations when the judge evaluates them as positive
                 </p>
-              </div>
-
-              {/* Dependencies — collapsible */}
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => setShowDeps(!showDeps)}
-                  className="flex items-center gap-1.5 text-sm font-semibold hover:text-foreground/80 transition-colors"
-                >
-                  {showDeps ? (
-                    <ChevronDown className="h-4 w-4" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4" />
-                  )}
-                  Dependencies
-                  {dependsOn.length > 0 && (
-                    <Badge variant="secondary" className="ml-1 text-xs">
-                      {dependsOn.length}
-                    </Badge>
-                  )}
-                  <span className="font-normal text-muted-foreground">(optional)</span>
-                </button>
-
-                {showDeps && (
-                  <div className="pl-5">
-                    <CriteriaPicker selected={dependsOn} onChange={setDependsOn} />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Criteria that must pass before this one is evaluated
-                    </p>
-                  </div>
-                )}
               </div>
             </CardContent>
           </Card>
