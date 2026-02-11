@@ -2,6 +2,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import dotenv from "dotenv";
 import { Command } from "commander";
 import EventSource from "eventsource";
 import React from "react";
@@ -10,6 +11,8 @@ import { DemoApp } from "./components/DemoApp.js";
 import { resolveScenarioAndPersona } from "./config-loader.js";
 import { configureHelp } from "./utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner } from "./utils/style.js";
+
+dotenv.config();
 
 const program = new Command();
 
@@ -39,7 +42,7 @@ program
   .option("-w, --worker <worker>", "Worker to use (coder-acp-claude-code, coder-acp-copilot, coder-vscode-web)", "coder-acp-copilot")
   .option("-c, --criteria <criteria...>", "Evaluation criteria (overrides scenario criteria)")
   .option("--max-iterations <number>", "Max judge iterations for multi-turn mode", parseInt)
-  .option("-u, --url <url>", "API base URL", process.env.API_URL || "http://localhost:3000")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options) => {
     const { scenario, persona, traits, worker, url, stream, maxIterations } = options;
@@ -195,7 +198,7 @@ program
   .command("status")
   .description("Get status of a request")
   .argument("<id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.API_URL || "http://localhost:3000")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .action(async (id, options) => {
     try {
       const response = await fetch(`${options.url}/api/v1/requests/${id}`);
@@ -223,7 +226,7 @@ program
   .command("logs")
   .description("Stream logs for a request")
   .argument("<id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.API_URL || "http://localhost:3000")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("--from-start", "Include historical logs from start")
   .action(async (id, options) => {
     const url = options.fromStart
@@ -281,7 +284,7 @@ program
 program
   .command("list")
   .description("List all requests")
-  .option("-u, --url <url>", "API base URL", process.env.API_URL || "http://localhost:3000")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
   .action(async (options) => {
     try {
@@ -325,7 +328,7 @@ program
   .description("Run concurrent requests to all coders with a live TUI dashboard")
   .requiredOption("-m, --message <message>", "Message/prompt to send to all coders")
   .option("-c, --count <count>", "Number of requests to send to each coder", "1")
-  .option("-u, --url <url>", "API base URL", process.env.API_URL || "http://localhost:3000")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("-w, --workers <workers>", "Comma-separated list of workers", DEFAULT_WORKERS.join(","))
   .action((options) => {
     const { message, count, url, workers: workersStr } = options;
