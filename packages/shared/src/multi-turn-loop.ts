@@ -91,7 +91,7 @@ export async function runMultiTurnLoop(
     // Check timeout
     const elapsed = Date.now() - startTime;
     if (elapsed > MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS) {
-      await log("warn", `Multi-turn loop timed out after ${Math.round(elapsed / 1000)}s`);
+      await log("warn", `Multi-turn loop timed out after ${Math.round(elapsed / 1000)}s`, { iteration, elapsedMs: elapsed });
       return {
         turns,
         passed: false,
@@ -105,13 +105,13 @@ export async function runMultiTurnLoop(
     });
 
     // Step 1: Call the coding agent
-    await log("info", "Calling coding agent...");
+    await log("info", "Calling coding agent...", { iteration });
     let codingResponse: string;
     try {
       codingResponse = await processor.processMessage(nextPrompt, log);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      await log("error", `Coding agent failed on iteration ${iteration}: ${errorMsg}`);
+      await log("error", `Coding agent failed on iteration ${iteration}: ${errorMsg}`, { iteration, error: errorMsg });
       return {
         turns,
         passed: false,
@@ -120,11 +120,12 @@ export async function runMultiTurnLoop(
     }
 
     await log("info", "Coding agent completed", {
+      iteration,
       responseLength: codingResponse.length,
     });
 
     // Step 2: Snapshot workspace to blob storage
-    await log("info", "Uploading workspace snapshot...");
+    await log("info", "Uploading workspace snapshot...", { iteration });
     let snapshotUrl: string;
     try {
       snapshotUrl = await blobStorage.uploadWorkspaceSnapshot(
@@ -134,7 +135,7 @@ export async function runMultiTurnLoop(
       );
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      await log("error", `Snapshot upload failed: ${errorMsg}`);
+      await log("error", `Snapshot upload failed: ${errorMsg}`, { iteration, error: errorMsg });
       return {
         turns,
         passed: false,
@@ -142,10 +143,10 @@ export async function runMultiTurnLoop(
       };
     }
 
-    await log("info", "Snapshot uploaded", { snapshotUrl });
+    await log("info", "Snapshot uploaded", { iteration, snapshotUrl });
 
     // Step 3: Call the judge
-    await log("info", "Calling judge for evaluation...");
+    await log("info", "Calling judge for evaluation...", { iteration });
     let judgePassed: boolean;
     let judgeFeedback: string;
     let criteriaResults: CriterionResult[] | undefined;
@@ -163,7 +164,7 @@ export async function runMultiTurnLoop(
       criteriaResults = judgeResult.criteriaResults;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      await log("error", `Judge evaluation failed: ${errorMsg}`);
+      await log("error", `Judge evaluation failed: ${errorMsg}`, { iteration, error: errorMsg });
       return {
         turns,
         passed: false,
@@ -178,6 +179,7 @@ export async function runMultiTurnLoop(
       const skipped = criteriaResults.filter(r => !r.evaluated).length;
       await log("info", `Criteria DAG: ${passed} passed, ${failed} failed, ${skipped} skipped`, {
         type: "criteria_dag_status",
+        iteration,
         results: criteriaResults.map(r => ({
           criterionId: r.criterionId,
           passed: r.passed,
@@ -229,6 +231,7 @@ export async function runMultiTurnLoop(
 
   // Max iterations exhausted
   await log("warn", `Max iterations (${maxIterations}) reached without passing`, {
+    iteration: maxIterations,
     totalIterations: maxIterations,
   });
   return {
