@@ -695,11 +695,11 @@ app.get("/api/v1/criteria/graph", async (_req: Request, res: Response, next: Nex
   try {
     const all = await criteriaCollection.find({ deletedAt: { $exists: false } }).sort({ id: 1 }).toArray();
     const nodes = all.map(c => ({ id: c.id, prompt: c.prompt, dependsOn: c.dependsOn || [] }));
-    const edges: { from: string; to: string }[] = [];
+    const edges: { source: string; target: string }[] = [];
     for (const c of all) {
       if (c.dependsOn) {
         for (const parentId of c.dependsOn) {
-          edges.push({ from: parentId, to: c.id });
+          edges.push({ source: parentId, target: c.id });
         }
       }
     }
