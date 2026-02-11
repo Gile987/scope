@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useLogStream } from "@/hooks/use-log-stream";
+import type { LogEvent } from "@/types";
 import { Circle, Wifi, WifiOff } from "lucide-react";
 
 const levelColors: Record<string, string> = {
@@ -17,14 +18,32 @@ const levelColors: Record<string, string> = {
 interface LogViewerProps {
   runId: string;
   enabled?: boolean;
+  /** If provided, LogViewer uses these instead of creating its own stream */
+  logs?: LogEvent[];
+  isConnected?: boolean;
+  isDone?: boolean;
+  error?: string | null;
 }
 
-export function LogViewer({ runId, enabled = true }: LogViewerProps) {
-  const { logs, isConnected, isDone, error } = useLogStream({
+export function LogViewer({
+  runId,
+  enabled = true,
+  logs: externalLogs,
+  isConnected: externalIsConnected,
+  isDone: externalIsDone,
+  error: externalError,
+}: LogViewerProps) {
+  // Use external data if provided, otherwise fall back to own hook
+  const ownStream = useLogStream({
     id: runId,
-    enabled,
+    enabled: enabled && externalLogs === undefined,
     fromStart: true,
   });
+
+  const logs = externalLogs ?? ownStream.logs;
+  const isConnected = externalIsConnected ?? ownStream.isConnected;
+  const isDone = externalIsDone ?? ownStream.isDone;
+  const error = externalError !== undefined ? externalError : ownStream.error;
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom on new logs

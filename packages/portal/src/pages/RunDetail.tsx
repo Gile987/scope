@@ -13,6 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LogViewer } from "@/components/LogViewer";
 import { TurnTimeline } from "@/components/TurnTimeline";
+import { CriteriaGraphView } from "@/components/CriteriaGraphView";
+import { useLogStream } from "@/hooks/use-log-stream";
 import { ArrowLeft, Copy, Check } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useState } from "react";
@@ -65,6 +67,14 @@ export function RunDetail() {
   }
 
   const isActive = run.status === "pending" || run.status === "processing" || run.status === "iterating";
+  const isV2 = run.scenario.version === "v2";
+
+  // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
+  const logStream = useLogStream({
+    id: run._id,
+    enabled: isActive,
+    fromStart: true,
+  });
 
   return (
     <div className="space-y-6">
@@ -120,8 +130,21 @@ export function RunDetail() {
         </TabsContent>
 
         {/* Logs tab */}
-        <TabsContent value="logs" className="mt-4">
-          <LogViewer runId={run._id} enabled={isActive} />
+        <TabsContent value="logs" className="mt-4 space-y-4">
+          {isV2 && run.scenario.criteria.length > 0 && (
+            <CriteriaGraphView
+              scenarioCriteria={run.scenario.criteria}
+              logs={logStream.logs}
+            />
+          )}
+          <LogViewer
+            runId={run._id}
+            enabled={isActive}
+            logs={logStream.logs}
+            isConnected={logStream.isConnected}
+            isDone={logStream.isDone}
+            error={logStream.error}
+          />
         </TabsContent>
 
         {/* Details tab */}
