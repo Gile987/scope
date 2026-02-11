@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Stepper } from "@/components/Stepper";
+import { CriteriaPicker } from "@/components/CriteriaPicker";
 import {
   ArrowLeft,
   ArrowRight,
@@ -336,29 +337,13 @@ export function CreateCriterion() {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-4">
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                      Criteria ID
-                    </p>
-                    <Badge variant="secondary" className="font-mono">
-                      {id}
-                    </Badge>
-                  </div>
-                  {dependsOn.length > 0 && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                        Dependencies
-                      </p>
-                      <div className="flex flex-wrap gap-1">
-                        {dependsOn.map((dep) => (
-                          <Badge key={dep} variant="outline" className="font-mono text-xs">
-                            {dep}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                    Criteria ID
+                  </p>
+                  <Badge variant="secondary" className="font-mono">
+                    {id}
+                  </Badge>
                 </div>
               </div>
             </CardContent>
@@ -450,6 +435,19 @@ export function CreateCriterion() {
               </CardContent>
             </Card>
           )}
+
+          {/* Dependencies (manual) */}
+          <Card>
+            <CardContent className="pt-6 space-y-3">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+                Parent Dependencies
+              </Label>
+              <CriteriaPicker selected={dependsOn} onChange={setDependsOn} />
+              <p className="text-xs text-muted-foreground">
+                Criteria that must pass before this one is evaluated
+              </p>
+            </CardContent>
+          </Card>
 
           {/* Criteria Prompt */}
           <Card>
