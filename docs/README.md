@@ -2,12 +2,6 @@
 
 Central documentation hub for the Scope MT platform — an AI coding agent benchmarking system.
 
-## Vision & Strategy
-
-| Document | Description |
-|----------|-------------|
-| [Vision](vision.md) | What Scope MT is, why it exists, target audience, roadmap themes |
-
 ## Architecture & Design
 
 | Document | Description |
