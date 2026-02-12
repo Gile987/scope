@@ -238,7 +238,13 @@ function SuccessAtTChart({ data }: { data: AnalysisResponse }) {
                 formatter={(value: number) => formatPercent(value)}
                 labelFormatter={(label: string | number) => `≤${label} iterations`}
               />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Legend
+                wrapperStyle={{ fontSize: 11 }}
+                formatter={(value: string) => {
+                  const group = groupsWithData.find(g => getGroupKey(g) === value);
+                  return group ? `${value} (n=${group.passed})` : value;
+                }}
+              />
               {groupsWithData.map((group, idx) => (
                 <Line
                   key={getGroupKey(group)}
@@ -289,6 +295,7 @@ function IterationStatsTable({ data }: { data: AnalysisResponse }) {
             <TableRow>
               <TableHead className="max-w-[200px]">Task</TableHead>
               <TableHead>Worker</TableHead>
+              <TableHead className="text-center">N</TableHead>
               <TableHead className="text-center">Mean</TableHead>
               <TableHead className="text-center">Std Dev</TableHead>
               <TableHead className="text-center">Min</TableHead>
@@ -305,6 +312,9 @@ function IterationStatsTable({ data }: { data: AnalysisResponse }) {
                   <Badge variant="outline" className="font-mono text-xs">
                     {group.workerType}
                   </Badge>
+                </TableCell>
+                <TableCell className="text-center font-mono text-muted-foreground">
+                  {group.passed}
                 </TableCell>
                 <TableCell className="text-center font-mono">
                   {formatNumber(group.iterationStats!.mean)}
