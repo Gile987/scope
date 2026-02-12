@@ -10,6 +10,13 @@ import { BlobServiceClient } from "@azure/storage-blob";
 import { v4 as uuidv4 } from "uuid";
 import { createRequire } from "module";
 import dotenv from "dotenv";
+import multer from "multer";
+import { execSync } from "child_process";
+import { mkdtempSync, rmSync, existsSync, readdirSync, statSync } from "fs";
+import { readFile } from "fs/promises";
+import { tmpdir } from "os";
+import { join, basename } from "path";
+import { parse as yamlParse } from "yaml";
 import { isLlmAvailable, generateCriteriaPrompt } from "./llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 
@@ -21,6 +28,9 @@ dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Multer configuration for file uploads (stored in temp directory)
+const upload = multer({ dest: tmpdir() });
 
 // Configuration from environment
 // K8s: MONGO_CONNECTION_STRING from secret, STORAGE_CONNECTION_STRING from secret
@@ -834,6 +844,193 @@ app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: R
     downloadResponse.readableStreamBody.pipe(res);
   } catch (error) {
     next(error);
+  }
+});
+
+// --- Runs upload (import downloaded archives) ---
+
+// POST /api/v1/runs/upload — Upload a run archive (tar.gz) to import a previously downloaded run
+app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, res: Response, next: NextFunction) => {
+  const tempDir = mkdtempSync(join(tmpdir(), "run-upload-"));
+  let uploadedFilePath: string | undefined;
+
+  try {
+    // Validate file was uploaded
+    if (!req.file) {
+      res.status(400).json({ error: "No archive file uploaded. Use 'archive' field for the tar.gz file." });
+      return;
+    }
+    uploadedFilePath = req.file.path;
+
+    // Extract archive to temp directory
+    const extractDir = join(tempDir, "extracted");
+    execSync(`mkdir -p "${extractDir}" && tar xzf "${uploadedFilePath}" -C "${extractDir}"`, { stdio: "pipe" });
+
+    // Find the run directory (archive contains <id>/ folder with run.yaml)
+    const entries = readdirSync(extractDir);
+    if (entries.length === 0) {
+      res.status(400).json({ error: "Archive is empty" });
+      return;
+    }
+
+    // Determine run directory - could be at root or in a subdirectory
+    let runDir = extractDir;
+    let runYamlPath = join(extractDir, "run.yaml");
+    
+    if (!existsSync(runYamlPath)) {
+      // run.yaml might be inside a subdirectory (e.g., <id>/run.yaml)
+      // Check each top-level entry for run.yaml
+      for (const entry of entries) {
+        const subDir = join(extractDir, entry);
+        const subRunYaml = join(subDir, "run.yaml");
+        try {
+          const stat = statSync(subDir);
+          if (stat.isDirectory() && existsSync(subRunYaml)) {
+            runDir = subDir;
+            runYamlPath = subRunYaml;
+            break;
+          }
+        } catch {
+          // Entry might not be a directory, skip
+        }
+      }
+    }
+
+    if (!existsSync(runYamlPath)) {
+      res.status(400).json({ error: "Invalid archive: run.yaml not found" });
+      return;
+    }
+
+    // Parse run.yaml
+    const runYamlContent = await readFile(runYamlPath, "utf-8");
+    let runDoc: RequestDocument;
+    try {
+      runDoc = yamlParse(runYamlContent) as RequestDocument;
+    } catch (parseErr) {
+      res.status(400).json({ error: `Failed to parse run.yaml: ${parseErr}` });
+      return;
+    }
+
+    // Validate required fields
+    if (!runDoc._id) {
+      res.status(400).json({ error: "Invalid run.yaml: missing _id field" });
+      return;
+    }
+    if (!runDoc.scenario) {
+      res.status(400).json({ error: "Invalid run.yaml: missing scenario field" });
+      return;
+    }
+    if (!runDoc.workerType) {
+      res.status(400).json({ error: "Invalid run.yaml: missing workerType field" });
+      return;
+    }
+    if (!runDoc.status) {
+      res.status(400).json({ error: "Invalid run.yaml: missing status field" });
+      return;
+    }
+
+    // Validate status is terminal (cannot import in-flight runs)
+    const terminalStatuses = ["completed", "failed"];
+    if (!terminalStatuses.includes(runDoc.status)) {
+      res.status(400).json({
+        error: `Cannot upload in-flight run (status: ${runDoc.status}). Only completed or failed runs can be uploaded.`,
+      });
+      return;
+    }
+
+    // Check if run already exists
+    const existingRun = await collection.findOne({ _id: runDoc._id });
+    if (existingRun) {
+      res.status(409).json({
+        error: `Run with ID '${runDoc._id}' already exists`,
+        existingStatus: existingRun.status,
+      });
+      return;
+    }
+
+    // Upload iteration snapshots to blob storage and update snapshotUrls
+    const turns = runDoc.turns || [];
+    const iterationDirs = readdirSync(runDir).filter(name => name.startsWith("iteration-"));
+    
+    // Connect to blob storage
+    let blobServiceClient: BlobServiceClient;
+    if (storageConnectionString) {
+      blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+    } else {
+      blobServiceClient = new BlobServiceClient(
+        `https://${storageAccountName}.blob.core.windows.net`,
+        new DefaultAzureCredential()
+      );
+    }
+    const containerClient = blobServiceClient.getContainerClient("snapshots");
+    await containerClient.createIfNotExists();
+
+    for (const iterDir of iterationDirs) {
+      const iterMatch = iterDir.match(/^iteration-(\d+)$/);
+      if (!iterMatch) continue;
+      
+      const iterNum = parseInt(iterMatch[1], 10);
+      const iterPath = join(runDir, iterDir);
+      
+      // Create tar.gz from iteration directory
+      const iterArchive = join(tempDir, `iter-${iterNum}.tar.gz`);
+      execSync(`tar czf "${iterArchive}" -C "${iterPath}" .`, { stdio: "pipe" });
+      
+      // Upload to blob storage
+      const blobName = `${runDoc._id}/iteration-${iterNum}/workspace.tar.gz`;
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      await blockBlobClient.uploadFile(iterArchive, {
+        blobHTTPHeaders: { blobContentType: "application/gzip" },
+        tags: { requestId: runDoc._id, iteration: String(iterNum) },
+      });
+      
+      // Update turn's snapshotUrl
+      const turn = turns.find(t => t.iteration === iterNum);
+      if (turn) {
+        turn.snapshotUrl = blockBlobClient.url;
+      }
+    }
+
+    // Prepare document for insertion
+    const docToInsert: RequestDocument = {
+      _id: runDoc._id,
+      scenario: runDoc.scenario,
+      workerType: runDoc.workerType as WorkerType,
+      status: runDoc.status,
+      createdAt: runDoc.createdAt ? new Date(runDoc.createdAt) : new Date(),
+      updatedAt: runDoc.updatedAt ? new Date(runDoc.updatedAt) : undefined,
+      turns: turns.map(t => ({
+        ...t,
+        timestamp: t.timestamp ? new Date(t.timestamp) : new Date(),
+      })),
+      ...(runDoc.result ? { result: runDoc.result } : {}),
+      ...(runDoc.error ? { error: runDoc.error } : {}),
+      ...(runDoc.maxIterations ? { maxIterations: runDoc.maxIterations } : {}),
+      ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
+      ...(runDoc.persona ? { persona: runDoc.persona } : {}),
+      // Note: logs are intentionally not imported (they were excluded from download)
+    };
+
+    // Insert into MongoDB
+    await collection.insertOne(docToInsert);
+
+    console.log(`Uploaded run ${runDoc._id} with ${iterationDirs.length} iterations`);
+
+    res.status(201).json({
+      id: runDoc._id,
+      status: runDoc.status,
+      iterations: iterationDirs.length,
+      message: "Run uploaded successfully",
+    });
+
+  } catch (error) {
+    next(error);
+  } finally {
+    // Cleanup temp files
+    rmSync(tempDir, { recursive: true, force: true });
+    if (uploadedFilePath && existsSync(uploadedFilePath)) {
+      rmSync(uploadedFilePath, { force: true });
+    }
   }
 });
 

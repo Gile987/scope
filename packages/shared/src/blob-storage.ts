@@ -109,6 +109,54 @@ export class BlobStorage {
   }
 
   /**
+   * Uploads a workspace directory as a tar.gz snapshot to blob storage.
+   * Similar to uploadWorkspaceSnapshot but takes a directory containing extracted workspace files.
+   * Used when importing run archives.
+   * Returns the blob URL.
+   */
+  async uploadSnapshotFromDirectory(
+    directoryPath: string,
+    requestId: string,
+    iteration: number
+  ): Promise<string> {
+    await this.ensureContainer();
+
+    const blobName = `${requestId}/iteration-${iteration}/workspace.tar.gz`;
+    const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
+
+    // Create tar.gz in a temp directory
+    const tempDir = mkdtempSync(join(tmpdir(), "snapshot-upload-"));
+    const archivePath = join(tempDir, "workspace.tar.gz");
+
+    try {
+      // Build tar exclude flags (same patterns as uploadWorkspaceSnapshot)
+      const excludeFlags = EXCLUDE_PATTERNS.map((p) => `--exclude='${p}'`).join(" ");
+
+      // Create tar.gz archive from the directory contents
+      execSync(
+        `tar czf "${archivePath}" ${excludeFlags} -C "${directoryPath}" .`,
+        { stdio: "pipe" }
+      );
+
+      // Upload to blob storage
+      await blockBlobClient.uploadFile(archivePath, {
+        blobHTTPHeaders: {
+          blobContentType: "application/gzip",
+        },
+        tags: {
+          requestId,
+          iteration: String(iteration),
+        },
+      });
+
+      return blockBlobClient.url;
+    } finally {
+      // Cleanup temp directory
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  /**
    * Downloads a snapshot from blob storage and extracts it to the target directory.
    */
   async downloadAndExtractSnapshot(
