@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ import type { Run } from "@/types";
 export function RunsList() {
   const [workerFilter, setWorkerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [taskFilter, setTaskFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [resubmitCount, setResubmitCount] = useState(1);
   const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
@@ -36,6 +37,11 @@ export function RunsList() {
     queryFn: () => api.listRuns(workerFilter === "all" ? undefined : workerFilter),
     refetchInterval: 10_000,
   });
+
+  const uniqueTasks = useMemo(
+    () => [...new Set(runs.map((r) => r.scenario?.task).filter(Boolean) as string[])].sort(),
+    [runs],
+  );
 
   const deleteMutation = useMutation({
     mutationFn: api.deleteRun,
@@ -72,8 +78,11 @@ export function RunsList() {
     },
   });
 
-  const filteredRuns =
-    statusFilter === "all" ? runs : runs.filter((r) => r.status === statusFilter);
+  const filteredRuns = runs.filter((r) => {
+    if (statusFilter !== "all" && r.status !== statusFilter) return false;
+    if (taskFilter !== "all" && r.scenario?.task !== taskFilter) return false;
+    return true;
+  });
 
   const allSelected = filteredRuns.length > 0 && filteredRuns.every((r) => selectedIds.has(r._id));
   const someSelected = filteredRuns.some((r) => selectedIds.has(r._id));
@@ -117,7 +126,7 @@ export function RunsList() {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Worker:</span>
-          <Select value={workerFilter} onValueChange={setWorkerFilter}>
+          <Select value={workerFilter} onValueChange={(v) => { setWorkerFilter(v); setTaskFilter("all"); }}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="All workers" />
             </SelectTrigger>
@@ -139,6 +148,22 @@ export function RunsList() {
               <SelectItem value="all">All statuses</SelectItem>
               {STATUS_LIST.map((s) => (
                 <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Task:</span>
+          <Select value={taskFilter} onValueChange={setTaskFilter}>
+            <SelectTrigger className="w-[260px]">
+              <SelectValue placeholder="All tasks" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All tasks</SelectItem>
+              {uniqueTasks.map((t) => (
+                <SelectItem key={t} value={t}>
+                  <span title={t}>{truncate(t, 50)}</span>
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
