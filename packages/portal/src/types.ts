@@ -46,7 +46,7 @@ export interface LogEvent {
 export interface Run {
   _id: string;
   id: string;
-  scenario: Scenario;
+  scenario?: Scenario;
   workerType: string;
   status: RunStatus;
   result?: string;
