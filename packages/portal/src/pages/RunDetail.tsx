@@ -76,7 +76,7 @@ export function RunDetail() {
     );
   }
 
-  const isV2 = run.scenario.version === "v2";
+  const isV2 = run.scenario?.version === "v2";
 
   return (
     <div className="space-y-6">
@@ -133,7 +133,7 @@ export function RunDetail() {
 
         {/* Logs tab */}
         <TabsContent value="logs" className="mt-4 space-y-4">
-          {isV2 && run.scenario.criteria.length > 0 && (
+          {isV2 && run.scenario?.criteria && run.scenario.criteria.length > 0 && (
             <CriteriaGraphView
               scenarioCriteria={run.scenario.criteria}
               logs={logStream.logs}
