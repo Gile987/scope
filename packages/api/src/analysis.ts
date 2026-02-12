@@ -37,14 +37,30 @@ export interface AnalysisResponse {
     overallPassRate: number;
     avgIterationsToPass: number | null;
   };
+  /** Union of all criteria IDs found across all runs (before filtering) */
+  availableCriteria: string[];
+  /** Criteria IDs that were used to define success (empty = use turn.passed) */
+  selectedCriteria: string[];
+}
+
+/** Per-criterion result stored on each turn */
+export interface CriterionResult {
+  criterionId: string;
+  passed: boolean;
+  feedback: string;
+  evaluated: boolean;
 }
 
 // Run data needed for analysis (subset of RequestDocument)
 export interface AnalyzableRun {
-  scenario: { task: string };
+  scenario: { task: string; criteria?: string[] };
   workerType: string;
   status: string;
-  turns?: Array<{ iteration: number; passed: boolean }>;
+  turns?: Array<{
+    iteration: number;
+    passed: boolean;
+    criteriaResults?: CriterionResult[];
+  }>;
 }
 
 /**
@@ -97,27 +113,73 @@ function stdDev(values: number[]): number {
 }
 
 /**
- * Get the iteration count where a run passed (last turn's iteration if passed)
+ * Check if a turn is considered passed based on selected criteria.
+ * If selectedCriteria is empty or undefined, uses turn.passed.
+ * Otherwise, all selected criteria must have passed: true in criteriaResults.
  */
-function getPassedIteration(run: AnalyzableRun): number | null {
+function isTurnPassed(
+  turn: { passed: boolean; criteriaResults?: CriterionResult[] },
+  selectedCriteria?: string[]
+): boolean {
+  if (!selectedCriteria || selectedCriteria.length === 0) {
+    return turn.passed;
+  }
+  if (!turn.criteriaResults) {
+    return false;
+  }
+  const resultsMap = new Map(turn.criteriaResults.map(r => [r.criterionId, r]));
+  return selectedCriteria.every(id => resultsMap.get(id)?.passed === true);
+}
+
+/**
+ * Get the iteration count where a run passed (last turn's iteration if passed)
+ * @param selectedCriteria - If provided, determines pass based on these criteria
+ */
+function getPassedIteration(run: AnalyzableRun, selectedCriteria?: string[]): number | null {
   if (!run.turns || run.turns.length === 0) return null;
   const lastTurn = run.turns[run.turns.length - 1];
-  return lastTurn.passed ? lastTurn.iteration : null;
+  return isTurnPassed(lastTurn, selectedCriteria) ? lastTurn.iteration : null;
 }
 
 /**
  * Check if a run is considered "passed" (completed with final turn passed)
  */
-function isPassedRun(run: AnalyzableRun): boolean {
-  return getPassedIteration(run) !== null;
+function isPassedRun(run: AnalyzableRun, selectedCriteria?: string[]): boolean {
+  return getPassedIteration(run, selectedCriteria) !== null;
 }
 
 /**
  * Group runs by (task, workerType) and compute metrics
+ * @param runs - All runs to analyze
+ * @param kValues - Values of k for pass@k calculation
+ * @param selectedCriteria - If provided, filter to runs containing these criteria and use them to define success
  */
-export function computeAnalysis(runs: AnalyzableRun[], kValues: number[]): AnalysisResponse {
+export function computeAnalysis(
+  runs: AnalyzableRun[],
+  kValues: number[],
+  selectedCriteria?: string[]
+): AnalysisResponse {
   // Filter out runs without a valid scenario
-  const validRuns = runs.filter(run => run.scenario?.task);
+  const allValidRuns = runs.filter(run => run.scenario?.task);
+  
+  // Collect all available criteria from all runs (before filtering)
+  const availableCriteriaSet = new Set<string>();
+  for (const run of allValidRuns) {
+    if (run.scenario.criteria) {
+      for (const c of run.scenario.criteria) {
+        availableCriteriaSet.add(c);
+      }
+    }
+  }
+  const availableCriteria = Array.from(availableCriteriaSet).sort();
+
+  // Filter runs: if selectedCriteria is provided, only include runs that have ALL selected criteria
+  const validRuns = selectedCriteria && selectedCriteria.length > 0
+    ? allValidRuns.filter(run => {
+        const runCriteria = new Set(run.scenario.criteria || []);
+        return selectedCriteria.every(c => runCriteria.has(c));
+      })
+    : allValidRuns;
   
   // Group by task + workerType
   const groupMap = new Map<string, AnalyzableRun[]>();
@@ -138,9 +200,9 @@ export function computeAnalysis(runs: AnalyzableRun[], kValues: number[]): Analy
     const [task, workerType] = key.split('|||');
     
     const completed = groupRuns.filter(r => r.status === 'completed');
-    const passedRuns = completed.filter(isPassedRun);
+    const passedRuns = completed.filter(r => isPassedRun(r, selectedCriteria));
     const passedIterations = passedRuns
-      .map(getPassedIteration)
+      .map(r => getPassedIteration(r, selectedCriteria))
       .filter((iter): iter is number => iter !== null);
 
     const maxIterInGroup = passedIterations.length > 0
@@ -188,9 +250,9 @@ export function computeAnalysis(runs: AnalyzableRun[], kValues: number[]): Analy
   // Now fill in Success@≤T for all groups using globalMaxT
   for (const group of groups) {
     const groupRuns = groupMap.get(`${group.task}|||${group.workerType}`)!;
-    const passedRuns = groupRuns.filter(r => r.status === 'completed').filter(isPassedRun);
+    const passedRuns = groupRuns.filter(r => r.status === 'completed').filter(r => isPassedRun(r, selectedCriteria));
     const passedIterations = passedRuns
-      .map(getPassedIteration)
+      .map(r => getPassedIteration(r, selectedCriteria))
       .filter((iter): iter is number => iter !== null);
 
     for (let t = 1; t <= globalMaxT; t++) {
@@ -200,9 +262,9 @@ export function computeAnalysis(runs: AnalyzableRun[], kValues: number[]): Analy
 
   // Compute summary
   const allCompleted = validRuns.filter(r => r.status === 'completed');
-  const allPassed = allCompleted.filter(isPassedRun);
+  const allPassed = allCompleted.filter(r => isPassedRun(r, selectedCriteria));
   const allPassedIterations = allPassed
-    .map(getPassedIteration)
+    .map(r => getPassedIteration(r, selectedCriteria))
     .filter((iter): iter is number => iter !== null);
 
   const summary = {
@@ -220,5 +282,7 @@ export function computeAnalysis(runs: AnalyzableRun[], kValues: number[]): Analy
     kValues,
     maxT: globalMaxT,
     summary,
+    availableCriteria,
+    selectedCriteria: selectedCriteria || [],
   };
 }
