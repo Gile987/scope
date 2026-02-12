@@ -51,7 +51,7 @@ export interface RequestDocument {
   _id: string;  // UUID as _id (for CosmosDB sharding compatibility)
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
-  status: "pending" | "processing" | "iterating" | "completed" | "failed";
+  status: "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
   result?: string;
   error?: string;
   logs: LogEvent[];

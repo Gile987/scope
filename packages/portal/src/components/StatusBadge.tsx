@@ -10,6 +10,7 @@ const statusConfig: Record<RunStatus, { label: string; variant: "default" | "sec
   iterating: { label: "Iterating", variant: "warning" },
   completed: { label: "Completed", variant: "success" },
   failed: { label: "Failed", variant: "destructive" },
+  exhausted: { label: "Exhausted", variant: "warning" },
 };
 
 export function StatusBadge({ status }: { status: RunStatus }) {

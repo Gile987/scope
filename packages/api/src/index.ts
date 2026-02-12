@@ -82,7 +82,7 @@ interface RequestDocument {
   _id: string;
   scenario: { task: string; criteria: string[]; version?: 'v1' | 'v2' };
   workerType: WorkerType;
-  status: "pending" | "processing" | "iterating" | "completed" | "failed";
+  status: "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
   result?: string;
   error?: string;
   logs?: LogEvent[];
@@ -484,8 +484,8 @@ app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: N
       }
     }
 
-    // If request already completed/failed, send final event and close
-    if (resource.status === "completed" || resource.status === "failed") {
+    // If request already completed/failed/exhausted, send final event and close
+    if (resource.status === "completed" || resource.status === "failed" || resource.status === "exhausted") {
       // For completed multi-turn requests, send turns summary
       if (resource.turns && resource.turns.length > 0) {
         res.write(`data: ${JSON.stringify({ type: "turns_summary", turns: resource.turns.length, passed: resource.status === "completed" })}\n\n`);
@@ -561,7 +561,7 @@ app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: N
       changeStream.on("change", (change) => {
         if (change.operationType === "update" && change.fullDocument) {
           const doc = change.fullDocument;
-          if (doc.status === "completed" || doc.status === "failed") {
+          if (doc.status === "completed" || doc.status === "failed" || doc.status === "exhausted") {
             res.write(`event: done\ndata: {"status":"${doc.status}"}\n\n`);
             client.cleanup();
           }
@@ -626,7 +626,7 @@ app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFuncti
     // Fetch all completed/failed runs (exclude pending/processing, exclude deleted)
     const runs = await collection
       .find({
-        status: { $in: ["completed", "failed"] },
+        status: { $in: ["completed", "failed", "exhausted"] },
         deletedAt: { $exists: false },
       })
       .project({
@@ -936,10 +936,10 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
     }
 
     // Validate status is terminal (cannot import in-flight runs)
-    const terminalStatuses = ["completed", "failed"];
+    const terminalStatuses = ["completed", "failed", "exhausted"];
     if (!terminalStatuses.includes(runDoc.status)) {
       res.status(400).json({
-        error: `Cannot upload in-flight run (status: ${runDoc.status}). Only completed or failed runs can be uploaded.`,
+        error: `Cannot upload in-flight run (status: ${runDoc.status}). Only terminal runs can be uploaded.`,
       });
       return;
     }

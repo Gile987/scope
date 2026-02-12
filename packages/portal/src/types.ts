@@ -3,7 +3,7 @@
 
 // Types mirroring the API response shapes (from shared/src/types.ts)
 
-export type RunStatus = "pending" | "processing" | "iterating" | "completed" | "failed";
+export type RunStatus = "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
 
 export interface CriterionResult {
   criterionId: string;
@@ -75,6 +75,7 @@ export const STATUS_LIST: RunStatus[] = [
   "iterating",
   "completed",
   "failed",
+  "exhausted",
 ];
 
 // Criteria types

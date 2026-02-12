@@ -278,7 +278,11 @@ export class QueueProcessor {
       },
     });
 
-    const finalStatus = result.passed ? "completed" : "failed";
+    const finalStatus = result.passed
+      ? "completed"
+      : result.turns.length >= maxIterations
+        ? "exhausted"
+        : "failed";
     await log("info", `Multi-turn processing ${finalStatus}`, {
       passed: result.passed,
       totalIterations: result.turns.length,

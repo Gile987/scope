@@ -29,13 +29,14 @@ export function RunDetail() {
     enabled: !!id,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      // Stop polling once completed or failed
-      if (status === "completed" || status === "failed") return false;
+      // Stop polling once terminal (completed, failed, or exhausted)
+      if (status === "completed" || status === "failed" || status === "exhausted") return false;
       return 5_000;
     },
   });
 
   const isActive = run?.status === "pending" || run?.status === "processing" || run?.status === "iterating";
+  // Note: "exhausted" is terminal — not active, no log streaming needed
 
   // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
   // Must be called unconditionally (before any early returns) per Rules of Hooks
