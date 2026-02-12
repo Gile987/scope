@@ -130,8 +130,12 @@ export const api = {
   // ─── Analysis ──────────────────────────────────────────────────────────────
 
   /** Get analysis data for insights dashboard */
-  getAnalysis: (kValues: number[] = [1, 2, 5]): Promise<AnalysisResponse> => {
-    const ks = kValues.join(",");
-    return request(`/analysis?k=${ks}`);
+  getAnalysis: (kValues: number[] = [1, 2, 5], criteria?: string[]): Promise<AnalysisResponse> => {
+    const params = new URLSearchParams();
+    params.set("k", kValues.join(","));
+    if (criteria && criteria.length > 0) {
+      params.set("criteria", criteria.join(","));
+    }
+    return request(`/analysis?${params.toString()}`);
   },
 };
