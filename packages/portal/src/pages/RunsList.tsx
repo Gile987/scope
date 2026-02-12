@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -22,6 +23,7 @@ import type { Run } from "@/types";
 export function RunsList() {
   const [workerFilter, setWorkerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
   const { data: runs = [], isLoading, isRefetching } = useQuery({
@@ -35,8 +37,39 @@ export function RunsList() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
   });
 
+  const bulkDeleteMutation = useMutation({
+    mutationFn: api.bulkDeleteRuns,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      setSelectedIds(new Set());
+    },
+  });
+
   const filteredRuns =
     statusFilter === "all" ? runs : runs.filter((r) => r.status === statusFilter);
+
+  const allSelected = filteredRuns.length > 0 && filteredRuns.every((r) => selectedIds.has(r._id));
+  const someSelected = filteredRuns.some((r) => selectedIds.has(r._id));
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredRuns.map((r) => r._id)));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -90,6 +123,48 @@ export function RunsList() {
         </span>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-4 rounded-md border bg-muted/50 px-4 py-2">
+          <span className="text-sm font-medium">
+            {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""} selected
+          </span>
+          <div className="flex-1" />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Clear selection
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm" className="gap-1.5">
+                <Trash2 className="h-4 w-4" /> Delete selected
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will soft-delete the selected runs. They can be recovered later if needed.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => bulkDeleteMutation.mutate(Array.from(selectedIds))}
+                  disabled={bulkDeleteMutation.isPending}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  {bulkDeleteMutation.isPending ? "Deleting…" : "Delete"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      )}
+
       {/* Table */}
       {isLoading ? (
         <div className="space-y-2">
@@ -105,6 +180,13 @@ export function RunsList() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-[40px]">
+                <Checkbox
+                  checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="Select all"
+                />
+              </TableHead>
               <TableHead className="w-[100px]">ID</TableHead>
               <TableHead>Task</TableHead>
               <TableHead className="w-[180px]">Worker</TableHead>
@@ -116,7 +198,14 @@ export function RunsList() {
           </TableHeader>
           <TableBody>
             {filteredRuns.map((run: Run) => (
-              <TableRow key={run._id}>
+              <TableRow key={run._id} data-state={selectedIds.has(run._id) ? "selected" : undefined}>
+                <TableCell>
+                  <Checkbox
+                    checked={selectedIds.has(run._id)}
+                    onCheckedChange={() => toggleSelect(run._id)}
+                    aria-label={`Select run ${formatId(run._id)}`}
+                  />
+                </TableCell>
                 <TableCell className="font-mono text-xs">
                   <Link to={`/runs/${run._id}`} className="text-primary hover:underline">
                     {formatId(run._id)}
