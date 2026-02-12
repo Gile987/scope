@@ -59,6 +59,14 @@ export const api = {
     });
   },
 
+  /** Bulk re-submit runs (create new runs from existing ones) */
+  bulkResubmitRuns: (ids: string[], count = 1): Promise<{ submitted: number; failed: string[]; newIds: string[] }> => {
+    return request(`/requests/bulk-resubmit`, {
+      method: "POST",
+      body: JSON.stringify({ ids, count }),
+    });
+  },
+
   /** Get snapshot download URL for a specific iteration */
   snapshotUrl: (id: string, iteration: number): string => {
     return `${BASE}/requests/${id}/snapshots/${iteration}`;

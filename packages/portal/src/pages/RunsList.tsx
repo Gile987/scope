@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -16,7 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
 import type { Run } from "@/types";
@@ -25,6 +27,8 @@ export function RunsList() {
   const [workerFilter, setWorkerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [resubmitCount, setResubmitCount] = useState(1);
+  const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: runs = [], isLoading, isRefetching } = useQuery({
@@ -47,6 +51,22 @@ export function RunsList() {
     },
     onError: (error) => {
       toast.error("Failed to delete runs", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const bulkResubmitMutation = useMutation({
+    mutationFn: ({ ids, count }: { ids: string[]; count: number }) => api.bulkResubmitRuns(ids, count),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      setSelectedIds(new Set());
+      setResubmitDialogOpen(false);
+      setResubmitCount(1);
+      toast.success(`Re-submitted ${data.submitted} run${data.submitted !== 1 ? "s" : ""}`);
+    },
+    onError: (error) => {
+      toast.error("Failed to re-submit runs", {
         description: error instanceof Error ? error.message : "Unknown error",
       });
     },
@@ -144,6 +164,45 @@ export function RunsList() {
           >
             Clear selection
           </Button>
+          <AlertDialog open={resubmitDialogOpen} onOpenChange={setResubmitDialogOpen}>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <Repeat className="h-4 w-4" /> Re-submit selected
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Re-submit {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will create new runs with the same scenario, worker, and settings as the selected runs.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="py-4">
+                <Label htmlFor="resubmit-count" className="text-sm font-medium">Copies per run</Label>
+                <Input
+                  id="resubmit-count"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={resubmitCount}
+                  onChange={(e) => setResubmitCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                  className="mt-1.5 w-24"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Total new runs: {selectedIds.size * resubmitCount}
+                </p>
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setResubmitCount(1)}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => bulkResubmitMutation.mutate({ ids: Array.from(selectedIds), count: resubmitCount })}
+                  disabled={bulkResubmitMutation.isPending}
+                >
+                  {bulkResubmitMutation.isPending ? "Re-submitting…" : "Re-submit"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive" size="sm" className="gap-1.5">

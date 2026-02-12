@@ -578,6 +578,82 @@ app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFuncti
   }
 });
 
+// Bulk re-submit requests (create new runs from existing ones)
+app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ids, count = 1 } = req.body as { ids?: string[]; count?: number };
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: "Request body must include 'ids' array" });
+      return;
+    }
+
+    if (typeof count !== "number" || count < 1 || count > 10) {
+      res.status(400).json({ error: "count must be a number between 1 and 10" });
+      return;
+    }
+
+    // Fetch original runs
+    const originalRuns = await collection.find(
+      { _id: { $in: ids }, deletedAt: { $exists: false } }
+    ).toArray();
+
+    const foundIds = new Set(originalRuns.map(r => r._id));
+    const notFound = ids.filter(id => !foundIds.has(id));
+
+    const newIds: string[] = [];
+    const newDocs: RequestDocument[] = [];
+    const queueMessages: Array<{ workerType: WorkerType; message: string }> = [];
+
+    for (const original of originalRuns) {
+      for (let i = 0; i < count; i++) {
+        const requestId = uuidv4();
+        newIds.push(requestId);
+
+        const newDoc: RequestDocument = {
+          _id: requestId,
+          scenario: original.scenario,
+          workerType: original.workerType,
+          status: "pending",
+          createdAt: new Date(),
+          ...(original.maxIterations ? { maxIterations: original.maxIterations } : {}),
+          ...(original.personaInstructions ? { personaInstructions: original.personaInstructions } : {}),
+          ...(original.persona ? { persona: original.persona } : {}),
+        };
+
+        newDocs.push(newDoc);
+
+        const queueMessage: QueueMessage = { requestId };
+        const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
+        queueMessages.push({ workerType: original.workerType as WorkerType, message: messageContent });
+      }
+    }
+
+    // Insert all new documents
+    if (newDocs.length > 0) {
+      await collection.insertMany(newDocs);
+    }
+
+    // Queue all messages
+    for (const { workerType, message } of queueMessages) {
+      const queueClient = queueClients.get(workerType);
+      if (queueClient) {
+        await queueClient.sendMessage(message);
+      }
+    }
+
+    console.log(`Bulk re-submitted ${newIds.length} runs from ${originalRuns.length} originals (count=${count})`);
+
+    res.status(201).json({
+      submitted: newIds.length,
+      failed: notFound,
+      newIds,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Bulk soft-delete requests
 app.delete("/api/v1/requests/bulk", async (req: Request, res: Response, next: NextFunction) => {
   try {
