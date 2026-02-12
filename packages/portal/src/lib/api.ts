@@ -31,14 +31,15 @@ export const api = {
     return request(`/requests/${id}`);
   },
 
-  /** Submit a new run */
+  /** Submit a new run (or multiple runs if count > 1) */
   submitRun: (body: {
     scenario: { task: string; criteria: string[]; version?: "v1" | "v2" };
     worker: string;
     maxIterations?: number;
     personaInstructions?: string;
     persona?: { personality: string; experience: string; verbosity: string; type: string };
-  }): Promise<Run & { message: string }> => {
+    count?: number;
+  }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     return request(`/requests?worker=${encodeURIComponent(worker)}`, {
       method: "POST",

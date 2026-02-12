@@ -279,7 +279,7 @@ app.get("/about", (_req: Request, res: Response) => {
 // Submit a request
 app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1 } = req.body;
     const worker = req.query.worker as string;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
@@ -320,8 +320,13 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       }
     }
 
+    // Validate count if provided
+    if (typeof count !== "number" || count < 1 || count > 10) {
+      res.status(400).json({ error: "count must be a number between 1 and 10" });
+      return;
+    }
+
     const workerType = worker as WorkerType;
-    const requestId = uuidv4();
 
     // Normalize scenario: ensure criteria is always an array, preserve version
     const scenario: RequestDocument['scenario'] = {
@@ -329,6 +334,62 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       criteria: Array.isArray(scenarioObj.criteria) ? scenarioObj.criteria as string[] : [],
       ...(scenarioObj.version === 'v1' || scenarioObj.version === 'v2' ? { version: scenarioObj.version } : {}),
     };
+
+    const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
+    const queueClient = queueClients.get(workerType)!;
+
+    // Handle multiple runs (count > 1)
+    if (count > 1) {
+      const newIds: string[] = [];
+      const newDocs: RequestDocument[] = [];
+      const queueMessages: string[] = [];
+
+      for (let i = 0; i < count; i++) {
+        const requestId = uuidv4();
+        newIds.push(requestId);
+
+        const requestDoc: RequestDocument = {
+          _id: requestId,
+          scenario,
+          workerType,
+          status: "pending",
+          createdAt: new Date(),
+          ...(maxIterations ? { maxIterations } : {}),
+          ...(personaInstructions ? { personaInstructions } : {}),
+          ...(personaObj ? { persona: personaObj } : {}),
+        };
+        newDocs.push(requestDoc);
+
+        const queueMessage: QueueMessage = { requestId };
+        const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
+        queueMessages.push(messageContent);
+      }
+
+      // Bulk insert all documents
+      await collection.insertMany(newDocs);
+
+      // Queue all messages
+      for (const message of queueMessages) {
+        await queueClient.sendMessage(message);
+      }
+
+      console.log(`Created ${count} ${mode} requests for ${workerType} and queued for processing`);
+
+      res.status(201).json({
+        ids: newIds,
+        count,
+        workerType,
+        status: "pending",
+        mode,
+        message: `${count} requests submitted successfully`,
+        scenario,
+        ...(maxIterations ? { maxIterations } : {}),
+      });
+      return;
+    }
+
+    // Single run (count === 1) - original behavior
+    const requestId = uuidv4();
 
     // Create request document
     const requestDoc: RequestDocument = {
@@ -346,12 +407,10 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
     await collection.insertOne(requestDoc);
 
     // Queue the request for the appropriate worker
-    const queueClient = queueClients.get(workerType)!;
     const queueMessage: QueueMessage = { requestId };
     const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
     await queueClient.sendMessage(messageContent);
 
-    const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
     console.log(`Created ${mode} request ${requestId} for ${workerType} and queued for processing`);
 
     res.status(201).json({
