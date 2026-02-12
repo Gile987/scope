@@ -116,10 +116,13 @@ function isPassedRun(run: AnalyzableRun): boolean {
  * Group runs by (task, workerType) and compute metrics
  */
 export function computeAnalysis(runs: AnalyzableRun[], kValues: number[]): AnalysisResponse {
+  // Filter out runs without a valid scenario
+  const validRuns = runs.filter(run => run.scenario?.task);
+  
   // Group by task + workerType
   const groupMap = new Map<string, AnalyzableRun[]>();
   
-  for (const run of runs) {
+  for (const run of validRuns) {
     const key = `${run.scenario.task}|||${run.workerType}`;
     if (!groupMap.has(key)) {
       groupMap.set(key, []);
@@ -196,14 +199,14 @@ export function computeAnalysis(runs: AnalyzableRun[], kValues: number[]): Analy
   }
 
   // Compute summary
-  const allCompleted = runs.filter(r => r.status === 'completed');
+  const allCompleted = validRuns.filter(r => r.status === 'completed');
   const allPassed = allCompleted.filter(isPassedRun);
   const allPassedIterations = allPassed
     .map(getPassedIteration)
     .filter((iter): iter is number => iter !== null);
 
   const summary = {
-    totalRuns: runs.length,
+    totalRuns: validRuns.length,
     completedRuns: allCompleted.length,
     passedRuns: allPassed.length,
     overallPassRate: allCompleted.length > 0 ? allPassed.length / allCompleted.length : 0,
