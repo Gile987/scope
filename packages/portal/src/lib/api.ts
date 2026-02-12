@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -108,5 +108,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ behavior, ...(currentId && { currentId }) }),
     });
+  },
+
+  // ─── Analysis ──────────────────────────────────────────────────────────────
+
+  /** Get analysis data for insights dashboard */
+  getAnalysis: (kValues: number[] = [1, 2, 5]): Promise<AnalysisResponse> => {
+    const ks = kValues.join(",");
+    return request(`/analysis?k=${ks}`);
   },
 };
