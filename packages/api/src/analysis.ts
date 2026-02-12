@@ -115,7 +115,9 @@ function stdDev(values: number[]): number {
 /**
  * Check if a turn is considered passed based on selected criteria.
  * If selectedCriteria is empty or undefined, uses turn.passed.
- * Otherwise, all selected criteria must have passed: true in criteriaResults.
+ * Otherwise:
+ *   - If turn.passed is true, all criteria passed, so any subset also passed
+ *   - If turn.passed is false, check if the selected subset specifically passed
  */
 function isTurnPassed(
   turn: { passed: boolean; criteriaResults?: CriterionResult[] },
@@ -124,6 +126,11 @@ function isTurnPassed(
   if (!selectedCriteria || selectedCriteria.length === 0) {
     return turn.passed;
   }
+  // If the turn passed overall, all criteria passed, so any subset also passed
+  if (turn.passed) {
+    return true;
+  }
+  // Turn didn't pass overall - check if the selected criteria subset passed
   if (!turn.criteriaResults) {
     return false;
   }
