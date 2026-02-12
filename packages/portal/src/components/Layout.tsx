@@ -3,12 +3,13 @@
 
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List, FlaskConical } from "lucide-react";
+import { Activity, Plus, List, FlaskConical, BarChart3 } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Runs", icon: List },
   { to: "/runs/new", label: "New Run", icon: Plus },
   { to: "/criteria", label: "Criteria", icon: FlaskConical },
+  { to: "/insights", label: "Insights", icon: BarChart3 },
 ];
 
 export function Layout() {

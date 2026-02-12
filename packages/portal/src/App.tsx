@@ -10,6 +10,7 @@ import { CriteriaList } from "@/pages/CriteriaList";
 import { CriterionDetail } from "@/pages/CriterionDetail";
 import { CreateCriterion } from "@/pages/CreateCriterion";
 import { CriteriaGraphView } from "@/pages/CriteriaGraphView";
+import { Insights } from "@/pages/Insights";
 
 export function App() {
   return (
@@ -22,6 +23,7 @@ export function App() {
         <Route path="/criteria/new" element={<CreateCriterion />} />
         <Route path="/criteria/graph" element={<CriteriaGraphView />} />
         <Route path="/criteria/:id" element={<CriterionDetail />} />
+        <Route path="/insights" element={<Insights />} />
       </Route>
     </Routes>
   );
