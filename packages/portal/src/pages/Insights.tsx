@@ -479,7 +479,7 @@ export function Insights() {
             onClear={handleClearCriteria}
           />
           <SummaryCards data={data} />
-          <PassAtKTable data={data} />
+          {import.meta.env.VITE_SHOW_PASS_AT_K === "true" && <PassAtKTable data={data} />}
           <SuccessAtTChart data={data} />
           <IterationStatsTable data={data} />
         </>
