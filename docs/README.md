@@ -1,0 +1,51 @@
+# Scope MT Documentation
+
+Central documentation hub for the Scope MT platform — an AI coding agent benchmarking system.
+
+## Vision & Strategy
+
+| Document | Description |
+|----------|-------------|
+| [Vision](vision.md) | What Scope MT is, why it exists, target audience, roadmap themes |
+
+## Architecture & Design
+
+| Document | Description |
+|----------|-------------|
+| [System Overview](architecture/overview.md) | High-level architecture, component interactions, data flow |
+| [Architecture Layers](architecture/architecture-layers.md) | 5-layer responsibility model — from cloud foundation to app workloads |
+| [Application Design](architecture/app-design.md) | Data models, API design, judge pipeline, queue patterns, criteria system |
+| [GitOps & Deployment](architecture/gitops-deploy.md) | FluxCD design, kustomization phases, variable substitution |
+
+## Infrastructure
+
+| Document | Description |
+|----------|-------------|
+| [AKS Node Pool Separation](infrastructure/aks-node-pool-separation.md) | Taints, tolerations, node selectors for workload isolation |
+| [Azure Developer CLI](infrastructure/azd-deployment.md) | Provisioning with `azd up`, feature flags, environment variables |
+
+## Research
+
+| Document | Description |
+|----------|-------------|
+| [Delta Storage](research/delta-storage.md) | Approaches for space-efficient storage of coding agent iteration snapshots |
+
+## Decisions
+
+Architecture Decision Records (ADRs) capture significant design choices and their rationale.
+
+| Document | Description |
+|----------|-------------|
+| [ADR Template](decisions/000-template.md) | Template for new ADRs |
+
+---
+
+## Where else is documentation?
+
+- **Sub-project READMEs** — Quick-start and setup guides:
+  - [`scope-mt-app/README.md`](../scope-mt-app/README.md) — Application setup, Docker Compose, features
+  - [`scope-mt-deploy/README.md`](../scope-mt-deploy/README.md) — FluxCD manifest structure
+  - [`scope-mt-infra/README.md`](../scope-mt-infra/README.md) — Azure infrastructure overview
+- **[`scope-mt-app/ENV_VARIABLES.md`](../scope-mt-app/ENV_VARIABLES.md)** — Environment variable reference for the criteria/judge system
+- **[`scope-mt-app/config/`](../scope-mt-app/config/)** — Domain knowledge encoded as YAML (scenarios, personas, criteria, traits)
+- **[`.github/copilot-instructions.md`](../.github/copilot-instructions.md)** — Development conventions and patterns for AI assistants
