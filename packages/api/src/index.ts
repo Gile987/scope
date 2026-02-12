@@ -12,7 +12,7 @@ import { createRequire } from "module";
 import dotenv from "dotenv";
 import multer from "multer";
 import { execSync } from "child_process";
-import { mkdtempSync, rmSync, existsSync, readdirSync } from "fs";
+import { mkdtempSync, rmSync, existsSync, readdirSync, statSync } from "fs";
 import { readFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join, basename } from "path";
@@ -873,17 +873,26 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       return;
     }
 
-    // Determine run directory - could be at root or in a single subdirectory
+    // Determine run directory - could be at root or in a subdirectory
     let runDir = extractDir;
     let runYamlPath = join(extractDir, "run.yaml");
     
-    if (!existsSync(runYamlPath) && entries.length === 1) {
-      // run.yaml might be inside a single subdirectory (e.g., <id>/run.yaml)
-      const subDir = join(extractDir, entries[0]);
-      const subRunYaml = join(subDir, "run.yaml");
-      if (existsSync(subRunYaml)) {
-        runDir = subDir;
-        runYamlPath = subRunYaml;
+    if (!existsSync(runYamlPath)) {
+      // run.yaml might be inside a subdirectory (e.g., <id>/run.yaml)
+      // Check each top-level entry for run.yaml
+      for (const entry of entries) {
+        const subDir = join(extractDir, entry);
+        const subRunYaml = join(subDir, "run.yaml");
+        try {
+          const stat = statSync(subDir);
+          if (stat.isDirectory() && existsSync(subRunYaml)) {
+            runDir = subDir;
+            runYamlPath = subRunYaml;
+            break;
+          }
+        } catch {
+          // Entry might not be a directory, skip
+        }
       }
     }
 
