@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     storageAccountName: process.env.AZURE_STORAGE_ACCOUNT_NAME || "",
     storageConnectionString: process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING,
     queueName: process.env.QUEUE_NAME || process.env.AZURE_STORAGE_QUEUE_NAME || "queue-coder-acp-copilot",
-    batchSize: parseInt(process.env.BATCH_SIZE || "5", 10),
+    batchSize: parseInt(process.env.BATCH_SIZE || "1", 10),
     pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "1000", 10),
     redisHost: process.env.REDIS_HOST || "",
     redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),
