@@ -617,6 +617,12 @@ app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFuncti
     const kParam = (req.query.k as string) || "1,2,5";
     const kValues = kParam.split(",").map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v) && v > 0);
 
+    // Parse criteria filter from query string (comma-separated criterion IDs)
+    const criteriaParam = req.query.criteria as string | undefined;
+    const selectedCriteria = criteriaParam
+      ? criteriaParam.split(",").map(c => c.trim()).filter(Boolean)
+      : undefined;
+
     // Fetch all completed/failed runs (exclude pending/processing, exclude deleted)
     const runs = await collection
       .find({
@@ -640,7 +646,7 @@ app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFuncti
       turns: r.turns,
     }));
 
-    const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues);
+    const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues, selectedCriteria);
     res.json(analysis);
   } catch (error) {
     next(error);

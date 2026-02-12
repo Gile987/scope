@@ -57,6 +57,14 @@ When enabled, prevents feedback from hinting about descendant criteria (requirem
 
 Path to the directory containing criteria definition YAML files for v2 scenarios.
 
+## Portal Feature Flags
+
+### VITE_SHOW_PASS_AT_K
+**Default:** (not set, hidden)
+**Type:** `"true"` | (any other value or unset)
+
+When set to `"true"`, displays the Pass@k metrics table on the Insights page. By default, this table is hidden. This is a Vite env var and must be prefixed with `VITE_` to be exposed to the frontend.
+
 ## Setting Variables
 
 ### Docker Compose

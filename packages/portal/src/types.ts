@@ -131,6 +131,10 @@ export interface AnalysisResponse {
     overallPassRate: number;
     avgIterationsToPass: number | null;
   };
+  /** Union of all criteria IDs found across all runs (before filtering) */
+  availableCriteria: string[];
+  /** Criteria IDs that were used to define success (empty = use turn.passed) */
+  selectedCriteria: string[];
 }
 
 // Bulk re-submit response
