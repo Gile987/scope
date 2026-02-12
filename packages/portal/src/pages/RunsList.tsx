@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -39,9 +40,15 @@ export function RunsList() {
 
   const bulkDeleteMutation = useMutation({
     mutationFn: api.bulkDeleteRuns,
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["runs"] });
       setSelectedIds(new Set());
+      toast.success(`Deleted ${data.deleted} run${data.deleted !== 1 ? "s" : ""}`);
+    },
+    onError: (error) => {
+      toast.error("Failed to delete runs", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
     },
   });
 

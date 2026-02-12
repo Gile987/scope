@@ -25,6 +25,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^2.15.0",
+    "sonner": "^1.7.0",
     "@xyflow/react": "^12.6.0",
     "dagre": "^0.8.5",
     "react-router-dom": "^7.1.0",
