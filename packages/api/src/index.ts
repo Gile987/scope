@@ -578,6 +578,41 @@ app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFuncti
   }
 });
 
+// Bulk soft-delete requests
+app.delete("/api/v1/requests/bulk", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ids } = req.body as { ids?: string[] };
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: "Request body must include 'ids' array" });
+      return;
+    }
+
+    // Find which IDs exist and are not already deleted
+    const existingDocs = await collection.find(
+      { _id: { $in: ids }, deletedAt: { $exists: false } },
+      { projection: { _id: 1 } }
+    ).toArray();
+    const existingIds = new Set(existingDocs.map(d => d._id));
+
+    // Soft-delete all matching documents
+    const result = await collection.updateMany(
+      { _id: { $in: ids }, deletedAt: { $exists: false } },
+      { $set: { deletedAt: new Date() } }
+    );
+
+    // Determine which IDs were not found or already deleted
+    const notFound = ids.filter(id => !existingIds.has(id));
+
+    res.json({
+      deleted: result.modifiedCount,
+      notFound,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Soft-delete a request
 app.delete("/api/v1/requests/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
