@@ -132,3 +132,10 @@ export interface AnalysisResponse {
     avgIterationsToPass: number | null;
   };
 }
+
+// Bulk re-submit response
+export interface BulkResubmitResponse {
+  submitted: number;
+  failed: string[];
+  newIds: string[];
+}
