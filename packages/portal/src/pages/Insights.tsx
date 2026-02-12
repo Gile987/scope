@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -17,7 +18,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { BarChart3, TrendingUp, CheckCircle, Clock, RefreshCw } from "lucide-react";
+import { BarChart3, TrendingUp, CheckCircle, Clock, RefreshCw, X, Filter } from "lucide-react";
 import type { AnalysisResponse, TaskWorkerGroup } from "@/types";
 
 // Color palette for chart lines (distinct colors for different groups)
@@ -355,12 +356,104 @@ function InsightsSkeleton() {
   );
 }
 
+// Criteria filter bar for selecting which criteria define success
+function CriteriaFilterBar({
+  availableCriteria,
+  selectedCriteria,
+  onToggle,
+  onClear,
+}: {
+  availableCriteria: string[];
+  selectedCriteria: string[];
+  onToggle: (id: string) => void;
+  onClear: () => void;
+}) {
+  if (availableCriteria.length === 0) {
+    return null;
+  }
+
+  const selectedSet = new Set(selectedCriteria);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Success Criteria Filter</CardTitle>
+          </div>
+          {selectedCriteria.length > 0 && (
+            <button
+              onClick={onClear}
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+        <CardDescription>
+          {selectedCriteria.length === 0
+            ? "Click criteria to filter runs and redefine success. Default: all criteria in each run must pass."
+            : `Success = all ${selectedCriteria.length} selected criteria pass. Runs without these criteria are excluded.`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap gap-1.5">
+          {availableCriteria.map((id) => {
+            const isSelected = selectedSet.has(id);
+            return (
+              <Badge
+                key={id}
+                variant={isSelected ? "default" : "outline"}
+                className={`cursor-pointer transition-colors ${
+                  isSelected
+                    ? "bg-primary hover:bg-primary/80"
+                    : "hover:bg-muted"
+                }`}
+                onClick={() => onToggle(id)}
+              >
+                {id}
+                {isSelected && <X className="ml-1 h-3 w-3" />}
+              </Badge>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function Insights() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Parse selected criteria from URL
+  const selectedCriteria = searchParams.get("criteria")?.split(",").filter(Boolean) || [];
+
   const { data, isLoading, isRefetching } = useQuery({
-    queryKey: ["analysis"],
-    queryFn: () => api.getAnalysis([1, 2, 5]),
+    queryKey: ["analysis", selectedCriteria],
+    queryFn: () => api.getAnalysis([1, 2, 5], selectedCriteria.length > 0 ? selectedCriteria : undefined),
     refetchInterval: 30_000,  // Refresh every 30 seconds
   });
+
+  // Toggle a criterion in the filter
+  const handleToggleCriterion = (id: string) => {
+    const newSelected = selectedCriteria.includes(id)
+      ? selectedCriteria.filter((c) => c !== id)
+      : [...selectedCriteria, id];
+    
+    if (newSelected.length === 0) {
+      searchParams.delete("criteria");
+    } else {
+      searchParams.set("criteria", newSelected.join(","));
+    }
+    setSearchParams(searchParams, { replace: true });
+  };
+
+  // Clear all criteria filters
+  const handleClearCriteria = () => {
+    searchParams.delete("criteria");
+    setSearchParams(searchParams, { replace: true });
+  };
 
   return (
     <div className="space-y-6">
@@ -379,6 +472,12 @@ export function Insights() {
         <InsightsSkeleton />
       ) : (
         <>
+          <CriteriaFilterBar
+            availableCriteria={data.availableCriteria}
+            selectedCriteria={selectedCriteria}
+            onToggle={handleToggleCriterion}
+            onClear={handleClearCriteria}
+          />
           <SummaryCards data={data} />
           <PassAtKTable data={data} />
           <SuccessAtTChart data={data} />
