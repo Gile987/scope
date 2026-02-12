@@ -101,3 +101,34 @@ export interface GeneratePromptResponse {
   suggestedParents: string[];
   suggestedChildren: string[];
 }
+
+// Analysis types for insights dashboard
+export interface TaskWorkerGroup {
+  task: string;
+  workerType: string;
+  total: number;
+  completed: number;
+  passed: number;
+  rejected: number;
+  passAtK: Record<number, number>;  // k -> probability
+  successAtT: number[];  // CDF: index i = probability of success at ≤(i+1) iterations
+  iterationStats: {
+    mean: number;
+    stdDev: number;
+    min: number;
+    max: number;
+  } | null;  // null if no passed runs
+}
+
+export interface AnalysisResponse {
+  groups: TaskWorkerGroup[];
+  kValues: number[];
+  maxT: number;
+  summary: {
+    totalRuns: number;
+    completedRuns: number;
+    passedRuns: number;
+    overallPassRate: number;
+    avgIterationsToPass: number | null;
+  };
+}
