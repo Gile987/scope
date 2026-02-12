@@ -514,6 +514,112 @@ run
     }
   });
 
+run
+  .command("upload")
+  .description("Upload a run archive to the API (previously downloaded via 'run download')")
+  .argument("<path>", "Path to .tar.gz archive or extracted directory")
+  .option("--dry-run", "Preview what would be uploaded without sending")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (inputPath: string, options) => {
+    const { url, dryRun } = options;
+
+    try {
+      const resolvedPath = resolve(inputPath);
+      
+      // Check if path exists
+      if (!existsSync(resolvedPath)) {
+        console.error(errorText(`Path not found: ${resolvedPath}`));
+        process.exit(1);
+      }
+
+      const stats = statSync(resolvedPath);
+      let archivePath: string;
+      let tempDir: string | undefined;
+
+      if (stats.isDirectory()) {
+        // Directory: validate run.yaml exists, then create tar.gz
+        const runYamlPath = join(resolvedPath, "run.yaml");
+        if (!existsSync(runYamlPath)) {
+          console.error(errorText(`Invalid directory: run.yaml not found at ${runYamlPath}`));
+          process.exit(1);
+        }
+
+        // Create temporary tar.gz archive
+        tempDir = mkdtempSync(join(tmpdir(), "scope-mt-upload-"));
+        archivePath = join(tempDir, `${basename(resolvedPath)}.tar.gz`);
+        
+        console.log(`${label('Creating archive from')} ${value(resolvedPath)}...`);
+        execSync(`tar czf "${archivePath}" -C "${dirname(resolvedPath)}" "${basename(resolvedPath)}"`, { stdio: "pipe" });
+      } else if (resolvedPath.endsWith(".tar.gz")) {
+        // Archive file: use as-is
+        archivePath = resolvedPath;
+      } else {
+        console.error(errorText("Input must be a .tar.gz archive or a directory"));
+        process.exit(1);
+      }
+
+      const archiveStats = statSync(archivePath);
+      const archiveSizeKB = Math.round(archiveStats.size / 1024);
+
+      console.log(`${label('Archive:')} ${value(archivePath)}`);
+      console.log(`${label('Size:')} ${value(`${archiveSizeKB} KB`)}`);
+      console.log();
+
+      if (dryRun) {
+        console.log(warnBanner("Dry run - no data will be uploaded"));
+        console.log(`Would upload to: ${normalizeUrl(url)}/api/v1/runs/upload`);
+        
+        // Cleanup temp dir if created
+        if (tempDir) {
+          rmSync(tempDir, { recursive: true, force: true });
+        }
+        return;
+      }
+
+      // Upload archive
+      console.log(`${label('Uploading to')} ${value(normalizeUrl(url))}...`);
+      
+      const formData = new FormData();
+      const archiveBuffer = readFileSync(archivePath);
+      const blob = new Blob([archiveBuffer], { type: "application/gzip" });
+      formData.append("archive", blob, basename(archivePath));
+
+      const response = await fetch(`${normalizeUrl(url)}/api/v1/runs/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      // Cleanup temp dir if created
+      if (tempDir) {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        
+        if (response.status === 409) {
+          console.error(errorText(`Error: ${errorData.error || "Run already exists"}`));
+        } else if (response.status === 400) {
+          console.error(errorText(`Error: ${errorData.error || "Invalid archive"}`));
+        } else {
+          console.error(errorText(`Error: ${errorData.error || response.statusText}`));
+        }
+        process.exit(1);
+      }
+
+      const result = await response.json();
+      console.log();
+      console.log(successText("Run uploaded successfully!"));
+      console.log(`${label('Run ID:')} ${value(result.id)}`);
+      console.log(`${label('Status:')} ${value(result.status)}`);
+      console.log(`${label('Iterations:')} ${value(String(result.iterations))}`);
+
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 // ─── Criteria management ─────────────────────────────────────────────────────
 
 const criteria = program
