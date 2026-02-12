@@ -26,6 +26,7 @@ export function SubmitRun() {
   const [version, setVersion] = useState<"v1" | "v2">("v2");
   const [worker, setWorker] = useState<string>("coder-acp-copilot");
   const [maxIterations, setMaxIterations] = useState<string>("10");
+  const [occurrences, setOccurrences] = useState<number>(1);
 
   // Optional persona
   const [personality, setPersonality] = useState<string>("");
@@ -36,7 +37,14 @@ export function SubmitRun() {
   const submitMutation = useMutation({
     mutationFn: api.submitRun,
     onSuccess: (data) => {
-      navigate(`/runs/${data.id}`);
+      // If multiple runs were created, navigate to runs list
+      if ('ids' in data && data.ids.length > 1) {
+        navigate('/runs');
+      } else if ('id' in data) {
+        navigate(`/runs/${data.id}`);
+      } else {
+        navigate('/runs');
+      }
     },
   });
 
@@ -62,6 +70,7 @@ export function SubmitRun() {
       },
       worker,
       maxIterations: parseInt(maxIterations, 10) || undefined,
+      ...(occurrences > 1 ? { count: occurrences } : {}),
       ...(hasPersona
         ? {
             persona: {
@@ -159,7 +168,7 @@ export function SubmitRun() {
             <CardTitle>Worker</CardTitle>
             <CardDescription>Select which coding agent to run</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="worker">Worker Type *</Label>
               <Select value={worker} onValueChange={setWorker}>
@@ -174,6 +183,21 @@ export function SubmitRun() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="occurrences">Number of occurrences</Label>
+              <Input
+                id="occurrences"
+                type="number"
+                min={1}
+                max={10}
+                value={occurrences}
+                onChange={(e) => setOccurrences(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                className="w-24"
+              />
+              <p className="text-xs text-muted-foreground">
+                Submit {occurrences} identical run{occurrences !== 1 ? "s" : ""}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -257,7 +281,7 @@ export function SubmitRun() {
             ) : (
               <Send className="h-4 w-4" />
             )}
-            Submit Run
+            Submit {occurrences > 1 ? `${occurrences} Runs` : "Run"}
           </Button>
         </div>
       </form>
