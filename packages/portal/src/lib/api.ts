@@ -51,6 +51,14 @@ export const api = {
     return request(`/requests/${id}`, { method: "DELETE" });
   },
 
+  /** Bulk soft-delete multiple runs */
+  bulkDeleteRuns: (ids: string[]): Promise<{ deleted: number; notFound: string[] }> => {
+    return request(`/requests/bulk`, {
+      method: "DELETE",
+      body: JSON.stringify({ ids }),
+    });
+  },
+
   /** Get snapshot download URL for a specific iteration */
   snapshotUrl: (id: string, iteration: number): string => {
     return `${BASE}/requests/${id}/snapshots/${iteration}`;
