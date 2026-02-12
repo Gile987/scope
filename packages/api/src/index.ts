@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from "uuid";
 import { createRequire } from "module";
 import dotenv from "dotenv";
 import { isLlmAvailable, generateCriteriaPrompt } from "./llm.js";
+import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 
 const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
@@ -535,6 +536,43 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
       .toArray();
 
     res.json(resources.map(r => ({ ...r, id: r._id })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Analysis endpoint - compute pass@k, success@T, and iteration stats
+app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Parse k values from query string (default: 1,2,5)
+    const kParam = (req.query.k as string) || "1,2,5";
+    const kValues = kParam.split(",").map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v) && v > 0);
+
+    // Fetch all completed/failed runs (exclude pending/processing, exclude deleted)
+    const runs = await collection
+      .find({
+        status: { $in: ["completed", "failed"] },
+        deletedAt: { $exists: false },
+      })
+      .project({
+        _id: 1,
+        scenario: 1,
+        workerType: 1,
+        status: 1,
+        turns: 1,
+      })
+      .toArray();
+
+    // Transform to AnalyzableRun format
+    const analyzableRuns: AnalyzableRun[] = runs.map(r => ({
+      scenario: r.scenario,
+      workerType: r.workerType,
+      status: r.status,
+      turns: r.turns,
+    }));
+
+    const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues);
+    res.json(analysis);
   } catch (error) {
     next(error);
   }
