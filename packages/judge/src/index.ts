@@ -3,13 +3,19 @@
 
 import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
+import { MongoClient } from "mongodb";
 import { evaluateWorkspace } from "./judge-agent.js";
-import { BlobStorage, RedisLogPublisher } from "shared";
+import { BlobStorage, RedisLogPublisher, CriteriaStore, CachedCriteriaStore } from "shared";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
 dotenv.config();
+
+const mongoUri = process.env.MONGO_CONNECTION_STRING || "";
+const mongoDatabase = process.env.MONGO_DATABASE || "requests-db";
+
+let criteriaStore: CachedCriteriaStore | null = null;
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -41,7 +47,12 @@ if (redisHost) {
 
 // Health check
 app.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "healthy", service: "judge", version: "1.0.0" });
+  res.json({
+    status: "healthy",
+    service: "judge",
+    version: "1.0.0",
+    mongodb: criteriaStore ? "connected" : "disconnected",
+  });
 });
 
 // Evaluate endpoint — called by coding workers after each iteration
@@ -110,6 +121,7 @@ app.post(
           personaInstructions,
           scenarioVersion: scenarioVersion || 'v1',  // Default to v1 for backward compatibility
           onProgress,
+          criteriaStore: criteriaStore!,
         });
 
         const elapsed = Date.now() - startTime;
@@ -136,9 +148,37 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 async function main(): Promise<void> {
+  // Connect to MongoDB for criteria
+  if (!mongoUri) {
+    console.error("[judge] MONGO_CONNECTION_STRING is required");
+    process.exit(1);
+  }
+  const mongoClient = new MongoClient(mongoUri);
+  await mongoClient.connect();
+  const db = mongoClient.db(mongoDatabase);
+  const criteriaCollection = db.collection("criteria");
+
+  // Create unique index (idempotent)
+  try {
+    await criteriaCollection.createIndex({ id: 1 }, { unique: true });
+  } catch (_) { /* index may already exist */ }
+
+  const store = new CriteriaStore(criteriaCollection as any);
+  criteriaStore = new CachedCriteriaStore(store);
+  console.log(`[judge] Connected to MongoDB: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
+
   app.listen(port, () => {
     console.log(`[judge] Judge service listening on port ${port}`);
   });
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    console.log("[judge] Shutting down...");
+    await mongoClient.close();
+    process.exit(0);
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 main().catch((error) => {

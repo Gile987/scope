@@ -6,8 +6,8 @@ import {
   CriterionResult,
   ConversationTurn,
   DetailedEvaluationResult,
+  CachedCriteriaStore,
 } from "shared";
-import { getCriteriaRegistry } from "shared/criteria-registry";
 import { CriteriaGraph, normalizeCriteria } from "shared/criteria-graph";
 import { createJudgeStrategy } from "./judge-strategies.js";
 import { FeedbackGenerator } from "./feedback-generator.js";
@@ -20,6 +20,8 @@ export interface EvaluationInput {
   scenarioVersion?: "v1" | "v2";  // v1 = inline prompts, v2 = criteria IDs
   /** Called when an individual criterion result is available (for real-time progress) */
   onProgress?: (result: CriterionResult) => void;
+  /** Cached criteria store for resolving v2 criteria IDs from MongoDB */
+  criteriaStore: CachedCriteriaStore;
 }
 
 export interface EvaluationResult {
@@ -56,12 +58,11 @@ export async function evaluateWorkspace(
   let normalizedCriteria: CriteriaConfig[];
 
   if (scenarioVersion === "v2") {
-    // v2: criteria are IDs, resolve from registry
+    // v2: criteria are IDs, resolve from MongoDB via cached store
     try {
-      const registry = getCriteriaRegistry();
-      normalizedCriteria = registry.resolveWithAncestors(input.criteria);
+      normalizedCriteria = await input.criteriaStore.resolveWithAncestors(input.criteria);
       console.log(
-        `[judge-agent] Loaded ${normalizedCriteria.length} criteria (including ancestors) from registry (v2 format)`
+        `[judge-agent] Loaded ${normalizedCriteria.length} criteria (including ancestors) from store (v2 format)`
       );
     } catch (error) {
       console.error("[judge-agent] Failed to resolve criteria:", error);
