@@ -39,7 +39,7 @@ WORKDIR /app/packages/judge
 EXPOSE 80
 
 ENV PORT=80
-ENV CRITERIA_DIR=/shared-criteria
+ENV CRITERIA_DIR=/app/config/criteria
 ENV CRITERIA_WATCH=true
 ENV JUDGE_STRATEGY=bundled
 ENV JUDGE_MAX_PARALLELISM=3

@@ -15,7 +15,7 @@ import { stringify as yamlStringify } from 'yaml';
 
 const mongoUri = process.env.MONGO_CONNECTION_STRING || '';
 const mongoDatabase = process.env.MONGO_DATABASE || 'requests-db';
-const outputDir = process.env.OUTPUT_DIR || '/shared-criteria';
+const outputDir = process.env.OUTPUT_DIR || '/app/config/criteria';
 const syncIntervalMs = parseInt(process.env.SYNC_INTERVAL_MS || '10000', 10);
 
 interface CriteriaDocument {
