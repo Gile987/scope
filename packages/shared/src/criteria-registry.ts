@@ -48,10 +48,19 @@ export class CriteriaRegistry {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         try {
+          const previousIds = new Set(this.registry.keys());
           console.log(`[criteria-registry] Detected change in ${filename}, reloading criteria...`);
           this.registry = new Map();
           this.loadAllCriteria(this.criteriaDir);
-          console.log(`[criteria-registry] Reloaded ${this.registry.size} criteria`);
+          const currentIds = new Set(this.registry.keys());
+
+          // Log what changed
+          const added = [...currentIds].filter(id => !previousIds.has(id));
+          const removed = [...previousIds].filter(id => !currentIds.has(id));
+          const kept = [...currentIds].filter(id => previousIds.has(id));
+          if (added.length > 0) console.log(`[criteria-registry] Added: ${added.join(', ')}`);
+          if (removed.length > 0) console.log(`[criteria-registry] Removed: ${removed.join(', ')}`);
+          console.log(`[criteria-registry] Reloaded ${this.registry.size} criteria (${added.length} added, ${removed.length} removed, ${kept.length} unchanged)`);
         } catch (error) {
           console.error(`[criteria-registry] Failed to reload criteria:`, error);
         }
