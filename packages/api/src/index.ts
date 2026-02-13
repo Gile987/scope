@@ -1051,7 +1051,7 @@ app.post("/api/v1/criteria/generate-prompt", async (req: Request, res: Response,
     }
 
     if (!isLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: GITHUB_TOKEN is not set" });
+      return res.status(503).json({ error: "LLM not configured: GITHUB_MODELS_API_KEY is not set" });
     }
 
     // Fetch existing criteria to give the LLM context for parent/children suggestions

@@ -48,14 +48,14 @@ let client: ReturnType<typeof ModelClient> | null = null;
 
 function getClient(): ReturnType<typeof ModelClient> | null {
   if (client) return client;
-  const token = process.env.GITHUB_TOKEN;
+  const token = process.env.GITHUB_MODELS_API_KEY;
   if (!token) return null;
   client = ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token));
   return client;
 }
 
 export function isLlmAvailable(): boolean {
-  return !!process.env.GITHUB_TOKEN;
+  return !!process.env.GITHUB_MODELS_API_KEY;
 }
 
 function buildUserMessage(behavior: string, existingCriteria: ExistingCriterion[]): string {
@@ -81,7 +81,7 @@ export async function generateCriteriaPrompt(
 ): Promise<GenerateResult> {
   const llm = getClient();
   if (!llm) {
-    throw new Error("LLM not configured: GITHUB_TOKEN is not set");
+    throw new Error("LLM not configured: GITHUB_MODELS_API_KEY is not set");
   }
 
   const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
