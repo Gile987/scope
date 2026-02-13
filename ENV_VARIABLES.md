@@ -4,11 +4,13 @@ The sophisticated criteria system can be configured via environment variables in
 
 ## LLM Configuration (Criteria Prompt Generation)
 
-### GITHUB_TOKEN
+### GITHUB_MODELS_API_KEY
 **Required for AI prompt generation**
 **Type:** string
 
-GitHub personal access token used to authenticate with GitHub Models (`https://models.inference.ai.azure.com`) via the Azure AI Inference SDK. When set, the API can auto-generate evaluation prompts from natural-language behavior descriptions during criteria creation.
+GitHub personal access token (with the `models` read permission) used to authenticate with GitHub Models (`https://models.inference.ai.azure.com`) via the Azure AI Inference SDK. When set, the API can auto-generate evaluation prompts from natural-language behavior descriptions during criteria creation.
+
+> **Note:** This is separate from `GITHUB_TOKEN`, which is used by the Judge and worker services for Copilot SDK / ACP access and does **not** need the `models` permission.
 
 ### LLM_MODEL
 **Default:** `gpt-4.1`
