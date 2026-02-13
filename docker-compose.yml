@@ -133,13 +133,33 @@ services:
       FEEDBACK_MAX_CRITERIA: ${FEEDBACK_MAX_CRITERIA:-1}
       FEEDBACK_DESCENDANT_GUARD: ${FEEDBACK_DESCENDANT_GUARD:-true}
       CRITERIA_DIR: /app/config/criteria
+      CRITERIA_WATCH: "true"
     volumes:
-      - ./config/criteria:/app/config/criteria:ro
+      - criteria-sync:/app/config/criteria:ro
     depends_on:
+      mongodb:
+        condition: service_healthy
       azurite:
         condition: service_healthy
       redis:
         condition: service_healthy
+      criteria-syncer:
+        condition: service_started
+
+  # Criteria Syncer — polls API and writes YAML files to shared volume
+  criteria-syncer:
+    build:
+      context: .
+      dockerfile: Dockerfile.criteria-syncer
+    environment:
+      API_URL: http://api:80
+      OUTPUT_DIR: /app/config/criteria
+      SYNC_INTERVAL_MS: "10000"
+    volumes:
+      - criteria-sync:/app/config/criteria
+    depends_on:
+      api:
+        condition: service_started
 
   # ===========================================================================
   # Worker services (opt-in via profiles)
@@ -201,3 +221,4 @@ services:
 
 volumes:
   mongodb_data:
+  criteria-sync:
