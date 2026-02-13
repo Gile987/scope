@@ -6,14 +6,14 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
-COPY packages/shared/package.json ./packages/shared/
+COPY packages/criteria-syncer/package.json ./packages/criteria-syncer/
 
 RUN pnpm install --frozen-lockfile
 
-COPY packages/shared/tsconfig.json ./packages/shared/
-COPY packages/shared/src ./packages/shared/src/
+COPY packages/criteria-syncer/tsconfig.json ./packages/criteria-syncer/
+COPY packages/criteria-syncer/src ./packages/criteria-syncer/src/
 
-RUN pnpm --filter shared build
+RUN pnpm --filter criteria-syncer build
 
 FROM node:22.22.0-slim
 
@@ -22,12 +22,12 @@ RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY packages/shared/package.json ./packages/shared/
+COPY packages/criteria-syncer/package.json ./packages/criteria-syncer/
 
 RUN pnpm install --frozen-lockfile --prod
 
-COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
+COPY --from=builder /app/packages/criteria-syncer/dist ./packages/criteria-syncer/dist/
 
-WORKDIR /app/packages/shared
+WORKDIR /app/packages/criteria-syncer
 
-CMD ["node", "dist/criteria-syncer.js"]
+CMD ["node", "dist/index.js"]

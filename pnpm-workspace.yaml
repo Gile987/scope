@@ -1,6 +1,7 @@
 packages:
   - "packages/api"
   - "packages/cli"
+  - "packages/criteria-syncer"
   - "packages/judge"
   - "packages/portal"
   - "packages/shared"
