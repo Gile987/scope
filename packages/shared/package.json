@@ -20,6 +20,10 @@
     "./criteria-store": {
       "types": "./dist/criteria-store.d.ts",
       "import": "./dist/criteria-store.js"
+    },
+    "./cached-criteria-store": {
+      "types": "./dist/cached-criteria-store.d.ts",
+      "import": "./dist/cached-criteria-store.js"
     }
   },
   "scripts": {
