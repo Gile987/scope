@@ -13,13 +13,17 @@
       "types": "./dist/criteria-graph.d.ts",
       "import": "./dist/criteria-graph.js"
     },
-    "./criteria-registry": {
-      "types": "./dist/criteria-registry.d.ts",
-      "import": "./dist/criteria-registry.js"
-    },
     "./criteria-store": {
       "types": "./dist/criteria-store.d.ts",
       "import": "./dist/criteria-store.js"
+    },
+    "./criteria-provider": {
+      "types": "./dist/criteria-provider.d.ts",
+      "import": "./dist/criteria-provider.js"
+    },
+    "./criteria-provider-factory": {
+      "types": "./dist/criteria-provider-factory.d.ts",
+      "import": "./dist/criteria-provider-factory.js"
     }
   },
   "scripts": {

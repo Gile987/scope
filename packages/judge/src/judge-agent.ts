@@ -7,7 +7,7 @@ import {
   ConversationTurn,
   DetailedEvaluationResult,
 } from "shared";
-import { getCriteriaRegistry } from "shared/criteria-registry";
+import { getCriteriaProvider } from "shared/criteria-provider-factory";
 import { CriteriaGraph, normalizeCriteria } from "shared/criteria-graph";
 import { createJudgeStrategy } from "./judge-strategies.js";
 import { FeedbackGenerator } from "./feedback-generator.js";
@@ -56,12 +56,12 @@ export async function evaluateWorkspace(
   let normalizedCriteria: CriteriaConfig[];
 
   if (scenarioVersion === "v2") {
-    // v2: criteria are IDs, resolve from registry
+    // v2: criteria are IDs, resolve from provider (API or filesystem)
     try {
-      const registry = getCriteriaRegistry();
-      normalizedCriteria = registry.resolveWithAncestors(input.criteria);
+      const provider = getCriteriaProvider();
+      normalizedCriteria = await provider.resolveWithAncestors(input.criteria);
       console.log(
-        `[judge-agent] Loaded ${normalizedCriteria.length} criteria (including ancestors) from registry (v2 format)`
+        `[judge-agent] Loaded ${normalizedCriteria.length} criteria (including ancestors) from provider (v2 format)`
       );
     } catch (error) {
       console.error("[judge-agent] Failed to resolve criteria:", error);
