@@ -4,7 +4,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { evaluateWorkspace } from "./judge-agent.js";
-import { BlobStorage, RedisLogPublisher } from "shared";
+import { BlobStorage, RedisLogPublisher, getCriteriaRegistry } from "shared";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -136,6 +136,10 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 async function main(): Promise<void> {
+  // Initialize criteria registry early (starts fs.watch if CRITERIA_WATCH=true)
+  const registry = getCriteriaRegistry();
+  console.log(`[judge] Criteria registry initialized with ${registry.size()} criteria`);
+
   app.listen(port, () => {
     console.log(`[judge] Judge service listening on port ${port}`);
   });

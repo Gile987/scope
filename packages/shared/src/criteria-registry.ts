@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, watch, FSWatcher } from 'fs';
 import { join } from 'path';
 import { parse as parseYaml } from 'yaml';
 import { CriteriaConfig } from './types.js';
@@ -21,9 +21,13 @@ import { CriteriaConfig } from './types.js';
  */
 export class CriteriaRegistry {
   private registry: Map<string, CriteriaConfig>;
+  private criteriaDir: string | null;
+  private watcher: FSWatcher | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(criteriaDir: string) {
     this.registry = new Map();
+    this.criteriaDir = criteriaDir;
 
     if (!existsSync(criteriaDir)) {
       console.warn(`Criteria directory does not exist: ${criteriaDir}`);
@@ -170,6 +174,102 @@ export class CriteriaRegistry {
   size(): number {
     return this.registry.size;
   }
+
+  /**
+   * Start watching the criteria directory for changes.
+   * On detected changes (debounced 500ms), reloads all criteria and logs a diff.
+   */
+  watch(): void {
+    if (!this.criteriaDir || !existsSync(this.criteriaDir)) {
+      console.warn('[CriteriaRegistry] Cannot watch — criteria directory not available');
+      return;
+    }
+    if (this.watcher) {
+      console.warn('[CriteriaRegistry] Already watching');
+      return;
+    }
+
+    console.log(`[CriteriaRegistry] Watching for changes in ${this.criteriaDir}`);
+
+    this.watcher = watch(this.criteriaDir, (_eventType, _filename) => {
+      // Debounce: multiple rapid events (e.g. syncer writing several files) are coalesced
+      if (this.debounceTimer) clearTimeout(this.debounceTimer);
+      this.debounceTimer = setTimeout(() => {
+        this.reload();
+      }, 500);
+    });
+
+    this.watcher.on('error', (err) => {
+      console.error('[CriteriaRegistry] Watcher error:', err);
+    });
+  }
+
+  /**
+   * Stop watching the criteria directory.
+   */
+  stopWatching(): void {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    if (this.watcher) {
+      this.watcher.close();
+      this.watcher = null;
+      console.log('[CriteriaRegistry] Stopped watching');
+    }
+  }
+
+  /**
+   * Reload all criteria from disk and log a diff of changes.
+   */
+  private reload(): void {
+    if (!this.criteriaDir || !existsSync(this.criteriaDir)) return;
+
+    const previousIds = new Set(this.registry.keys());
+    const newRegistry = new Map<string, CriteriaConfig>();
+
+    try {
+      const files = readdirSync(this.criteriaDir).filter(f =>
+        f.endsWith('.yaml') || f.endsWith('.yml')
+      );
+
+      for (const file of files) {
+        try {
+          const filePath = join(this.criteriaDir, file);
+          const content = readFileSync(filePath, 'utf-8');
+          const data = parseYaml(content);
+          if (!data || typeof data !== 'object' || !data.id || !data.prompt) continue;
+
+          const dependsOn = data.depends_on || data.dependsOn || [];
+          const criteria: CriteriaConfig = {
+            id: data.id.trim(),
+            prompt: data.prompt.trim(),
+            dependsOn: Array.isArray(dependsOn) ? dependsOn.map((d: any) => String(d).trim()) : [],
+          };
+          newRegistry.set(criteria.id, criteria);
+        } catch {
+          // Skip individual file errors during reload (don't crash the judge)
+        }
+      }
+
+      // Compute diff
+      const newIds = new Set(newRegistry.keys());
+      const added = [...newIds].filter(id => !previousIds.has(id));
+      const removed = [...previousIds].filter(id => !newIds.has(id));
+      const unchanged = [...newIds].filter(id => previousIds.has(id));
+
+      this.registry = newRegistry;
+
+      console.log(
+        `[CriteriaRegistry] Reloaded: ${newRegistry.size} criteria ` +
+        `(+${added.length} added, -${removed.length} removed, ${unchanged.length} unchanged)`
+      );
+      if (added.length > 0) console.log(`[CriteriaRegistry]   Added: ${added.join(', ')}`);
+      if (removed.length > 0) console.log(`[CriteriaRegistry]   Removed: ${removed.join(', ')}`);
+    } catch (err) {
+      console.error('[CriteriaRegistry] Reload failed:', err);
+    }
+  }
 }
 
 // Singleton instance
@@ -177,7 +277,8 @@ let registryInstance: CriteriaRegistry | null = null;
 
 /**
  * Get the singleton CriteriaRegistry instance
- * Creates the instance on first call using CRITERIA_DIR environment variable
+ * Creates the instance on first call using CRITERIA_DIR environment variable.
+ * If CRITERIA_WATCH=true, automatically starts watching for changes.
  */
 export function getCriteriaRegistry(): CriteriaRegistry {
   if (!registryInstance) {
@@ -185,6 +286,10 @@ export function getCriteriaRegistry(): CriteriaRegistry {
     const defaultPath = join(process.cwd(), 'config', 'criteria');
     const criteriaDir = process.env.CRITERIA_DIR || defaultPath;
     registryInstance = new CriteriaRegistry(criteriaDir);
+
+    if (process.env.CRITERIA_WATCH === 'true') {
+      registryInstance.watch();
+    }
   }
   return registryInstance;
 }
