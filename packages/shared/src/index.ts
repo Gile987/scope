@@ -10,3 +10,7 @@ export * from "./multi-turn-loop.js";
 export * from "./criteria-graph.js";
 export * from "./criteria-registry.js";
 export * from "./criteria-store.js";
+export * from "./criteria-provider.js";
+export * from "./criteria-provider-fs.js";
+export * from "./criteria-provider-api.js";
+export * from "./criteria-provider-factory.js";
