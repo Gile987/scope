@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, watch as fsWatch, FSWatcher } from 'fs';
 import { join } from 'path';
 import { parse as parseYaml } from 'yaml';
 import { CriteriaConfig } from './types.js';
@@ -21,9 +21,12 @@ import { CriteriaConfig } from './types.js';
  */
 export class CriteriaRegistry {
   private registry: Map<string, CriteriaConfig>;
+  private criteriaDir: string;
+  private watcher: FSWatcher | null = null;
 
   constructor(criteriaDir: string) {
     this.registry = new Map();
+    this.criteriaDir = criteriaDir;
 
     if (!existsSync(criteriaDir)) {
       console.warn(`Criteria directory does not exist: ${criteriaDir}`);
@@ -31,6 +34,38 @@ export class CriteriaRegistry {
     }
 
     this.loadAllCriteria(criteriaDir);
+  }
+
+  /** Start watching the criteria directory for changes. Reloads all criteria on any file change. */
+  watch(): void {
+    if (!this.criteriaDir || !existsSync(this.criteriaDir)) return;
+    if (this.watcher) return; // Already watching
+
+    let debounceTimer: NodeJS.Timeout | null = null;
+    this.watcher = fsWatch(this.criteriaDir, { persistent: false }, (_event, filename) => {
+      if (!filename || (!filename.endsWith('.yaml') && !filename.endsWith('.yml'))) return;
+      // Debounce: wait 500ms after last change before reloading
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        try {
+          console.log(`[criteria-registry] Detected change in ${filename}, reloading criteria...`);
+          this.registry = new Map();
+          this.loadAllCriteria(this.criteriaDir);
+          console.log(`[criteria-registry] Reloaded ${this.registry.size} criteria`);
+        } catch (error) {
+          console.error(`[criteria-registry] Failed to reload criteria:`, error);
+        }
+      }, 500);
+    });
+    console.log(`[criteria-registry] Watching ${this.criteriaDir} for changes`);
+  }
+
+  /** Stop watching */
+  stopWatching(): void {
+    if (this.watcher) {
+      this.watcher.close();
+      this.watcher = null;
+    }
   }
 
   /**
@@ -185,6 +220,9 @@ export function getCriteriaRegistry(): CriteriaRegistry {
     const defaultPath = join(process.cwd(), 'config', 'criteria');
     const criteriaDir = process.env.CRITERIA_DIR || defaultPath;
     registryInstance = new CriteriaRegistry(criteriaDir);
+    if (process.env.CRITERIA_WATCH === 'true') {
+      registryInstance.watch();
+    }
   }
   return registryInstance;
 }
