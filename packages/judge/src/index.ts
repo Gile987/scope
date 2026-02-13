@@ -5,11 +5,15 @@ import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { evaluateWorkspace } from "./judge-agent.js";
 import { BlobStorage, RedisLogPublisher } from "shared";
+import { getCriteriaRegistry } from "shared/criteria-registry";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
 dotenv.config();
+
+// Initialize criteria registry early (enables file-watching when sidecar writes criteria files)
+getCriteriaRegistry();
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
