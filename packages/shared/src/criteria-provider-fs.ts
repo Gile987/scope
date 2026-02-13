@@ -11,8 +11,8 @@ import { CriteriaProvider } from './criteria-provider.js';
  * CriteriaProvider backed by YAML files on the filesystem.
  *
  * Loads all criteria eagerly on construction and serves from an in-memory Map.
- * This is the same logic as the legacy CriteriaRegistry, adapted to the async
- * CriteriaProvider interface.
+ * Reads YAML files from a directory, supporting both `depends_on` (snake_case)
+ * and `dependsOn` (camelCase) formats.
  */
 export class FileSystemCriteriaProvider implements CriteriaProvider {
   private registry: Map<string, CriteriaConfig>;
