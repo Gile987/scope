@@ -34,14 +34,16 @@ RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/packages/judge/dist ./packages/judge/dist/
 
-# Copy criteria definitions
-COPY config/criteria ./config/criteria/
+# NOTE: Criteria are loaded at runtime via CRITERIA_API_URL (REST API) or
+# CRITERIA_DIR (filesystem fallback). No need to bake criteria into the image.
 
 WORKDIR /app/packages/judge
 
 EXPOSE 80
 
 ENV PORT=80
+# In production, set CRITERIA_API_URL to use REST API provider.
+# CRITERIA_DIR is kept as fallback for local dev with mounted criteria.
 ENV CRITERIA_DIR=/app/config/criteria
 ENV JUDGE_STRATEGY=bundled
 ENV JUDGE_MAX_PARALLELISM=3

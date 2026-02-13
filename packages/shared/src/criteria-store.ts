@@ -8,7 +8,7 @@ import { CriteriaGraph } from './criteria-graph.js';
 /**
  * MongoDB-backed criteria store for CRUD operations on criteria definitions.
  *
- * Replaces filesystem-based CriteriaRegistry for multi-instance deployments.
+ * Replaces filesystem-based criteria loading for multi-instance deployments.
  * Criteria documents are soft-deleted (deletedAt) rather than removed.
  */
 export class CriteriaStore {
@@ -132,7 +132,7 @@ export class CriteriaStore {
 
   /**
    * Resolve criteria IDs to CriteriaConfig objects, including all transitive ancestors.
-   * Same BFS logic as CriteriaRegistry.resolveWithAncestors but reads from MongoDB.
+   * Same BFS logic as FileSystemCriteriaProvider.resolveWithAncestors but reads from MongoDB.
    */
   async resolveWithAncestors(ids: string[]): Promise<CriteriaConfig[]> {
     const collected = new Map<string, CriteriaConfig>();
