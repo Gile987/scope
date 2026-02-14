@@ -1,0 +1,138 @@
+name: Build Container Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      images:
+        description: 'Comma-separated list of images to build (or "all")'
+        required: false
+        default: 'all'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'packages/**'
+      - 'Dockerfile.*'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'tsconfig.base.json'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+
+jobs:
+  detect-changes:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.changes.outputs.api }}
+      judge: ${{ steps.changes.outputs.judge }}
+      portal: ${{ steps.changes.outputs.portal }}
+      coder-acp-copilot: ${{ steps.changes.outputs.coder-acp-copilot }}
+      coder-acp-claude-code: ${{ steps.changes.outputs.coder-acp-claude-code }}
+      shared: ${{ steps.changes.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            shared:
+              - 'packages/shared/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'tsconfig.base.json'
+            api:
+              - 'packages/api/**'
+              - 'Dockerfile.api'
+            judge:
+              - 'packages/judge/**'
+              - 'Dockerfile.judge'
+            portal:
+              - 'packages/portal/**'
+              - 'Dockerfile.portal'
+            coder-acp-copilot:
+              - 'packages/workers/coder-acp-copilot/**'
+              - 'Dockerfile.coder-acp-copilot'
+            coder-acp-claude-code:
+              - 'packages/workers/coder-acp-claude-code/**'
+              - 'Dockerfile.coder-acp-claude-code'
+
+  build-on-push:
+    if: github.event_name == 'push'
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: api
+            changed: ${{ needs.detect-changes.outputs.api == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+          - name: judge
+            changed: ${{ needs.detect-changes.outputs.judge == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+          - name: portal
+            changed: ${{ needs.detect-changes.outputs.portal == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+          - name: coder-acp-copilot
+            changed: ${{ needs.detect-changes.outputs.coder-acp-copilot == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+          - name: coder-acp-claude-code
+            changed: ${{ needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+        exclude:
+          - image:
+              changed: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push to ACR
+        run: |
+          az acr build \
+            --registry "${{ vars.ACR_NAME }}" \
+            --image "scoped/${{ matrix.image.name }}:${{ github.sha }}" \
+            --image "scoped/${{ matrix.image.name }}:latest" \
+            --file "Dockerfile.${{ matrix.image.name }}" \
+            .
+
+  build-manual:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if image should be built
+        id: check
+        run: |
+          IMAGES="${{ github.event.inputs.images }}"
+          if [[ "$IMAGES" == "all" ]] || echo "$IMAGES" | grep -qw "${{ matrix.image }}"; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to Azure
+        if: steps.check.outputs.build == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push to ACR
+        if: steps.check.outputs.build == 'true'
+        run: |
+          az acr build \
+            --registry "${{ vars.ACR_NAME }}" \
+            --image "scoped/${{ matrix.image }}:${{ github.sha }}" \
+            --image "scoped/${{ matrix.image }}:latest" \
+            --file "Dockerfile.${{ matrix.image }}" \
+            .
