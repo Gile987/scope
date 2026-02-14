@@ -5,7 +5,8 @@ set -euo pipefail
 # setup-github-ci.sh — Automate GitHub Actions CI/CD setup for scope-mt-app
 #
 # Creates a dedicated Azure MSI, configures OIDC federation for GitHub Actions,
-# assigns AcrPush role on the ACR, and sets all required GitHub Actions variables.
+# assigns Contributor role on the ACR (required for ACR Tasks / az acr build),
+# and sets all required GitHub Actions variables.
 #
 # Prerequisites:
 #   - Azure CLI (az) authenticated
@@ -229,34 +230,46 @@ add_federated_credential \
   "${GITHUB_REPO_SLUG}-pull_request" \
   "repo:${GITHUB_REPO}:pull_request"
 
-# --- AcrPush role assignment --------------------------------------------------
-step "ACR Role Assignment (AcrPush)"
+# --- ACR role assignment ------------------------------------------------------
+# az acr build uses ACR Tasks (server-side build), which requires Contributor
+# on the ACR — AcrPush alone is insufficient (no scheduleRun/action permission).
+step "ACR Role Assignment (Contributor)"
 
 ACR_RESOURCE_ID="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerRegistry/registries/${ACR_NAME}"
 
-EXISTING_ROLE=$(az role assignment list \
-  --assignee "$MSI_PRINCIPAL_ID" \
-  --role "AcrPush" \
-  --scope "$ACR_RESOURCE_ID" \
-  -o json 2>/dev/null | jq 'length')
+assign_role() {
+  local role="$1"
+  local scope="$2"
 
-if [[ "$EXISTING_ROLE" -gt 0 ]]; then
-  success "AcrPush role already assigned"
-else
-  if $DRY_RUN; then
-    info "[dry-run] Would assign AcrPush on $ACR_NAME to $MSI_PRINCIPAL_ID"
-  else
-    info "Assigning AcrPush role..."
-    az role assignment create \
-      --assignee-object-id "$MSI_PRINCIPAL_ID" \
-      --assignee-principal-type "ServicePrincipal" \
-      --role "AcrPush" \
-      --scope "$ACR_RESOURCE_ID" \
-      -o none \
-      || fatal "Failed to assign AcrPush role"
-    success "AcrPush role assigned on $ACR_NAME"
+  local existing
+  existing=$(az role assignment list \
+    --assignee "$MSI_PRINCIPAL_ID" \
+    --role "$role" \
+    --scope "$scope" \
+    -o json 2>/dev/null | jq 'length')
+
+  if [[ "$existing" -gt 0 ]]; then
+    success "$role — already assigned"
+    return
   fi
-fi
+
+  if $DRY_RUN; then
+    info "[dry-run] Would assign $role on $ACR_NAME to $MSI_PRINCIPAL_ID"
+    return
+  fi
+
+  info "Assigning $role role..."
+  az role assignment create \
+    --assignee-object-id "$MSI_PRINCIPAL_ID" \
+    --assignee-principal-type "ServicePrincipal" \
+    --role "$role" \
+    --scope "$scope" \
+    -o none \
+    || fatal "Failed to assign $role role"
+  success "$role assigned on $ACR_NAME"
+}
+
+assign_role "Contributor" "$ACR_RESOURCE_ID"
 
 # --- GitHub Actions variables ------------------------------------------------
 step "GitHub Actions Variables"
@@ -287,7 +300,7 @@ echo ""
 echo -e "${BOLD}Resource Summary${NC}"
 echo "  MSI:                $MSI_NAME (in $AZURE_RESOURCE_GROUP)"
 echo "  MSI Client ID:      $MSI_CLIENT_ID"
-echo "  ACR:                $ACR_NAME (AcrPush assigned)"
+echo "  ACR:                $ACR_NAME (Contributor assigned)"
 echo "  GitHub Repo:        $GITHUB_REPO"
 echo ""
 echo -e "${BOLD}Federated Credentials${NC}"
