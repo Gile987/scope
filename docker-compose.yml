@@ -77,7 +77,9 @@ services:
       - "${AZURITE_BLOB_PORT:-10100}:10000"  # Blob
       - "${AZURITE_QUEUE_PORT:-10101}:10001"  # Queue
       - "${AZURITE_TABLE_PORT:-10102}:10002"  # Table
-    command: azurite --loose --skipApiVersionCheck --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --silent
+    command: azurite --loose --skipApiVersionCheck --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --silent --location /data
+    volumes:
+      - azurite_data:/data
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:10001', (r) => process.exit(r.statusCode === 400 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
@@ -201,3 +203,4 @@ services:
 
 volumes:
   mongodb_data:
+  azurite_data:

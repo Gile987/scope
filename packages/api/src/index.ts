@@ -6,7 +6,7 @@ import cors from "cors";
 import { MongoClient, Db, Collection } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
-import { BlobServiceClient } from "@azure/storage-blob";
+import { BlobServiceClient, RestError } from "@azure/storage-blob";
 import { v4 as uuidv4 } from "uuid";
 import { createRequire } from "module";
 import dotenv from "dotenv";
@@ -849,6 +849,10 @@ app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: R
 
     downloadResponse.readableStreamBody.pipe(res);
   } catch (error) {
+    if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+      res.status(404).json({ error: "Snapshot not found — the blob may have been deleted or is no longer available" });
+      return;
+    }
     next(error);
   }
 });
