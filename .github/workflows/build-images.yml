@@ -10,8 +10,8 @@ on:
   push:
     branches: [main, dev]
     paths:
-      - 'packages/**'
-      - 'Dockerfile.*'
+      - 'apps/**'
+      - 'packages/shared/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'tsconfig.base.json'
@@ -45,20 +45,15 @@ jobs:
               - 'pnpm-lock.yaml'
               - 'tsconfig.base.json'
             api:
-              - 'packages/api/**'
-              - 'Dockerfile.api'
+              - 'apps/api/**'
             judge:
-              - 'packages/judge/**'
-              - 'Dockerfile.judge'
+              - 'apps/judge/**'
             portal:
-              - 'packages/portal/**'
-              - 'Dockerfile.portal'
+              - 'apps/portal/**'
             coder-acp-copilot:
-              - 'packages/workers/coder-acp-copilot/**'
-              - 'Dockerfile.coder-acp-copilot'
+              - 'apps/workers/coder-acp-copilot/**'
             coder-acp-claude-code:
-              - 'packages/workers/coder-acp-claude-code/**'
-              - 'Dockerfile.coder-acp-claude-code'
+              - 'apps/workers/coder-acp-claude-code/**'
 
   build-on-push:
     if: github.event_name == 'push'
@@ -69,14 +64,19 @@ jobs:
       matrix:
         image:
           - name: api
+            dockerfile: apps/api/Dockerfile
             changed: ${{ needs.detect-changes.outputs.api == 'true' || needs.detect-changes.outputs.shared == 'true' }}
           - name: judge
+            dockerfile: apps/judge/Dockerfile
             changed: ${{ needs.detect-changes.outputs.judge == 'true' || needs.detect-changes.outputs.shared == 'true' }}
           - name: portal
+            dockerfile: apps/portal/Dockerfile
             changed: ${{ needs.detect-changes.outputs.portal == 'true' || needs.detect-changes.outputs.shared == 'true' }}
           - name: coder-acp-copilot
+            dockerfile: apps/workers/coder-acp-copilot/Dockerfile
             changed: ${{ needs.detect-changes.outputs.coder-acp-copilot == 'true' || needs.detect-changes.outputs.shared == 'true' }}
           - name: coder-acp-claude-code
+            dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
             changed: ${{ needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true' }}
         exclude:
           - image:
@@ -98,7 +98,7 @@ jobs:
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --image "scoped/${{ matrix.image.name }}:${{ github.sha }}" \
             --image "scoped/${{ matrix.image.name }}:latest" \
-            --file "Dockerfile.${{ matrix.image.name }}" \
+            --file "${{ matrix.image.dockerfile }}" \
             .
 
   build-manual:
@@ -120,6 +120,17 @@ jobs:
             echo "build=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Compute Dockerfile path
+        id: dockerfile
+        if: steps.check.outputs.build == 'true'
+        run: |
+          case "${{ matrix.image }}" in
+            api|judge|portal) DOCKERFILE="apps/${{ matrix.image }}/Dockerfile" ;;
+            coder-*) DOCKERFILE="apps/workers/${{ matrix.image }}/Dockerfile" ;;
+            *) DOCKERFILE="apps/${{ matrix.image }}/Dockerfile" ;;
+          esac
+          echo "path=$DOCKERFILE" >> "$GITHUB_OUTPUT"
+
       - name: Log in to Azure
         if: steps.check.outputs.build == 'true'
         uses: azure/login@v2
@@ -136,5 +147,5 @@ jobs:
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --image "scoped/${{ matrix.image }}:${{ github.sha }}" \
             --image "scoped/${{ matrix.image }}:latest" \
-            --file "Dockerfile.${{ matrix.image }}" \
+            --file "${{ steps.dockerfile.outputs.path }}" \
             .
