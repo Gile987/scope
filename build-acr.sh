@@ -32,7 +32,11 @@ ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal"
 
 get_dockerfile() {
   local name=$1
-  echo "Dockerfile.${name}"
+  case "$name" in
+    api|judge|portal) echo "apps/${name}/Dockerfile" ;;
+    coder-acp-*) echo "apps/workers/${name}/Dockerfile" ;;
+    *) echo "apps/${name}/Dockerfile" ;;
+  esac
 }
 
 build_image() {
