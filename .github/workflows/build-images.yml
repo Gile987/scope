@@ -7,8 +7,20 @@ on:
         description: 'Comma-separated list of images to build (or "all")'
         required: false
         default: 'all'
+      tag:
+        description: 'Image tag to use (default: dev)'
+        required: false
+        default: 'dev'
   push:
     branches: [main, dev]
+    paths:
+      - 'apps/**'
+      - 'packages/shared/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'tsconfig.base.json'
+  pull_request:
+    branches: [dev]
     paths:
       - 'apps/**'
       - 'packages/shared/**'
@@ -18,13 +30,13 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 env:
 
 jobs:
   detect-changes:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       api: ${{ steps.changes.outputs.api }}
@@ -91,15 +103,115 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Determine environment tag
+        id: env-tag
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "tag=prod" >> "$GITHUB_OUTPUT"
+            echo "overlay=prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev" >> "$GITHUB_OUTPUT"
+            echo "overlay=integration" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and push to ACR
         run: |
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --image "scoped/${{ matrix.image.name }}:${{ github.sha }}" \
-            --image "scoped/${{ matrix.image.name }}:latest" \
+            --image "scoped/${{ matrix.image.name }}:${{ steps.env-tag.outputs.tag }}" \
             --file "${{ matrix.image.dockerfile }}" \
             .
+
+  build-on-pr:
+    if: github.event_name == 'pull_request'
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: api
+            dockerfile: apps/api/Dockerfile
+            changed: ${{ needs.detect-changes.outputs.api == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+          - name: judge
+            dockerfile: apps/judge/Dockerfile
+            changed: ${{ needs.detect-changes.outputs.judge == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+          - name: portal
+            dockerfile: apps/portal/Dockerfile
+            changed: ${{ needs.detect-changes.outputs.portal == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+          - name: coder-acp-copilot
+            dockerfile: apps/workers/coder-acp-copilot/Dockerfile
+            changed: ${{ needs.detect-changes.outputs.coder-acp-copilot == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+          - name: coder-acp-claude-code
+            dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
+            changed: ${{ needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+        exclude:
+          - image:
+              changed: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push to ACR
+        run: |
+          az acr build \
+            --registry "${{ vars.ACR_NAME }}" \
+            --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
+            --image "scoped/${{ matrix.image.name }}:${{ github.event.pull_request.head.sha }}" \
+            --image "scoped/${{ matrix.image.name }}:pr-${{ github.event.pull_request.number }}" \
+            --file "${{ matrix.image.dockerfile }}" \
+            .
+
+  update-rollout-sha:
+    if: github.event_name == 'push'
+    needs: build-on-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine overlay
+        id: overlay
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "path=deploy/overlays/prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=deploy/overlays/integration" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update rollout SHA
+        run: |
+          OVERLAY="${{ steps.overlay.outputs.path }}"
+          cat > "${OVERLAY}/rollout-sha.yaml" << EOF
+          apiVersion: builtin
+          kind: PatchTransformer
+          metadata:
+            name: rollout-sha-patch
+          patch: |
+            - op: add
+              path: /spec/template/metadata/annotations/scoped.dev~1rollout-sha
+              value: "${{ github.sha }}"
+          target:
+            kind: Deployment
+          EOF
+
+      - name: Commit rollout SHA
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "${{ steps.overlay.outputs.path }}/rollout-sha.yaml"
+          git diff --cached --quiet || git commit -m "ci: update rollout SHA to ${{ github.sha }}"
+          git push
 
   build-manual:
     if: github.event_name == 'workflow_dispatch'
@@ -146,6 +258,6 @@ jobs:
             --registry "${{ vars.ACR_NAME }}" \
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --image "scoped/${{ matrix.image }}:${{ github.sha }}" \
-            --image "scoped/${{ matrix.image }}:latest" \
+            --image "scoped/${{ matrix.image }}:${{ github.event.inputs.tag }}" \
             --file "${{ steps.dockerfile.outputs.path }}" \
             .
