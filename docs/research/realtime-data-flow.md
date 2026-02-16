@@ -13,7 +13,7 @@ The portal uses **two mechanisms** for real-time updates:
 GET /api/v1/requests/:id/logs?fromStart=true
 ```
 
-Defined in `packages/api/src/index.ts`. Accepts an optional `fromStart=true` query param to replay existing logs from MongoDB before switching to live streaming.
+Defined in `apps/api/src/index.ts`. Accepts an optional `fromStart=true` query param to replay existing logs from MongoDB before switching to live streaming.
 
 ### Server-Side Flow
 
@@ -50,7 +50,7 @@ sequenceDiagram
 
 ### Portal Consumer
 
-- `useLogStream` hook in `packages/portal/src/hooks/use-log-stream.ts` — uses browser `EventSource` API
+- `useLogStream` hook in `apps/portal/src/hooks/use-log-stream.ts` — uses browser `EventSource` API
 - Used by `RunDetail.tsx` and `LogViewer.tsx`
 
 ## React Query Polling
