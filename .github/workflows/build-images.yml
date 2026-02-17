@@ -162,12 +162,15 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Build and push to ACR
+        env:
+          SHORT_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          SHORT_SHA="${SHORT_SHA:0:7}"
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --image "scoped/${{ matrix.image.name }}:${{ github.event.pull_request.head.sha }}" \
-            --image "scoped/${{ matrix.image.name }}:pr-${{ github.event.pull_request.number }}" \
+            --image "scoped/${{ matrix.image.name }}:pr-${{ github.event.pull_request.number }}-${SHORT_SHA}" \
             --file "${{ matrix.image.dockerfile }}" \
             .
 
