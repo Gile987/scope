@@ -21,7 +21,6 @@ export const LEVEL_COLORS: Record<string, Parameters<typeof styleText>[0]> = {
 export const WORKER_COLORS: Record<string, Parameters<typeof styleText>[0]> = {
   'coder-acp-claude-code': 'cyan',
   'coder-acp-copilot': 'magenta',
-  'coder-vscode-web': 'blue',
 };
 
 /** Format a log level with its associated color */

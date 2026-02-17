@@ -94,7 +94,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: apps/api/Dockerfile
     restart: on-failure:5
     ports:
       - "${API_PORT:-3100}:80"
@@ -117,7 +117,7 @@ services:
   judge:
     build:
       context: .
-      dockerfile: Dockerfile.judge
+      dockerfile: apps/judge/Dockerfile
     ports:
       - "${JUDGE_PORT:-3101}:80"
     environment:
@@ -153,7 +153,7 @@ services:
   portal:
     build:
       context: .
-      dockerfile: Dockerfile.portal
+      dockerfile: apps/portal/Dockerfile
     profiles: [portal]
     ports:
       - "${PORTAL_PORT:-5180}:80"
@@ -165,7 +165,7 @@ services:
   coder-acp-claude-code:
     build:
       context: .
-      dockerfile: Dockerfile.coder-acp-claude-code
+      dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
     profiles: [claude-code]
     environment:
       <<: *worker-env
@@ -186,7 +186,7 @@ services:
   coder-acp-copilot:
     build:
       context: .
-      dockerfile: Dockerfile.coder-acp-copilot
+      dockerfile: apps/workers/coder-acp-copilot/Dockerfile
     profiles: [copilot]
     environment:
       <<: *worker-env

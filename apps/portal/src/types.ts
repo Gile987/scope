@@ -63,8 +63,7 @@ export interface Run {
 
 export const WORKER_TYPES = [
   "coder-acp-claude-code",
-  "coder-acp-copilot",
-  "coder-vscode-web",
+  "coder-acp-copilot"
 ] as const;
 
 export type WorkerType = (typeof WORKER_TYPES)[number];
