@@ -117,11 +117,15 @@ jobs:
 
       - name: Build and push to ACR
         run: |
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          ENV_TAG="${{ steps.env-tag.outputs.tag }}"
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --image "scoped/${{ matrix.image.name }}:${{ github.sha }}" \
-            --image "scoped/${{ matrix.image.name }}:${{ steps.env-tag.outputs.tag }}" \
+            --image "scoped/${{ matrix.image.name }}:${ENV_TAG}" \
+            --image "scoped/${{ matrix.image.name }}:${ENV_TAG}-${SHORT_SHA}" \
             --file "${{ matrix.image.dockerfile }}" \
             .
 
@@ -175,9 +179,9 @@ jobs:
             --file "${{ matrix.image.dockerfile }}" \
             .
 
-  update-rollout-sha:
+  update-image-tags:
     if: github.event_name == 'push'
-    needs: build-on-push
+    needs: [detect-changes, build-on-push]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -185,37 +189,78 @@ jobs:
           ref: ${{ github.ref_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Determine overlay
-        id: overlay
+      - name: Determine overlay and tag prefix
+        id: env
         run: |
           if [[ "${{ github.ref_name }}" == "main" ]]; then
             echo "path=deploy/overlays/prod" >> "$GITHUB_OUTPUT"
+            echo "tag_prefix=prod" >> "$GITHUB_OUTPUT"
           else
             echo "path=deploy/overlays/integration" >> "$GITHUB_OUTPUT"
+            echo "tag_prefix=dev" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Update rollout SHA
+      - name: Update image tags for changed images
+        env:
+          OVERLAY: ${{ steps.env.outputs.path }}
+          TAG_PREFIX: ${{ steps.env.outputs.tag_prefix }}
+          SHARED_CHANGED: ${{ needs.detect-changes.outputs.shared }}
+          API_CHANGED: ${{ needs.detect-changes.outputs.api }}
+          JUDGE_CHANGED: ${{ needs.detect-changes.outputs.judge }}
+          PORTAL_CHANGED: ${{ needs.detect-changes.outputs.portal }}
+          CODER_ACP_COPILOT_CHANGED: ${{ needs.detect-changes.outputs.coder-acp-copilot }}
+          CODER_ACP_CLAUDE_CODE_CHANGED: ${{ needs.detect-changes.outputs.coder-acp-claude-code }}
         run: |
-          OVERLAY="${{ steps.overlay.outputs.path }}"
-          cat > "${OVERLAY}/rollout-sha.yaml" << EOF
-          apiVersion: builtin
-          kind: PatchTransformer
-          metadata:
-            name: rollout-sha-patch
-          patch: |
-            - op: add
-              path: /spec/template/metadata/annotations/scoped.dev~1rollout-sha
-              value: "${{ github.sha }}"
-          target:
-            kind: Deployment
-          EOF
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          NEW_TAG="${TAG_PREFIX}-${SHORT_SHA}"
+          KUSTOMIZATION="${OVERLAY}/kustomization.yaml"
 
-      - name: Commit rollout SHA
+          # Update image tags for changed images only
+          # Uses sed to replace the tag in the image reference
+          update_image_tag() {
+            local image_name="$1"
+            # Match the image line and update the tag
+            sed -i "s|scoped/${image_name}:${TAG_PREFIX}[^\"]*|scoped/${image_name}:${NEW_TAG}|g" "$KUSTOMIZATION"
+          }
+
+          if [[ "$API_CHANGED" == "true" || "$SHARED_CHANGED" == "true" ]]; then
+            echo "Updating api to ${NEW_TAG}"
+            update_image_tag "api"
+          fi
+
+          if [[ "$JUDGE_CHANGED" == "true" || "$SHARED_CHANGED" == "true" ]]; then
+            echo "Updating judge to ${NEW_TAG}"
+            update_image_tag "judge"
+          fi
+
+          if [[ "$PORTAL_CHANGED" == "true" || "$SHARED_CHANGED" == "true" ]]; then
+            echo "Updating portal to ${NEW_TAG}"
+            update_image_tag "portal"
+          fi
+
+          if [[ "$CODER_ACP_COPILOT_CHANGED" == "true" || "$SHARED_CHANGED" == "true" ]]; then
+            echo "Updating coder-acp-copilot to ${NEW_TAG}"
+            update_image_tag "coder-acp-copilot"
+          fi
+
+          if [[ "$CODER_ACP_CLAUDE_CODE_CHANGED" == "true" || "$SHARED_CHANGED" == "true" ]]; then
+            echo "Updating coder-acp-claude-code to ${NEW_TAG}"
+            update_image_tag "coder-acp-claude-code"
+          fi
+
+          if [[ "$CODER_VSCODE_WEB_CHANGED" == "true" || "$SHARED_CHANGED" == "true" ]]; then
+          fi
+
+          echo "Updated kustomization.yaml:"
+          grep -A1 "value:.*scoped/" "$KUSTOMIZATION" || true
+
+      - name: Commit image tag updates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${{ steps.overlay.outputs.path }}/rollout-sha.yaml"
-          git diff --cached --quiet || git commit -m "ci: update rollout SHA to ${{ github.sha }}"
+          git add "${{ steps.env.outputs.path }}/kustomization.yaml"
+          git diff --cached --quiet || git commit -m "ci: update image tags to ${{ github.sha }}"
           git push
 
   build-manual:
