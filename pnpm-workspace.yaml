@@ -1,7 +1,7 @@
 packages:
-  - "packages/api"
-  - "packages/cli"
-  - "packages/judge"
-  - "packages/portal"
+  - "apps/api"
+  - "apps/cli"
+  - "apps/judge"
+  - "apps/portal"
+  - "apps/workers/*"
   - "packages/shared"
-  - "packages/workers/*"

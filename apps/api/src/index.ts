@@ -41,14 +41,13 @@ const storageAccountName = process.env.AZURE_STORAGE_ACCOUNT_NAME || "";
 const storageConnectionString = process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING || "";
 const queueWorker1 = process.env.AZURE_STORAGE_QUEUE_WORKER_1 || "queue-coder-acp-claude-code";
 const queueWorker2 = process.env.AZURE_STORAGE_QUEUE_WORKER_2 || "queue-coder-acp-copilot";
-const queueWorker3 = process.env.AZURE_STORAGE_QUEUE_WORKER_3 || "queue-coder-vscode-web";
 const redisHost = process.env.REDIS_HOST || "";
 const redisPort = parseInt(process.env.REDIS_PORT || "6379", 10);
 const redisPassword = process.env.REDIS_PASSWORD || "";
 const port = parseInt(process.env.PORT || "3000", 10);
 
 // Valid worker types
-const VALID_WORKERS = ["coder-acp-claude-code", "coder-acp-copilot", "coder-vscode-web"] as const;
+const VALID_WORKERS = ["coder-acp-claude-code", "coder-acp-copilot"] as const;
 type WorkerType = (typeof VALID_WORKERS)[number];
 
 // MongoDB clients
@@ -252,14 +251,12 @@ async function initializeClients(): Promise<void> {
     // Connection string auth (local Azurite or Azure with connection string)
     queueClients.set("coder-acp-claude-code", new QueueClient(storageConnectionString, queueWorker1));
     queueClients.set("coder-acp-copilot", new QueueClient(storageConnectionString, queueWorker2));
-    queueClients.set("coder-vscode-web", new QueueClient(storageConnectionString, queueWorker3));
   } else {
     // Azure with DefaultAzureCredential
     const credential = new DefaultAzureCredential();
     const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
     queueClients.set("coder-acp-claude-code", new QueueClient(`${queueUrl}/${queueWorker1}`, credential));
     queueClients.set("coder-acp-copilot", new QueueClient(`${queueUrl}/${queueWorker2}`, credential));
-    queueClients.set("coder-vscode-web", new QueueClient(`${queueUrl}/${queueWorker3}`, credential));
   }
 
   // Ensure queues exist (creates them in Azurite on first run)

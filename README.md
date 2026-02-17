@@ -212,19 +212,27 @@ Use the postprovision script to build and deploy specific services:
 ├── azure.yaml
 ├── docker-compose.yml
 ├── .env.example
-├── Dockerfile.api
-├── Dockerfile.coder-acp-claude-code
-├── Dockerfile.coder-acp-copilot
 ├── infra/
 │   ├── main.bicep
 │   ├── resources.bicep
 │   └── modules/
-├── packages/
-│   ├── api/src/index.ts
-│   ├── shared/src/
+├── apps/
+│   ├── api/
+│   │   ├── Dockerfile
+│   │   └── src/index.ts
+│   ├── cli/
+│   ├── judge/
+│   │   └── Dockerfile
+│   ├── portal/
+│   │   └── Dockerfile
 │   └── workers/
 │       ├── coder-acp-claude-code/
+│       │   └── Dockerfile
 │       ├── coder-acp-copilot/
+│       │   └── Dockerfile
+│           └── Dockerfile
+├── packages/
+│   └── shared/src/
 └── package.json
 ```
 

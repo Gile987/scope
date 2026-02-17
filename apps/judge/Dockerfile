@@ -7,14 +7,14 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
-COPY packages/judge/package.json ./packages/judge/
+COPY apps/judge/package.json ./apps/judge/
 
 RUN pnpm install --frozen-lockfile
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
-COPY packages/judge/tsconfig.json ./packages/judge/
-COPY packages/judge/src ./packages/judge/src/
+COPY apps/judge/tsconfig.json ./apps/judge/
+COPY apps/judge/src ./apps/judge/src/
 
 RUN pnpm --filter shared build && pnpm --filter judge build
 
@@ -27,17 +27,17 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
-COPY packages/judge/package.json ./packages/judge/
+COPY apps/judge/package.json ./apps/judge/
 
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
-COPY --from=builder /app/packages/judge/dist ./packages/judge/dist/
+COPY --from=builder /app/apps/judge/dist ./apps/judge/dist/
 
 # NOTE: Criteria are loaded at runtime via CRITERIA_API_URL (REST API) or
 # CRITERIA_DIR (filesystem fallback). No need to bake criteria into the image.
 
-WORKDIR /app/packages/judge
+WORKDIR /app/apps/judge
 
 EXPOSE 80
 

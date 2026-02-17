@@ -7,14 +7,14 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
-COPY packages/workers/coder-acp-copilot/package.json ./packages/workers/coder-acp-copilot/
+COPY apps/workers/coder-acp-copilot/package.json ./apps/workers/coder-acp-copilot/
 
 RUN pnpm install --frozen-lockfile
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
-COPY packages/workers/coder-acp-copilot/tsconfig.json ./packages/workers/coder-acp-copilot/
-COPY packages/workers/coder-acp-copilot/src ./packages/workers/coder-acp-copilot/src/
+COPY apps/workers/coder-acp-copilot/tsconfig.json ./apps/workers/coder-acp-copilot/
+COPY apps/workers/coder-acp-copilot/src ./apps/workers/coder-acp-copilot/src/
 
 RUN pnpm --filter shared build && pnpm --filter coder-acp-copilot build
 
@@ -41,17 +41,17 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
-COPY packages/workers/coder-acp-copilot/package.json ./packages/workers/coder-acp-copilot/
+COPY apps/workers/coder-acp-copilot/package.json ./apps/workers/coder-acp-copilot/
 
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
-COPY --from=builder /app/packages/workers/coder-acp-copilot/dist ./packages/workers/coder-acp-copilot/dist/
+COPY --from=builder /app/apps/workers/coder-acp-copilot/dist ./apps/workers/coder-acp-copilot/dist/
 
 # Create workspace directory
 RUN mkdir -p /workspace
 
-WORKDIR /app/packages/workers/coder-acp-copilot
+WORKDIR /app/apps/workers/coder-acp-copilot
 
 ENV WORKER_NAME=coder-acp-copilot
 
