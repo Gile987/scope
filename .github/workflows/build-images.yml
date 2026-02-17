@@ -129,6 +129,7 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: detect-changes
     runs-on: ubuntu-latest
+    environment: integration
     strategy:
       fail-fast: false
       matrix:
