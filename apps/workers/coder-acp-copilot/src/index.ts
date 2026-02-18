@@ -16,7 +16,16 @@ class CopilotProcessor implements WorkerProcessor {
     message: string,
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<string> {
-    await log("info", "Starting Copilot ACP processor", { inputLength: message.length });
+    const githubToken = process.env.GITHUB_TOKEN || "";
+    const tokenPreview = githubToken 
+      ? `${githubToken.substring(0, 7)}...(${githubToken.length} chars)` 
+      : "(empty)";
+    
+    await log("info", "Starting Copilot ACP processor", { 
+      inputLength: message.length,
+      githubTokenPresent: !!githubToken,
+      githubTokenPreview: tokenPreview,
+    });
     
     try {
       // Run ACP session with GitHub Copilot
@@ -24,7 +33,7 @@ class CopilotProcessor implements WorkerProcessor {
         command: "copilot",
         args: ["--acp"],
         env: {
-          GITHUB_TOKEN: process.env.GITHUB_TOKEN || "",
+          GITHUB_TOKEN: githubToken,
         },
         cwd: "/workspace",
         onLog: async (msg) => {
