@@ -30,6 +30,12 @@ COPY --from=builder /app/apps/api/dist ./apps/api/dist/
 
 WORKDIR /app/apps/api
 
+# Version information (passed as build args)
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+ENV GIT_COMMIT=$GIT_COMMIT
+ENV BUILD_TIME=$BUILD_TIME
+
 EXPOSE 80
 
 ENV PORT=80
