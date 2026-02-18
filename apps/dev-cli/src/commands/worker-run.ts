@@ -60,7 +60,7 @@ export function workerRunCommand(): Command {
     .option("-t, --traits <path>", "Path to traits YAML file")
     .option("-m, --max-iterations <n>", "Max iterations for multi-turn", "10")
     .option("-w, --workspace <path>", "Local directory to bind-mount as /workspace (default: temp dir)")
-    .option("-j, --judge-url <url>", "Judge service URL", process.env.JUDGE_SERVICE_URL || "http://localhost:3200")
+    .option("-j, --judge-url <url>", "Judge service URL", process.env.JUDGE_SERVICE_URL || "http://localhost:3101")
     .option("-e, --env-file <path>", "Env file with worker-specific variables (e.g. GITHUB_TOKEN)")
     .option("-c, --context <path>", "Docker build context path (default: auto-detect)")
     .action(async (opts: WorkerRunOptions) => {
