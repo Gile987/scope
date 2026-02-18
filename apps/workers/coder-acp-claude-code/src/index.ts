@@ -8,6 +8,13 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-claude-code";
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+const ANTHROPIC_API_KEY_PREVIEW = ANTHROPIC_API_KEY 
+  ? `${ANTHROPIC_API_KEY.substring(0, 7)}...(${ANTHROPIC_API_KEY.length} chars)` 
+  : "(empty)";
+
+// Log at startup for debugging authentication issues
+console.log(`[${WORKER_NAME}] ANTHROPIC_API_KEY present: ${!!ANTHROPIC_API_KEY}, preview: ${ANTHROPIC_API_KEY_PREVIEW}`);
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
@@ -24,7 +31,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         command: "claude-code-acp",
         args: [],
         env: {
-          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
+          ANTHROPIC_API_KEY,
         },
         cwd: "/workspace",
         onLog: async (msg) => {
