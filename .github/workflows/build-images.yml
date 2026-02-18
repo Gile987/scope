@@ -80,19 +80,19 @@ jobs:
         image:
           - name: api
             dockerfile: apps/api/Dockerfile
-            changed: ${{ needs.detect-changes.outputs.api == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+            changed: ${{ (needs.detect-changes.outputs.api == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: judge
             dockerfile: apps/judge/Dockerfile
-            changed: ${{ needs.detect-changes.outputs.judge == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+            changed: ${{ (needs.detect-changes.outputs.judge == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: portal
             dockerfile: apps/portal/Dockerfile
-            changed: ${{ needs.detect-changes.outputs.portal == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+            changed: ${{ (needs.detect-changes.outputs.portal == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: coder-acp-copilot
             dockerfile: apps/workers/coder-acp-copilot/Dockerfile
-            changed: ${{ needs.detect-changes.outputs.coder-acp-copilot == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+            changed: ${{ (needs.detect-changes.outputs.coder-acp-copilot == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: coder-acp-claude-code
             dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
-            changed: ${{ needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+            changed: ${{ (needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: 'false'
@@ -142,19 +142,19 @@ jobs:
         image:
           - name: api
             dockerfile: apps/api/Dockerfile
-            changed: ${{ needs.detect-changes.outputs.api == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+            changed: ${{ (needs.detect-changes.outputs.api == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: judge
             dockerfile: apps/judge/Dockerfile
-            changed: ${{ needs.detect-changes.outputs.judge == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+            changed: ${{ (needs.detect-changes.outputs.judge == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: portal
             dockerfile: apps/portal/Dockerfile
-            changed: ${{ needs.detect-changes.outputs.portal == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+            changed: ${{ (needs.detect-changes.outputs.portal == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: coder-acp-copilot
             dockerfile: apps/workers/coder-acp-copilot/Dockerfile
-            changed: ${{ needs.detect-changes.outputs.coder-acp-copilot == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+            changed: ${{ (needs.detect-changes.outputs.coder-acp-copilot == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: coder-acp-claude-code
             dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
-            changed: ${{ needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true' }}
+            changed: ${{ (needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: 'false'
