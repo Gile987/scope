@@ -7,6 +7,10 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __GIT_COMMIT__: JSON.stringify(process.env.GIT_COMMIT || "development"),
+    __BUILD_TIME__: JSON.stringify(process.env.BUILD_TIME || new Date().toISOString()),
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
