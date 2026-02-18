@@ -34,6 +34,16 @@ x-worker-env: &worker-env
   <<: *common-env
   JUDGE_SERVICE_URL: http://judge:80
 
+x-worker-deps: &worker-deps
+  mongodb:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  azurite:
+    condition: service_healthy
+  judge:
+    condition: service_started
+
 services:
   # ===========================================================================
   # Infrastructure services
@@ -174,15 +184,7 @@ services:
       WORKER_NAME: coder-acp-claude-code
       QUEUE_NAME: queue-coder-acp-claude-code
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      azurite:
-        condition: service_healthy
-      judge:
-        condition: service_started
+    depends_on: *worker-deps
 
   # GitHub Copilot worker (via ACP)
   coder-acp-copilot:
@@ -195,15 +197,7 @@ services:
       WORKER_NAME: coder-acp-copilot
       QUEUE_NAME: queue-coder-acp-copilot
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-    depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      azurite:
-        condition: service_healthy
-      judge:
-        condition: service_started
+    depends_on: *worker-deps
 
 volumes:
   mongodb_data:
