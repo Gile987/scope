@@ -122,13 +122,14 @@ jobs:
           SHORT_SHA="${{ github.sha }}"
           SHORT_SHA="${SHORT_SHA:0:7}"
           ENV_TAG="${{ steps.env-tag.outputs.tag }}"
+          TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --image "scoped/${{ matrix.image.name }}:${{ github.sha }}" \
             --image "scoped/${{ matrix.image.name }}:${ENV_TAG}-latest" \
-            --image "scoped/${{ matrix.image.name }}:${ENV_TAG}-${SHORT_SHA}" \
+            --image "scoped/${{ matrix.image.name }}:${ENV_TAG}-${TIMESTAMP}-${SHORT_SHA}" \
             --build-arg GIT_COMMIT=${{ github.sha }} \
             --build-arg BUILD_TIME=${BUILD_TIME} \
             --file "${{ matrix.image.dockerfile }}" \
@@ -229,13 +230,14 @@ jobs:
           SHORT_SHA="${{ github.sha }}"
           SHORT_SHA="${SHORT_SHA:0:7}"
           TAG="${{ github.event.inputs.tag }}"
+          TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --image "scoped/${{ matrix.image }}:${{ github.sha }}" \
             --image "scoped/${{ matrix.image }}:${TAG}-latest" \
-            --image "scoped/${{ matrix.image }}:${TAG}-${SHORT_SHA}" \
+            --image "scoped/${{ matrix.image }}:${TAG}-${TIMESTAMP}-${SHORT_SHA}" \
             --build-arg GIT_COMMIT=${{ github.sha }} \
             --build-arg BUILD_TIME=${BUILD_TIME} \
             --file "${{ steps.dockerfile.outputs.path }}" \
