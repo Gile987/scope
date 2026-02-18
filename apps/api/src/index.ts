@@ -46,6 +46,10 @@ const redisPort = parseInt(process.env.REDIS_PORT || "6379", 10);
 const redisPassword = process.env.REDIS_PASSWORD || "";
 const port = parseInt(process.env.PORT || "3000", 10);
 
+// Version information (injected at build time)
+const GIT_COMMIT = process.env.GIT_COMMIT || "development";
+const BUILD_TIME = process.env.BUILD_TIME || new Date().toISOString();
+
 // Valid worker types
 const VALID_WORKERS = ["coder-acp-claude-code", "coder-acp-copilot"] as const;
 type WorkerType = (typeof VALID_WORKERS)[number];
@@ -270,16 +274,25 @@ async function initializeClients(): Promise<void> {
 
 // Health check endpoint
 app.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "healthy", version: "1.0.0" });
+  res.json({ status: "healthy", version: GIT_COMMIT });
 });
 
 // About endpoint
 app.get("/about", (_req: Request, res: Response) => {
   res.json({
     name: "Multi-Worker API (MongoDB)",
-    version: "1.0.0",
+    version: GIT_COMMIT,
+    buildTime: BUILD_TIME,
     description: "API that routes requests to multiple workers via separate queues",
     workers: VALID_WORKERS,
+  });
+});
+
+// Version endpoint
+app.get("/api/v1/version", (_req: Request, res: Response) => {
+  res.json({
+    commit: GIT_COMMIT,
+    buildTime: BUILD_TIME,
   });
 });
 
