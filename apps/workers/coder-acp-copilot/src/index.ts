@@ -8,6 +8,13 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-copilot";
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
+const GITHUB_TOKEN_PREVIEW = GITHUB_TOKEN 
+  ? `${GITHUB_TOKEN.substring(0, 7)}...(${GITHUB_TOKEN.length} chars)` 
+  : "(empty)";
+
+// Log at startup for debugging authentication issues
+console.log(`[${WORKER_NAME}] GITHUB_TOKEN present: ${!!GITHUB_TOKEN}, preview: ${GITHUB_TOKEN_PREVIEW}`);
 
 class CopilotProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
@@ -16,16 +23,7 @@ class CopilotProcessor implements WorkerProcessor {
     message: string,
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<string> {
-    const githubToken = process.env.GITHUB_TOKEN || "";
-    const tokenPreview = githubToken 
-      ? `${githubToken.substring(0, 7)}...(${githubToken.length} chars)` 
-      : "(empty)";
-    
-    await log("info", "Starting Copilot ACP processor", { 
-      inputLength: message.length,
-      githubTokenPresent: !!githubToken,
-      githubTokenPreview: tokenPreview,
-    });
+    await log("info", "Starting Copilot ACP processor", { inputLength: message.length });
     
     try {
       // Run ACP session with GitHub Copilot
@@ -33,7 +31,7 @@ class CopilotProcessor implements WorkerProcessor {
         command: "copilot",
         args: ["--acp"],
         env: {
-          GITHUB_TOKEN: githubToken,
+          GITHUB_TOKEN,
         },
         cwd: "/workspace",
         onLog: async (msg) => {
