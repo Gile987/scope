@@ -138,4 +138,11 @@ export const api = {
     }
     return request(`/analysis?${params.toString()}`);
   },
+
+  // ─── Version ───────────────────────────────────────────────────────────────
+
+  /** Get API version information (commit hash and build time) */
+  getVersion: (): Promise<{ commit: string; buildTime: string }> => {
+    return request("/version");
+  },
 };
