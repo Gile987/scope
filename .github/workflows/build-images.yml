@@ -30,7 +30,7 @@ on:
 
 permissions:
   id-token: write
-  contents: write
+  contents: read
   pull-requests: read
 
 env:
@@ -168,64 +168,14 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Build and push to ACR
-        env:
-          SHORT_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          SHORT_SHA="${SHORT_SHA:0:7}"
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --image "scoped/${{ matrix.image.name }}:${{ github.event.pull_request.head.sha }}" \
-            --image "scoped/${{ matrix.image.name }}:pr-${{ github.event.pull_request.number }}-${SHORT_SHA}" \
+            --image "scoped/${{ matrix.image.name }}:pr-${{ github.event.pull_request.number }}-latest" \
             --file "${{ matrix.image.dockerfile }}" \
             .
-
-  update-image-tags:
-    if: github.event_name == 'push'
-    needs: [detect-changes, build-on-push]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref_name }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Determine overlay
-        id: env
-        run: |
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "path=deploy/overlays/prod" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=deploy/overlays/integration" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install yq
-        run: |
-          wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          chmod +x /usr/local/bin/yq
-
-      - name: Update rollout annotation to trigger deployment
-        env:
-          OVERLAY: ${{ steps.env.outputs.path }}
-        run: |
-          SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
-          KUSTOMIZATION="${OVERLAY}/kustomization.yaml"
-
-          # Update the build-sha annotation to trigger FluxCD rollout
-          # Images use {env}-latest tags, this annotation change triggers redeployment
-          yq -i ".commonAnnotations.\"scope-mt/build-sha\" = \"${SHORT_SHA}\"" "$KUSTOMIZATION"
-
-          echo "::notice::Updated build-sha annotation to ${SHORT_SHA}"
-          yq '.commonAnnotations' "$KUSTOMIZATION"
-
-      - name: Commit annotation update
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${{ steps.env.outputs.path }}/kustomization.yaml"
-          git diff --cached --quiet || git commit -m "ci: trigger rollout for ${{ github.sha }}"
-          git push
 
   build-manual:
     if: github.event_name == 'workflow_dispatch'
