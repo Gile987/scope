@@ -6,10 +6,10 @@ import { cn } from "@/lib/utils";
 import { Activity, Plus, List, FlaskConical, BarChart3 } from "lucide-react";
 
 const navItems = [
-  { to: "/", label: "Runs", icon: List },
+  { to: "/insights", label: "Insights", icon: BarChart3 },
+  { to: "/runs", label: "Runs", icon: List },
   { to: "/runs/new", label: "New Run", icon: Plus },
   { to: "/criteria", label: "Criteria", icon: FlaskConical },
-  { to: "/insights", label: "Insights", icon: BarChart3 },
 ];
 
 export function Layout() {
@@ -26,10 +26,7 @@ export function Layout() {
           </Link>
           <nav className="flex items-center space-x-6 text-sm font-medium">
             {navItems.map((item) => {
-              const isActive =
-                item.to === "/"
-                  ? location.pathname === "/"
-                  : location.pathname.startsWith(item.to);
+              const isActive = location.pathname.startsWith(item.to);
               return (
                 <Link
                   key={item.to}
