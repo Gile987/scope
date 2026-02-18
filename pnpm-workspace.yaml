@@ -1,6 +1,7 @@
 packages:
   - "apps/api"
   - "apps/cli"
+  - "apps/dev-cli"
   - "apps/judge"
   - "apps/portal"
   - "apps/workers/*"

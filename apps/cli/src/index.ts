@@ -15,7 +15,7 @@ import { parse as yamlParse, parseAllDocuments, stringify as yamlStringify } fro
 import React from "react";
 import { render } from "ink";
 import { DemoApp } from "./components/DemoApp.js";
-import { resolveScenarioAndPersona } from "./config-loader.js";
+import { resolveScenarioAndPersona } from "shared";
 import { configureHelp } from "./utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "./utils/style.js";
 

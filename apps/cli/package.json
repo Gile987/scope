@@ -16,6 +16,7 @@
     "eventsource": "^2.0.2",
     "ink": "^6.0.0",
     "react": "^19.0.0",
+    "shared": "workspace:*",
     "yaml": "^2.6.0"
   },
   "devDependencies": {

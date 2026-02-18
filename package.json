@@ -6,6 +6,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "cli": "tsx apps/cli/src/index.ts",
+    "dev-cli": "tsx apps/dev-cli/src/index.ts",
     "dev:api": "pnpm --filter api dev",
     "dev:portal": "pnpm --filter portal dev",
     "dev:coder-acp-claude-code": "pnpm --filter coder-acp-claude-code dev",
