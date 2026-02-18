@@ -219,10 +219,14 @@ jobs:
       - name: Build and push to ACR
         if: steps.check.outputs.build == 'true'
         run: |
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          TAG="${{ github.event.inputs.tag }}"
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --image "scoped/${{ matrix.image }}:${{ github.sha }}" \
-            --image "scoped/${{ matrix.image }}:${{ github.event.inputs.tag }}" \
+            --image "scoped/${{ matrix.image }}:${TAG}-latest" \
+            --image "scoped/${{ matrix.image }}:${TAG}-${SHORT_SHA}" \
             --file "${{ steps.dockerfile.outputs.path }}" \
             .
