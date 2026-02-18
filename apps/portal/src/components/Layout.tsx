@@ -4,6 +4,7 @@
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Activity, Plus, List, FlaskConical, BarChart3 } from "lucide-react";
+import { VersionFooter } from "./VersionFooter";
 
 const navItems = [
   { to: "/insights", label: "Insights", icon: BarChart3 },
@@ -16,7 +17,7 @@ export function Layout() {
   const location = useLocation();
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex min-h-screen flex-col bg-background">
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center">
@@ -46,9 +47,12 @@ export function Layout() {
       </header>
 
       {/* Main content */}
-      <main className="container py-6">
+      <main className="container flex-1 py-6">
         <Outlet />
       </main>
+
+      {/* Version footer */}
+      <VersionFooter />
     </div>
   );
 }
