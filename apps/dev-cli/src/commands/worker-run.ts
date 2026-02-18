@@ -3,6 +3,7 @@
 
 import { Command } from "commander";
 import Docker from "dockerode";
+import { createInterface } from "readline";
 import { existsSync, readFileSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { resolve, join } from "path";
@@ -17,7 +18,7 @@ const KNOWN_WORKERS = [
 ];
 
 interface WorkerRunOptions {
-  name: string;
+  name?: string;
   scenario: string;
   persona?: string;
   traits?: string;
@@ -53,7 +54,7 @@ function parseEnvFile(filePath: string): Record<string, string> {
 export function workerRunCommand(): Command {
   const cmd = new Command("run")
     .description("Build a worker Docker image and run a task directly (bypassing the queue)")
-    .requiredOption("-n, --name <worker>", `Worker name (${KNOWN_WORKERS.join(", ")})`)
+    .option("-n, --name <worker>", `Worker name (${KNOWN_WORKERS.join(", ")})`)
     .requiredOption("-s, --scenario <path>", "Path to scenario YAML file")
     .option("-p, --persona <path>", "Path to persona YAML file")
     .option("-t, --traits <path>", "Path to traits YAML file")
@@ -75,8 +76,33 @@ export function workerRunCommand(): Command {
   return cmd;
 }
 
+/**
+ * Prompt the user to select a worker from a numbered list.
+ */
+async function promptWorkerSelection(): Promise<string> {
+  console.log(`\n${label('Select a worker:')}`);
+  for (let i = 0; i < KNOWN_WORKERS.length; i++) {
+    console.log(`  ${value(String(i + 1))}. ${KNOWN_WORKERS[i]}`);
+  }
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(`\n${label('Enter number')} ${dimTimestamp(`[1-${KNOWN_WORKERS.length}]`)}: `, (answer) => {
+      rl.close();
+      const idx = parseInt(answer.trim(), 10) - 1;
+      if (idx >= 0 && idx < KNOWN_WORKERS.length) {
+        resolve(KNOWN_WORKERS[idx]);
+      } else {
+        console.error(errorText(`Invalid selection: ${answer.trim()}`));
+        process.exit(1);
+      }
+    });
+  });
+}
+
 async function runWorker(opts: WorkerRunOptions): Promise<void> {
-  const { name } = opts;
+  // Prompt for worker name if not provided
+  const name = opts.name ?? await promptWorkerSelection();
 
   if (!KNOWN_WORKERS.includes(name)) {
     throw new Error(
