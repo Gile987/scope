@@ -8,6 +8,7 @@ import { tmpdir } from "os";
 import { resolve, join } from "path";
 import { resolveScenarioAndPersona, DirectRunRequest } from "shared";
 import tar from "tar-fs";
+import { banner, label, value, errorText, successText, dimTimestamp, colorLevel, criterionIcon } from "../utils/style.js";
 
 const KNOWN_WORKERS = [
   "coder-acp-copilot",
@@ -66,7 +67,7 @@ export function workerRunCommand(): Command {
         await runWorker(opts);
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        console.error(`\n✗ Error: ${msg}`);
+        console.error(`\n${errorText('✗ Error:')} ${msg}`);
         process.exit(1);
       }
     });
@@ -95,24 +96,24 @@ async function runWorker(opts: WorkerRunOptions): Promise<void> {
   }
 
   // 2. Resolve scenario + persona
-  console.log(`\n● Resolving scenario: ${opts.scenario}`);
+  console.log(`\n${banner('● Resolving scenario:')} ${value(opts.scenario)}`);
   const resolved = resolveScenarioAndPersona(
     resolve(opts.scenario),
     opts.persona ? resolve(opts.persona) : undefined,
     opts.traits ? resolve(opts.traits) : undefined
   );
 
-  console.log(`  Task: ${resolved.task.substring(0, 80)}${resolved.task.length > 80 ? "..." : ""}`);
-  console.log(`  Criteria: ${resolved.criteria.length} item(s)`);
+  console.log(`  ${label('Task:')} ${resolved.task.substring(0, 80)}${resolved.task.length > 80 ? "..." : ""}`);
+  console.log(`  ${label('Criteria:')} ${value(String(resolved.criteria.length))} item(s)`);
   if (resolved.persona) {
-    console.log(`  Persona: ${resolved.persona.personality} ${resolved.persona.experience}`);
+    console.log(`  ${label('Persona:')} ${value(resolved.persona.personality + ' ' + resolved.persona.experience)}`);
   }
 
   // 3. Prepare workspace
   const workspacePath = opts.workspace
     ? resolve(opts.workspace)
     : mkdtempSync(join(tmpdir(), `scope-mt-worker-${name}-`));
-  console.log(`  Workspace: ${workspacePath}`);
+  console.log(`  ${label('Workspace:')} ${value(workspacePath)}`);
 
   // 4. Parse env file
   const envFromFile = opts.envFile ? parseEnvFile(resolve(opts.envFile)) : {};
@@ -121,9 +122,9 @@ async function runWorker(opts: WorkerRunOptions): Promise<void> {
   const docker = new Docker();
   const imageTag = `scope-mt-worker-${name}:dev`;
 
-  console.log(`\n● Building Docker image: ${imageTag}`);
-  console.log(`  Context: ${buildContext}`);
-  console.log(`  Dockerfile: ${dockerfilePath}`);
+  console.log(`\n${banner('● Building Docker image:')} ${value(imageTag)}`);
+  console.log(`  ${label('Context:')} ${dimTimestamp(buildContext)}`);
+  console.log(`  ${label('Dockerfile:')} ${dimTimestamp(dockerfilePath)}`);
 
   await buildImage(docker, buildContext, dockerfilePath, imageTag);
 
@@ -161,7 +162,7 @@ async function runWorker(opts: WorkerRunOptions): Promise<void> {
   }
 
   // 8. Create and start container
-  console.log(`\n● Running worker container...`);
+  console.log(`\n${banner('● Running worker container...')}`);
 
   const container = await docker.createContainer({
     Image: imageTag,
@@ -209,13 +210,12 @@ async function runWorker(opts: WorkerRunOptions): Promise<void> {
       try {
         const event = JSON.parse(line);
         if (event.level && event.message) {
-          const levelIcon = event.level === "error" ? "✗" : event.level === "warn" ? "!" : event.level === "debug" ? "·" : "→";
-          const iter = event.data?.iteration ? ` [iter ${event.data.iteration}]` : "";
-          console.log(`  ${levelIcon} ${event.message}${iter}`);
+          const iter = event.data?.iteration ? dimTimestamp(` [iter ${event.data.iteration}]`) : "";
+          console.log(`  ${colorLevel(event.level)} ${event.message}${iter}`);
           continue;
         }
       } catch { /* not JSON, print raw */ }
-      console.log(`  ${line}`);
+      console.log(`  ${dimTimestamp(line)}`);
     }
   });
 
@@ -238,15 +238,15 @@ async function runWorker(opts: WorkerRunOptions): Promise<void> {
 
   // Parse and display result
   if (StatusCode !== 0) {
-    console.error(`\n✗ Worker exited with code ${StatusCode}`);
+    console.error(`\n${errorText(`✗ Worker exited with code ${StatusCode}`)}`);
     if (stdout) {
       try {
         const result = JSON.parse(stdout);
         if (result.error) {
-          console.error(`  Error: ${result.error}`);
+          console.error(`  ${errorText('Error:')} ${result.error}`);
         }
       } catch {
-        console.error(`  Raw output: ${stdout.substring(0, 500)}`);
+        console.error(`  ${label('Raw output:')} ${stdout.substring(0, 500)}`);
       }
     }
     process.exit(1);
@@ -255,22 +255,22 @@ async function runWorker(opts: WorkerRunOptions): Promise<void> {
   // Parse the JSON response
   try {
     const result = JSON.parse(stdout);
-    console.log(`\n● Result:`);
-    console.log(`  Success: ${result.success}`);
+    console.log(`\n${banner('● Result:')}`);
+    console.log(`  ${label('Success:')} ${result.success ? successText('true') : errorText('false')}`);
     if (result.passed !== undefined) {
-      console.log(`  Passed: ${result.passed}`);
+      console.log(`  ${label('Passed:')}  ${result.passed ? successText('true') : errorText('false')}`);
     }
     if (result.turns) {
-      console.log(`  Turns: ${result.turns.length}`);
+      console.log(`  ${label('Turns:')}   ${value(String(result.turns.length))}`);
     }
     if (result.result) {
-      console.log(`  Response (first 500 chars):`);
-      console.log(`  ${result.result.substring(0, 500)}`);
+      console.log(`  ${label('Response (first 500 chars):')}`);
+      console.log(`  ${dimTimestamp(result.result.substring(0, 500))}`);
     }
-    console.log(`\n  Workspace: ${workspacePath}`);
+    console.log(`\n  ${label('Workspace:')} ${value(workspacePath)}`);
   } catch {
-    console.log(`\n● Raw output:`);
-    console.log(stdout.substring(0, 1000));
+    console.log(`\n${banner('● Raw output:')}`);
+    console.log(dimTimestamp(stdout.substring(0, 1000)));
   }
 }
 
@@ -307,7 +307,7 @@ async function buildImage(
       },
       (event: { stream?: string; error?: string; errorDetail?: { message?: string } }) => {
         if (event.error) {
-          console.error(`  BUILD ERROR: ${event.error}`);
+          console.error(`  ${errorText('BUILD ERROR:')} ${event.error}`);
         } else if (event.stream) {
           const line = event.stream.trimEnd();
           if (line) {
@@ -318,7 +318,7 @@ async function buildImage(
     );
   });
 
-  console.log(`  ✓ Image built: ${tag}`);
+  console.log(`  ${successText('✓ Image built:')} ${value(tag)}`);
 }
 
 /**
