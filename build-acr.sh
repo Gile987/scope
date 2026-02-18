@@ -43,10 +43,14 @@ build_image() {
   local name=$1
   local dockerfile=$(get_dockerfile "$name")
   local full_image="scoped/${name}:latest"
+  local git_commit=$(git rev-parse --short HEAD)
+  local build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   az acr build \
     --registry "$ACR_NAME" \
     --image "$full_image" \
+    --build-arg GIT_COMMIT="$git_commit" \
+    --build-arg BUILD_TIME="$build_time" \
     --file "$dockerfile" \
     .
 }
