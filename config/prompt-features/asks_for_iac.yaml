@@ -1,0 +1,4 @@
+id: asks_for_iac
+prompt: |
+  The task prompt asks the agent to write or use infrastructure as code
+  (Bicep, Terraform, CloudFormation, Pulumi, ARM templates, etc.).

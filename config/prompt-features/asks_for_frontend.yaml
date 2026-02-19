@@ -1,0 +1,4 @@
+id: asks_for_frontend
+prompt: |
+  The task prompt asks the agent to create or modify a frontend, UI, or
+  client-side web application (React, Vue, Angular, HTML/CSS, etc.).
