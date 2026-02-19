@@ -178,8 +178,9 @@ export const api = {
   },
 
   /** Extract prompt features from a task text */
-  extractPromptFeatures: (taskText: string, model?: string): Promise<PromptFeatureExtraction> => {
-    return request("/prompt-features/extract", {
+  extractPromptFeatures: (taskText: string, model?: string, force?: boolean): Promise<PromptFeatureExtraction> => {
+    const url = force ? "/prompt-features/extract?force=true" : "/prompt-features/extract";
+    return request(url, {
       method: "POST",
       body: JSON.stringify({ taskText, ...(model && { model }) }),
     });
