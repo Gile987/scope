@@ -50,6 +50,9 @@ importers:
       multer:
         specifier: ^1.4.5-lts.1
         version: 1.4.5-lts.2
+      shared:
+        specifier: workspace:*
+        version: link:../../packages/shared
       uuid:
         specifier: ^10.0.0
         version: 10.0.0

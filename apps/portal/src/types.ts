@@ -59,6 +59,7 @@ export interface Run {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
+  promptFeatureExtractionId?: string;
 }
 
 export const WORKER_TYPES = [
@@ -100,6 +101,40 @@ export interface GeneratePromptResponse {
   suggestedId: string;
   suggestedParents: string[];
   suggestedChildren: string[];
+}
+
+// Prompt Feature types
+export interface PromptFeatureConfig {
+  id: string;
+  prompt: string;
+  dependsOn?: string[];
+}
+
+export interface PromptFeatureDocument extends PromptFeatureConfig {
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface PromptFeatureGraphData {
+  nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
+  edges: Array<{ source: string; target: string }>;
+}
+
+export interface PromptFeatureResult {
+  featureId: string;
+  detected: boolean;
+  evaluated: boolean;
+}
+
+export interface PromptFeatureExtraction {
+  _id?: string;
+  taskText: string;
+  taskTextHash?: string;
+  promptFeatureResults: PromptFeatureResult[];
+  extractedAt: string;
+  model?: string;
+  cached?: boolean;
 }
 
 // Analysis types for insights dashboard

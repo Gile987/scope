@@ -10,13 +10,13 @@ import {
   CriterionResult,
   DetailedEvaluationResult,
   ConversationTurn,
+  DependencyGraph,
 } from "shared";
-import { CriteriaGraph } from "shared/criteria-graph";
 
 export interface JudgeStrategyContext {
   workspacePath: string;
   criteria: CriteriaConfig[];
-  criteriaGraph: CriteriaGraph;
+  criteriaGraph: DependencyGraph;
   conversationHistory: ConversationTurn[];
   personaInstructions?: string;
   model?: string;

@@ -6,9 +6,14 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
+COPY packages/shared/package.json ./packages/shared/
 COPY apps/api/package.json ./apps/api/
 
 RUN pnpm install --frozen-lockfile
+
+COPY packages/shared/tsconfig.json ./packages/shared/
+COPY packages/shared/src ./packages/shared/src/
+RUN pnpm --filter shared build
 
 COPY apps/api/tsconfig.json ./apps/api/
 COPY apps/api/src ./apps/api/src/
@@ -22,10 +27,12 @@ RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/shared/package.json ./packages/shared/
 COPY apps/api/package.json ./apps/api/
 
 RUN pnpm install --frozen-lockfile --prod
 
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/apps/api/dist ./apps/api/dist/
 
 WORKDIR /app/apps/api

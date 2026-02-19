@@ -1028,5 +1028,468 @@ function mapYamlCriterion(
   };
 }
 
+// ─── Prompt Feature management ───────────────────────────────────────────────
+
+const promptFeature = program
+  .command("prompt-feature")
+  .description("Manage prompt features (CRUD, import, extract, graph)")
+  .action(() => {
+    promptFeature.help();
+  });
+
+configureHelp(promptFeature);
+
+promptFeature
+  .command("list")
+  .description("List all prompt features")
+  .option("-q, --query <search>", "Filter by ID or prompt text")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const params = new URLSearchParams();
+      if (options.query) params.set("q", options.query);
+      const qs = params.toString();
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features${qs ? `?${qs}` : ""}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
+      if (items.length === 0) {
+        console.log(warnBanner("No prompt features found."));
+        return;
+      }
+
+      console.log(label(`Found ${items.length} prompt features:\n`));
+
+      const idW = Math.max(24, ...items.map(f => f.id.length)) + 2;
+      console.log(`  ${styleText('bold', 'ID'.padEnd(idW))}${styleText('bold', 'Deps'.padEnd(6))}${'Prompt'}`);
+      console.log(`  ${'─'.repeat(idW)}${'─'.repeat(6)}${'─'.repeat(50)}`);
+
+      for (const f of items) {
+        const deps = (f.dependsOn ?? []).length;
+        const prompt = f.prompt.replace(/\n/g, ' ').substring(0, 60);
+        console.log(`  ${value(f.id.padEnd(idW))}${String(deps).padEnd(6)}${dimTimestamp(prompt)}${f.prompt.length > 60 ? '…' : ''}`);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+promptFeature
+  .command("get")
+  .description("Get details of a single prompt feature")
+  .requiredOption("-i, --id <id>", "Prompt feature ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/${options.id}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const f = await response.json() as {
+        id: string; prompt: string; dependsOn?: string[];
+        dependents: string[]; createdAt: string; updatedAt?: string;
+      };
+
+      console.log(`${label('ID:')}        ${value(f.id)}`);
+      console.log(`${label('Prompt:')}`);
+      for (const line of f.prompt.trim().split('\n')) {
+        console.log(`  ${line}`);
+      }
+      if ((f.dependsOn ?? []).length > 0) {
+        console.log(`${label('Depends on:')} ${f.dependsOn!.map(d => value(d)).join(', ')}`);
+      } else {
+        console.log(`${label('Depends on:')} ${dimTimestamp('(none — root feature)')}`);
+      }
+      if (f.dependents.length > 0) {
+        console.log(`${label('Dependents:')} ${f.dependents.map(d => value(d)).join(', ')}`);
+      }
+      console.log(`${label('Created:')}   ${value(f.createdAt)}`);
+      if (f.updatedAt) console.log(`${label('Updated:')}   ${value(f.updatedAt)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+promptFeature
+  .command("create")
+  .description("Create a new prompt feature")
+  .requiredOption("--id <id>", "Prompt feature ID (lowercase snake_case)")
+  .requiredOption("--prompt <prompt>", "Detection prompt for the feature")
+  .option("-d, --depends-on <ids...>", "IDs of parent features")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {
+        id: options.id,
+        prompt: options.prompt,
+      };
+      if (options.dependsOn && options.dependsOn.length > 0) {
+        body.dependsOn = options.dependsOn;
+      }
+
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const created = await response.json();
+      console.log(`${successText('Created prompt feature')} ${value(created.id)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+promptFeature
+  .command("update")
+  .description("Update an existing prompt feature")
+  .requiredOption("-i, --id <id>", "Prompt feature ID")
+  .option("--prompt <prompt>", "New detection prompt")
+  .option("-d, --depends-on <ids...>", "New parent feature IDs (replaces all)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {};
+      if (options.prompt !== undefined) body.prompt = options.prompt;
+      if (options.dependsOn !== undefined) body.dependsOn = options.dependsOn;
+
+      if (Object.keys(body).length === 0) {
+        console.error(errorText("Error: provide --prompt and/or --depends-on"));
+        process.exit(1);
+      }
+
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/${options.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      console.log(`${successText('Updated prompt feature')} ${value(options.id)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+promptFeature
+  .command("delete")
+  .description("Delete a prompt feature (soft-delete; fails if other features depend on it)")
+  .requiredOption("-i, --id <id>", "Prompt feature ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/${options.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        if (error.dependents) {
+          console.error(errorText(`Cannot delete '${options.id}': depended on by ${error.dependents.join(', ')}`));
+        } else {
+          console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        }
+        process.exit(1);
+      }
+
+      console.log(`${successText('Deleted prompt feature')} ${value(options.id)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+promptFeature
+  .command("graph")
+  .description("Display the prompt feature dependency graph as ASCII")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/graph`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const graph = await response.json() as {
+        nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
+        edges: Array<{ from: string; to: string }>;
+      };
+
+      if (graph.nodes.length === 0) {
+        console.log(warnBanner("No prompt features in the graph."));
+        return;
+      }
+
+      console.log(label(`Prompt Feature DAG — ${graph.nodes.length} nodes, ${graph.edges.length} edges\n`));
+
+      const inDegree = new Map<string, number>();
+      const children = new Map<string, string[]>();
+      for (const n of graph.nodes) {
+        inDegree.set(n.id, 0);
+        children.set(n.id, []);
+      }
+      for (const e of graph.edges) {
+        inDegree.set(e.to, (inDegree.get(e.to) ?? 0) + 1);
+        children.get(e.from)?.push(e.to);
+      }
+
+      const layers: string[][] = [];
+      let queue = graph.nodes.filter(n => (inDegree.get(n.id) ?? 0) === 0).map(n => n.id);
+      while (queue.length > 0) {
+        layers.push([...queue]);
+        const next: string[] = [];
+        for (const id of queue) {
+          for (const child of children.get(id) ?? []) {
+            const deg = (inDegree.get(child) ?? 1) - 1;
+            inDegree.set(child, deg);
+            if (deg === 0) next.push(child);
+          }
+        }
+        queue = next;
+      }
+
+      for (let i = 0; i < layers.length; i++) {
+        const layerNodes = layers[i];
+        const row = layerNodes.map(id => value(id)).join('  ');
+        console.log(`  ${dimTimestamp(`Layer ${i}:`)}  ${row}`);
+      }
+
+      if (graph.edges.length > 0) {
+        console.log(`\n  ${label('Edges:')}`);
+        for (const e of graph.edges) {
+          console.log(`    ${value(e.from)} ${styleText('gray', '→')} ${value(e.to)}`);
+        }
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+promptFeature
+  .command("import")
+  .description("Import prompt features from YAML file(s) into the database (upsert)")
+  .argument("<path>", "Path to a .yaml file or a directory of .yaml files")
+  .option("--dry-run", "Preview what would be imported without sending to API")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (inputPath: string, options) => {
+    try {
+      const absPath = resolve(inputPath);
+      if (!existsSync(absPath)) {
+        console.error(errorText(`Path not found: ${absPath}`));
+        process.exit(1);
+      }
+
+      let yamlFiles: string[];
+      if (statSync(absPath).isDirectory()) {
+        yamlFiles = readdirSync(absPath)
+          .filter(f => extname(f) === '.yaml' || extname(f) === '.yml')
+          .sort()
+          .map(f => join(absPath, f));
+        if (yamlFiles.length === 0) {
+          console.error(errorText(`No .yaml files found in ${absPath}`));
+          process.exit(1);
+        }
+        console.log(`${label('Directory:')} ${value(absPath)} (${yamlFiles.length} files)`);
+      } else {
+        yamlFiles = [absPath];
+        console.log(`${label('File:')} ${value(absPath)}`);
+      }
+
+      const allFeatures: Array<{ id: string; prompt: string; dependsOn?: string[] }> = [];
+      const parseErrors: string[] = [];
+
+      for (const file of yamlFiles) {
+        const content = readFileSync(file, 'utf-8');
+        const fname = basename(file);
+
+        try {
+          const docs = parseAllDocuments(content);
+          for (let docIdx = 0; docIdx < docs.length; docIdx++) {
+            const doc = docs[docIdx].toJSON();
+            if (!doc || typeof doc !== 'object') continue;
+
+            // Reuse the same YAML mapping logic
+            const feature = mapYamlCriterion(doc, fname, docIdx);
+            if (feature) {
+              allFeatures.push(feature);
+            } else {
+              parseErrors.push(`${fname}${docs.length > 1 ? ` (doc ${docIdx + 1})` : ''}: missing id or prompt`);
+            }
+          }
+        } catch (e) {
+          parseErrors.push(`${fname}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      if (parseErrors.length > 0) {
+        console.log(`\n${warnBanner('Parse warnings:')}`);
+        for (const err of parseErrors) {
+          console.log(`  ${errorText('⚠')} ${err}`);
+        }
+      }
+
+      if (allFeatures.length === 0) {
+        console.error(errorText('No valid prompt features found to import.'));
+        process.exit(1);
+      }
+
+      console.log(`\n${label('Parsed:')} ${value(String(allFeatures.length))} prompt features`);
+
+      for (const f of allFeatures) {
+        const deps = (f.dependsOn ?? []).length;
+        const depsStr = deps > 0 ? ` ${dimTimestamp(`(${deps} dep${deps > 1 ? 's' : ''})`)}` : '';
+        console.log(`  ${value(f.id)}${depsStr}`);
+      }
+
+      if (options.dryRun) {
+        console.log(`\n${warnBanner('Dry run — no changes made.')}`);
+        return;
+      }
+
+      console.log();
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/seed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ features: allFeatures }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const result = await response.json() as { seeded: number; errors: string[] };
+      console.log(`${successText('Seeded:')} ${value(String(result.seeded))} prompt features`);
+      if (result.seeded < allFeatures.length) {
+        console.log(`${dimTimestamp(`(${allFeatures.length - result.seeded} already existed — skipped)`)}`);
+      }
+      if (result.errors.length > 0) {
+        console.log(`\n${warnBanner('Seed errors:')}`);
+        for (const err of result.errors) {
+          console.log(`  ${errorText('⚠')} ${err}`);
+        }
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+promptFeature
+  .command("extract")
+  .description("Extract prompt features from a task text or scenario file")
+  .option("-t, --task <text>", "Task text to analyze")
+  .option("-s, --scenario <path>", "Path to scenario YAML file (uses its task text)")
+  .option("--model <model>", "LLM model to use for extraction")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      let taskText = options.task;
+
+      if (!taskText && options.scenario) {
+        const absPath = resolve(options.scenario);
+        if (!existsSync(absPath)) {
+          console.error(errorText(`Scenario file not found: ${absPath}`));
+          process.exit(1);
+        }
+        const content = readFileSync(absPath, 'utf-8');
+        const parsed = yamlParse(content);
+        taskText = parsed?.task || parsed?.scenario?.task;
+        if (!taskText) {
+          console.error(errorText("Could not find 'task' field in scenario file"));
+          process.exit(1);
+        }
+        console.log(`${label('Scenario:')} ${value(basename(absPath))}`);
+      }
+
+      if (!taskText) {
+        console.error(errorText("Error: provide --task or --scenario"));
+        process.exit(1);
+      }
+
+      console.log(`${label('Extracting prompt features...')}`);
+
+      const body: Record<string, unknown> = { taskText };
+      if (options.model) body.model = options.model;
+
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/extract`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const extraction = await response.json() as {
+        promptFeatureResults: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
+        extractedAt: string;
+        model?: string;
+      };
+
+      const detected = extraction.promptFeatureResults.filter(r => r.detected);
+      const notDetected = extraction.promptFeatureResults.filter(r => !r.detected && r.evaluated);
+      const skipped = extraction.promptFeatureResults.filter(r => !r.evaluated);
+
+      console.log(`\n${label('Results:')}`);
+      if (detected.length > 0) {
+        console.log(`  ${successText('Detected:')}`);
+        for (const r of detected) {
+          console.log(`    ${criterionIcon(true, true)} ${value(r.featureId)}`);
+        }
+      }
+      if (notDetected.length > 0) {
+        console.log(`  ${dimTimestamp('Not detected:')}`);
+        for (const r of notDetected) {
+          console.log(`    ${criterionIcon(true, false)} ${dimTimestamp(r.featureId)}`);
+        }
+      }
+      if (skipped.length > 0) {
+        console.log(`  ${warnBanner('Skipped (not evaluated):')}`);
+        for (const r of skipped) {
+          console.log(`    ○ ${dimTimestamp(r.featureId)}`);
+        }
+      }
+
+      console.log(`\n${label('Summary:')} ${value(String(detected.length))} detected, ${dimTimestamp(String(notDetected.length))} not detected, ${dimTimestamp(String(skipped.length))} skipped`);
+      if (extraction.model) console.log(`${label('Model:')}   ${value(extraction.model)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 program.parse();
 

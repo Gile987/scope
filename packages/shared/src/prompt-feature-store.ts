@@ -2,50 +2,51 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { CriteriaConfig, CriteriaDocument } from './types.js';
+import { PromptFeatureConfig, PromptFeatureDocument } from './types.js';
 import { DependencyGraph } from './dependency-graph.js';
 
 /**
- * MongoDB-backed criteria store for CRUD operations on criteria definitions.
+ * MongoDB-backed prompt feature store for CRUD operations on prompt feature definitions.
  *
- * Replaces filesystem-based criteria loading for multi-instance deployments.
- * Criteria documents are soft-deleted (deletedAt) rather than removed.
+ * Mirrors the CriteriaStore pattern — manages prompt features that describe
+ * detectable characteristics in task prompts (as opposed to codebases).
+ * Documents are soft-deleted (deletedAt) rather than removed.
  */
-export class CriteriaStore {
-  constructor(private collection: Collection<CriteriaDocument>) {}
+export class PromptFeatureStore {
+  constructor(private collection: Collection<PromptFeatureDocument>) {}
 
-  /** List all active (non-deleted) criteria */
-  async getAll(): Promise<CriteriaDocument[]> {
+  /** List all active (non-deleted) prompt features */
+  async getAll(): Promise<PromptFeatureDocument[]> {
     return this.collection
       .find({ deletedAt: { $exists: false } })
       .sort({ id: 1 })
       .toArray();
   }
 
-  /** Get a single criterion by ID */
-  async get(id: string): Promise<CriteriaDocument | null> {
+  /** Get a single prompt feature by ID */
+  async get(id: string): Promise<PromptFeatureDocument | null> {
     return this.collection.findOne({ id, deletedAt: { $exists: false } });
   }
 
-  /** Create a new criterion. Validates uniqueness and dependency references. */
+  /** Create a new prompt feature. Validates uniqueness and dependency references. */
   async create(input: {
     id: string;
     prompt: string;
     dependsOn?: string[];
-  }): Promise<CriteriaDocument> {
+  }): Promise<PromptFeatureDocument> {
     const { id, prompt, dependsOn = [] } = input;
 
     // Validate ID format
     if (!/^[a-z0-9_-]+$/.test(id)) {
       throw new Error(
-        `Invalid criteria ID '${id}'. Must match [a-z0-9_-]+`
+        `Invalid prompt feature ID '${id}'. Must match [a-z0-9_-]+`
       );
     }
 
     // Check for duplicates
     const existing = await this.collection.findOne({ id, deletedAt: { $exists: false } });
     if (existing) {
-      throw new Error(`Criteria '${id}' already exists`);
+      throw new Error(`Prompt feature '${id}' already exists`);
     }
 
     // Validate dependency references exist
@@ -58,7 +59,7 @@ export class CriteriaStore {
       await this.validateNoCycles(id, dependsOn);
     }
 
-    const doc: CriteriaDocument = {
+    const doc: PromptFeatureDocument = {
       id,
       prompt: prompt.trim(),
       dependsOn,
@@ -69,14 +70,14 @@ export class CriteriaStore {
     return doc;
   }
 
-  /** Update a criterion's prompt and/or dependencies */
+  /** Update a prompt feature's prompt and/or dependencies */
   async update(
     id: string,
     patch: { prompt?: string; dependsOn?: string[] }
-  ): Promise<CriteriaDocument> {
+  ): Promise<PromptFeatureDocument> {
     const existing = await this.get(id);
     if (!existing) {
-      throw new Error(`Criteria '${id}' not found`);
+      throw new Error(`Prompt feature '${id}' not found`);
     }
 
     // Validate dependencies if changing them
@@ -100,13 +101,13 @@ export class CriteriaStore {
   }
 
   /**
-   * Soft-delete a criterion.
-   * Rejects if other active criteria depend on this one.
+   * Soft-delete a prompt feature.
+   * Rejects if other active prompt features depend on this one.
    */
   async delete(id: string): Promise<void> {
     const existing = await this.get(id);
     if (!existing) {
-      throw new Error(`Criteria '${id}' not found`);
+      throw new Error(`Prompt feature '${id}' not found`);
     }
 
     // Check for dependents
@@ -120,7 +121,7 @@ export class CriteriaStore {
     if (dependents.length > 0) {
       const depIds = dependents.map((d) => d.id).join(', ');
       throw new Error(
-        `Cannot delete '${id}': other criteria depend on it: ${depIds}`
+        `Cannot delete '${id}': other prompt features depend on it: ${depIds}`
       );
     }
 
@@ -131,11 +132,10 @@ export class CriteriaStore {
   }
 
   /**
-   * Resolve criteria IDs to CriteriaConfig objects, including all transitive ancestors.
-   * Same BFS logic as FileSystemCriteriaProvider.resolveWithAncestors but reads from MongoDB.
+   * Resolve prompt feature IDs to PromptFeatureConfig objects, including all transitive ancestors.
    */
-  async resolveWithAncestors(ids: string[]): Promise<CriteriaConfig[]> {
-    const collected = new Map<string, CriteriaConfig>();
+  async resolveWithAncestors(ids: string[]): Promise<PromptFeatureConfig[]> {
+    const collected = new Map<string, PromptFeatureConfig>();
     const queue = [...ids];
 
     while (queue.length > 0) {
@@ -147,7 +147,7 @@ export class CriteriaStore {
         const all = await this.getAll();
         const availableIds = all.map((c) => c.id).join(', ');
         throw new Error(
-          `Criteria '${id}' not found in store. Available: ${availableIds || 'none'}`
+          `Prompt feature '${id}' not found in store. Available: ${availableIds || 'none'}`
         );
       }
 
@@ -169,21 +169,21 @@ export class CriteriaStore {
    * Get the full DAG as nodes + edges for visualization.
    */
   async getGraph(): Promise<{
-    nodes: CriteriaConfig[];
+    nodes: PromptFeatureConfig[];
     edges: { from: string; to: string }[];
   }> {
     const all = await this.getAll();
-    const nodes: CriteriaConfig[] = all.map((c) => ({
+    const nodes: PromptFeatureConfig[] = all.map((c) => ({
       id: c.id,
       prompt: c.prompt,
       dependsOn: c.dependsOn,
     }));
 
     const edges: { from: string; to: string }[] = [];
-    for (const criterion of all) {
-      if (criterion.dependsOn) {
-        for (const parentId of criterion.dependsOn) {
-          edges.push({ from: parentId, to: criterion.id });
+    for (const feature of all) {
+      if (feature.dependsOn) {
+        for (const parentId of feature.dependsOn) {
+          edges.push({ from: parentId, to: feature.id });
         }
       }
     }
@@ -192,10 +192,10 @@ export class CriteriaStore {
   }
 
   /**
-   * Seed criteria from YAML-loaded configs (upsert — skip existing).
-   * Returns the number of newly inserted criteria.
+   * Seed prompt features from configs (upsert — skip existing).
+   * Returns the number of newly inserted prompt features.
    */
-  async seed(configs: CriteriaConfig[]): Promise<number> {
+  async seed(configs: PromptFeatureConfig[]): Promise<number> {
     let inserted = 0;
     for (const config of configs) {
       const existing = await this.collection.findOne({ id: config.id });
@@ -226,20 +226,20 @@ export class CriteriaStore {
 
   /** Validate that adding edges would not introduce a cycle */
   private async validateNoCycles(
-    criterionId: string,
+    featureId: string,
     dependsOn: string[]
   ): Promise<void> {
     // Build a temporary in-memory graph with the proposed change
     const all = await this.getAll();
-    const configs: CriteriaConfig[] = all.map((c) => ({
+    const configs: PromptFeatureConfig[] = all.map((c) => ({
       id: c.id,
       prompt: c.prompt,
-      dependsOn: c.id === criterionId ? dependsOn : c.dependsOn,
+      dependsOn: c.id === featureId ? dependsOn : c.dependsOn,
     }));
 
-    // If this is a new criterion, add it
-    if (!configs.some((c) => c.id === criterionId)) {
-      configs.push({ id: criterionId, prompt: '(pending)', dependsOn });
+    // If this is a new feature, add it
+    if (!configs.some((c) => c.id === featureId)) {
+      configs.push({ id: featureId, prompt: '(pending)', dependsOn });
     }
 
     try {
@@ -247,7 +247,7 @@ export class CriteriaStore {
     } catch (error) {
       if (error instanceof Error && error.message.includes('ycle')) {
         throw new Error(
-          `Adding dependencies [${dependsOn.join(', ')}] to '${criterionId}' would create a cycle`
+          `Adding dependencies [${dependsOn.join(', ')}] to '${featureId}' would create a cycle`
         );
       }
       throw error;

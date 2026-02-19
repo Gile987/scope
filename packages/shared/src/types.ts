@@ -63,6 +63,7 @@ export interface RequestDocument {
   personaInstructions?: string;  // Resolved persona prose (from traits.yaml)
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
+  promptFeatureExtractionId?: string; // Linked prompt feature extraction (hash-deduped)
 }
 
 // Log event for real-time streaming and persistence
@@ -142,4 +143,40 @@ export interface CriteriaDocument extends CriteriaConfig {
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;  // Soft-delete timestamp
+}
+
+// --- Prompt Features System types ---
+// Prompt features describe detectable characteristics of a task prompt
+// (analogous to criteria which describe detectable characteristics of a codebase)
+
+/** Prompt feature definition (loaded from config/prompt-features/*.yaml) */
+export interface PromptFeatureConfig {
+  id: string;
+  prompt: string;
+  dependsOn?: string[];  // Optional parent prompt feature IDs
+}
+
+/** Prompt feature document stored in MongoDB (extends PromptFeatureConfig with DB metadata) */
+export interface PromptFeatureDocument extends PromptFeatureConfig {
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;  // Soft-delete timestamp
+}
+
+/** Per-feature result from LLM extraction */
+export interface PromptFeatureResult {
+  featureId: string;
+  detected: boolean;
+  evaluated: boolean;  // False if skipped due to ancestor not detected
+}
+
+/** Stored extraction result — maps a task prompt to its detected features */
+export interface PromptFeatureExtraction {
+  _id?: string;
+  taskText: string;
+  taskTextHash?: string;
+  promptFeatureResults: PromptFeatureResult[];
+  extractedAt: Date;
+  model?: string;
+  cached?: boolean;
 }

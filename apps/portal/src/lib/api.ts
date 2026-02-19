@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -39,6 +39,7 @@ export const api = {
     personaInstructions?: string;
     persona?: { personality: string; experience: string; verbosity: string; type: string };
     count?: number;
+    promptFeatureExtractionId?: string;
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     return request(`/requests?worker=${encodeURIComponent(worker)}`, {
@@ -125,6 +126,68 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ behavior, ...(currentId && { currentId }) }),
     });
+  },
+
+  // ─── Prompt Features ───────────────────────────────────────────────────────
+
+  /** List all prompt features, optionally filtered by search query */
+  listPromptFeatures: (q?: string): Promise<PromptFeatureDocument[]> => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    const qs = params.toString();
+    return request(`/prompt-features${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single prompt feature by ID */
+  getPromptFeature: (id: string): Promise<PromptFeatureDocument & { dependents: string[] }> => {
+    return request(`/prompt-features/${id}`);
+  },
+
+  /** Create a new prompt feature */
+  createPromptFeature: (body: { id: string; prompt: string; dependsOn?: string[] }): Promise<PromptFeatureDocument> => {
+    return request("/prompt-features", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update an existing prompt feature */
+  updatePromptFeature: (id: string, body: { prompt?: string; dependsOn?: string[] }): Promise<PromptFeatureDocument> => {
+    return request(`/prompt-features/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Delete a prompt feature */
+  deletePromptFeature: (id: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/prompt-features/${id}`, { method: "DELETE" });
+  },
+
+  /** Get the full prompt feature dependency graph */
+  getPromptFeatureGraph: (): Promise<PromptFeatureGraphData> => {
+    return request("/prompt-features/graph");
+  },
+
+  /** Generate a prompt feature prompt from a behavior description using AI */
+  generatePromptFeaturePrompt: (behavior: string, currentId?: string): Promise<GeneratePromptResponse> => {
+    return request("/prompt-features/generate-prompt", {
+      method: "POST",
+      body: JSON.stringify({ behavior, ...(currentId && { currentId }) }),
+    });
+  },
+
+  /** Extract prompt features from a task text */
+  extractPromptFeatures: (taskText: string, model?: string): Promise<PromptFeatureExtraction> => {
+    return request("/prompt-features/extract", {
+      method: "POST",
+      body: JSON.stringify({ taskText, ...(model && { model }) }),
+    });
+  },
+
+  /** Get a single prompt feature extraction by ID */
+  getPromptFeatureExtraction: (id: string): Promise<PromptFeatureExtraction> => {
+    return request(`/prompt-features/extractions/${encodeURIComponent(id)}`);
   },
 
   // ─── Analysis ──────────────────────────────────────────────────────────────

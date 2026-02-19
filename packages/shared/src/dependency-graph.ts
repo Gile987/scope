@@ -1,49 +1,72 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CriteriaConfig, CriterionResult } from './types.js';
+/**
+ * Generic node in a dependency DAG.
+ * Both CriteriaConfig and PromptFeatureConfig satisfy this interface.
+ */
+export interface DependencyNode {
+  id: string;
+  dependsOn?: string[];
+}
 
 /**
- * Criteria DAG (Directed Acyclic Graph) implementation
+ * Result that can be filtered for root failures.
+ * Both CriterionResult and PromptFeatureResult satisfy this interface.
+ */
+export interface DependencyResult {
+  /** The node ID this result refers to */
+  criterionId?: string;
+  featureId?: string;
+  passed?: boolean;
+  detected?: boolean;
+}
+
+/**
+ * Dependency DAG (Directed Acyclic Graph) implementation.
  *
- * Manages dependencies between criteria and provides graph traversal operations:
- * - Cycle detection (fail fast)
+ * A generic graph that manages dependency relationships between nodes.
+ * Used by both the criteria system (codebase evaluation) and the
+ * prompt features system (task prompt analysis).
+ *
+ * Provides:
+ * - Cycle detection (fail fast on construction)
  * - Topological sort (evaluation order)
  * - Ancestor/descendant computation (transitive closure)
  * - Root failure filtering (failures without failing ancestors)
  */
-export class CriteriaGraph {
-  private registry: Map<string, CriteriaConfig>;
+export class DependencyGraph<T extends DependencyNode = DependencyNode> {
+  private registry: Map<string, T>;
   private adjacencyList: Map<string, Set<string>>;      // parent -> children
   private reverseAdjacency: Map<string, Set<string>>;   // child -> parents
 
-  constructor(criteria: CriteriaConfig[]) {
+  constructor(nodes: T[]) {
     this.registry = new Map();
     this.adjacencyList = new Map();
     this.reverseAdjacency = new Map();
 
-    // Add all criteria to registry
-    for (const criterion of criteria) {
-      if (this.registry.has(criterion.id)) {
-        throw new Error(`Duplicate criteria id '${criterion.id}'`);
+    // Add all nodes to registry
+    for (const node of nodes) {
+      if (this.registry.has(node.id)) {
+        throw new Error(`Duplicate node id '${node.id}'`);
       }
-      this.registry.set(criterion.id, criterion);
-      this.adjacencyList.set(criterion.id, new Set());
-      this.reverseAdjacency.set(criterion.id, new Set());
+      this.registry.set(node.id, node);
+      this.adjacencyList.set(node.id, new Set());
+      this.reverseAdjacency.set(node.id, new Set());
     }
 
     // Build edges (parent -> child)
-    for (const criterion of criteria) {
-      if (criterion.dependsOn && criterion.dependsOn.length > 0) {
-        for (const parentId of criterion.dependsOn) {
+    for (const node of nodes) {
+      if (node.dependsOn && node.dependsOn.length > 0) {
+        for (const parentId of node.dependsOn) {
           if (!this.registry.has(parentId)) {
             throw new Error(
-              `Criteria '${criterion.id}' depends on unknown criteria '${parentId}'`
+              `Node '${node.id}' depends on unknown node '${parentId}'`
             );
           }
           // Add edge: parent -> child
-          this.adjacencyList.get(parentId)!.add(criterion.id);
-          this.reverseAdjacency.get(criterion.id)!.add(parentId);
+          this.adjacencyList.get(parentId)!.add(node.id);
+          this.reverseAdjacency.get(node.id)!.add(parentId);
         }
       }
     }
@@ -59,35 +82,35 @@ export class CriteriaGraph {
     const visited = new Set<string>();
     const visiting = new Set<string>();
 
-    const dfs = (criterionId: string): boolean => {
-      if (visiting.has(criterionId)) {
+    const dfs = (nodeId: string): boolean => {
+      if (visiting.has(nodeId)) {
         // Found a cycle
         return true;
       }
-      if (visited.has(criterionId)) {
+      if (visited.has(nodeId)) {
         // Already processed
         return false;
       }
 
-      visiting.add(criterionId);
+      visiting.add(nodeId);
 
-      const children = this.adjacencyList.get(criterionId) || new Set();
+      const children = this.adjacencyList.get(nodeId) || new Set();
       for (const childId of children) {
         if (dfs(childId)) {
           return true;  // Cycle detected
         }
       }
 
-      visiting.delete(criterionId);
-      visited.add(criterionId);
+      visiting.delete(nodeId);
+      visited.add(nodeId);
       return false;
     };
 
     // Check all nodes (handles disconnected components)
-    for (const criterionId of this.registry.keys()) {
-      if (!visited.has(criterionId)) {
-        if (dfs(criterionId)) {
-          throw new Error('Cycle detected in criteria dependencies');
+    for (const nodeId of this.registry.keys()) {
+      if (!visited.has(nodeId)) {
+        if (dfs(nodeId)) {
+          throw new Error('Cycle detected in dependencies');
         }
       }
     }
@@ -96,8 +119,8 @@ export class CriteriaGraph {
   /**
    * Get all ancestor IDs (transitive) using BFS
    */
-  getAncestors(criterionId: string): Set<string> {
-    if (!this.registry.has(criterionId)) {
+  getAncestors(nodeId: string): Set<string> {
+    if (!this.registry.has(nodeId)) {
       return new Set();
     }
 
@@ -105,7 +128,7 @@ export class CriteriaGraph {
     const queue: string[] = [];
 
     // Start with immediate parents
-    const parents = this.reverseAdjacency.get(criterionId) || new Set();
+    const parents = this.reverseAdjacency.get(nodeId) || new Set();
     for (const parentId of parents) {
       queue.push(parentId);
       ancestors.add(parentId);
@@ -129,8 +152,8 @@ export class CriteriaGraph {
   /**
    * Get all descendant IDs (transitive) using BFS
    */
-  getDescendants(criterionId: string): Set<string> {
-    if (!this.registry.has(criterionId)) {
+  getDescendants(nodeId: string): Set<string> {
+    if (!this.registry.has(nodeId)) {
       return new Set();
     }
 
@@ -138,7 +161,7 @@ export class CriteriaGraph {
     const queue: string[] = [];
 
     // Start with immediate children
-    const children = this.adjacencyList.get(criterionId) || new Set();
+    const children = this.adjacencyList.get(nodeId) || new Set();
     for (const childId of children) {
       queue.push(childId);
       descendants.add(childId);
@@ -160,23 +183,23 @@ export class CriteriaGraph {
   }
 
   /**
-   * Topological sort using Kahn's algorithm
-   * Returns criteria IDs in evaluation order (parents before children)
+   * Topological sort using Kahn's algorithm.
+   * Returns node IDs in evaluation order (parents before children).
    */
   topologicalSort(): string[] {
     const result: string[] = [];
     const inDegree = new Map<string, number>();
 
     // Calculate in-degree for each node
-    for (const criterionId of this.registry.keys()) {
-      inDegree.set(criterionId, this.reverseAdjacency.get(criterionId)!.size);
+    for (const nodeId of this.registry.keys()) {
+      inDegree.set(nodeId, this.reverseAdjacency.get(nodeId)!.size);
     }
 
     // Queue for nodes with no incoming edges
     const queue: string[] = [];
-    for (const [criterionId, degree] of inDegree.entries()) {
+    for (const [nodeId, degree] of inDegree.entries()) {
       if (degree === 0) {
-        queue.push(criterionId);
+        queue.push(nodeId);
       }
     }
 
@@ -205,23 +228,33 @@ export class CriteriaGraph {
   }
 
   /**
-   * Filter to root-cause failures (failures with no failing ancestors)
+   * Filter to root-cause failures (failures with no failing ancestors).
    *
-   * If a parent criterion fails, we don't also report the child as failed
-   * since the child failure is a consequence of the parent failure.
+   * Works with both CriterionResult (criterionId/passed) and
+   * PromptFeatureResult (featureId/detected) formats.
+   *
+   * A result is considered "failed" if passed===false or detected===false.
+   * The node ID is read from criterionId or featureId.
    */
-  getRootFailures(results: CriterionResult[]): CriterionResult[] {
+  getRootFailures<R extends DependencyResult>(results: R[]): R[] {
+    const getNodeId = (r: R): string => (r.criterionId ?? r.featureId ?? '');
+    const isFailed = (r: R): boolean => {
+      if (r.passed !== undefined) return !r.passed;
+      if (r.detected !== undefined) return !r.detected;
+      return false;
+    };
+
     const failedIds = new Set<string>();
     for (const result of results) {
-      if (!result.passed) {
-        failedIds.add(result.criterionId);
+      if (isFailed(result)) {
+        failedIds.add(getNodeId(result));
       }
     }
 
-    const rootFailures: CriterionResult[] = [];
+    const rootFailures: R[] = [];
     for (const result of results) {
-      if (!result.passed) {
-        const ancestors = this.getAncestors(result.criterionId);
+      if (isFailed(result)) {
+        const ancestors = this.getAncestors(getNodeId(result));
         const hasFailedAncestor = Array.from(ancestors).some(ancestorId =>
           failedIds.has(ancestorId)
         );
@@ -235,42 +268,26 @@ export class CriteriaGraph {
   }
 
   /**
-   * Get all criteria in the graph
+   * Get all nodes in the graph
    */
-  getAllCriteria(): CriteriaConfig[] {
+  getAllNodes(): T[] {
     return Array.from(this.registry.values());
   }
 
   /**
-   * Get a single criterion by ID
+   * Get a single node by ID
    */
-  getCriterion(id: string): CriteriaConfig | undefined {
+  getNode(id: string): T | undefined {
     return this.registry.get(id);
   }
-}
 
-/**
- * Normalize criteria from v1 format (string prompts) or v2 format (CriteriaConfig[])
- *
- * v1: Converts string array to CriteriaConfig[] with auto-generated IDs
- * v2: Returns as-is if already CriteriaConfig[]
- */
-export function normalizeCriteria(
-  criteria: string[] | CriteriaConfig[]
-): CriteriaConfig[] {
-  if (criteria.length === 0) {
-    return [];
+  /** @deprecated Use getAllNodes() instead */
+  getAllCriteria(): T[] {
+    return this.getAllNodes();
   }
 
-  // Check if already normalized (CriteriaConfig[])
-  if (typeof criteria[0] === 'object' && 'id' in criteria[0]) {
-    return criteria as CriteriaConfig[];
+  /** @deprecated Use getNode() instead */
+  getCriterion(id: string): T | undefined {
+    return this.getNode(id);
   }
-
-  // v1 format: convert strings to CriteriaConfig with auto IDs
-  return (criteria as string[]).map((prompt, index) => ({
-    id: `criterion-${index + 1}`,
-    prompt: prompt.trim(),
-    dependsOn: []
-  }));
 }
