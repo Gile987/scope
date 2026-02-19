@@ -124,7 +124,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
         await this.logPublisher.publish(documentId!, level, msg, data);
       };
 
-      await this.handleRequest(doc, message, currentPopReceipt, log);
+      await this.handleRequest(doc as TDocument, message, currentPopReceipt, log);
     } catch (error) {
       console.error(`[${this.workerName}] Error processing message:`, error);
 
