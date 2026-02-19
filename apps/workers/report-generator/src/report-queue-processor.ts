@@ -12,7 +12,7 @@ import {
   LogEvent,
   ReportDocument,
   Reporter,
-} from "@scope-mt/shared";
+} from "shared";
 import { createReportTools } from "./tools.js";
 import { REPORT_SYSTEM_PROMPT } from "./prompt.js";
 
