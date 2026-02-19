@@ -195,6 +195,7 @@ export interface Report {
   _id: string;
   id: string;
   requestId: string;
+  task?: string;
   reporter?: Reporter;
   content?: string;
   status: ReportStatus;

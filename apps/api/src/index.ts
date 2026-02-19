@@ -1863,7 +1863,14 @@ app.get("/api/v1/reports", async (req: Request, res: Response, next: NextFunctio
       .sort({ createdAt: -1 })
       .toArray();
 
-    res.json(reports.map(r => ({ ...r, id: r._id })));
+    // Enrich reports with the task from their associated run
+    const requestIds = [...new Set(reports.map(r => r.requestId))];
+    const runs = requestIds.length > 0
+      ? await collection.find({ _id: { $in: requestIds } as any }, { projection: { _id: 1, "scenario.task": 1 } }).toArray()
+      : [];
+    const taskByRequestId = new Map(runs.map(r => [r._id, r.scenario?.task]));
+
+    res.json(reports.map(r => ({ ...r, id: r._id, task: taskByRequestId.get(r.requestId) })));
   } catch (error) {
     next(error);
   }

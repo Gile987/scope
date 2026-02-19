@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
-import { formatDate, formatId } from "@/lib/utils";
+import { formatDate, formatId, truncate } from "@/lib/utils";
 import { FileText } from "lucide-react";
 
 export function ReportsList() {
@@ -63,6 +63,7 @@ export function ReportsList() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-[120px]">Report ID</TableHead>
+              <TableHead>Task</TableHead>
               <TableHead className="w-[120px]">Run ID</TableHead>
               <TableHead className="w-[120px]">Status</TableHead>
               <TableHead className="w-[100px]">Model</TableHead>
@@ -79,6 +80,9 @@ export function ReportsList() {
                   >
                     {formatId(report._id)}
                   </Link>
+                </TableCell>
+                <TableCell className="text-sm">
+                  {truncate(report.task ?? "–", 60)}
                 </TableCell>
                 <TableCell>
                   <Link
