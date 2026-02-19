@@ -13,7 +13,7 @@
     "dev:report-generator": "pnpm --filter report-generator dev",
     "docker:up": "docker compose up --build",
     "docker:up:claude-code": "docker compose --profile claude-code up --build",
-    "docker:up:copilot": "docker compose --profile copilot up --build",
+    "docker:up:copilot": "docker compose --profile copilot --profile report up --build",
     "docker:up:vscode-web": "docker compose --profile vscode-web up --build",
     "docker:up:report": "docker compose --profile report up --build",
     "docker:up:all-workers": "docker compose --profile claude-code --profile copilot --profile vscode-web --profile report up --build",
