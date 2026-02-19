@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { LogViewer } from "@/components/LogViewer";
 import { useLogStream } from "@/hooks/use-log-stream";
-import { ArrowLeft, Copy, Check, ExternalLink } from "lucide-react";
+import { ArrowLeft, Copy, Check, ExternalLink, ClipboardCopy } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -23,6 +23,7 @@ import remarkGithubAlerts from "remark-github-markdown-alerts";
 export function ReportDetail() {
   const { id } = useParams<{ id: string }>();
   const [copied, setCopied] = useState(false);
+  const [copiedMarkdown, setCopiedMarkdown] = useState(false);
 
   const { data: report, isLoading, error } = useQuery({
     queryKey: ["report", id],
@@ -126,7 +127,25 @@ export function ReportDetail() {
         <TabsContent value="report" className="mt-4">
           {report.content ? (
             <Card>
-              <CardContent className="prose dark:prose-invert max-w-none pt-6">
+              <div className="flex justify-end px-6 pt-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-muted-foreground"
+                  onClick={() => {
+                    navigator.clipboard.writeText(report.content!);
+                    setCopiedMarkdown(true);
+                    setTimeout(() => setCopiedMarkdown(false), 2000);
+                  }}
+                >
+                  {copiedMarkdown ? (
+                    <><Check className="h-4 w-4 text-emerald-500" /> Copied!</>
+                  ) : (
+                    <><ClipboardCopy className="h-4 w-4" /> Copy Markdown</>
+                  )}
+                </Button>
+              </div>
+              <CardContent className="prose dark:prose-invert max-w-none pt-2">
                 <ReactMarkdown remarkPlugins={[remarkGfm, remarkGithubAlerts]} rehypePlugins={[rehypeRaw]}>{report.content}</ReactMarkdown>
               </CardContent>
             </Card>
