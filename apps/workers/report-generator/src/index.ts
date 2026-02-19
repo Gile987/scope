@@ -5,11 +5,11 @@ import "dotenv/config";
 import { ReportQueueProcessor, ReportQueueProcessorConfig } from "./report-queue-processor.js";
 
 const config: ReportQueueProcessorConfig = {
-  mongoUri: process.env.AZURE_COSMOS_CONNECTION_STRING || "mongodb://localhost:27017",
-  mongoDatabase: process.env.MONGO_DATABASE || "scope-mt",
+  mongoUri: process.env.MONGO_CONNECTION_STRING || process.env.AZURE_COSMOS_CONNECTION_STRING || "mongodb://localhost:27017",
+  mongoDatabase: process.env.MONGO_DATABASE || "requests-db",
   mongoCollection: "reports",
   storageAccountName: process.env.AZURE_STORAGE_ACCOUNT_NAME || "devstoreaccount1",
-  storageConnectionString: process.env.AZURE_STORAGE_CONNECTION_STRING || undefined,
+  storageConnectionString: process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING || undefined,
   queueName: process.env.AZURE_STORAGE_QUEUE_REPORT || "report-queue",
   batchSize: Number(process.env.BATCH_SIZE) || 1,
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS) || 5000,

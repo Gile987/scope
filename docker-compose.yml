@@ -8,6 +8,7 @@
 #   docker compose --profile copilot up                  # + Copilot worker
 #   docker compose --profile vscode-web up               # + VS Code Web worker
 #   docker compose --profile claude-code --profile copilot up  # multiple workers
+#   docker compose --profile report up                   # + Report Generator worker
 #   docker compose up mongodb redis azurite              # infra only (run app services natively)
 #
 # Host-native debugging:
@@ -113,6 +114,7 @@ services:
       PORT: "80"
       AZURE_STORAGE_QUEUE_WORKER_1: queue-coder-acp-claude-code
       AZURE_STORAGE_QUEUE_WORKER_2: queue-coder-acp-copilot
+      AZURE_STORAGE_QUEUE_REPORT: report-queue
       GITHUB_MODELS_API_KEY: ${GITHUB_MODELS_API_KEY:-${GITHUB_TOKEN}}
       LLM_MODEL: ${LLM_MODEL:-gpt-4.1}
       GIT_COMMIT: ${GIT_COMMIT:-development}
@@ -198,6 +200,30 @@ services:
       QUEUE_NAME: queue-coder-acp-copilot
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     depends_on: *worker-deps
+
+  # Report Generator worker (LLM-powered run reports via Copilot SDK)
+  report-generator:
+    build:
+      context: .
+      dockerfile: apps/workers/report-generator/Dockerfile
+    profiles: [report]
+    environment:
+      <<: *common-env
+      AZURE_STORAGE_QUEUE_REPORT: report-queue
+      REPORT_MODEL: ${REPORT_MODEL:-gpt-4.1}
+      SCOPE_MT_API_URL: http://api:80
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GIT_COMMIT: ${GIT_COMMIT:-development}
+      SESSION_TIMEOUT_MS: ${SESSION_TIMEOUT_MS:-300000}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+      api:
+        condition: service_started
 
 volumes:
   mongodb_data:
