@@ -1467,13 +1467,13 @@ promptFeature
       if (detected.length > 0) {
         console.log(`  ${successText('Detected:')}`);
         for (const r of detected) {
-          console.log(`    ${criterionIcon(true)} ${value(r.featureId)}`);
+          console.log(`    ${criterionIcon(true, true)} ${value(r.featureId)}`);
         }
       }
       if (notDetected.length > 0) {
         console.log(`  ${dimTimestamp('Not detected:')}`);
         for (const r of notDetected) {
-          console.log(`    ${criterionIcon(false)} ${dimTimestamp(r.featureId)}`);
+          console.log(`    ${criterionIcon(true, false)} ${dimTimestamp(r.featureId)}`);
         }
       }
       if (skipped.length > 0) {

@@ -235,7 +235,6 @@ export async function extractPromptFeatures(
 
     // Build complete results for all features (mark as not evaluated if
     // an ancestor was not detected — skip descendant evaluation)
-    const featureIds = new Set(features.map(f => f.id));
     const results: PromptFeatureResult[] = features.map(f => ({
       featureId: f.id,
       detected: llmResults.get(f.id) ?? false,
