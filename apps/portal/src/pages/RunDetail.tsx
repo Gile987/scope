@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,13 +11,15 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { LogViewer } from "@/components/LogViewer";
 import { TurnTimeline } from "@/components/TurnTimeline";
 import { CriteriaGraphView } from "@/components/CriteriaGraphView";
 import { useLogStream } from "@/hooks/use-log-stream";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus } from "lucide-react";
+import { formatDate, formatId } from "@/lib/utils";
 import { useState } from "react";
+import { toast } from "sonner";
 
 export function RunDetail() {
   const { id } = useParams<{ id: string }>();
@@ -52,6 +54,26 @@ export function RunDetail() {
     queryKey: ["prompt-feature-extraction", extractionId],
     queryFn: () => api.getPromptFeatureExtraction(extractionId!),
     enabled: !!extractionId,
+  });
+
+  // Fetch reports for this run
+  const { data: reports, refetch: refetchReports } = useQuery({
+    queryKey: ["run-reports", id],
+    queryFn: () => api.getRunReports(id!),
+    enabled: !!id,
+    refetchInterval: 10_000,
+  });
+
+  const queryClient = useQueryClient();
+  const generateReport = useMutation({
+    mutationFn: () => api.createReport(id!),
+    onSuccess: () => {
+      toast.success("Report generation queued");
+      refetchReports();
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to generate report");
+    },
   });
 
   const copyId = () => {
@@ -132,6 +154,9 @@ export function RunDetail() {
             Turns {run.turns ? `(${run.turns.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="logs">Logs</TabsTrigger>
+          <TabsTrigger value="reports">
+            Reports {reports && reports.length > 0 ? `(${reports.length})` : ""}
+          </TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
         </TabsList>
 
@@ -156,6 +181,54 @@ export function RunDetail() {
             isDone={logStream.isDone}
             error={logStream.error}
           />
+        </TabsContent>
+
+        {/* Reports tab */}
+        <TabsContent value="reports" className="mt-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-medium">Reports</h3>
+            <Button
+              size="sm"
+              onClick={() => generateReport.mutate()}
+              disabled={generateReport.isPending}
+              className="gap-1.5"
+            >
+              <Plus className="h-4 w-4" />
+              Generate Report
+            </Button>
+          </div>
+
+          {reports && reports.length > 0 ? (
+            <div className="space-y-3">
+              {reports.map((report) => (
+                <Card key={report._id}>
+                  <CardContent className="flex items-center justify-between py-4">
+                    <div className="flex items-center gap-4">
+                      <FileText className="h-5 w-5 text-muted-foreground" />
+                      <div>
+                        <Link
+                          to={`/reports/${report._id}`}
+                          className="font-mono text-sm text-primary hover:underline"
+                        >
+                          {formatId(report._id)}
+                        </Link>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDate(report.createdAt)}
+                          {report.reporter?.model && ` · ${report.reporter.model}`}
+                        </p>
+                      </div>
+                    </div>
+                    <ReportStatusBadge status={report.status} />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>No reports for this run yet.</p>
+            </div>
+          )}
         </TabsContent>
 
         {/* Details tab */}
