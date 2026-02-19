@@ -14,3 +14,7 @@ export * from "./criteria-provider.js";
 export * from "./criteria-provider-fs.js";
 export * from "./criteria-provider-api.js";
 export * from "./criteria-provider-factory.js";
+export * from "./prompt-feature-store.js";
+export * from "./prompt-feature-provider.js";
+export * from "./prompt-feature-provider-fs.js";
+export * from "./prompt-feature-provider-api.js";
