@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,7 @@ function slugify(text: string): string {
 export function CreatePromptFeature() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
 
   // Wizard step (1 or 2)
   const [step, setStep] = useState(1);
@@ -62,6 +63,29 @@ export function CreatePromptFeature() {
   const [suggestedParents, setSuggestedParents] = useState<string[]>([]);
   const [suggestedChildren, setSuggestedChildren] = useState<string[]>([]);
   const [acceptedChildren, setAcceptedChildren] = useState<string[]>([]);
+
+  // Pre-fill from URL search params (e.g., from extraction suggestions)
+  const [prefilled, setPrefilled] = useState(false);
+  useEffect(() => {
+    if (prefilled) return;
+    const paramBehavior = searchParams.get("behavior");
+    const paramId = searchParams.get("id");
+    const paramPrompt = searchParams.get("prompt");
+    if (paramBehavior || paramId || paramPrompt) {
+      if (paramBehavior) setBehavior(paramBehavior);
+      if (paramId) {
+        setId(paramId);
+        setIdManuallyEdited(true);
+      }
+      if (paramPrompt) {
+        // If a prompt is provided, skip to step 2 directly
+        setPrompt(paramPrompt);
+        setAiGenerated(false);
+        setStep(2);
+      }
+      setPrefilled(true);
+    }
+  }, [searchParams, prefilled]);
 
   // ID validation
   const idValid = useMemo(() => /^[a-z][a-z0-9_]*$/.test(id), [id]);
