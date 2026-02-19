@@ -102,6 +102,38 @@ export interface GeneratePromptResponse {
   suggestedChildren: string[];
 }
 
+// Prompt Feature types
+export interface PromptFeatureConfig {
+  id: string;
+  prompt: string;
+  dependsOn?: string[];
+}
+
+export interface PromptFeatureDocument extends PromptFeatureConfig {
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface PromptFeatureGraphData {
+  nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
+  edges: Array<{ source: string; target: string }>;
+}
+
+export interface PromptFeatureResult {
+  featureId: string;
+  detected: boolean;
+  evaluated: boolean;
+}
+
+export interface PromptFeatureExtraction {
+  _id?: string;
+  taskText: string;
+  promptFeatureResults: PromptFeatureResult[];
+  extractedAt: string;
+  model?: string;
+}
+
 // Analysis types for insights dashboard
 export interface TaskWorkerGroup {
   task: string;

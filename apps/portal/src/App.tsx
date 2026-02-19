@@ -11,6 +11,10 @@ import { CriterionDetail } from "@/pages/CriterionDetail";
 import { CreateCriterion } from "@/pages/CreateCriterion";
 import { CriteriaGraphView } from "@/pages/CriteriaGraphView";
 import { Insights } from "@/pages/Insights";
+import { PromptFeatureList } from "@/pages/PromptFeatureList";
+import { PromptFeatureDetail } from "@/pages/PromptFeatureDetail";
+import { CreatePromptFeature } from "@/pages/CreatePromptFeature";
+import { PromptFeatureGraphView } from "@/pages/PromptFeatureGraphView";
 
 export function App() {
   return (
@@ -24,6 +28,10 @@ export function App() {
         <Route path="/criteria/new" element={<CreateCriterion />} />
         <Route path="/criteria/graph" element={<CriteriaGraphView />} />
         <Route path="/criteria/:id" element={<CriterionDetail />} />
+        <Route path="/prompt-features" element={<PromptFeatureList />} />
+        <Route path="/prompt-features/new" element={<CreatePromptFeature />} />
+        <Route path="/prompt-features/graph" element={<PromptFeatureGraphView />} />
+        <Route path="/prompt-features/:id" element={<PromptFeatureDetail />} />
         <Route path="/insights" element={<Insights />} />
       </Route>
     </Routes>
