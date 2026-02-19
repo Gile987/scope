@@ -2,12 +2,11 @@
 // Licensed under the MIT License.
 
 import { CopilotClient, SessionEvent } from "@github/copilot-sdk";
-import { CriteriaConfig, CriterionResult } from "shared";
-import { CriteriaGraph } from "shared/criteria-graph";
+import { CriteriaConfig, CriterionResult, DependencyGraph } from "shared";
 
 export interface FeedbackContext {
   judgeResults: CriterionResult[];
-  criteriaGraph: CriteriaGraph;
+  criteriaGraph: DependencyGraph;
   criteriaRegistry: Map<string, CriteriaConfig>;
   personaInstructions?: string;
   maxCriteria?: number;
@@ -119,7 +118,7 @@ export class FeedbackGenerator {
   private buildSystemPrompt(
     baseInstructions: string,
     selectedCriteriaIds: string[],
-    criteriaGraph: CriteriaGraph,
+    criteriaGraph: DependencyGraph,
     criteriaRegistry: Map<string, CriteriaConfig>,
     includeDescendantGuard: boolean
   ): string {
@@ -148,7 +147,7 @@ export class FeedbackGenerator {
 
   private getDescendantPrompts(
     criteriaIds: string[],
-    graph: CriteriaGraph,
+    graph: DependencyGraph,
     registry: Map<string, CriteriaConfig>
   ): string[] {
     const descendantPrompts: string[] = [];

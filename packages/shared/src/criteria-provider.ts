@@ -22,7 +22,7 @@ export interface CriteriaProvider {
 
   /**
    * Resolve criteria IDs including transitive ancestors (BFS).
-   * Ensures the full DAG is available for CriteriaGraph construction.
+   * Ensures the full DAG is available for DependencyGraph construction.
    * Throws if any criterion (leaf or ancestor) is missing.
    */
   resolveWithAncestors(ids: string[]): Promise<CriteriaConfig[]>;

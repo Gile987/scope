@@ -9,10 +9,7 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./criteria-graph": {
-      "types": "./dist/criteria-graph.d.ts",
-      "import": "./dist/criteria-graph.js"
-    },
+
     "./criteria-store": {
       "types": "./dist/criteria-store.d.ts",
       "import": "./dist/criteria-store.js"

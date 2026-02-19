@@ -1,20 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/**
- * Backward-compatibility shim.
- *
- * The generic graph implementation has moved to dependency-graph.ts.
- * This module re-exports it under the legacy name and keeps the
- * criteria-specific `normalizeCriteria` helper here.
- */
-import { DependencyGraph } from './dependency-graph.js';
 import { CriteriaConfig } from './types.js';
-
-export { DependencyGraph };
-
-/** @deprecated Use DependencyGraph directly */
-export const CriteriaGraph = DependencyGraph;
 
 /**
  * Normalize criteria from v1 format (string prompts) or v2 format (CriteriaConfig[])

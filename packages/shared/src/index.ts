@@ -8,7 +8,7 @@ export * from "./blob-storage.js";
 export * from "./judge-client.js";
 export * from "./multi-turn-loop.js";
 export * from "./dependency-graph.js";
-export * from "./criteria-graph.js";
+export * from "./normalize-criteria.js";
 export * from "./criteria-store.js";
 export * from "./criteria-provider.js";
 export * from "./criteria-provider-fs.js";
