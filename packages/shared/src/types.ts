@@ -86,8 +86,8 @@ export interface WorkerProcessor {
   processMessage(message: string, log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>): Promise<string>;
 }
 
-// Configuration for the queue processor
-export interface QueueProcessorConfig {
+// Base configuration for queue processors
+export interface BaseQueueProcessorConfig {
   mongoUri: string;
   mongoDatabase: string;
   mongoCollection: string;
@@ -99,6 +99,11 @@ export interface QueueProcessorConfig {
   redisHost: string;
   redisPort: number;
   redisPassword: string;
+}
+
+// Configuration for the coding agent queue processor
+export interface QueueProcessorConfig extends BaseQueueProcessorConfig {
+  apiBaseUrl?: string; // For auto-triggering report generation via REST API
 }
 
 // --- Enhanced Criteria System types ---
@@ -143,6 +148,38 @@ export interface CriteriaDocument extends CriteriaConfig {
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;  // Soft-delete timestamp
+}
+
+// --- Report System types ---
+
+export type ReportStatus = "pending" | "generating" | "completed" | "failed";
+
+/** Reporter identity — describes what generated the report */
+export interface Reporter {
+  id: string;            // Hardcoded worker slug, e.g. "report-generator"
+  name: string;          // Human-readable, e.g. "Report Generator"
+  gitHash: string;       // Build-time GIT_COMMIT
+  model: string;         // Runtime REPORT_MODEL, e.g. "gpt-4.1"
+  agentId: string;       // Agent platform identifier, e.g. "copilot-sdk"
+  agentVersion: string;  // @github/copilot-sdk package version
+}
+
+/** Report document stored in MongoDB */
+export interface ReportDocument {
+  _id: string;           // UUID
+  requestId: string;     // FK → RequestDocument._id
+  reporter?: Reporter;   // Set by the worker when it picks up the job
+  content?: string;      // Generated markdown report
+  status: ReportStatus;
+  error?: string;
+  logs: LogEvent[];
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+/** Queue message payload for report generation */
+export interface ReportQueueMessagePayload {
+  reportId: string;
 }
 
 // --- Prompt Features System types ---

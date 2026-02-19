@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 export * from "./types.js";
+export * from "./base-queue-processor.js";
 export * from "./queue-processor.js";
 export * from "./log-publisher.js";
 export * from "./blob-storage.js";
