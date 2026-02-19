@@ -1260,8 +1260,8 @@ app.post("/api/v1/criteria", async (req: Request, res: Response, next: NextFunct
       res.status(400).json({ error: "id is required and must be a string" });
       return;
     }
-    if (!/^[a-z0-9_-]+$/.test(id)) {
-      res.status(400).json({ error: "id must match [a-z0-9_-]+" });
+    if (!/^[a-z][a-z0-9_]*$/.test(id)) {
+      res.status(400).json({ error: "id must start with a lowercase letter and contain only [a-z0-9_]" });
       return;
     }
     if (!prompt || typeof prompt !== "string") {
@@ -1639,8 +1639,8 @@ app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: Ne
       res.status(400).json({ error: "id is required and must be a string" });
       return;
     }
-    if (!/^[a-z0-9_-]+$/.test(id)) {
-      res.status(400).json({ error: "id must match [a-z0-9_-]+" });
+    if (!/^[a-z][a-z0-9_]*$/.test(id)) {
+      res.status(400).json({ error: "id must start with a lowercase letter and contain only [a-z0-9_]" });
       return;
     }
     if (!prompt || typeof prompt !== "string") {
