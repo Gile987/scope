@@ -1,0 +1,173 @@
+{
+  "groups": [
+    {
+      "task": "Create a calendar website",
+      "workerType": "coder-acp-copilot",
+      "total": 1,
+      "completed": 1,
+      "passed": 1,
+      "rejected": 0,
+      "passAtK": {
+        "1": 1,
+        "2": 1,
+        "5": 1
+      },
+      "successAtT": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "iterationStats": {
+        "mean": 4,
+        "stdDev": 0,
+        "min": 4,
+        "max": 4
+      }
+    },
+    {
+      "task": "Create a TODO webapp",
+      "workerType": "coder-acp-claude-code",
+      "total": 9,
+      "completed": 4,
+      "passed": 4,
+      "rejected": 0,
+      "passAtK": {
+        "1": 1,
+        "2": 1,
+        "5": 1
+      },
+      "successAtT": [
+        0.25,
+        0.5,
+        0.5,
+        0.75,
+        0.75,
+        0.75,
+        0.75,
+        0.75,
+        0.75,
+        1
+      ],
+      "iterationStats": {
+        "mean": 4.25,
+        "stdDev": 3.491060010942235,
+        "min": 1,
+        "max": 10
+      }
+    },
+    {
+      "task": "Create a Hello World Express API",
+      "workerType": "coder-acp-copilot",
+      "total": 9,
+      "completed": 9,
+      "passed": 9,
+      "rejected": 0,
+      "passAtK": {
+        "1": 1,
+        "2": 1,
+        "5": 1
+      },
+      "successAtT": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.6666666666666666,
+        0.7777777777777778,
+        0.7777777777777778,
+        0.7777777777777778,
+        0.8888888888888888,
+        1,
+        1,
+        1
+      ],
+      "iterationStats": {
+        "mean": 3.4444444444444446,
+        "stdDev": 2.408831487630978,
+        "min": 1,
+        "max": 8
+      }
+    },
+    {
+      "task": "Create a calendar webapp",
+      "workerType": "coder-acp-copilot",
+      "total": 26,
+      "completed": 23,
+      "passed": 23,
+      "rejected": 0,
+      "passAtK": {
+        "1": 1,
+        "2": 1,
+        "5": 1
+      },
+      "successAtT": [
+        0.391304347826087,
+        0.5652173913043478,
+        0.8260869565217391,
+        0.9130434782608695,
+        0.9565217391304348,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "iterationStats": {
+        "mean": 2.347826086956522,
+        "stdDev": 1.4021317823127912,
+        "min": 1,
+        "max": 6
+      }
+    },
+    {
+      "task": "Create a clone of Outlook on the web using Typescript",
+      "workerType": "coder-acp-copilot",
+      "total": 1,
+      "completed": 0,
+      "passed": 0,
+      "rejected": 0,
+      "passAtK": {
+        "1": 0,
+        "2": 0,
+        "5": 0
+      },
+      "successAtT": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "iterationStats": null
+    }
+  ],
+  "kValues": [
+    1,
+    2,
+    5
+  ],
+  "maxT": 10,
+  "summary": {
+    "totalRuns": 46,
+    "completedRuns": 37,
+    "passedRuns": 37,
+    "overallPassRate": 1,
+    "avgIterationsToPass": 2.864864864864865
+  },
+  "availableCriteria": [
+    "has_azure_azd",
+    "has_azure_doc",
+    "has_azure_swa"
+  ],
+  "selectedCriteria": []
+}

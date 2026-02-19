@@ -1,0 +1,235 @@
+================================================================================
+DEEP DIVE: AGENT ARGUMENTATION vs COMPLIANCE PATTERNS
+================================================================================
+
+Instances where agent argued against a requirement: 10
+
+  Run 6a780f8c (iter 3/6, 3 iters left after arguing)
+  Task: Create a calendar webapp
+  Agent said: "This is a pure static web app (HTML + CSS + vanilla JS) with no Node.js dependencies or build step. A `package.json` isn't needed. I'll add a `README...."
+
+  Run 6a780f8c (iter 4/6, 2 iters left after arguing)
+  Task: Create a calendar webapp
+  Agent said: "This is a fully static app — plain HTML, CSS, and vanilla JS with no modern JS features (no ES modules, no imports, no bundling needed). A `package.js..."
+
+  Run 6a780f8c (iter 5/6, 1 iters left after arguing)
+  Task: Create a calendar webapp
+  Agent said: "The README already covers the key points well. I'll add the `infra/` folder to the project structure listing and a note about other hosting options to..."
+
+  Run 6a780f8c (iter 6/6, 0 iters left after arguing)
+  Task: Create a calendar webapp
+  Agent said: "This is a purely static app (no Node.js needed). I'll add a minimal `package.json` to satisfy tooling expectations and document the project properly.A..."
+
+  Run a4e025cb (iter 2/2, 0 iters left after arguing)
+  Task: Create a calendar webapp
+  Agent said: "Two files were created:
+
+**`staticwebapp.config.json`** (project root):
+- **Routes**: `/api/*` allowed for all roles; static assets (`.css`, `.js`) ge..."
+
+  Run 32d25025 (iter 4/4, 0 iters left after arguing)
+  Task: Create a calendar webapp
+  Agent said: "This is a static web app (pure HTML/CSS/JS) deployed to Azure Static Web Apps. A `package.json` is needed because `azure.yaml` specifies `language: js..."
+
+  Run 5b116cb5 (iter 3/3, 0 iters left after arguing)
+  Task: Create a calendar webapp
+  Agent said: "Now update the package.json with the correct name and scripts:`package.json` is created with:
+- **name**: `calendar-app` (matching `azure.yaml`)
+- **`..."
+
+  Run d8990f09 (iter 1/2, 1 iters left after arguing)
+  Task: Create a calendar webapp
+  Agent said: "I'll help you create a calendar webapp. Let me first explore the current directory structure and then create a plan.Now let me create a plan for build..."
+
+  Run a6c8d526 (iter 3/5, 2 iters left after arguing)
+  Task: Create a calendar webapp
+  Agent said: "This is a **Python Flask application** that does not require Node.js. The project already has excellent documentation in the README.md that clearly de..."
+
+  Run 63e9ca22 (iter 3/3, 0 iters left after arguing)
+  Task: Create a calendar webapp
+  Agent said: "I'll create a package.json file for your project. Let me first check the existing files to understand the dependencies, then run npm init.Now I'll run..."
+
+================================================================================
+DEEP DIVE: The package.json / Node.js Problem
+================================================================================
+
+Runs with has_node struggles (flip-flops or 3+ turns failing): 14
+
+  Run 6a780f8c: Create a calendar webapp
+    Iter 1: PASS — package.json is present, indicating Node.js is used as the runtime environment.
+    Iter 2: FAIL — No package.json or Node.js-specific files found; project does not appear to use 
+    Iter 3: FAIL — No package.json or Node.js-specific files found. The app appears to be static HT
+    Iter 4: FAIL — No package.json or Node.js-specific files found. The README clarifies this is a 
+    Iter 5: FAIL — No package.json or Node.js-specific files found. The app is pure static HTML/CSS
+    Iter 6: PASS — package.json is present with a 'start' script using 'npx serve .', indicating No
+
+  Run 32d25025: Create a calendar webapp
+    Iter 1: FAIL — No package.json or other Node.js-specific configuration files were found, so Nod
+    Iter 2: FAIL — No package.json or other Node.js-specific configuration files found. Project doe
+    Iter 3: FAIL — No 'package.json' or other Node.js-specific configuration files were found. The 
+    Iter 4: PASS — A package.json file is present, specifying a Node.js-based start script ('npx se
+
+  Run 1fbeb8cd: Create a calendar webapp
+    Iter 1: FAIL — No 'package.json' or other Node.js-specific configuration files found. The proje
+    Iter 2: FAIL — No package.json or other Node.js-specific configuration files found. The app app
+    Iter 3: PASS — A package.json file is present, indicating Node.js usage for local development a
+
+  Run 7a6f4d26: Create a calendar webapp
+    Iter 1: FAIL — No package.json or other Node.js-specific files found. The project does not appe
+    Iter 2: FAIL — No package.json or other Node.js-specific configuration files found. The project
+    Iter 3: PASS — A package.json file is present, specifying Node.js as the runtime and including 
+
+  Run 5b116cb5: Create a calendar webapp
+    Iter 1: FAIL — Failed to parse judge response: ```json
+[
+  {"criterion": "has_azure_azd", "pass
+    Iter 2: FAIL — There is no package.json or other Node.js-specific configuration file present. T
+    Iter 3: PASS — A package.json file is present, specifying Node.js scripts and dependencies (e.g
+
+  Run a6c8d526: Create a calendar webapp
+    Iter 1: FAIL — No 'package.json' or other Node.js-specific files were found. The services are P
+    Iter 2: FAIL — No package.json or Node.js-specific files were found. The project does not appea
+    Iter 3: FAIL — No package.json or Node.js-specific files were found. The project does not use N
+    Iter 4: PASS — A package.json file is present at the root, specifying Node.js as the runtime wi
+    Iter 5: PASS — A package.json file is present, specifying Node.js as the runtime (with an engin
+
+  Run 63e9ca22: Create a calendar webapp
+    Iter 1: FAIL — package.json was listed by glob, but is missing from the workspace. Node.js runt
+    Iter 2: FAIL — No package.json file was found in the workspace, so Node.js runtime usage is not
+    Iter 3: PASS — package.json and package-lock.json are present, confirming Node.js runtime usage
+
+  Run ace3c201: Create a calendar webapp
+    Iter 1: FAIL — There is no package.json or other Node.js-specific configuration file present, s
+    Iter 2: PASS — A package.json file is present, specifying Node.js scripts and dependencies, con
+
+================================================================================
+DEEP DIVE: Azure Static Web Apps Configuration Gap
+================================================================================
+
+Runs where SWA criterion failed at least once: 16
+
+Judge feedback patterns on SWA failures:
+  No SWA configuration detected: 16
+  Missing staticwebapp.config.json: 15
+  Missing GitHub Actions workflow: 14
+  Missing azure.yaml SWA config: 2
+
+================================================================================
+DEEP DIVE: Agent Development Strategy (App-first vs Infra-first)
+================================================================================
+
+Development strategy on first iteration:
+  app_first: 14 runs
+  infra_first: 8 runs
+  both_first: 15 runs
+
+App-first → avg total iterations: 4.1
+Infra-first → avg total iterations: 2.5
+
+================================================================================
+TIMING ANALYSIS — How long do iterations take?
+================================================================================
+
+Iteration-to-iteration duration:
+  Mean: 90s
+  Min: 20s
+  Max: 509s
+
+Total run durations (created → last iteration):
+  Run a6c8d526: 12928s (215.5min) over 5 iterations
+  Run 3568a9fe: 8835s (147.3min) over 2 iterations
+  Run 42688e3d: 7115s (118.6min) over 10 iterations
+  Run 026f4f38: 4372s (72.9min) over 2 iterations
+  Run d8990f09: 4308s (71.8min) over 2 iterations
+  Average: 2182s (36.4min)
+
+================================================================================
+REGRESSION ANALYSIS — When agents break things they already had working
+================================================================================
+
+Total regressions detected: 6
+
+  Run 6a780f8c at iter 2: has_node
+  Task: Create a calendar webapp
+  Judge: No package.json or Node.js-specific files found; project does not appear to use Node.js as its runti
+  Agent: This is a static Calendar web app. I'll add AZD (Azure Developer CLI) configuration with Bicep to deploy it as an **Azure Static Web App**.Added the f...
+
+  Run 6a780f8c at iter 3: has_azure_swa
+  Task: Create a calendar webapp
+  Judge: No staticwebapp.config.json or Azure Static Web Apps workflow files found. README.md mentions SWA, b
+  Agent: This is a pure static web app (HTML + CSS + vanilla JS) with no Node.js dependencies or build step. A `package.json` isn't needed. I'll add a `README....
+
+  Run 291e80fb at iter 3: has_node
+  Task: Create a calendar webapp
+  Judge: No package.json file was found in the project root, indicating that Node.js is not currently configu
+  Agent: I'll help you set up Azure Static Web Apps configuration. Let me first explore the current project structure to understand what's already in place.Now...
+
+  Run 42688e3d at iter 2: has_node
+  Task: Create a TODO webapp
+  Judge: package.json file is missing, so Node.js runtime environment is not confirmed.
+  Agent: I'll help you add the necessary configuration files for Azure Static Web Apps deployment. Let me first explore the project structure to understand you...
+
+  Run 0ff3434f at iter 5: criterion-1
+  Task: Create a Hello World Express API
+  Judge: Not evaluated
+  Agent: I'll help you create an azd.yaml file for Azure Developer CLI deployments. Let me first examine the existing project structure to understand what need...
+
+  Run 0ff3434f at iter 7: has_azure_azd
+  Task: Create a Hello World Express API
+  Judge: The workspace does not contain an azd.yaml file, which is required for Azure Developer CLI deploymen
+  Agent: I can help review and analyze the code in your workspace! Let me examine what's here first.Great! I can see you have an Express.js application ready f...
+
+================================================================================
+FAILED RUNS — Infrastructure/timeout issues
+================================================================================
+
+  87e74fe3 [coder-acp-copilot] "Create a calendar webapp"
+    Turns completed: 0
+    Error: Judge evaluation failed on iteration 1: fetch failed
+
+  ffd918c0 [coder-acp-copilot] "Create a calendar webapp"
+    Turns completed: 1
+    Error: Judge evaluation failed on iteration 2: fetch failed
+
+  d8676005 [coder-acp-copilot] "Create a calendar webapp"
+    Turns completed: 0
+    Error: Judge evaluation failed on iteration 1: fetch failed
+
+  38e98a01 [coder-acp-claude-code] "Create a TODO webapp"
+    Turns completed: 0
+    Error: Coding agent failed on iteration 1: {
+  "code": -32603,
+  "message": "Internal error: Credit balance is too low"
+}
+
+  8f00c240 [coder-acp-claude-code] "Create a TODO webapp"
+    Turns completed: 0
+    Error: Coding agent failed on iteration 1: {
+  "code": -32603,
+  "message": "Internal error: Credit balance is too low"
+}
+
+  aa148acb [coder-acp-claude-code] "Create a TODO webapp"
+    Turns completed: 0
+    Error: Coding agent failed on iteration 1: {
+  "code": -32603,
+  "message": "Internal error: Credit balance is too low"
+}
+
+  683f2726 [coder-acp-claude-code] "Create a TODO webapp"
+    Turns completed: 0
+    Error: Coding agent failed on iteration 1: {
+  "code": -32603,
+  "message": "Internal error: Credit balance is too low"
+}
+
+  978d27b1 [coder-acp-copilot] "Create a clone of Outlook on the web using Typescript"
+    Turns completed: 3
+    Error: Judge evaluation failed on iteration 4: fetch failed
+
+  19bd07c3 [coder-acp-claude-code] "Create a TODO webapp"
+    Turns completed: 1
+    Error: Coding agent failed on iteration 2: {
+  "code": -32603,
+  "message": "Internal error: Credit balance is too low"
+}

@@ -1,0 +1,261 @@
+================================================================================
+SCOPE MT — CODING AGENT INSIGHTS REPORT
+================================================================================
+
+## Overview
+Total runs: 46
+Completed: 37 (80%)
+Failed (infra/timeout): 9 (20%)
+
+## By Worker
+  coder-acp-claude-code: 9 runs (4 completed, 5 failed)
+  coder-acp-copilot: 37 runs (33 completed, 4 failed)
+
+## By Task (Scenario)
+
+  Task: "Create a calendar webapp"
+    Runs: 26 (completed=23, failed=3)
+    Iterations: avg=2.3, min=1, max=6
+
+  Task: "Create a TODO webapp"
+    Runs: 9 (completed=4, failed=5)
+    Iterations: avg=4.2, min=1, max=10
+
+  Task: "Create a Hello World Express API"
+    Runs: 9 (completed=9, failed=0)
+    Iterations: avg=3.4, min=1, max=8
+
+  Task: "Create a clone of Outlook on the web using Typescript"
+    Runs: 1 (completed=0, failed=1)
+
+  Task: "Create a calendar website"
+    Runs: 1 (completed=1, failed=0)
+    Iterations: avg=4.0, min=4, max=4
+
+================================================================================
+CRITERIA ANALYSIS — Which criteria are hardest for agents?
+================================================================================
+
+Criterion             Evals   Pass@1  PassAny  NeverPass  AvgIterToPass
+----------------------------------------------------------------------
+  criterion-1             1       0%     100%          0            4.0
+  criterion-2             1       0%     100%          0            8.0
+  has_azure_swa          28      43%     100%          0            2.2
+  has_azure_doc           9      44%     100%          0            2.0
+  has_node               28      57%     100%          0            1.8
+  has_azure_azd          37      62%     100%          0            1.7
+  has_iac                36      64%     100%          0            1.5
+  has_azure              36      64%     100%          0            1.4
+  has_cloud              36      64%     100%          0            1.4
+
+================================================================================
+CRITERIA CO-FAILURE — Which criteria tend to fail together?
+================================================================================
+
+Most common co-failures on iteration 1:
+  has_azure_azd + has_iac: 13 runs
+  has_azure + has_azure_azd: 13 runs
+  has_azure_azd + has_cloud: 13 runs
+  has_azure + has_iac: 13 runs
+  has_cloud + has_iac: 13 runs
+  has_azure + has_cloud: 13 runs
+  has_azure_swa + has_node: 10 runs
+  has_azure_azd + has_azure_swa: 8 runs
+  has_azure_swa + has_iac: 8 runs
+  has_azure + has_azure_swa: 8 runs
+
+================================================================================
+ITERATION DYNAMICS — How do agents recover?
+================================================================================
+
+Criteria recoveries (fail→pass across iterations):
+  has_azure_swa: 17 recoveries
+  has_node: 15 recoveries
+  has_azure_azd: 14 recoveries
+  has_iac: 13 recoveries
+  has_azure: 13 recoveries
+  has_cloud: 13 recoveries
+  has_azure_doc: 5 recoveries
+  criterion-1: 2 recoveries
+  criterion-2: 1 recoveries
+
+Criteria regressions (pass→fail across iterations):
+  has_node: 3 regressions
+  has_azure_swa: 1 regressions
+  criterion-1: 1 regressions
+  has_azure_azd: 1 regressions
+
+================================================================================
+AGENT BEHAVIOR PATTERNS — Response analysis
+================================================================================
+
+Total turns across all completed runs: 106
+Avg response length: 1104 chars
+Avg feedback length: 212 chars
+
+Agent pushback (argued against requirement): 7 turns (7%)
+Agent compliance (tried to fix): 99 turns (93%)
+
+================================================================================
+FRICTION ANALYSIS — Where do agents waste iterations?
+================================================================================
+
+Runs requiring 4+ iterations: 10/37
+
+Criteria that agents get stuck on (failed 3+ consecutive turns):
+
+Detailed stuck patterns:
+
+  Run 42688e3d (coder-acp-claude-code, 10 iters)
+  Task: Create a TODO webapp
+  Stuck on: ['has_azure_swa']
+  Agent said: I'll help you create both the `staticwebapp.config.json` configuration file and the GitHub Actions workflow for Azure St...
+
+  Run 0ff3434f (coder-acp-copilot, 8 iters)
+  Task: Create a Hello World Express API
+  Stuck on: ['has_azure_azd', 'criterion-1', 'criterion-2']
+  Agent said: I can help review and analyze the code in your workspace! Let me examine what's here first.Great! I can see you have an ...
+
+  Run 00c5bfe7 (coder-acp-copilot, 7 iters)
+  Task: Create a Hello World Express API
+  Stuck on: ['has_azure_azd']
+  Agent said: I'll add infrastructure as code files to automate your Azure deployment. Let me first examine the current project struct...
+
+  Run 6a780f8c (coder-acp-copilot, 6 iters)
+  Task: Create a calendar webapp
+  Stuck on: ['has_node']
+  Agent said: The README already covers the key points well. I'll add the `infra/` folder to the project structure listing and a note ...
+
+  Run a6c8d526 (coder-acp-copilot, 5 iters)
+  Task: Create a calendar webapp
+  Stuck on: ['has_azure_swa']
+  Agent said: I'll help you switch this project to Node.js. Let me first examine the current Python application to understand what nee...
+
+  Run 32d25025 (coder-acp-copilot, 4 iters)
+  Task: Create a calendar webapp
+  Stuck on: ['has_azure_swa', 'has_node']
+  Agent said: This project is a plain HTML/CSS/JS calendar app with no build tools or Node.js dependencies — it runs directly in the b...
+
+  Run 291e80fb (coder-acp-copilot, 4 iters)
+  Task: Create a calendar webapp
+  Stuck on: ['has_node']
+  Agent said: I'll help you set up Azure Static Web Apps configuration. Let me first explore the current project structure to understa...
+
+  Run 4b1b4bcf (coder-acp-claude-code, 4 iters)
+  Task: Create a TODO webapp
+  Stuck on: ['has_azure_swa']
+  Agent said: I'll help you create a `package.json` file for your Node.js project. Let me first check the current directory structure ...
+
+  Run 9516f023 (coder-acp-copilot, 4 iters)
+  Task: Create a calendar website
+  Stuck on: ['has_azure_swa']
+  Agent said: I'll add the Node.js files needed for the App Service deployment. Let me first check the current structure and then crea...
+
+  Run c80baceb (coder-acp-copilot, 4 iters)
+  Task: Create a Hello World Express API
+  Stuck on: ['has_azure_azd']
+  Agent said: I'll examine the current workspace to understand the project and then add appropriate infrastructure as code files.Now I...
+
+================================================================================
+SUCCESS@T — Cumulative success rate by iteration
+================================================================================
+
+  [coder-acp-claude-code] Create a TODO webapp
+    Total=9, Completed=4, Passed=4
+    Iterations: mean=4.2, std=3.5, min=1, max=10
+    S@T: T1=25% T2=50% T3=50% T4=75% T5=75% T6=75% T7=75% T8=75% T9=75% T10=100% 
+
+  [coder-acp-copilot] Create a Hello World Express API
+    Total=9, Completed=9, Passed=9
+    Iterations: mean=3.4, std=2.4, min=1, max=8
+    S@T: T1=33% T2=33% T3=67% T4=78% T5=78% T6=78% T7=89% T8=100% T9=100% T10=100% 
+
+  [coder-acp-copilot] Create a calendar webapp
+    Total=26, Completed=23, Passed=23
+    Iterations: mean=2.3, std=1.4, min=1, max=6
+    S@T: T1=39% T2=57% T3=83% T4=91% T5=96% T6=100% T7=100% T8=100% T9=100% T10=100% 
+
+================================================================================
+JUDGE FEEDBACK THEMES — What does the judge keep asking for?
+================================================================================
+
+Total failing turns with feedback: 69
+
+Most frequent themes in judge feedback:
+  'add': 55 mentions
+  'include': 47 mentions
+  'configuration': 38 mentions
+  'create': 35 mentions
+  'deployment': 33 mentions
+  'package.json': 22 mentions
+  'node.js': 22 mentions
+  'dependencies': 20 mentions
+  'azd': 18 mentions
+  'static web app': 17 mentions
+  'staticwebapp.config': 17 mentions
+  'documentation': 14 mentions
+  'infrastructure': 12 mentions
+  'azure.yaml': 12 mentions
+  'terraform': 10 mentions
+  'npm': 10 mentions
+  'readme': 9 mentions
+  'build': 5 mentions
+  'api': 5 mentions
+  'port': 3 mentions
+
+================================================================================
+WORKER COMPARISON — Copilot vs Claude Code
+================================================================================
+
+  coder-acp-claude-code:
+    Completed: 4/9
+    Avg iterations: 4.2
+    Pass@1 (first attempt): 1/4 (25%)
+    Min/Max iterations: 1/10
+
+  coder-acp-copilot:
+    Completed: 33/37
+    Avg iterations: 2.7
+    Pass@1 (first attempt): 12/33 (36%)
+    Min/Max iterations: 1/8
+
+================================================================================
+SCENARIO × CRITERIA MATRIX — First iteration pass rates
+================================================================================
+
+  Task: "Create a Hello World Express API"
+    ✗ criterion-1: 0% pass@1 (0/1)
+    ✗ criterion-2: 0% pass@1 (0/1)
+    ✗ has_azure: 38% pass@1 (3/8)
+    ✗ has_azure_azd: 38% pass@1 (3/8)
+    ✗ has_azure_doc: 38% pass@1 (3/8)
+    ✗ has_cloud: 38% pass@1 (3/8)
+    ✗ has_iac: 38% pass@1 (3/8)
+
+  Task: "Create a TODO webapp"
+    ✓ has_azure: 100% pass@1 (4/4)
+    ✓ has_azure_azd: 100% pass@1 (4/4)
+    ✗ has_azure_swa: 25% pass@1 (1/4)
+    ✓ has_cloud: 100% pass@1 (4/4)
+    ✓ has_iac: 100% pass@1 (4/4)
+    ⚠ has_node: 75% pass@1 (3/4)
+
+  Task: "Create a calendar webapp"
+    ⚠ has_azure: 70% pass@1 (16/23)
+    ⚠ has_azure_azd: 70% pass@1 (16/23)
+    ✗ has_azure_swa: 48% pass@1 (11/23)
+    ⚠ has_cloud: 70% pass@1 (16/23)
+    ⚠ has_iac: 70% pass@1 (16/23)
+    ⚠ has_node: 57% pass@1 (13/23)
+
+  Task: "Create a calendar website"
+    ✗ has_azure: 0% pass@1 (0/1)
+    ✗ has_azure_azd: 0% pass@1 (0/1)
+    ✗ has_azure_swa: 0% pass@1 (0/1)
+    ✗ has_cloud: 0% pass@1 (0/1)
+    ✗ has_iac: 0% pass@1 (0/1)
+    ✗ has_node: 0% pass@1 (0/1)
+
+================================================================================
+END OF REPORT
+================================================================================

@@ -1,0 +1,124 @@
+[
+  {
+    "_id": "698ce3cab28d7c4806965238",
+    "id": "has_azure",
+    "prompt": "The project uses Azure cloud services.",
+    "dependsOn": [
+      "has_cloud"
+    ],
+    "createdAt": "2026-02-11T20:17:14.690Z"
+  },
+  {
+    "_id": "698ce3cab28d7c4806965239",
+    "id": "has_azure_arm",
+    "prompt": "The project uses Azure ARM templates for infrastructure as code.\nLook for azuredeploy.json, *.arm.json, or JSON files with $schema pointing to Azure deployment schemas.",
+    "dependsOn": [
+      "has_iac",
+      "has_azure"
+    ],
+    "createdAt": "2026-02-11T20:17:14.713Z"
+  },
+  {
+    "_id": "698ce3cab28d7c480696523a",
+    "id": "has_azure_azd",
+    "prompt": "The project uses Azure Developer CLI (azd) for infrastructure and deployment.\nLook for azure.yaml, .azure folder, or azd-specific configuration files.",
+    "dependsOn": [
+      "has_iac",
+      "has_azure"
+    ],
+    "createdAt": "2026-02-11T20:17:14.722Z"
+  },
+  {
+    "_id": "698ce3cab28d7c480696523b",
+    "id": "has_azure_bicep",
+    "prompt": "The project uses Azure Bicep for infrastructure as code.\nLook for *.bicep files, bicepconfig.json, or main.bicep entry points.",
+    "dependsOn": [
+      "has_iac",
+      "has_azure"
+    ],
+    "createdAt": "2026-02-11T20:17:14.741Z"
+  },
+  {
+    "_id": "698ce3cab28d7c480696523c",
+    "id": "has_azure_doc",
+    "prompt": "Documentation refers to Azure",
+    "dependsOn": [],
+    "createdAt": "2026-02-11T20:17:14.750Z"
+  },
+  {
+    "_id": "698ce3cab28d7c480696523d",
+    "id": "has_azure_swa",
+    "prompt": "The project is configured to deploy to Azure Static Web Apps. Look for\nstaticwebapp.config.json, azure-static-web-apps workflow files, or SWA CLI configuration.",
+    "dependsOn": [
+      "has_azure",
+      "has_node"
+    ],
+    "createdAt": "2026-02-11T20:17:14.761Z"
+  },
+  {
+    "_id": "698ce3cab28d7c480696523e",
+    "id": "has_cloud",
+    "prompt": "The project uses cloud infrastructure or services (Azure, AWS, GCP, or other cloud providers).",
+    "dependsOn": [],
+    "createdAt": "2026-02-11T20:17:14.771Z"
+  },
+  {
+    "_id": "698ce3cab28d7c4806965240",
+    "id": "has_iac",
+    "prompt": "Contains infrastructure as code (AZD, Terraform, shell scripts, ...)",
+    "dependsOn": [],
+    "createdAt": "2026-02-11T20:17:14.789Z"
+  },
+  {
+    "_id": "698ce3cab28d7c4806965241",
+    "id": "has_node",
+    "prompt": "The project uses Node.js as its runtime environment. Look for package.json file\nor Node.js-specific configuration files.",
+    "dependsOn": [],
+    "createdAt": "2026-02-11T20:17:14.798Z"
+  },
+  {
+    "_id": "698ce3cab28d7c4806965242",
+    "id": "has_react",
+    "prompt": "The project uses React framework. Look for react dependency in package.json,\n.jsx or .tsx files with React components.",
+    "dependsOn": [
+      "has_node"
+    ],
+    "createdAt": "2026-02-11T20:17:14.807Z"
+  },
+  {
+    "_id": "698ce3cab28d7c4806965243",
+    "id": "has_terraform",
+    "prompt": "The project uses Terraform for infrastructure as code.\nLook for .tf files, terraform.tfstate, or terraform configuration.",
+    "dependsOn": [
+      "has_iac"
+    ],
+    "createdAt": "2026-02-11T20:17:14.816Z"
+  },
+  {
+    "_id": "698ce3cab28d7c4806965244",
+    "id": "has_typescript",
+    "prompt": "The project uses TypeScript. Look for tsconfig.json, .ts or .tsx files,\nor typescript dependency in package.json.",
+    "dependsOn": [
+      "has_node"
+    ],
+    "createdAt": "2026-02-11T20:17:14.825Z"
+  },
+  {
+    "_id": "698cfb3ef7d0c1db58d1d565",
+    "id": "managed_cloud_documents_database",
+    "prompt": "ksjhdf",
+    "dependsOn": [
+      "has_cloud"
+    ],
+    "createdAt": "2026-02-11T21:57:18.817Z"
+  },
+  {
+    "_id": "6995e295cb078e61da624542",
+    "id": "uses_vercel",
+    "prompt": "Has vercel.json file",
+    "dependsOn": [
+      "has_cloud"
+    ],
+    "createdAt": "2026-02-18T16:02:29.991Z"
+  }
+]
