@@ -19,9 +19,16 @@ export function ReportsList() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-[400px] w-full" />
+      <div className="space-y-6">
+        <div>
+          <Skeleton className="h-9 w-48" />
+          <Skeleton className="h-5 w-80 mt-2" />
+        </div>
+        <div className="space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
       </div>
     );
   }
@@ -38,22 +45,28 @@ export function ReportsList() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Reports</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-3xl font-bold tracking-tight">Reports</h1>
+          <p className="text-muted-foreground">
             LLM-generated analysis reports for benchmark runs
           </p>
         </div>
       </div>
 
       {reports && reports.length > 0 ? (
+        <div className="flex items-center justify-end">
+          <span className="text-sm text-muted-foreground">{reports.length} reports</span>
+        </div>
+      ) : null}
+
+      {reports && reports.length > 0 ? (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Report ID</TableHead>
-              <TableHead>Run ID</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Model</TableHead>
-              <TableHead>Created</TableHead>
+              <TableHead className="w-[120px]">Report ID</TableHead>
+              <TableHead className="w-[120px]">Run ID</TableHead>
+              <TableHead className="w-[120px]">Status</TableHead>
+              <TableHead className="w-[100px]">Model</TableHead>
+              <TableHead className="w-[180px]">Created</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -62,7 +75,7 @@ export function ReportsList() {
                 <TableCell>
                   <Link
                     to={`/reports/${report._id}`}
-                    className="font-mono text-sm text-primary hover:underline"
+                    className="font-mono text-xs text-primary hover:underline"
                   >
                     {formatId(report._id)}
                   </Link>
@@ -70,7 +83,7 @@ export function ReportsList() {
                 <TableCell>
                   <Link
                     to={`/runs/${report.requestId}`}
-                    className="font-mono text-sm text-muted-foreground hover:text-foreground hover:underline"
+                    className="font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
                   >
                     {formatId(report.requestId)}
                   </Link>
