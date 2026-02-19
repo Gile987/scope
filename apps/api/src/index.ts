@@ -47,6 +47,7 @@ const storageAccountName = process.env.AZURE_STORAGE_ACCOUNT_NAME || "";
 const storageConnectionString = process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING || "";
 const queueWorker1 = process.env.AZURE_STORAGE_QUEUE_WORKER_1 || "queue-coder-acp-claude-code";
 const queueWorker2 = process.env.AZURE_STORAGE_QUEUE_WORKER_2 || "queue-coder-acp-copilot";
+const queueReport = process.env.AZURE_STORAGE_QUEUE_REPORT || "report-queue";
 const redisHost = process.env.REDIS_HOST || "";
 const redisPort = parseInt(process.env.REDIS_PORT || "6379", 10);
 const redisPassword = process.env.REDIS_PASSWORD || "";
@@ -67,7 +68,9 @@ let collection: Collection<RequestDocument>;
 let criteriaCollection: Collection<CriteriaDocument>;
 let promptFeatureCollection: Collection<PromptFeatureDocument>;
 let promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
+let reportCollection: Collection<ReportDocument>;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
+let reportQueueClient: QueueClient;
 
 // Criteria document interface
 interface CriteriaDocument {
@@ -96,6 +99,26 @@ interface PromptFeatureExtractionDocument {
   promptFeatureResults: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
   extractedAt: Date;
   model?: string;
+}
+
+// Report document interface
+interface ReportDocument {
+  _id: string;
+  requestId: string;
+  reporter?: {
+    id: string;
+    name: string;
+    gitHash: string;
+    model: string;
+    agentId: string;
+    agentVersion: string;
+  };
+  content?: string;
+  status: "pending" | "generating" | "completed" | "failed";
+  error?: string;
+  logs: LogEvent[];
+  createdAt: Date;
+  updatedAt?: Date;
 }
 
 // Log event interface
@@ -255,6 +278,7 @@ async function initializeClients(): Promise<void> {
   criteriaCollection = db.collection<CriteriaDocument>("criteria");
   promptFeatureCollection = db.collection<PromptFeatureDocument>("prompt-features");
   promptFeatureExtractionCollection = db.collection<PromptFeatureExtractionDocument>("prompt-feature-extractions");
+  reportCollection = db.collection<ReportDocument>("reports");
   
   // Create index for createdAt (required for sorting in CosmosDB MongoDB API)
   try {
@@ -289,6 +313,15 @@ async function initializeClients(): Promise<void> {
     console.log("Index on prompt-feature-extractions.taskTextHash already exists or couldn't be created");
   }
 
+  // Create indexes for reports collection
+  try {
+    await reportCollection.createIndex({ createdAt: -1 });
+    await reportCollection.createIndex({ requestId: 1 });
+    console.log("Created indexes on reports collection");
+  } catch (err) {
+    console.log("Indexes on reports collection already exist or couldn't be created");
+  }
+
   // Seed criteria from YAML files on first boot (skipped — use POST /api/v1/criteria/seed)
   const criteriaCount = await criteriaCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Criteria collection has ${criteriaCount} documents`);
@@ -303,12 +336,14 @@ async function initializeClients(): Promise<void> {
     // Connection string auth (local Azurite or Azure with connection string)
     queueClients.set("coder-acp-claude-code", new QueueClient(storageConnectionString, queueWorker1));
     queueClients.set("coder-acp-copilot", new QueueClient(storageConnectionString, queueWorker2));
+    reportQueueClient = new QueueClient(storageConnectionString, queueReport);
   } else {
     // Azure with DefaultAzureCredential
     const credential = new DefaultAzureCredential();
     const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
     queueClients.set("coder-acp-claude-code", new QueueClient(`${queueUrl}/${queueWorker1}`, credential));
     queueClients.set("coder-acp-copilot", new QueueClient(`${queueUrl}/${queueWorker2}`, credential));
+    reportQueueClient = new QueueClient(`${queueUrl}/${queueReport}`, credential);
   }
 
   // Ensure queues exist (creates them in Azurite on first run)
@@ -316,8 +351,10 @@ async function initializeClients(): Promise<void> {
     await client.createIfNotExists();
     console.log(`Ensured queue exists: ${name}`);
   }
+  await reportQueueClient.createIfNotExists();
+  console.log(`Ensured queue exists: ${queueReport}`);
 
-  console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}`);
+  console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}, report`);
 }
 
 // Health check endpoint
@@ -1759,6 +1796,263 @@ app.delete("/api/v1/prompt-features/:id", async (req: Request, res: Response, ne
     );
 
     res.json({ id, deleted: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==================== Report Endpoints ====================
+
+// Create a report for a run (POST /api/v1/reports)
+app.post("/api/v1/reports", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { requestId } = req.body;
+
+    if (!requestId || typeof requestId !== "string") {
+      res.status(400).json({ error: "requestId is required and must be a string" });
+      return;
+    }
+
+    // Verify the run exists
+    const run = await collection.findOne({ _id: requestId });
+    if (!run) {
+      res.status(404).json({ error: `Run ${requestId} not found` });
+      return;
+    }
+
+    const reportId = uuidv4();
+
+    const reportDoc: ReportDocument = {
+      _id: reportId,
+      requestId,
+      status: "pending",
+      logs: [],
+      createdAt: new Date(),
+    };
+
+    await reportCollection.insertOne(reportDoc);
+
+    // Queue the report for processing
+    const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
+    await reportQueueClient.sendMessage(messageContent);
+
+    console.log(`Created report ${reportId} for run ${requestId} and queued for processing`);
+
+    res.status(201).json({
+      id: reportId,
+      requestId,
+      status: "pending",
+      message: "Report generation queued",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// List all reports (GET /api/v1/reports)
+app.get("/api/v1/reports", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const requestIdFilter = req.query.requestId as string;
+    const filter: Record<string, unknown> = {};
+    if (requestIdFilter) {
+      filter.requestId = requestIdFilter;
+    }
+
+    const reports = await reportCollection
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(reports.map(r => ({ ...r, id: r._id })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Bulk report status (POST /api/v1/reports/bulk-status)
+app.post("/api/v1/reports/bulk-status", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { requestIds } = req.body as { requestIds?: string[] };
+
+    if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+      res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+      return;
+    }
+
+    // Find the latest report for each requestId
+    const reports = await reportCollection
+      .find({ requestId: { $in: requestIds } })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    // Build a map of requestId → latest report status
+    const statusMap: Record<string, { reportId: string; status: string }> = {};
+    for (const report of reports) {
+      if (!statusMap[report.requestId]) {
+        statusMap[report.requestId] = {
+          reportId: report._id,
+          status: report.status,
+        };
+      }
+    }
+
+    res.json(statusMap);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get a single report (GET /api/v1/reports/:id)
+app.get("/api/v1/reports/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const report = await reportCollection.findOne({ _id: id });
+
+    if (!report) {
+      res.status(404).json({ error: "Report not found" });
+      return;
+    }
+
+    res.json({ ...report, id: report._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Stream report logs via SSE (GET /api/v1/reports/:id/logs)
+app.get("/api/v1/reports/:id/logs", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const fromStart = req.query.fromStart === "true";
+
+    const report = await reportCollection.findOne({ _id: id });
+
+    if (!report) {
+      res.status(404).json({ error: "Report not found" });
+      return;
+    }
+
+    // Set SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    // Replay existing logs if requested
+    if (fromStart && report.logs && report.logs.length > 0) {
+      for (const log of report.logs) {
+        res.write(`data: ${JSON.stringify(log)}\n\n`);
+      }
+    }
+
+    // If report already completed/failed, send done and close
+    if (report.status === "completed" || report.status === "failed") {
+      res.write(`event: done\ndata: {"status":"${report.status}"}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Live streaming via Redis + Change Streams (same pattern as requests)
+    let cleaned = false;
+    let changeStream: ReturnType<typeof reportCollection.watch> | null = null;
+    let redisSubscribed = false;
+
+    const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+    let inactivityTimer: ReturnType<typeof setTimeout>;
+
+    const resetInactivityTimer = () => {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => {
+        res.write(`event: timeout\ndata: {"message":"Stream timeout after 5 minutes of inactivity"}\n\n`);
+        client.cleanup();
+      }, INACTIVITY_TIMEOUT_MS);
+    };
+
+    const heartbeat = setInterval(() => {
+      if (!cleaned) {
+        res.write(`:\n\n`);
+      }
+    }, 30_000);
+
+    const client: SSEClient = {
+      res,
+      onActivity: resetInactivityTimer,
+      cleanup: () => {
+        if (!cleaned) {
+          cleaned = true;
+          clearTimeout(inactivityTimer);
+          clearInterval(heartbeat);
+          if (changeStream) {
+            changeStream.close().catch(err => console.error("Error closing report change stream:", err));
+          }
+          if (redisSubscribed) {
+            unsubscribeClient(id, client);
+          }
+          res.end();
+        }
+      },
+    };
+
+    resetInactivityTimer();
+
+    if (redisHost) {
+      try {
+        await subscribeClient(id, client);
+        redisSubscribed = true;
+      } catch (err) {
+        console.error(`Redis subscription failed for report ${id}, using Change Streams only:`, err);
+      }
+    }
+
+    try {
+      changeStream = reportCollection.watch(
+        [{ $match: { "documentKey._id": id, operationType: "update" } }],
+        { fullDocument: "updateLookup" }
+      );
+
+      changeStream.on("change", (change) => {
+        if (change.operationType === "update" && change.fullDocument) {
+          const doc = change.fullDocument;
+          if (doc.status === "completed" || doc.status === "failed") {
+            res.write(`event: done\ndata: {"status":"${doc.status}"}\n\n`);
+            client.cleanup();
+          }
+        }
+      });
+
+      changeStream.on("error", (err) => {
+        console.error(`Report change stream error for ${id}:`, err);
+      });
+    } catch (err) {
+      console.error(`Failed to create change stream for report ${id}:`, err);
+    }
+
+    req.on("close", () => client.cleanup());
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get reports for a specific run (GET /api/v1/requests/:id/reports)
+app.get("/api/v1/requests/:id/reports", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    // Verify the run exists
+    const run = await collection.findOne({ _id: id });
+    if (!run) {
+      res.status(404).json({ error: "Run not found" });
+      return;
+    }
+
+    const reports = await reportCollection
+      .find({ requestId: id })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(reports.map(r => ({ ...r, id: r._id })));
   } catch (error) {
     next(error);
   }
