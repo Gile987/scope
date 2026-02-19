@@ -7,3 +7,4 @@ dist/
 .azure/
 .venv/
 downloads/
+work/
