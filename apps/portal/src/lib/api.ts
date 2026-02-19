@@ -39,6 +39,7 @@ export const api = {
     personaInstructions?: string;
     persona?: { personality: string; experience: string; verbosity: string; type: string };
     count?: number;
+    promptFeatureExtractionId?: string;
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     return request(`/requests?worker=${encodeURIComponent(worker)}`, {
@@ -182,6 +183,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ taskText, ...(model && { model }) }),
     });
+  },
+
+  /** Get a single prompt feature extraction by ID */
+  getPromptFeatureExtraction: (id: string): Promise<PromptFeatureExtraction> => {
+    return request(`/prompt-features/extractions/${encodeURIComponent(id)}`);
   },
 
   // ─── Analysis ──────────────────────────────────────────────────────────────

@@ -63,6 +63,7 @@ export interface RequestDocument {
   personaInstructions?: string;  // Resolved persona prose (from traits.yaml)
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
+  promptFeatureExtractionId?: string; // Linked prompt feature extraction (hash-deduped)
 }
 
 // Log event for real-time streaming and persistence
@@ -173,7 +174,9 @@ export interface PromptFeatureResult {
 export interface PromptFeatureExtraction {
   _id?: string;
   taskText: string;
+  taskTextHash?: string;
   promptFeatureResults: PromptFeatureResult[];
   extractedAt: Date;
   model?: string;
+  cached?: boolean;
 }

@@ -59,6 +59,7 @@ export interface Run {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
+  promptFeatureExtractionId?: string;
 }
 
 export const WORKER_TYPES = [
@@ -129,9 +130,11 @@ export interface PromptFeatureResult {
 export interface PromptFeatureExtraction {
   _id?: string;
   taskText: string;
+  taskTextHash?: string;
   promptFeatureResults: PromptFeatureResult[];
   extractedAt: string;
   model?: string;
+  cached?: boolean;
 }
 
 // Analysis types for insights dashboard

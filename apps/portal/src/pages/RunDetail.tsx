@@ -15,7 +15,7 @@ import { LogViewer } from "@/components/LogViewer";
 import { TurnTimeline } from "@/components/TurnTimeline";
 import { CriteriaGraphView } from "@/components/CriteriaGraphView";
 import { useLogStream } from "@/hooks/use-log-stream";
-import { ArrowLeft, Copy, Check } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useState } from "react";
 
@@ -44,6 +44,14 @@ export function RunDetail() {
     id: run?._id ?? "",
     enabled: isActive && !!run,
     fromStart: true,
+  });
+
+  // Fetch linked prompt feature extraction (if present)
+  const extractionId = run?.promptFeatureExtractionId;
+  const { data: extraction } = useQuery({
+    queryKey: ["prompt-feature-extraction", extractionId],
+    queryFn: () => api.getPromptFeatureExtraction(extractionId!),
+    enabled: !!extractionId,
   });
 
   const copyId = () => {
@@ -222,6 +230,73 @@ export function RunDetail() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Prompt Features card (if extraction linked) */}
+            {extraction && (
+              <Card className="md:col-span-2">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Sparkles className="h-4 w-4" /> Prompt Features
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(() => {
+                    const detected = extraction.promptFeatureResults.filter((f) => f.detected);
+                    const notDetected = extraction.promptFeatureResults.filter((f) => !f.detected && f.evaluated);
+                    const skipped = extraction.promptFeatureResults.filter((f) => !f.evaluated);
+                    return (
+                      <>
+                        {detected.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+                              Detected ({detected.length})
+                            </h4>
+                            <div className="flex flex-wrap gap-1.5">
+                              {detected.map((f) => (
+                                <Badge key={f.featureId} variant="default" className="gap-1 font-mono text-xs">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  {f.featureId}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {notDetected.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+                              Not detected ({notDetected.length})
+                            </h4>
+                            <div className="flex flex-wrap gap-1.5">
+                              {notDetected.map((f) => (
+                                <Badge key={f.featureId} variant="outline" className="gap-1 font-mono text-xs text-muted-foreground">
+                                  <XCircle className="h-3 w-3" />
+                                  {f.featureId}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {skipped.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+                              Skipped ({skipped.length})
+                            </h4>
+                            <div className="flex flex-wrap gap-1.5">
+                              {skipped.map((f) => (
+                                <Badge key={f.featureId} variant="outline" className="gap-1 font-mono text-xs text-muted-foreground/50">
+                                  <MinusCircle className="h-3 w-3" />
+                                  {f.featureId}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Error card (if failed) */}
             {run.error && (

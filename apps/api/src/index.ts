@@ -16,6 +16,7 @@ import { mkdtempSync, rmSync, existsSync, readdirSync, statSync } from "fs";
 import { readFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join, basename } from "path";
+import { createHash } from "crypto";
 import { parse as yamlParse } from "yaml";
 import { isLlmAvailable, generateCriteriaPrompt } from "./llm.js";
 import {
@@ -91,6 +92,7 @@ interface PromptFeatureDocument {
 interface PromptFeatureExtractionDocument {
   _id?: string;
   taskText: string;
+  taskTextHash: string;
   promptFeatureResults: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
   extractedAt: Date;
   model?: string;
@@ -279,6 +281,14 @@ async function initializeClients(): Promise<void> {
     console.log("Index on prompt-features.id already exists or couldn't be created");
   }
 
+  // Create unique index for prompt feature extraction task text hash (dedup)
+  try {
+    await promptFeatureExtractionCollection.createIndex({ taskTextHash: 1 }, { unique: true });
+    console.log("Created unique index on prompt-feature-extractions.taskTextHash");
+  } catch (err) {
+    console.log("Index on prompt-feature-extractions.taskTextHash already exists or couldn't be created");
+  }
+
   // Seed criteria from YAML files on first boot (skipped — use POST /api/v1/criteria/seed)
   const criteriaCount = await criteriaCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Criteria collection has ${criteriaCount} documents`);
@@ -337,7 +347,7 @@ app.get("/api/v1/version", (_req: Request, res: Response) => {
 // Submit a request
 app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1 } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId } = req.body;
     const worker = req.query.worker as string;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
@@ -415,6 +425,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
+          ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
         };
         newDocs.push(requestDoc);
 
@@ -459,6 +470,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
+      ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
     };
 
     // Store in MongoDB
@@ -1459,11 +1471,24 @@ app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, nex
 });
 
 // POST /api/v1/prompt-features/extract — extract prompt features from a task text
+// Dedup: returns cached extraction if taskTextHash matches, unless ?force=true
 app.post("/api/v1/prompt-features/extract", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { taskText, model } = req.body;
+    const force = req.query.force === "true";
     if (!taskText || typeof taskText !== "string" || !taskText.trim()) {
       return res.status(400).json({ error: "Body must contain a non-empty 'taskText' string" });
+    }
+
+    const trimmedTask = taskText.trim();
+    const taskTextHash = createHash("sha256").update(trimmedTask).digest("hex");
+
+    // Check cache (dedup by task text hash)
+    if (!force) {
+      const cached = await promptFeatureExtractionCollection.findOne({ taskTextHash });
+      if (cached) {
+        return res.json({ ...cached, cached: true });
+      }
     }
 
     if (!isPromptFeatureLlmAvailable()) {
@@ -1479,18 +1504,29 @@ app.post("/api/v1/prompt-features/extract", async (req: Request, res: Response, 
     }
 
     const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn }));
-    const results = await extractPromptFeatures(taskText.trim(), featureConfigs, model);
+    const results = await extractPromptFeatures(trimmedTask, featureConfigs, model);
 
-    // Store extraction result
+    // Store extraction result (upsert by hash for idempotency)
     const extraction: PromptFeatureExtractionDocument = {
-      taskText: taskText.trim(),
+      taskText: trimmedTask,
+      taskTextHash,
       promptFeatureResults: results,
       extractedAt: new Date(),
       model: model || process.env.LLM_MODEL || "gpt-4.1",
     };
-    await promptFeatureExtractionCollection.insertOne(extraction as any);
 
-    res.json(extraction);
+    if (force) {
+      // Replace existing extraction for this hash
+      await promptFeatureExtractionCollection.replaceOne(
+        { taskTextHash },
+        extraction,
+        { upsert: true },
+      );
+    } else {
+      await promptFeatureExtractionCollection.insertOne(extraction as any);
+    }
+
+    res.json({ ...extraction, cached: false });
   } catch (err) {
     if (err instanceof Error && err.message.includes("not configured")) {
       return res.status(503).json({ error: err.message });
@@ -1504,6 +1540,26 @@ app.get("/api/v1/prompt-features/extractions", async (_req: Request, res: Respon
   try {
     const extractions = await promptFeatureExtractionCollection.find({}).sort({ extractedAt: -1 }).toArray();
     res.json(extractions);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/v1/prompt-features/extractions/:id — get a single extraction by _id
+app.get("/api/v1/prompt-features/extractions/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { ObjectId } = await import("mongodb");
+    let extraction;
+    try {
+      extraction = await promptFeatureExtractionCollection.findOne({ _id: new ObjectId(id) as any });
+    } catch {
+      extraction = await promptFeatureExtractionCollection.findOne({ _id: id as any });
+    }
+    if (!extraction) {
+      return res.status(404).json({ error: "Extraction not found" });
+    }
+    res.json(extraction);
   } catch (error) {
     next(error);
   }
