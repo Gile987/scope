@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useParams, Link } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -64,7 +64,6 @@ export function RunDetail() {
     refetchInterval: 10_000,
   });
 
-  const queryClient = useQueryClient();
   const generateReport = useMutation({
     mutationFn: () => api.createReport(id!),
     onSuccess: () => {

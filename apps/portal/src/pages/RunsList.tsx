@@ -22,7 +22,7 @@ import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
-import type { Run, BulkReportStatus } from "@/types";
+import type { Run } from "@/types";
 
 export function RunsList() {
   const [workerFilter, setWorkerFilter] = useState("all");
