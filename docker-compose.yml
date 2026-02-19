@@ -34,6 +34,7 @@ x-common-env: &common-env
 x-worker-env: &worker-env
   <<: *common-env
   JUDGE_SERVICE_URL: http://judge:80
+  SCOPE_MT_API_URL: http://api:80
 
 x-worker-deps: &worker-deps
   mongodb:
