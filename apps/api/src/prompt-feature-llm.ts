@@ -3,7 +3,7 @@
 
 import ModelClient, { isUnexpected } from "@azure-rest/ai-inference";
 import { AzureKeyCredential } from "@azure/core-auth";
-import { PromptFeatureConfig, PromptFeatureResult } from "shared";
+import { PromptFeatureConfig, PromptFeatureResult, SuggestedPromptFeature } from "shared";
 
 const GITHUB_MODELS_ENDPOINT = "https://models.inference.ai.azure.com";
 
@@ -155,14 +155,19 @@ export async function generatePromptFeaturePrompt(
 
 const EXTRACT_SYSTEM_PROMPT = `You are an expert at analyzing task prompts for AI coding agent benchmarks.
 
-Given a task prompt (the instructions given to a coding agent) and a list of prompt features to detect, determine which features are present in the task prompt.
+Given a task prompt (the instructions given to a coding agent) and a list of prompt features to detect, you must:
 
-A feature is "detected" if the task prompt explicitly or implicitly asks for, mentions, or requires the characteristic described by that feature.
+1. Determine which features are present in the task prompt. A feature is "detected" if the task prompt explicitly or implicitly asks for, mentions, or requires the characteristic described by that feature.
 
-Respond with ONLY a JSON array in this exact format (no markdown, no code fences):
-[{"featureId": "feature_id_here", "detected": true}, {"featureId": "other_feature", "detected": false}]
+2. Suggest NEW features that the task prompt exhibits but that are NOT covered by any of the existing features. Only suggest features that represent clearly distinct, meaningful characteristics. Each suggestion needs:
+   - suggestedId: a snake_case identifier starting with a verb prefix (e.g., asks_for_X, requires_X, uses_X)
+   - behavior: a short natural-language description of the characteristic
+   - prompt: a concise detection prompt (1-3 sentences) for an LLM to detect this characteristic in other task prompts
 
-Include ALL features from the input list in your response. Be precise — only mark a feature as detected if the task prompt clearly relates to it.`;
+Respond with ONLY a JSON object in this exact format (no markdown, no code fences):
+{"results": [{"featureId": "feature_id_here", "detected": true}, {"featureId": "other_feature", "detected": false}], "suggestedFeatures": [{"suggestedId": "asks_for_something", "behavior": "short description", "prompt": "detection prompt"}]}
+
+Include ALL features from the input list in "results". Be precise — only mark a feature as detected if the task prompt clearly relates to it. If no new features should be suggested, use an empty array for "suggestedFeatures".`;
 
 function buildExtractUserMessage(taskText: string, features: PromptFeatureConfig[]): string {
   const parts: string[] = [];
@@ -177,18 +182,23 @@ function buildExtractUserMessage(taskText: string, features: PromptFeatureConfig
   return parts.join("\n");
 }
 
+export interface ExtractionResult {
+  results: PromptFeatureResult[];
+  suggestedFeatures: SuggestedPromptFeature[];
+}
+
 export async function extractPromptFeatures(
   taskText: string,
   features: PromptFeatureConfig[],
   model?: string,
-): Promise<PromptFeatureResult[]> {
+): Promise<ExtractionResult> {
   const llm = getClient();
   if (!llm) {
     throw new Error("LLM not configured: GITHUB_MODELS_API_KEY is not set");
   }
 
   if (features.length === 0) {
-    return [];
+    return { results: [], suggestedFeatures: [] };
   }
 
   const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
@@ -220,14 +230,18 @@ export async function extractPromptFeatures(
 
   const cleaned = content.replace(/```json\s*|```\s*/g, "").trim();
   try {
-    const parsed = JSON.parse(cleaned) as Array<{ featureId: string; detected: boolean }>;
-    if (!Array.isArray(parsed)) {
-      throw new Error("Expected a JSON array");
-    }
+    const parsed = JSON.parse(cleaned);
+
+    // Support both old format (plain array) and new format ({results, suggestedFeatures})
+    const rawResults: Array<{ featureId: string; detected: boolean }> = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed.results)
+        ? parsed.results
+        : [];
 
     // Build a map of LLM results
     const llmResults = new Map<string, boolean>();
-    for (const item of parsed) {
+    for (const item of rawResults) {
       if (item.featureId && typeof item.detected === "boolean") {
         llmResults.set(item.featureId, item.detected);
       }
@@ -241,7 +255,27 @@ export async function extractPromptFeatures(
       evaluated: llmResults.has(f.id),
     }));
 
-    return results;
+    // Parse suggested features (sanitize IDs)
+    const rawSuggestions: SuggestedPromptFeature[] = [];
+    if (!Array.isArray(parsed) && Array.isArray(parsed.suggestedFeatures)) {
+      for (const s of parsed.suggestedFeatures) {
+        if (s.suggestedId && s.behavior && s.prompt) {
+          const sanitizedId = String(s.suggestedId)
+            .toLowerCase()
+            .replace(/[^a-z0-9_]/g, "_")
+            .replace(/^[^a-z]+/, "")
+            .replace(/_+/g, "_")
+            .replace(/_$/, "");
+          rawSuggestions.push({
+            suggestedId: sanitizedId || "asks_for_something",
+            behavior: String(s.behavior).trim(),
+            prompt: String(s.prompt).trim(),
+          });
+        }
+      }
+    }
+
+    return { results, suggestedFeatures: rawSuggestions };
   } catch {
     throw new Error(`Failed to parse LLM extraction response as JSON: ${cleaned}`);
   }
