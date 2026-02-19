@@ -170,12 +170,20 @@ export interface PromptFeatureResult {
   evaluated: boolean;  // False if skipped due to ancestor not detected
 }
 
+/** A prompt feature suggested by the LLM during extraction (not yet in the registry) */
+export interface SuggestedPromptFeature {
+  suggestedId: string;
+  behavior: string;
+  prompt: string;
+}
+
 /** Stored extraction result — maps a task prompt to its detected features */
 export interface PromptFeatureExtraction {
   _id?: string;
   taskText: string;
   taskTextHash?: string;
   promptFeatureResults: PromptFeatureResult[];
+  suggestedFeatures?: SuggestedPromptFeature[];
   extractedAt: Date;
   model?: string;
   cached?: boolean;
