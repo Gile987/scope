@@ -28,6 +28,8 @@ We ran multi-turn benchmarks simulating real coding sessions where AI agents bui
 
 ## Insight 1: Agents Build the App but Forget the Infrastructure
 
+**Actionable for: GitHub Copilot PM, Azure Developer CLI (`azd`) PM**
+
 **Finding**: When given a task like "Create a calendar webapp," agents overwhelmingly build the application code first (HTML/CSS/JS) and omit Azure deployment configuration (`azure.yaml`, Bicep files, `staticwebapp.config.json`).
 
 | Strategy | Count | Avg Iterations |
@@ -40,15 +42,17 @@ We ran multi-turn benchmarks simulating real coding sessions where AI agents bui
 
 **Root Cause**: The task prompt says "Create a calendar webapp" — agents interpret this as a frontend task and don't proactively set up deployment infrastructure unless explicitly told. The criteria (`has_azure_azd`, `has_azure_swa`) are implicit requirements the agent doesn't discover until the judge rejects the first attempt.
 
-### Recommendation for Microsoft PMs
+### Recommendation
 
-> **Copilot should proactively scaffold Azure deployment when creating new projects.** When a user asks to "create a webapp," the agent should offer to set up `azure.yaml` + Bicep IaC alongside the application code — not wait to be told. This is the #1 lever to reduce iterations.
+> **GitHub Copilot PM**: Copilot should proactively scaffold Azure deployment when creating new projects. When a user asks to "create a webapp," the agent should offer to set up `azure.yaml` + Bicep IaC alongside the application code — not wait to be told. This is the #1 lever to reduce iterations.
 >
 > Consider surfacing Azure deployment templates (azd templates) as a first-class suggestion in the agent's response, e.g.: *"I created your calendar app. Want me to also set up Azure Static Web Apps deployment? I can add azure.yaml and Bicep infrastructure."*
 
 ---
 
 ## Insight 2: The `package.json` / Node.js Trap
+
+**Actionable for: GitHub Copilot PM (agent behavior), Azure Developer CLI (`azd`) PM (template defaults)**
 
 **Finding**: `has_node` is the most volatile criterion. It flip-flops between pass/fail across iterations — **14 runs** struggled with it, and it caused **3 regressions** (agent broke something that was already working).
 
@@ -61,17 +65,19 @@ The pattern:
 
 **This happened in 10 out of 37 completed runs (27%).** The agent wasted 7% of all turns arguing against requirements instead of complying.
 
-### Recommendation for Microsoft PMs
+### Recommendation
 
 > **Two issues here:**
 >
-> 1. **Agent stubbornness**: Copilot should bias toward compliance when the judge/user gives corrective feedback. The agent's instinct to argue "you don't need this" wastes iterations. When feedback clearly asks for something, the agent should add it, not debate.
+> 1. **GitHub Copilot PM — Agent stubbornness**: Copilot should bias toward compliance when the judge/user gives corrective feedback. The agent's instinct to argue "you don't need this" wastes iterations. When feedback clearly asks for something, the agent should add it, not debate.
 >
-> 2. **Template gap**: When scaffolding web apps, Copilot should *always* include a `package.json` — even for static sites. Modern web projects universally have one (for scripts, metadata, dev tooling). The `azd` template for SWA expects `package.json`. Omitting it creates unnecessary friction.
+> 2. **Azure Developer CLI (`azd`) PM — Template gap**: When scaffolding web apps, `azd` templates and Copilot should *always* include a `package.json` — even for static sites. Modern web projects universally have one (for scripts, metadata, dev tooling). The `azd` template for SWA expects `package.json`. Omitting it creates unnecessary friction.
 
 ---
 
 ## Insight 3: Azure Static Web Apps Config Is a Blind Spot
+
+**Actionable for: Azure Static Web Apps PM, Azure Developer CLI (`azd`) PM, GitHub Copilot PM**
 
 **Finding**: `has_azure_swa` has the **lowest first-attempt pass rate** of any criterion: only **43% pass@1**. It takes an average of 2.2 iterations to fix.
 
@@ -85,19 +91,21 @@ In **16 out of 28 evaluated runs**, the SWA criterion failed at least once. The 
 
 **Even when agents add `azure.yaml` with `host: staticwebapp`, they often forget the `staticwebapp.config.json`** that defines routing, navigation fallback, and platform features.
 
-### Recommendation for Microsoft PMs
+### Recommendation
 
-> **`azd init` and SWA templates should generate `staticwebapp.config.json` by default.** Currently, agents (and developers) add `azure.yaml` pointing to SWA but miss the platform-specific config file. The `azd` experience should:
+> **Azure Developer CLI (`azd`) PM / Azure Static Web Apps PM**: `azd init` and SWA templates should generate `staticwebapp.config.json` by default. Currently, agents (and developers) add `azure.yaml` pointing to SWA but miss the platform-specific config file. The `azd` experience should:
 >
 > 1. Auto-generate a sensible `staticwebapp.config.json` when the host is `staticwebapp`
 > 2. Include a GitHub Actions workflow for SWA deployment
 > 3. Validate completeness at `azd provision` time and warn if config is missing
 >
-> For Copilot specifically: when the agent sets up SWA deployment, it should emit all three files together (`azure.yaml` + Bicep + `staticwebapp.config.json`) as a coherent bundle rather than one at a time.
+> **GitHub Copilot PM**: when the agent sets up SWA deployment, it should emit all three files together (`azure.yaml` + Bicep + `staticwebapp.config.json`) as a coherent bundle rather than one at a time.
 
 ---
 
 ## Insight 4: Agents Cause Regressions When Adding Infrastructure
+
+**Actionable for: GitHub Copilot PM (agent architecture), VS Code PM (IDE tooling)**
 
 **Finding**: 6 regressions detected — the agent breaks a previously passing criterion while fixing another. The most common pattern:
 
@@ -111,17 +119,19 @@ Example (Run `6a780f8c`):
 
 **This regression + argumentation loop wasted 4 iterations.**
 
-### Recommendation for Microsoft PMs
+### Recommendation
 
-> **Copilot needs regression awareness in multi-turn sessions.** After each edit, the agent should verify that previously passing criteria still pass. This could be:
+> **GitHub Copilot PM**: Copilot needs regression awareness in multi-turn sessions. After each edit, the agent should verify that previously passing criteria still pass. This could be:
 >
 > 1. A lightweight self-check before responding ("Did I break anything?")
 > 2. Workspace-level diff awareness — flag when files are deleted or overwritten
-> 3. Show a "criteria dashboard" in the IDE that highlights regressions in real-time
+> 3. **VS Code PM**: Show a "criteria dashboard" in the IDE that highlights regressions in real-time
 
 ---
 
 ## Insight 5: Copilot vs Claude Code — Reliability vs Speed
+
+**Actionable for: GitHub Copilot PM (competitive positioning)**
 
 | Metric | GitHub Copilot | Claude Code |
 |--------|---------------|-------------|
@@ -135,13 +145,15 @@ Example (Run `6a780f8c`):
 
 **Copilot's consistency is notable** — std dev of 1.4 iterations vs 3.5 for Claude Code. Copilot delivers predictable performance; Claude Code swings between 1-iteration perfection and 10-iteration struggles.
 
-### Recommendation for Microsoft PMs
+### Recommendation
 
-> Copilot's reliability advantage is real but the **34% pass@1 rate means most sessions still require back-and-forth.** The target should be **>60% pass@1** which requires the agent to proactively include infra + config on the first attempt (see Insights 1 & 3).
+> **GitHub Copilot PM**: Copilot's reliability advantage is real but the **34% pass@1 rate means most sessions still require back-and-forth.** The target should be **>60% pass@1** which requires the agent to proactively include infra + config on the first attempt (see Insights 1 & 3).
 
 ---
 
 ## Insight 6: Success@T Curves Show Diminishing Returns After T=4
+
+**Actionable for: GitHub Copilot PM (agent loop design), VS Code PM (UX for multi-turn flows)**
 
 Looking at the "Create a calendar webapp" scenario (23 completed runs):
 
@@ -156,9 +168,9 @@ Looking at the "Create a calendar webapp" scenario (23 completed runs):
 
 **The critical window is iterations 1–3.** After that, remaining failures are edge cases requiring many more iterations. For "Hello World Express API" (9 runs), the tail extends to T=8.
 
-### Recommendation for Microsoft PMs
+### Recommendation
 
-> **Optimize for the T=1→T=3 window.** If the agent doesn't converge within 3 turns, the user experience degrades rapidly. The 36-minute average run time (with some runs taking 2+ hours!) is unacceptable for interactive dev flows.
+> **GitHub Copilot PM / VS Code PM**: Optimize for the T=1→T=3 window. If the agent doesn't converge within 3 turns, the user experience degrades rapidly. The 36-minute average run time (with some runs taking 2+ hours!) is unacceptable for interactive dev flows.
 >
 > Consider:
 > 1. **Batch criteria feedback**: show all failures at once, not one at a time
@@ -169,13 +181,15 @@ Looking at the "Create a calendar webapp" scenario (23 completed runs):
 
 ## Insight 7: All 6 Criteria Fail Together — It's a Template Problem
 
+**Actionable for: Azure Developer CLI (`azd`) PM, GitHub Copilot PM (tooling integration)**
+
 **Co-failure analysis** shows that `has_azure`, `has_azure_azd`, `has_iac`, `has_cloud` almost always fail together (13 runs with identical co-failure). This means agents don't partially set up infrastructure — they either do all of it or none of it.
 
 This is fundamentally a **template/scaffolding gap**, not an intelligence gap. The agent doesn't know what files Azure deployments need. When it does know (the "both_first" runs), it gets everything right in 1–2 iterations.
 
-### Recommendation for Microsoft PMs
+### Recommendation
 
-> **Ship curated "Azure project archetypes" that agents can invoke as recipes.**
+> **Azure Developer CLI (`azd`) PM**: Ship curated "Azure project archetypes" that agents can invoke as recipes.
 >
 > Instead of the agent inventing the file structure each time, provide structured templates:
 > - `azd-swa-static`: static site → `azure.yaml` + `staticwebapp.config.json` + Bicep + `package.json`
@@ -188,28 +202,30 @@ This is fundamentally a **template/scaffolding gap**, not an intelligence gap. T
 
 ## Insight 8: Infrastructure Failures Impact Claude Code Disproportionately
 
+**Actionable for: Scope MT Platform Team (benchmark reliability)**
+
 5 out of 9 Claude Code runs failed with `"Credit balance is too low"`. This is an API/billing issue, not an agent capability issue — but it makes Claude Code appear much worse than it is.
 
 3 Copilot runs failed with `"Judge evaluation failed: fetch failed"` — a network connectivity issue between the benchmark harness and the judge service.
 
-### Recommendation for Microsoft PMs
+### Recommendation
 
-> For benchmarking fairness, infrastructure failures should be retried automatically. The 20% failure rate (9/46) distorts metrics and wastes compute budget. Implement exponential backoff + retry for transient errors (network, billing).
+> **Scope MT Platform Team**: For benchmarking fairness, infrastructure failures should be retried automatically. The 20% failure rate (9/46) distorts metrics and wastes compute budget. Implement exponential backoff + retry for transient errors (network, billing).
 
 ---
 
 ## Summary of Actionable Recommendations
 
-| # | Recommendation | Expected Impact | Effort |
-|---|---------------|----------------|--------|
-| 1 | Proactively scaffold Azure deployment with app code | Pass@1: 34% → ~55% | Medium |
-| 2 | Always include `package.json` in web scaffolds | Eliminate 27% argumentation waste | Low |
-| 3 | Generate `staticwebapp.config.json` in SWA template | SWA pass@1: 43% → ~80% | Low |
-| 4 | Add regression awareness to multi-turn editing | Prevent 6+ regressions per 37 runs | Medium |
-| 5 | Target >60% pass@1 for Copilot | Reduce avg iterations from 2.7 → ~1.5 | High |
-| 6 | Optimize for T=1→T=3 convergence window | Reduce 36min avg to ~15min | Medium |
-| 7 | Ship Azure project archetypes as agent tools | Solve co-failure of 6 criteria at once | High |
-| 8 | Auto-retry infrastructure failures in benchmarks | Completion rate: 80% → ~95% | Low |
+| # | Recommendation | Owner | Expected Impact | Effort |
+|---|---------------|-------|----------------|--------|
+| 1 | Proactively scaffold Azure deployment with app code | GitHub Copilot PM, `azd` PM | Pass@1: 34% → ~55% | Medium |
+| 2 | Always include `package.json` in web scaffolds | GitHub Copilot PM, `azd` PM | Eliminate 27% argumentation waste | Low |
+| 3 | Generate `staticwebapp.config.json` in SWA template | Azure SWA PM, `azd` PM | SWA pass@1: 43% → ~80% | Low |
+| 4 | Add regression awareness to multi-turn editing | GitHub Copilot PM, VS Code PM | Prevent 6+ regressions per 37 runs | Medium |
+| 5 | Target >60% pass@1 for Copilot | GitHub Copilot PM | Reduce avg iterations from 2.7 → ~1.5 | High |
+| 6 | Optimize for T=1→T=3 convergence window | GitHub Copilot PM, VS Code PM | Reduce 36min avg to ~15min | Medium |
+| 7 | Ship Azure project archetypes as agent tools | `azd` PM, GitHub Copilot PM | Solve co-failure of 6 criteria at once | High |
+| 8 | Auto-retry infrastructure failures in benchmarks | Scope MT Platform Team | Completion rate: 80% → ~95% | Low |
 
 ---
 
