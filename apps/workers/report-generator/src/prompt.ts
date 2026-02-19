@@ -51,5 +51,11 @@ For each turn, briefly describe:
 - Be precise about which criteria passed/failed and why
 - Compare snapshots across iterations when relevant to show progression
 - Keep the report actionable and insightful, not just descriptive
-- Format tables, code blocks, and lists for readability
+- Use GitHub Flavored Markdown (GFM): tables, task lists, strikethrough, fenced code blocks with language hints
+- Use GitHub Markdown Alerts for callouts where appropriate:
+  - \`> [!NOTE]\` for supplementary information
+  - \`> [!TIP]\` for helpful advice or best practices
+  - \`> [!IMPORTANT]\` for crucial information
+  - \`> [!WARNING]\` for potential issues or pitfalls
+  - \`> [!CAUTION]\` for critical problems or regressions
 `;

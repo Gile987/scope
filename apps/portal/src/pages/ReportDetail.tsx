@@ -16,6 +16,9 @@ import { ArrowLeft, Copy, Check, ExternalLink } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import remarkGfm from "remark-gfm";
+import remarkGithubAlerts from "remark-github-markdown-alerts";
 
 export function ReportDetail() {
   const { id } = useParams<{ id: string }>();
@@ -124,7 +127,7 @@ export function ReportDetail() {
           {report.content ? (
             <Card>
               <CardContent className="prose dark:prose-invert max-w-none pt-6">
-                <ReactMarkdown>{report.content}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm, remarkGithubAlerts]} rehypePlugins={[rehypeRaw]}>{report.content}</ReactMarkdown>
               </CardContent>
             </Card>
           ) : report.status === "pending" || report.status === "generating" ? (
