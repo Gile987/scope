@@ -3,7 +3,7 @@
 
 import { Collection } from 'mongodb';
 import { CriteriaConfig, CriteriaDocument } from './types.js';
-import { CriteriaGraph } from './criteria-graph.js';
+import { DependencyGraph } from './dependency-graph.js';
 
 /**
  * MongoDB-backed criteria store for CRUD operations on criteria definitions.
@@ -243,7 +243,7 @@ export class CriteriaStore {
     }
 
     try {
-      new CriteriaGraph(configs);
+      new DependencyGraph(configs);
     } catch (error) {
       if (error instanceof Error && error.message.includes('ycle')) {
         throw new Error(
