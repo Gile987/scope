@@ -18,6 +18,11 @@ import { tmpdir } from "os";
 import { join, basename } from "path";
 import { parse as yamlParse } from "yaml";
 import { isLlmAvailable, generateCriteriaPrompt } from "./llm.js";
+import {
+  isLlmAvailable as isPromptFeatureLlmAvailable,
+  generatePromptFeaturePrompt,
+  extractPromptFeatures,
+} from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 
 const require = createRequire(import.meta.url);
@@ -59,6 +64,8 @@ let mongoClient: MongoClient;
 let db: Db;
 let collection: Collection<RequestDocument>;
 let criteriaCollection: Collection<CriteriaDocument>;
+let promptFeatureCollection: Collection<PromptFeatureDocument>;
+let promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 
 // Criteria document interface
@@ -69,6 +76,24 @@ interface CriteriaDocument {
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;
+}
+
+// Prompt feature document interfaces
+interface PromptFeatureDocument {
+  id: string;
+  prompt: string;
+  dependsOn?: string[];
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;
+}
+
+interface PromptFeatureExtractionDocument {
+  _id?: string;
+  taskText: string;
+  promptFeatureResults: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
+  extractedAt: Date;
+  model?: string;
 }
 
 // Log event interface
@@ -226,6 +251,8 @@ async function initializeClients(): Promise<void> {
   db = mongoClient.db(mongoDatabase);
   collection = db.collection<RequestDocument>(mongoCollection);
   criteriaCollection = db.collection<CriteriaDocument>("criteria");
+  promptFeatureCollection = db.collection<PromptFeatureDocument>("prompt-features");
+  promptFeatureExtractionCollection = db.collection<PromptFeatureExtractionDocument>("prompt-feature-extractions");
   
   // Create index for createdAt (required for sorting in CosmosDB MongoDB API)
   try {
@@ -244,9 +271,20 @@ async function initializeClients(): Promise<void> {
     console.log("Index on criteria.id already exists or couldn't be created");
   }
 
+  // Create unique index for prompt feature ID
+  try {
+    await promptFeatureCollection.createIndex({ id: 1 }, { unique: true });
+    console.log("Created unique index on prompt-features.id");
+  } catch (err) {
+    console.log("Index on prompt-features.id already exists or couldn't be created");
+  }
+
   // Seed criteria from YAML files on first boot (skipped — use POST /api/v1/criteria/seed)
   const criteriaCount = await criteriaCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Criteria collection has ${criteriaCount} documents`);
+
+  const promptFeatureCount = await promptFeatureCollection.countDocuments({ deletedAt: { $exists: false } });
+  console.log(`Prompt features collection has ${promptFeatureCount} documents`);
   
   console.log(`Connected to MongoDB: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
 
@@ -1332,6 +1370,334 @@ app.delete("/api/v1/criteria/:id", async (req: Request, res: Response, next: Nex
     }
 
     await criteriaCollection.updateOne(
+      { id, deletedAt: { $exists: false } },
+      { $set: { deletedAt: new Date() } }
+    );
+
+    res.json({ id, deleted: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// --- Prompt Feature CRUD & extraction ---
+
+// POST /api/v1/prompt-features/generate-prompt — AI-generate a prompt feature prompt from a behavior description
+app.post("/api/v1/prompt-features/generate-prompt", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { behavior, currentId } = req.body;
+    if (!behavior || typeof behavior !== "string" || !behavior.trim()) {
+      return res.status(400).json({ error: "Body must contain a non-empty 'behavior' string" });
+    }
+
+    if (!isPromptFeatureLlmAvailable()) {
+      return res.status(503).json({ error: "LLM not configured: GITHUB_MODELS_API_KEY is not set" });
+    }
+
+    const allFeatures = await promptFeatureCollection
+      .find({ deletedAt: { $exists: false } })
+      .project({ id: 1, prompt: 1, dependsOn: 1, _id: 0 })
+      .toArray();
+
+    const existingFeatures = currentId
+      ? allFeatures.filter((f: any) => f.id !== currentId)
+      : allFeatures;
+
+    const result = await generatePromptFeaturePrompt(
+      behavior.trim(),
+      existingFeatures as { id: string; prompt: string; dependsOn?: string[] }[],
+    );
+    console.log("[prompt-features/generate-prompt] LLM result:", JSON.stringify(result));
+    res.json(result);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not configured")) {
+      return res.status(503).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// POST /api/v1/prompt-features/seed — bulk seed prompt features from a JSON array
+app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { features } = req.body;
+    if (!Array.isArray(features)) {
+      return res.status(400).json({ error: "Body must contain a 'features' array" });
+    }
+
+    let seeded = 0;
+    const errors: string[] = [];
+
+    for (const config of features) {
+      if (!config.id || !config.prompt) {
+        errors.push("Skipping entry without id or prompt");
+        continue;
+      }
+      try {
+        await promptFeatureCollection.updateOne(
+          { id: config.id.trim() },
+          {
+            $setOnInsert: {
+              id: config.id.trim(),
+              prompt: config.prompt.trim(),
+              dependsOn: Array.isArray(config.dependsOn) ? config.dependsOn.map((d: any) => String(d).trim()) : [],
+              createdAt: new Date(),
+            },
+          },
+          { upsert: true }
+        );
+        seeded++;
+      } catch (err) {
+        errors.push(`Failed to seed ${config.id}: ${err}`);
+      }
+    }
+
+    res.json({ seeded, errors });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/prompt-features/extract — extract prompt features from a task text
+app.post("/api/v1/prompt-features/extract", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { taskText, model } = req.body;
+    if (!taskText || typeof taskText !== "string" || !taskText.trim()) {
+      return res.status(400).json({ error: "Body must contain a non-empty 'taskText' string" });
+    }
+
+    if (!isPromptFeatureLlmAvailable()) {
+      return res.status(503).json({ error: "LLM not configured: GITHUB_MODELS_API_KEY is not set" });
+    }
+
+    const allFeatures = await promptFeatureCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+
+    if (allFeatures.length === 0) {
+      return res.status(400).json({ error: "No prompt features defined. Seed or create features first." });
+    }
+
+    const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn }));
+    const results = await extractPromptFeatures(taskText.trim(), featureConfigs, model);
+
+    // Store extraction result
+    const extraction: PromptFeatureExtractionDocument = {
+      taskText: taskText.trim(),
+      promptFeatureResults: results,
+      extractedAt: new Date(),
+      model: model || process.env.LLM_MODEL || "gpt-4.1",
+    };
+    await promptFeatureExtractionCollection.insertOne(extraction as any);
+
+    res.json(extraction);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not configured")) {
+      return res.status(503).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// GET /api/v1/prompt-features/extractions — list all extractions
+app.get("/api/v1/prompt-features/extractions", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const extractions = await promptFeatureExtractionCollection.find({}).sort({ extractedAt: -1 }).toArray();
+    res.json(extractions);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// List all prompt features (with optional search)
+app.get("/api/v1/prompt-features", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const q = _req.query.q as string | undefined;
+    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    if (q) {
+      filter.$or = [
+        { id: { $regex: q, $options: "i" } },
+        { prompt: { $regex: q, $options: "i" } },
+      ];
+    }
+    const features = await promptFeatureCollection.find(filter).toArray();
+    features.sort((a, b) => a.id.localeCompare(b.id));
+    res.json(features);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get prompt feature DAG graph (nodes + edges)
+app.get("/api/v1/prompt-features/graph", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const all = await promptFeatureCollection.find({ deletedAt: { $exists: false } }).toArray();
+    all.sort((a, b) => a.id.localeCompare(b.id));
+    const nodes = all.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn || [] }));
+    const edges: { source: string; target: string }[] = [];
+    for (const f of all) {
+      if (f.dependsOn) {
+        for (const parentId of f.dependsOn) {
+          edges.push({ source: parentId, target: f.id });
+        }
+      }
+    }
+    res.json({ nodes, edges });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get single prompt feature by ID
+app.get("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const feature = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (!feature) {
+      res.status(404).json({ error: `Prompt feature '${id}' not found` });
+      return;
+    }
+
+    const dependents = await promptFeatureCollection.find({
+      dependsOn: id,
+      deletedAt: { $exists: false },
+    }).toArray();
+
+    res.json({
+      ...feature,
+      dependents: dependents.map(d => d.id),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create a new prompt feature
+app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, prompt, dependsOn = [] } = req.body;
+
+    if (!id || typeof id !== "string") {
+      res.status(400).json({ error: "id is required and must be a string" });
+      return;
+    }
+    if (!/^[a-z0-9_-]+$/.test(id)) {
+      res.status(400).json({ error: "id must match [a-z0-9_-]+" });
+      return;
+    }
+    if (!prompt || typeof prompt !== "string") {
+      res.status(400).json({ error: "prompt is required and must be a string" });
+      return;
+    }
+    if (!Array.isArray(dependsOn) || !dependsOn.every((d: unknown) => typeof d === "string")) {
+      res.status(400).json({ error: "dependsOn must be an array of strings" });
+      return;
+    }
+
+    const existing = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (existing) {
+      res.status(409).json({ error: `Prompt feature '${id}' already exists` });
+      return;
+    }
+
+    for (const depId of dependsOn) {
+      const dep = await promptFeatureCollection.findOne({ id: depId, deletedAt: { $exists: false } });
+      if (!dep) {
+        res.status(400).json({ error: `Dependency '${depId}' does not exist` });
+        return;
+      }
+    }
+
+    const doc: PromptFeatureDocument = {
+      id,
+      prompt: prompt.trim(),
+      dependsOn,
+      createdAt: new Date(),
+    };
+
+    await promptFeatureCollection.insertOne(doc as any);
+    res.status(201).json(doc);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update a prompt feature
+app.put("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { prompt, dependsOn } = req.body;
+
+    const existing = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: `Prompt feature '${id}' not found` });
+      return;
+    }
+
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (prompt !== undefined) {
+      if (typeof prompt !== "string") {
+        res.status(400).json({ error: "prompt must be a string" });
+        return;
+      }
+      update.prompt = prompt.trim();
+    }
+    if (dependsOn !== undefined) {
+      if (!Array.isArray(dependsOn) || !dependsOn.every((d: unknown) => typeof d === "string")) {
+        res.status(400).json({ error: "dependsOn must be an array of strings" });
+        return;
+      }
+      for (const depId of dependsOn) {
+        const dep = await promptFeatureCollection.findOne({ id: depId, deletedAt: { $exists: false } });
+        if (!dep) {
+          res.status(400).json({ error: `Dependency '${depId}' does not exist` });
+          return;
+        }
+      }
+      if (dependsOn.includes(id)) {
+        res.status(400).json({ error: "A prompt feature cannot depend on itself" });
+        return;
+      }
+      update.dependsOn = dependsOn;
+    }
+
+    await promptFeatureCollection.updateOne(
+      { id, deletedAt: { $exists: false } },
+      { $set: update }
+    );
+
+    const updated = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete a prompt feature (soft-delete, rejects if has dependents)
+app.delete("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: `Prompt feature '${id}' not found` });
+      return;
+    }
+
+    const dependents = await promptFeatureCollection.find({
+      dependsOn: id,
+      deletedAt: { $exists: false },
+    }).toArray();
+
+    if (dependents.length > 0) {
+      res.status(409).json({
+        error: `Cannot delete '${id}': other prompt features depend on it`,
+        dependents: dependents.map(d => d.id),
+      });
+      return;
+    }
+
+    await promptFeatureCollection.updateOne(
       { id, deletedAt: { $exists: false } },
       { $set: { deletedAt: new Date() } }
     );
