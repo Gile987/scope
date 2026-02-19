@@ -1,0 +1,249 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+import ModelClient, { isUnexpected } from "@azure-rest/ai-inference";
+import { AzureKeyCredential } from "@azure/core-auth";
+import { PromptFeatureConfig, PromptFeatureResult } from "shared";
+
+const GITHUB_MODELS_ENDPOINT = "https://models.inference.ai.azure.com";
+
+// ---------------------------------------------------------------------------
+// Generate prompt feature prompt (mirrors criteria generateCriteriaPrompt)
+// ---------------------------------------------------------------------------
+
+const GENERATE_SYSTEM_PROMPT = `You are an expert at writing detection prompts for AI coding agent benchmark task analysis.
+
+Given a natural-language description of a characteristic to detect in a task prompt (the instructions given to a coding agent), you must:
+
+1. Write a concise detection prompt (1-3 sentences) that an LLM will use to decide whether a task prompt exhibits that characteristic. The prompt should be specific about what phrases, patterns, or requirements to look for. Keep it factual and objective.
+
+2. Suggest a short, descriptive snake_case identifier for this prompt feature. The ID must:
+   - Start with "asks_for_" or a similar verb prefix
+   - Contain only lowercase letters, digits, and underscores
+   - Be concise but descriptive (e.g., asks_for_testing, asks_for_api, asks_for_docker)
+
+3. Suggest **parent dependencies** — existing prompt features that should logically be detected BEFORE this one can be evaluated. For example, if the new feature checks for "Azure Functions", it likely depends on "asks_for_azure" being detected first. Only suggest IDs from the provided existing list.
+
+4. Suggest **children dependents** — existing prompt features that should logically depend on this new feature. Only suggest IDs from the provided existing list.
+
+Here are examples of good detection prompts:
+- "The task prompt asks the agent to use, deploy to, or configure cloud infrastructure or services (Azure, AWS, GCP)."
+- "The task prompt asks the agent to create or modify a REST API, web service, HTTP server, or backend endpoint."
+- "The task prompt asks the agent to write tests, add test coverage, or set up a testing framework."
+
+Respond with ONLY a JSON object in this exact format (no markdown, no code fences):
+{"prompt": "your detection prompt here", "suggestedId": "asks_for_something", "suggestedParents": ["existing_id_1"], "suggestedChildren": ["existing_id_2"]}
+
+If no parents or children are appropriate, use empty arrays.`;
+
+export interface ExistingPromptFeature {
+  id: string;
+  prompt: string;
+  dependsOn?: string[];
+}
+
+export interface GeneratePromptFeatureResult {
+  prompt: string;
+  suggestedId: string;
+  suggestedParents: string[];
+  suggestedChildren: string[];
+}
+
+let client: ReturnType<typeof ModelClient> | null = null;
+
+function getClient(): ReturnType<typeof ModelClient> | null {
+  if (client) return client;
+  const token = process.env.GITHUB_MODELS_API_KEY;
+  if (!token) return null;
+  client = ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token));
+  return client;
+}
+
+export function isLlmAvailable(): boolean {
+  return !!process.env.GITHUB_MODELS_API_KEY;
+}
+
+function buildGenerateUserMessage(behavior: string, existing: ExistingPromptFeature[]): string {
+  const parts: string[] = [];
+
+  if (existing.length > 0) {
+    parts.push("EXISTING PROMPT FEATURES (use only these IDs for parent/children suggestions):");
+    for (const f of existing) {
+      const deps = f.dependsOn?.length ? ` [parents: ${f.dependsOn.join(", ")}]` : "";
+      parts.push(`- ${f.id}: ${f.prompt}${deps}`);
+    }
+    parts.push("");
+  }
+
+  parts.push(`NEW PROMPT FEATURE TO CREATE:\n${behavior}`);
+  return parts.join("\n");
+}
+
+export async function generatePromptFeaturePrompt(
+  behavior: string,
+  existingFeatures: ExistingPromptFeature[] = [],
+  model?: string,
+): Promise<GeneratePromptFeatureResult> {
+  const llm = getClient();
+  if (!llm) {
+    throw new Error("LLM not configured: GITHUB_MODELS_API_KEY is not set");
+  }
+
+  const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
+  const userMessage = buildGenerateUserMessage(behavior, existingFeatures);
+
+  const response = await llm.path("/chat/completions").post({
+    body: {
+      messages: [
+        { role: "system", content: GENERATE_SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      model: modelName,
+      temperature: 0.3,
+      max_tokens: 512,
+    },
+  });
+
+  if (isUnexpected(response)) {
+    const errBody = response.body as any;
+    throw new Error(
+      `LLM request failed: ${errBody?.error?.message || response.status}`,
+    );
+  }
+
+  const content = response.body.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("LLM returned empty response");
+  }
+
+  const cleaned = content.replace(/```json\s*|```\s*/g, "").trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (!parsed.prompt || !parsed.suggestedId) {
+      throw new Error("Missing required fields");
+    }
+
+    const sanitizedId = parsed.suggestedId
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "_")
+      .replace(/^[^a-z]+/, "")
+      .replace(/_+/g, "_")
+      .replace(/_$/, "");
+
+    const existingIds = new Set(existingFeatures.map((f) => f.id));
+    const suggestedParents = Array.isArray(parsed.suggestedParents)
+      ? parsed.suggestedParents.filter((pid: string) => existingIds.has(pid))
+      : [];
+    const suggestedChildren = Array.isArray(parsed.suggestedChildren)
+      ? parsed.suggestedChildren.filter((cid: string) => existingIds.has(cid))
+      : [];
+
+    return {
+      prompt: parsed.prompt.trim(),
+      suggestedId: sanitizedId || "asks_for_something",
+      suggestedParents,
+      suggestedChildren,
+    };
+  } catch {
+    throw new Error(`Failed to parse LLM response as JSON: ${cleaned}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Extract prompt features from a task prompt
+// ---------------------------------------------------------------------------
+
+const EXTRACT_SYSTEM_PROMPT = `You are an expert at analyzing task prompts for AI coding agent benchmarks.
+
+Given a task prompt (the instructions given to a coding agent) and a list of prompt features to detect, determine which features are present in the task prompt.
+
+A feature is "detected" if the task prompt explicitly or implicitly asks for, mentions, or requires the characteristic described by that feature.
+
+Respond with ONLY a JSON array in this exact format (no markdown, no code fences):
+[{"featureId": "feature_id_here", "detected": true}, {"featureId": "other_feature", "detected": false}]
+
+Include ALL features from the input list in your response. Be precise — only mark a feature as detected if the task prompt clearly relates to it.`;
+
+function buildExtractUserMessage(taskText: string, features: PromptFeatureConfig[]): string {
+  const parts: string[] = [];
+
+  parts.push("PROMPT FEATURES TO DETECT:");
+  for (const f of features) {
+    parts.push(`- ${f.id}: ${f.prompt}`);
+  }
+  parts.push("");
+  parts.push(`TASK PROMPT TO ANALYZE:\n${taskText}`);
+
+  return parts.join("\n");
+}
+
+export async function extractPromptFeatures(
+  taskText: string,
+  features: PromptFeatureConfig[],
+  model?: string,
+): Promise<PromptFeatureResult[]> {
+  const llm = getClient();
+  if (!llm) {
+    throw new Error("LLM not configured: GITHUB_MODELS_API_KEY is not set");
+  }
+
+  if (features.length === 0) {
+    return [];
+  }
+
+  const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
+  const userMessage = buildExtractUserMessage(taskText, features);
+
+  const response = await llm.path("/chat/completions").post({
+    body: {
+      messages: [
+        { role: "system", content: EXTRACT_SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      model: modelName,
+      temperature: 0.1,  // Lower temperature for more deterministic detection
+      max_tokens: 2048,
+    },
+  });
+
+  if (isUnexpected(response)) {
+    const errBody = response.body as any;
+    throw new Error(
+      `LLM extraction failed: ${errBody?.error?.message || response.status}`,
+    );
+  }
+
+  const content = response.body.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("LLM returned empty response");
+  }
+
+  const cleaned = content.replace(/```json\s*|```\s*/g, "").trim();
+  try {
+    const parsed = JSON.parse(cleaned) as Array<{ featureId: string; detected: boolean }>;
+    if (!Array.isArray(parsed)) {
+      throw new Error("Expected a JSON array");
+    }
+
+    // Build a map of LLM results
+    const llmResults = new Map<string, boolean>();
+    for (const item of parsed) {
+      if (item.featureId && typeof item.detected === "boolean") {
+        llmResults.set(item.featureId, item.detected);
+      }
+    }
+
+    // Build complete results for all features (mark as not evaluated if
+    // an ancestor was not detected — skip descendant evaluation)
+    const featureIds = new Set(features.map(f => f.id));
+    const results: PromptFeatureResult[] = features.map(f => ({
+      featureId: f.id,
+      detected: llmResults.get(f.id) ?? false,
+      evaluated: llmResults.has(f.id),
+    }));
+
+    return results;
+  } catch {
+    throw new Error(`Failed to parse LLM extraction response as JSON: ${cleaned}`);
+  }
+}
