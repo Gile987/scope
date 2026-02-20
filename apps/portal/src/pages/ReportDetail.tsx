@@ -14,7 +14,7 @@ import { LogViewer } from "@/components/LogViewer";
 import { useLogStream } from "@/hooks/use-log-stream";
 import { ArrowLeft, Copy, Check, ExternalLink, ClipboardCopy } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
@@ -24,6 +24,8 @@ export function ReportDetail() {
   const { id } = useParams<{ id: string }>();
   const [copied, setCopied] = useState(false);
   const [copiedMarkdown, setCopiedMarkdown] = useState(false);
+  const [activeTab, setActiveTab] = useState("logs");
+  const [reportSeen, setReportSeen] = useState(false);
 
   const { data: report, isLoading, error } = useQuery({
     queryKey: ["report", id],
@@ -51,6 +53,18 @@ export function ReportDetail() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Set initial tab to "report" if content is already available on first load
+  const initialTabSet = useRef(false);
+  useEffect(() => {
+    if (!initialTabSet.current && report) {
+      initialTabSet.current = true;
+      if (report.content) {
+        setActiveTab("report");
+        setReportSeen(true);
+      }
+    }
+  }, [report]);
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -76,7 +90,12 @@ export function ReportDetail() {
     );
   }
 
-  const defaultTab = report.content ? "report" : "logs";
+  const showReportReady = report.status === "completed" && !reportSeen;
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    if (tab === "report") setReportSeen(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -116,9 +135,14 @@ export function ReportDetail() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue={defaultTab}>
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList>
-          <TabsTrigger value="report">Report</TabsTrigger>
+          <TabsTrigger value="report" className="gap-1.5">
+            Report
+            {showReportReady && (
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            )}
+          </TabsTrigger>
           <TabsTrigger value="logs">Logs</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
         </TabsList>
