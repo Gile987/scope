@@ -5,7 +5,7 @@ declare const __GIT_COMMIT__: string;
 declare const __BUILD_TIME__: string;
 
 interface ImportMetaEnv {
-  /** Show the Pass@k metrics table on the Insights page (default: hidden) */
+  /** Show the Pass@k metrics table on the Statistics page (default: hidden) */
   readonly VITE_SHOW_PASS_AT_K?: string;
 }
 
