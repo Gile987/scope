@@ -1557,10 +1557,6 @@ app.post("/api/v1/prompt-features/extract", async (req: Request, res: Response, 
       .find({ deletedAt: { $exists: false } })
       .toArray();
 
-    if (allFeatures.length === 0) {
-      return res.status(400).json({ error: "No prompt features defined. Seed or create features first." });
-    }
-
     const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn }));
     const { results, suggestedFeatures } = await extractPromptFeatures(trimmedTask, featureConfigs, model);
 
