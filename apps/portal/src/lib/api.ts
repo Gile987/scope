@@ -213,6 +213,14 @@ export const api = {
     });
   },
 
+  /** Bulk create reports for multiple runs */
+  bulkCreateReports: (requestIds: string[]): Promise<{ created: number; reports: { reportId: string; requestId: string }[]; notFound: string[] }> => {
+    return request("/reports/bulk-create", {
+      method: "POST",
+      body: JSON.stringify({ requestIds }),
+    });
+  },
+
   /** List all reports, optionally filtered by requestId */
   listReports: (requestId?: string): Promise<Report[]> => {
     const params = new URLSearchParams();

@@ -1898,6 +1898,54 @@ app.get("/api/v1/reports", async (req: Request, res: Response, next: NextFunctio
   }
 });
 
+// Bulk create reports for multiple runs (POST /api/v1/reports/bulk-create)
+app.post("/api/v1/reports/bulk-create", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { requestIds } = req.body as { requestIds?: string[] };
+
+    if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+      res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+      return;
+    }
+
+    // Verify all runs exist
+    const runs = await collection.find({ _id: { $in: requestIds } as any }).toArray();
+    const foundIds = new Set(runs.map(r => r._id));
+    const notFound = requestIds.filter(id => !foundIds.has(id));
+
+    // Create reports only for runs that exist
+    const validIds = requestIds.filter(id => foundIds.has(id));
+    const created: { reportId: string; requestId: string }[] = [];
+
+    for (const requestId of validIds) {
+      const reportId = uuidv4();
+      const reportDoc: ReportDocument = {
+        _id: reportId,
+        requestId,
+        status: "pending",
+        logs: [],
+        createdAt: new Date(),
+      };
+      await reportCollection.insertOne(reportDoc);
+
+      const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
+      await reportQueueClient.sendMessage(messageContent);
+
+      created.push({ reportId, requestId });
+    }
+
+    console.log(`Bulk created ${created.length} reports for ${validIds.length} runs`);
+
+    res.status(201).json({
+      created: created.length,
+      reports: created,
+      notFound,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Bulk report status (POST /api/v1/reports/bulk-status)
 app.post("/api/v1/reports/bulk-status", async (req: Request, res: Response, next: NextFunction) => {
   try {
