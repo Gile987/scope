@@ -832,7 +832,7 @@ criteria
 
       const graph = await response.json() as {
         nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
-        edges: Array<{ from: string; to: string }>;
+        edges: Array<{ source: string; target: string }>;
       };
 
       if (graph.nodes.length === 0) {
@@ -850,8 +850,8 @@ criteria
         children.set(n.id, []);
       }
       for (const e of graph.edges) {
-        inDegree.set(e.to, (inDegree.get(e.to) ?? 0) + 1);
-        children.get(e.from)?.push(e.to);
+        inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1);
+        children.get(e.source)?.push(e.target);
       }
 
       const layers: string[][] = [];
@@ -880,7 +880,7 @@ criteria
       if (graph.edges.length > 0) {
         console.log(`\n  ${label('Edges:')}`);
         for (const e of graph.edges) {
-          console.log(`    ${value(e.from)} ${styleText('gray', '→')} ${value(e.to)}`);
+          console.log(`    ${value(e.source)} ${styleText('gray', '→')} ${value(e.target)}`);
         }
       }
     } catch (error) {
@@ -1239,7 +1239,7 @@ promptFeature
 
       const graph = await response.json() as {
         nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
-        edges: Array<{ from: string; to: string }>;
+        edges: Array<{ source: string; target: string }>;
       };
 
       if (graph.nodes.length === 0) {
@@ -1256,8 +1256,8 @@ promptFeature
         children.set(n.id, []);
       }
       for (const e of graph.edges) {
-        inDegree.set(e.to, (inDegree.get(e.to) ?? 0) + 1);
-        children.get(e.from)?.push(e.to);
+        inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1);
+        children.get(e.source)?.push(e.target);
       }
 
       const layers: string[][] = [];
@@ -1284,7 +1284,7 @@ promptFeature
       if (graph.edges.length > 0) {
         console.log(`\n  ${label('Edges:')}`);
         for (const e of graph.edges) {
-          console.log(`    ${value(e.from)} ${styleText('gray', '→')} ${value(e.to)}`);
+          console.log(`    ${value(e.source)} ${styleText('gray', '→')} ${value(e.target)}`);
         }
       }
     } catch (error) {

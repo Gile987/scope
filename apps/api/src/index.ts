@@ -1260,8 +1260,8 @@ app.post("/api/v1/criteria", async (req: Request, res: Response, next: NextFunct
       res.status(400).json({ error: "id is required and must be a string" });
       return;
     }
-    if (!/^[a-z0-9_-]+$/.test(id)) {
-      res.status(400).json({ error: "id must match [a-z0-9_-]+" });
+    if (!/^[a-z][a-z0-9_]*$/.test(id)) {
+      res.status(400).json({ error: "id must start with a lowercase letter and contain only [a-z0-9_]" });
       return;
     }
     if (!prompt || typeof prompt !== "string") {
@@ -1446,14 +1446,34 @@ app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, nex
         errors.push("Skipping entry without id or prompt");
         continue;
       }
+      const trimmedId = String(config.id).trim();
+      if (!/^[a-z][a-z0-9_]*$/.test(trimmedId)) {
+        errors.push(`Skipping '${trimmedId}': id must start with a lowercase letter and contain only [a-z0-9_]`);
+        continue;
+      }
+      // Validate dependsOn references exist
+      const deps = Array.isArray(config.dependsOn) ? config.dependsOn.map((d: any) => String(d).trim()) : [];
+      const missingDeps: string[] = [];
+      for (const depId of deps) {
+        const depExists = await promptFeatureCollection.findOne({ id: depId, deletedAt: { $exists: false } });
+        // Also check if the dep is being seeded in the same batch (by id)
+        const inBatch = features.some((f: any) => f.id && String(f.id).trim() === depId);
+        if (!depExists && !inBatch) {
+          missingDeps.push(depId);
+        }
+      }
+      if (missingDeps.length > 0) {
+        errors.push(`Skipping '${trimmedId}': dependencies not found: ${missingDeps.join(", ")}`);
+        continue;
+      }
       try {
         await promptFeatureCollection.updateOne(
-          { id: config.id.trim() },
+          { id: trimmedId },
           {
             $setOnInsert: {
-              id: config.id.trim(),
+              id: trimmedId,
               prompt: config.prompt.trim(),
-              dependsOn: Array.isArray(config.dependsOn) ? config.dependsOn.map((d: any) => String(d).trim()) : [],
+              dependsOn: deps,
               createdAt: new Date(),
             },
           },
@@ -1639,8 +1659,8 @@ app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: Ne
       res.status(400).json({ error: "id is required and must be a string" });
       return;
     }
-    if (!/^[a-z0-9_-]+$/.test(id)) {
-      res.status(400).json({ error: "id must match [a-z0-9_-]+" });
+    if (!/^[a-z][a-z0-9_]*$/.test(id)) {
+      res.status(400).json({ error: "id must start with a lowercase letter and contain only [a-z0-9_]" });
       return;
     }
     if (!prompt || typeof prompt !== "string") {

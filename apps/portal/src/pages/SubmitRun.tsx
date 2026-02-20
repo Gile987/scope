@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -13,10 +13,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus } from "lucide-react";
-import { WORKER_TYPES, type PromptFeatureExtraction } from "@/types";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus, Check } from "lucide-react";
+import { WORKER_TYPES, type PromptFeatureExtraction, type SuggestedPromptFeature } from "@/types";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { Stepper } from "@/components/Stepper";
+import { PromptFeatureWizard } from "@/components/PromptFeatureWizard";
+import { toast } from "sonner";
 
 const STEPS = ["Configure", "Review & Submit"];
 
@@ -42,8 +45,12 @@ export function SubmitRun() {
   // Extraction state
   const [extraction, setExtraction] = useState<PromptFeatureExtraction | null>(null);
 
+  // Sheet wizard state for creating suggested features
+  const [activeSuggestion, setActiveSuggestion] = useState<SuggestedPromptFeature | null>(null);
+  const [createdSuggestionIds, setCreatedSuggestionIds] = useState<Set<string>>(new Set());
+
   const extractMutation = useMutation({
-    mutationFn: () => api.extractPromptFeatures(task.trim()),
+    mutationFn: (opts?: { force?: boolean }) => api.extractPromptFeatures(task.trim(), undefined, opts?.force),
     onSuccess: (data) => setExtraction(data),
   });
 
@@ -64,7 +71,7 @@ export function SubmitRun() {
     if (!task.trim()) return;
     // Optimistically advance to step 2 and fire extraction
     setStep(2);
-    extractMutation.mutate();
+    extractMutation.mutate({});
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -440,28 +447,32 @@ export function SubmitRun() {
               <CardContent>
                 <div className="space-y-3">
                   {suggestedFeatures.map((s) => {
-                    const params = new URLSearchParams({
-                      behavior: s.behavior,
-                      id: s.suggestedId,
-                      prompt: s.prompt,
-                    });
+                    const alreadyCreated = createdSuggestionIds.has(s.suggestedId);
                     return (
-                      <div key={s.suggestedId} className="flex items-start justify-between gap-3 rounded-md border p-3">
+                      <div key={s.suggestedId} className={`flex items-start justify-between gap-3 rounded-md border p-3 ${alreadyCreated ? "opacity-60" : ""}`}>
                         <div className="space-y-1 min-w-0">
                           <Badge variant="secondary" className="font-mono text-xs">
                             {s.suggestedId}
                           </Badge>
                           <p className="text-sm text-muted-foreground">{s.behavior}</p>
                         </div>
-                        <Link
-                          to={`/prompt-features/new?${params.toString()}`}
-                          target="_blank"
-                        >
-                          <Button type="button" variant="outline" size="sm" className="gap-1 shrink-0">
+                        {alreadyCreated ? (
+                          <Badge variant="outline" className="gap-1 shrink-0 text-xs">
+                            <Check className="h-3 w-3" />
+                            Created
+                          </Badge>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="gap-1 shrink-0"
+                            onClick={() => setActiveSuggestion(s)}
+                          >
                             <Plus className="h-3.5 w-3.5" />
                             Create
                           </Button>
-                        </Link>
+                        )}
                       </div>
                     );
                   })}
@@ -495,6 +506,41 @@ export function SubmitRun() {
           </div>
         </form>
       )}
+
+      {/* ─── Sheet: Create Prompt Feature Wizard ───────────────────────── */}
+      <Sheet
+        open={activeSuggestion !== null}
+        onOpenChange={(open) => {
+          if (!open) setActiveSuggestion(null);
+        }}
+      >
+        <SheetContent side="right" className="sm:max-w-xl w-full overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Create Prompt Feature</SheetTitle>
+            <SheetDescription>
+              Create a new feature suggested by the extraction analysis
+            </SheetDescription>
+          </SheetHeader>
+          {activeSuggestion && (
+            <div className="mt-6">
+              <PromptFeatureWizard
+                key={activeSuggestion.suggestedId}
+                initialBehavior={activeSuggestion.behavior}
+                initialId={activeSuggestion.suggestedId}
+                initialPrompt={activeSuggestion.prompt}
+                onCreated={(feature) => {
+                  setCreatedSuggestionIds((prev) => new Set(prev).add(activeSuggestion.suggestedId));
+                  setActiveSuggestion(null);
+                  toast.success(`Feature "${feature.id}" created`);
+                  // Re-extract with force to pick up the new feature
+                  extractMutation.mutate({ force: true });
+                }}
+                onCancel={() => setActiveSuggestion(null)}
+              />
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
