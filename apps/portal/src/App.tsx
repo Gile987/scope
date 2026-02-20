@@ -10,7 +10,7 @@ import { CriteriaList } from "@/pages/CriteriaList";
 import { CriterionDetail } from "@/pages/CriterionDetail";
 import { CreateCriterion } from "@/pages/CreateCriterion";
 import { CriteriaGraphView } from "@/pages/CriteriaGraphView";
-import { Insights } from "@/pages/Insights";
+import { Statistics } from "@/pages/Statistics";
 import { PromptFeatureList } from "@/pages/PromptFeatureList";
 import { PromptFeatureDetail } from "@/pages/PromptFeatureDetail";
 import { CreatePromptFeature } from "@/pages/CreatePromptFeature";
@@ -22,7 +22,7 @@ export function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route path="/" element={<Navigate to="/insights" replace />} />
+        <Route path="/" element={<Navigate to="/statistics" replace />} />
         <Route path="/runs" element={<RunsList />} />
         <Route path="/runs/new" element={<SubmitRun />} />
         <Route path="/runs/:id" element={<RunDetail />} />
@@ -36,7 +36,7 @@ export function App() {
         <Route path="/prompt-features/new" element={<CreatePromptFeature />} />
         <Route path="/prompt-features/graph" element={<PromptFeatureGraphView />} />
         <Route path="/prompt-features/:id" element={<PromptFeatureDetail />} />
-        <Route path="/insights" element={<Insights />} />
+        <Route path="/statistics" element={<Statistics />} />
       </Route>
     </Routes>
   );

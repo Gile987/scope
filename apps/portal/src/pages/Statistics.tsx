@@ -338,7 +338,7 @@ function IterationStatsTable({ data }: { data: AnalysisResponse }) {
 }
 
 // Loading skeleton
-function InsightsSkeleton() {
+function StatisticsSkeleton() {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-4">
@@ -433,7 +433,7 @@ function CriteriaFilterBar({
   );
 }
 
-export function Insights() {
+export function Statistics() {
   const [searchParams, setSearchParams] = useSearchParams();
   
   // Parse selected criteria from URL
@@ -470,7 +470,7 @@ export function Insights() {
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Insights</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Statistics</h1>
           <p className="text-muted-foreground">
             Analysis of benchmark runs: pass rates, iterations, and success probability
           </p>
@@ -479,7 +479,7 @@ export function Insights() {
       </div>
 
       {isLoading || !data ? (
-        <InsightsSkeleton />
+        <StatisticsSkeleton />
       ) : (
         <>
           <CriteriaFilterBar

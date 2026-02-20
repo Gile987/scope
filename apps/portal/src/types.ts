@@ -144,7 +144,7 @@ export interface PromptFeatureExtraction {
   cached?: boolean;
 }
 
-// Analysis types for insights dashboard
+// Analysis types for statistics dashboard
 export interface TaskWorkerGroup {
   task: string;
   workerType: string;

@@ -7,7 +7,7 @@ import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText } from "l
 import { VersionFooter } from "./VersionFooter";
 
 const navItems = [
-  { to: "/insights", label: "Insights", icon: BarChart3 },
+  { to: "/statistics", label: "Statistics", icon: BarChart3 },
   { to: "/runs", label: "Runs", icon: List },
   { to: "/runs/new", label: "New Run", icon: Plus },
   { to: "/reports", label: "Reports", icon: FileText },
