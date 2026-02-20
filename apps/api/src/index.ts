@@ -94,6 +94,7 @@ interface PromptFeatureExtractionDocument {
   taskText: string;
   taskTextHash: string;
   promptFeatureResults: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
+  suggestedFeatures?: Array<{ suggestedId: string; behavior: string; prompt: string }>;
   extractedAt: Date;
   model?: string;
 }
@@ -1504,13 +1505,14 @@ app.post("/api/v1/prompt-features/extract", async (req: Request, res: Response, 
     }
 
     const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn }));
-    const results = await extractPromptFeatures(trimmedTask, featureConfigs, model);
+    const { results, suggestedFeatures } = await extractPromptFeatures(trimmedTask, featureConfigs, model);
 
     // Store extraction result (upsert by hash for idempotency)
     const extraction: PromptFeatureExtractionDocument = {
       taskText: trimmedTask,
       taskTextHash,
       promptFeatureResults: results,
+      ...(suggestedFeatures.length > 0 ? { suggestedFeatures } : {}),
       extractedAt: new Date(),
       model: model || process.env.LLM_MODEL || "gpt-4.1",
     };

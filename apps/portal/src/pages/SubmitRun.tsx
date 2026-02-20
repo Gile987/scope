@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
+import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus } from "lucide-react";
 import { WORKER_TYPES, type PromptFeatureExtraction } from "@/types";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { Stepper } from "@/components/Stepper";
@@ -107,6 +107,7 @@ export function SubmitRun() {
   const detectedFeatures = extraction?.promptFeatureResults?.filter((f) => f.detected) ?? [];
   const notDetectedFeatures = extraction?.promptFeatureResults?.filter((f) => !f.detected && f.evaluated) ?? [];
   const skippedFeatures = extraction?.promptFeatureResults?.filter((f) => !f.evaluated) ?? [];
+  const suggestedFeatures = extraction?.suggestedFeatures ?? [];
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -423,6 +424,51 @@ export function SubmitRun() {
               )}
             </CardContent>
           </Card>
+
+          {/* Suggested New Features */}
+          {suggestedFeatures.length > 0 && !extractMutation.isPending && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Plus className="h-4 w-4" />
+                  Suggested New Features
+                </CardTitle>
+                <CardDescription>
+                  The AI detected characteristics not covered by existing features
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {suggestedFeatures.map((s) => {
+                    const params = new URLSearchParams({
+                      behavior: s.behavior,
+                      id: s.suggestedId,
+                      prompt: s.prompt,
+                    });
+                    return (
+                      <div key={s.suggestedId} className="flex items-start justify-between gap-3 rounded-md border p-3">
+                        <div className="space-y-1 min-w-0">
+                          <Badge variant="secondary" className="font-mono text-xs">
+                            {s.suggestedId}
+                          </Badge>
+                          <p className="text-sm text-muted-foreground">{s.behavior}</p>
+                        </div>
+                        <Link
+                          to={`/prompt-features/new?${params.toString()}`}
+                          target="_blank"
+                        >
+                          <Button type="button" variant="outline" size="sm" className="gap-1 shrink-0">
+                            <Plus className="h-3.5 w-3.5" />
+                            Create
+                          </Button>
+                        </Link>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <Separator />
 

@@ -127,11 +127,18 @@ export interface PromptFeatureResult {
   evaluated: boolean;
 }
 
+export interface SuggestedPromptFeature {
+  suggestedId: string;
+  behavior: string;
+  prompt: string;
+}
+
 export interface PromptFeatureExtraction {
   _id?: string;
   taskText: string;
   taskTextHash?: string;
   promptFeatureResults: PromptFeatureResult[];
+  suggestedFeatures?: SuggestedPromptFeature[];
   extractedAt: string;
   model?: string;
   cached?: boolean;
