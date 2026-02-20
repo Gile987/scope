@@ -71,7 +71,7 @@ export function SubmitRun() {
     if (!task.trim()) return;
     // Optimistically advance to step 2 and fire extraction
     setStep(2);
-    extractMutation.mutate();
+    extractMutation.mutate({});
   };
 
   const handleSubmit = (e: React.FormEvent) => {
