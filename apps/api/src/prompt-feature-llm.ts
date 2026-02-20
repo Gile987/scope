@@ -155,9 +155,9 @@ export async function generatePromptFeaturePrompt(
 
 const EXTRACT_SYSTEM_PROMPT = `You are an expert at analyzing task prompts for AI coding agent benchmarks.
 
-Given a task prompt (the instructions given to a coding agent) and a list of prompt features to detect, you must:
+Given a task prompt (the instructions given to a coding agent) and optionally a list of prompt features to detect, you must:
 
-1. Determine which features are present in the task prompt. A feature is "detected" if the task prompt explicitly or implicitly asks for, mentions, or requires the characteristic described by that feature.
+1. If existing features are provided, determine which are present in the task prompt. A feature is "detected" if the task prompt explicitly or implicitly asks for, mentions, or requires the characteristic described by that feature.
 
 2. Suggest NEW features that the task prompt exhibits but that are NOT covered by any of the existing features. Only suggest features that represent clearly distinct, meaningful characteristics. Each suggestion needs:
    - suggestedId: a snake_case identifier starting with a verb prefix (e.g., asks_for_X, requires_X, uses_X)
@@ -167,14 +167,18 @@ Given a task prompt (the instructions given to a coding agent) and a list of pro
 Respond with ONLY a JSON object in this exact format (no markdown, no code fences):
 {"results": [{"featureId": "feature_id_here", "detected": true}, {"featureId": "other_feature", "detected": false}], "suggestedFeatures": [{"suggestedId": "asks_for_something", "behavior": "short description", "prompt": "detection prompt"}]}
 
-Include ALL features from the input list in "results". Be precise — only mark a feature as detected if the task prompt clearly relates to it. If no new features should be suggested, use an empty array for "suggestedFeatures".`;
+If no existing features are provided, "results" should be an empty array — focus on suggesting new features instead. Include ALL provided features in "results" if any are given. Be precise — only mark a feature as detected if the task prompt clearly relates to it. If no new features should be suggested, use an empty array for "suggestedFeatures".`;
 
 function buildExtractUserMessage(taskText: string, features: PromptFeatureConfig[]): string {
   const parts: string[] = [];
 
-  parts.push("PROMPT FEATURES TO DETECT:");
-  for (const f of features) {
-    parts.push(`- ${f.id}: ${f.prompt}`);
+  if (features.length > 0) {
+    parts.push("PROMPT FEATURES TO DETECT:");
+    for (const f of features) {
+      parts.push(`- ${f.id}: ${f.prompt}`);
+    }
+  } else {
+    parts.push("PROMPT FEATURES TO DETECT:\n(none defined yet \u2014 suggest new features based on the task prompt)");
   }
   parts.push("");
   parts.push(`TASK PROMPT TO ANALYZE:\n${taskText}`);
@@ -195,10 +199,6 @@ export async function extractPromptFeatures(
   const llm = getClient();
   if (!llm) {
     throw new Error("LLM not configured: GITHUB_MODELS_API_KEY is not set");
-  }
-
-  if (features.length === 0) {
-    return { results: [], suggestedFeatures: [] };
   }
 
   const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
