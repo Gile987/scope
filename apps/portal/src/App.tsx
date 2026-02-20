@@ -15,6 +15,8 @@ import { PromptFeatureList } from "@/pages/PromptFeatureList";
 import { PromptFeatureDetail } from "@/pages/PromptFeatureDetail";
 import { CreatePromptFeature } from "@/pages/CreatePromptFeature";
 import { PromptFeatureGraphView } from "@/pages/PromptFeatureGraphView";
+import { ReportsList } from "@/pages/ReportsList";
+import { ReportDetail } from "@/pages/ReportDetail";
 
 export function App() {
   return (
@@ -24,6 +26,8 @@ export function App() {
         <Route path="/runs" element={<RunsList />} />
         <Route path="/runs/new" element={<SubmitRun />} />
         <Route path="/runs/:id" element={<RunDetail />} />
+        <Route path="/reports" element={<ReportsList />} />
+        <Route path="/reports/:id" element={<ReportDetail />} />
         <Route path="/criteria" element={<CriteriaList />} />
         <Route path="/criteria/new" element={<CreateCriterion />} />
         <Route path="/criteria/graph" element={<CriteriaGraphView />} />

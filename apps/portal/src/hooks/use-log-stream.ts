@@ -12,6 +12,8 @@ interface UseLogStreamOptions {
   enabled?: boolean;
   /** Start from the beginning (default: true) */
   fromStart?: boolean;
+  /** Custom URL builder (default: api.logsUrl). Use api.reportLogsUrl for reports. */
+  urlBuilder?: (id: string, fromStart: boolean) => string;
 }
 
 interface UseLogStreamReturn {
@@ -26,6 +28,7 @@ export function useLogStream({
   id,
   enabled = true,
   fromStart = true,
+  urlBuilder = api.logsUrl,
 }: UseLogStreamOptions): UseLogStreamReturn {
   const [logs, setLogs] = useState<LogEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -38,7 +41,7 @@ export function useLogStream({
   useEffect(() => {
     if (!enabled || !id) return;
 
-    const url = api.logsUrl(id, fromStart);
+    const url = urlBuilder(id, fromStart);
     const es = new EventSource(url);
     eventSourceRef.current = es;
 
@@ -81,7 +84,7 @@ export function useLogStream({
       eventSourceRef.current = null;
       setIsConnected(false);
     };
-  }, [id, enabled, fromStart]);
+  }, [id, enabled, fromStart, urlBuilder]);
 
   return { logs, isConnected, isDone, error, clear };
 }

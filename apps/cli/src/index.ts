@@ -1491,5 +1491,257 @@ promptFeature
     }
   });
 
+// ─── Report management ──────────────────────────────────────────────────────
+
+const report = program
+  .command("report")
+  .description("Generate, view, and monitor run reports")
+  .action(() => {
+    report.help();
+  });
+
+configureHelp(report);
+
+report
+  .command("generate")
+  .description("Generate a report for a benchmark run")
+  .requiredOption("-i, --id <requestId>", "Run ID to generate a report for")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("--stream", "Stream report generation logs in real time", true)
+  .option("--no-stream", "Do not stream logs after submission")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId: options.id }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const result = await response.json() as { id: string; requestId: string; status: string };
+      console.log(`${successText("Report queued")} ${dimTimestamp(`(${result.id})`)}`);
+      console.log(`${label('Report ID:')} ${value(result.id)}`);
+      console.log(`${label('Run ID:')}    ${value(result.requestId)}`);
+
+      if (options.stream) {
+        console.log(`\n${label('Streaming logs...')}\n`);
+        const eventSource = new EventSource(
+          `${normalizeUrl(options.url)}/api/v1/reports/${result.id}/logs?fromStart=true`
+        );
+
+        eventSource.onmessage = (event: MessageEvent) => {
+          try {
+            const log = JSON.parse(event.data) as {
+              timestamp: string;
+              level: string;
+              source?: string;
+              message: string;
+            };
+            const ts = dimTimestamp(new Date(log.timestamp).toLocaleTimeString());
+            const lvl = colorLevel(log.level);
+            const src = log.source ? ` ${dimTimestamp(`[${log.source}]`)}` : "";
+            console.log(`${ts} ${lvl}${src} ${log.message}`);
+          } catch {
+            console.log(event.data);
+          }
+        };
+
+        eventSource.addEventListener("done", () => {
+          console.log(`\n${successText("Report generation complete")}`);
+          console.log(`\n${label('Next steps:')}`);
+          console.log(`  ${dimTimestamp('View report:')} pnpm cli report get -i ${result.id}`);
+          eventSource.close();
+          process.exit(0);
+        });
+
+        eventSource.addEventListener("timeout", () => {
+          console.log(`\n${warnBanner("Stream timed out")}`);
+          eventSource.close();
+          process.exit(0);
+        });
+
+        eventSource.onerror = () => {
+          eventSource.close();
+          process.exit(1);
+        };
+      } else {
+        console.log(`\n${label('Next steps:')}`);
+        console.log(`  ${dimTimestamp('Stream logs:')}  pnpm cli report logs -i ${result.id}`);
+        console.log(`  ${dimTimestamp('View report:')} pnpm cli report get -i ${result.id}`);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+report
+  .command("get")
+  .description("Get a report by ID")
+  .requiredOption("-i, --id <reportId>", "Report ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("--raw", "Output raw markdown without formatting")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/reports/${options.id}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const report = await response.json() as {
+        id: string;
+        requestId: string;
+        status: string;
+        reporter?: { id: string; name: string; model: string; agentId: string; agentVersion: string };
+        content?: string;
+        createdAt: string;
+        updatedAt?: string;
+        error?: string;
+      };
+
+      if (options.raw && report.content) {
+        console.log(report.content);
+        return;
+      }
+
+      console.log(`${label('Report:')}    ${value(report.id)}`);
+      console.log(`${label('Run:')}       ${value(report.requestId)}`);
+      console.log(`${label('Status:')}    ${colorLevel(report.status === "completed" ? "info" : report.status === "failed" ? "error" : "warn")} ${report.status}`);
+      console.log(`${label('Created:')}   ${dimTimestamp(new Date(report.createdAt).toLocaleString())}`);
+      if (report.updatedAt) {
+        console.log(`${label('Updated:')}   ${dimTimestamp(new Date(report.updatedAt).toLocaleString())}`);
+      }
+      if (report.reporter) {
+        console.log(`${label('Reporter:')}  ${value(report.reporter.name)} (${report.reporter.agentId}@${report.reporter.agentVersion})`);
+        console.log(`${label('Model:')}     ${value(report.reporter.model)}`);
+      }
+      if (report.error) {
+        console.log(`${label('Error:')}     ${errorText(report.error)}`);
+      }
+      if (report.content) {
+        console.log(`\n${banner('─── Report Content ───')}\n`);
+        console.log(report.content);
+      } else if (report.status === "pending" || report.status === "generating") {
+        console.log(`\n${dimTimestamp('Report is still being generated. Stream logs with:')}`);
+        console.log(`  pnpm cli report logs -i ${report.id}`);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+report
+  .command("list")
+  .description("List all reports (optionally filter by run)")
+  .option("-r, --run <requestId>", "Filter by run ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const params = new URLSearchParams();
+      if (options.run) params.set("requestId", options.run);
+      const qs = params.toString();
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/reports${qs ? `?${qs}` : ""}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const reports = await response.json() as Array<{
+        id: string;
+        requestId: string;
+        status: string;
+        reporter?: { model: string };
+        createdAt: string;
+      }>;
+
+      if (reports.length === 0) {
+        console.log(dimTimestamp("No reports found"));
+        return;
+      }
+
+      console.log(`${label(`Reports (${reports.length}):`)}\n`);
+      for (const r of reports) {
+        const status = r.status === "completed" ? successText("✓") : r.status === "failed" ? errorText("✗") : dimTimestamp("…");
+        const model = r.reporter?.model ? ` ${dimTimestamp(`[${r.reporter.model}]`)}` : "";
+        const ts = dimTimestamp(new Date(r.createdAt).toLocaleString());
+        console.log(`  ${status} ${value(r.id)} → ${dimTimestamp(r.requestId)}${model} ${ts}`);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+report
+  .command("logs")
+  .description("Stream report generation logs")
+  .requiredOption("-i, --id <reportId>", "Report ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("--from-start", "Include historical logs from the beginning", false)
+  .action(async (options) => {
+    try {
+      // Verify report exists first
+      const checkResponse = await fetch(`${normalizeUrl(options.url)}/api/v1/reports/${options.id}`);
+      if (!checkResponse.ok) {
+        const error = await checkResponse.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const fromStartParam = options.fromStart ? "&fromStart=true" : "";
+      const eventSource = new EventSource(
+        `${normalizeUrl(options.url)}/api/v1/reports/${options.id}/logs?${fromStartParam}`
+      );
+
+      eventSource.onmessage = (event: MessageEvent) => {
+        try {
+          const log = JSON.parse(event.data) as {
+            timestamp: string;
+            level: string;
+            source?: string;
+            message: string;
+          };
+          const ts = dimTimestamp(new Date(log.timestamp).toLocaleTimeString());
+          const lvl = colorLevel(log.level);
+          const src = log.source ? ` ${dimTimestamp(`[${log.source}]`)}` : "";
+          console.log(`${ts} ${lvl}${src} ${log.message}`);
+        } catch {
+          console.log(event.data);
+        }
+      };
+
+      eventSource.addEventListener("done", () => {
+        console.log(`\n${successText("Report generation complete")}`);
+        eventSource.close();
+        process.exit(0);
+      });
+
+      eventSource.addEventListener("timeout", () => {
+        console.log(`\n${warnBanner("Stream timed out")}`);
+        eventSource.close();
+        process.exit(0);
+      });
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        process.exit(1);
+      };
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 program.parse();
 

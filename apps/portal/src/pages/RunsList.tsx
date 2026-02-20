@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
@@ -35,6 +36,15 @@ export function RunsList() {
   const { data: runs = [], isLoading, isRefetching } = useQuery({
     queryKey: ["runs", workerFilter],
     queryFn: () => api.listRuns(workerFilter === "all" ? undefined : workerFilter),
+    refetchInterval: 10_000,
+  });
+
+  // Fetch bulk report status for all visible runs
+  const runIds = useMemo(() => runs.map((r) => r._id), [runs]);
+  const { data: reportStatuses } = useQuery({
+    queryKey: ["report-statuses", runIds],
+    queryFn: () => api.bulkReportStatus(runIds),
+    enabled: runIds.length > 0,
     refetchInterval: 10_000,
   });
 
@@ -282,6 +292,7 @@ export function RunsList() {
               <TableHead>Task</TableHead>
               <TableHead className="w-[180px]">Worker</TableHead>
               <TableHead className="w-[120px]">Status</TableHead>
+              <TableHead className="w-[100px]">Report</TableHead>
               <TableHead className="w-[80px]">Turns</TableHead>
               <TableHead className="w-[160px]">Created</TableHead>
               <TableHead className="w-[100px] text-right">Actions</TableHead>
@@ -310,6 +321,15 @@ export function RunsList() {
                 </TableCell>
                 <TableCell>
                   <StatusBadge status={run.status} />
+                </TableCell>
+                <TableCell>
+                  {reportStatuses?.[run._id] ? (
+                    <Link to={`/reports/${reportStatuses[run._id].reportId}`}>
+                      <ReportStatusBadge status={reportStatuses[run._id].status} />
+                    </Link>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">–</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-center">
                   {run.turns?.length ?? "–"}

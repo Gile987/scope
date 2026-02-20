@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -201,6 +201,47 @@ export const api = {
       params.set("criteria", criteria.join(","));
     }
     return request(`/analysis?${params.toString()}`);
+  },
+
+  // ─── Reports ──────────────────────────────────────────────────────────────
+
+  /** Create a report for a run */
+  createReport: (requestId: string): Promise<{ id: string; requestId: string; status: string }> => {
+    return request("/reports", {
+      method: "POST",
+      body: JSON.stringify({ requestId }),
+    });
+  },
+
+  /** List all reports, optionally filtered by requestId */
+  listReports: (requestId?: string): Promise<Report[]> => {
+    const params = new URLSearchParams();
+    if (requestId) params.set("requestId", requestId);
+    const qs = params.toString();
+    return request(`/reports${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single report by ID */
+  getReport: (id: string): Promise<Report> => {
+    return request(`/reports/${id}`);
+  },
+
+  /** Get reports for a specific run */
+  getRunReports: (requestId: string): Promise<Report[]> => {
+    return request(`/requests/${requestId}/reports`);
+  },
+
+  /** Bulk report status for multiple runs (returns latest report status per requestId) */
+  bulkReportStatus: (requestIds: string[]): Promise<BulkReportStatus> => {
+    return request("/reports/bulk-status", {
+      method: "POST",
+      body: JSON.stringify({ requestIds }),
+    });
+  },
+
+  /** SSE endpoint URL for report log streaming */
+  reportLogsUrl: (id: string, fromStart = true): string => {
+    return `${BASE}/reports/${id}/logs?fromStart=${fromStart}`;
   },
 
   // ─── Version ───────────────────────────────────────────────────────────────

@@ -185,3 +185,40 @@ export interface BulkResubmitResponse {
   failed: string[];
   newIds: string[];
 }
+
+// Report types
+export type ReportStatus = "pending" | "generating" | "completed" | "failed";
+
+export interface Reporter {
+  id: string;
+  name: string;
+  gitHash: string;
+  model: string;
+  agentId: string;
+  agentVersion: string;
+}
+
+export interface Report {
+  _id: string;
+  id: string;
+  requestId: string;
+  task?: string;
+  reporter?: Reporter;
+  content?: string;
+  status: ReportStatus;
+  error?: string;
+  logs: LogEvent[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export const REPORT_STATUS_LIST: ReportStatus[] = [
+  "pending",
+  "generating",
+  "completed",
+  "failed",
+];
+
+export interface BulkReportStatus {
+  [requestId: string]: { reportId: string; status: ReportStatus };
+}

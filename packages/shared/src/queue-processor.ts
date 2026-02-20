@@ -1,170 +1,70 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { MongoClient, Collection, Db } from "mongodb";
-import { QueueClient, DequeuedMessageItem } from "@azure/storage-queue";
-import { DefaultAzureCredential } from "@azure/identity";
+import { DequeuedMessageItem } from "@azure/storage-queue";
 import {
   RequestDocument,
-  QueueMessagePayload,
   WorkerProcessor,
   QueueProcessorConfig,
   LogEvent,
   MULTI_TURN_DEFAULTS,
   ConversationTurn,
 } from "./types.js";
-import { LogPublisher } from "./log-publisher.js";
+import { BaseQueueProcessor } from "./base-queue-processor.js";
 import { BlobStorage } from "./blob-storage.js";
 import { JudgeClient } from "./judge-client.js";
 import { runMultiTurnLoop } from "./multi-turn-loop.js";
 
-export class QueueProcessor {
-  private mongoClient: MongoClient;
-  private db!: Db;
-  private collection!: Collection<RequestDocument>;
-  private queueClient: QueueClient;
+/**
+ * Queue processor for coding agent workers.
+ * Extends BaseQueueProcessor with one-shot and multi-turn processing logic,
+ * including judge evaluation loops, workspace snapshots, and visibility timeout extension.
+ */
+export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocument> {
   private processor: WorkerProcessor;
-  private config: QueueProcessorConfig;
-  private logPublisher!: LogPublisher;
 
   constructor(config: QueueProcessorConfig, processor: WorkerProcessor) {
-    this.config = config;
+    super(config, processor.workerName);
     this.processor = processor;
+  }
 
-    // MongoDB client
-    this.mongoClient = new MongoClient(config.mongoUri);
+  protected async handleRequest(
+    requestDoc: RequestDocument,
+    message: DequeuedMessageItem,
+    currentPopReceipt: string,
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
+  ): Promise<void> {
+    // Determine if this is a multi-turn request (criteria present in scenario)
+    const isMultiTurn = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
 
-    // Queue client - support both Azure and Azurite
-    if (config.storageConnectionString) {
-      // Connection string auth (local Azurite or Azure with connection string)
-      this.queueClient = new QueueClient(
-        config.storageConnectionString,
-        config.queueName
-      );
+    if (isMultiTurn) {
+      await this.processMultiTurn(requestDoc, message, currentPopReceipt, log);
     } else {
-      // Azure with DefaultAzureCredential
-      const credential = new DefaultAzureCredential();
-      const queueUrl = `https://${config.storageAccountName}.queue.core.windows.net`;
-      this.queueClient = new QueueClient(`${queueUrl}/${config.queueName}`, credential);
+      await this.processOneShot(requestDoc, message, currentPopReceipt, log);
     }
   }
 
-  async start(): Promise<void> {
-    console.log(`[${this.processor.workerName}] Starting worker...`);
-    console.log(`[${this.processor.workerName}] MongoDB: ${this.config.mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
-    console.log(`[${this.processor.workerName}] Queue: ${this.config.storageAccountName}/${this.config.queueName}`);
-    console.log(`[${this.processor.workerName}] Redis: ${this.config.redisHost}:${this.config.redisPort}`);
-
-    // Ensure queue exists (creates it in Azurite on first run)
-    await this.queueClient.createIfNotExists();
-    console.log(`[${this.processor.workerName}] Ensured queue exists: ${this.config.queueName}`);
-
-    // Connect to MongoDB
-    await this.mongoClient.connect();
-    this.db = this.mongoClient.db(this.config.mongoDatabase);
-    this.collection = this.db.collection<RequestDocument>(this.config.mongoCollection);
-    console.log(`[${this.processor.workerName}] Connected to MongoDB`);
-
-    // Initialize log publisher
-    this.logPublisher = new LogPublisher(
-      {
-        redisHost: this.config.redisHost,
-        redisPort: this.config.redisPort,
-        redisPassword: this.config.redisPassword,
-      },
-      this.collection,
-      this.processor.workerName
-    );
-
-    while (true) {
-      try {
-        const response = await this.queueClient.receiveMessages({
-          numberOfMessages: this.config.batchSize,
-          visibilityTimeout: 30,
-        });
-
-        const messages = response.receivedMessageItems;
-
-        if (messages.length > 0) {
-          console.log(`[${this.processor.workerName}] Received ${messages.length} message(s)`);
-
-          for (const message of messages) {
-            await this.processMessage(message);
-          }
-        }
-      } catch (error) {
-        console.error(`[${this.processor.workerName}] Error polling queue:`, error);
-      }
-
-      await this.sleep(this.config.pollIntervalMs);
-    }
-  }
-
-  private async processMessage(message: DequeuedMessageItem): Promise<void> {
-    let requestId: string | undefined;
-    // Track the current pop receipt — it changes after each updateMessage call
-    let currentPopReceipt = message.popReceipt;
+  /**
+   * Fire-and-forget report generation trigger via REST API.
+   * Called after a run completes if apiBaseUrl is configured.
+   */
+  private async triggerReportGeneration(requestId: string): Promise<void> {
+    const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+    if (!apiBaseUrl) return;
 
     try {
-      const decodedContent = Buffer.from(message.messageText, "base64").toString("utf-8");
-      const payload: QueueMessagePayload = JSON.parse(decodedContent);
-      requestId = payload.requestId;
-
-      console.log(`[${this.processor.workerName}] Processing request ${requestId}`);
-
-      const requestDoc = await this.collection.findOne({ _id: requestId });
-
-      if (!requestDoc) {
-        console.error(`[${this.processor.workerName}] Request ${requestId} not found`);
-        await this.safeDeleteMessage(message.messageId, currentPopReceipt);
-        return;
-      }
-
-      // Create log function for this request
-      const log = async (
-        level: LogEvent["level"],
-        msg: string,
-        data?: Record<string, unknown>
-      ): Promise<void> => {
-        await this.logPublisher.publish(requestId!, level, msg, data);
-      };
-
-      // Determine if this is a multi-turn request (criteria present in scenario)
-      const isMultiTurn = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
-
-      if (isMultiTurn) {
-        currentPopReceipt = await this.processMultiTurn(requestDoc, message, currentPopReceipt, log);
+      const response = await fetch(`${apiBaseUrl}/api/v1/reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId }),
+      });
+      if (response.ok) {
+        console.log(`[${this.workerName}] Triggered report generation for request ${requestId}`);
       } else {
-        await this.processOneShot(requestDoc, message, currentPopReceipt, log);
+        console.warn(`[${this.workerName}] Failed to trigger report generation: ${response.status} ${response.statusText}`);
       }
     } catch (error) {
-      console.error(`[${this.processor.workerName}] Error processing message:`, error);
-
-      if (requestId) {
-        try {
-          await this.logPublisher.publish(
-            requestId,
-            "error",
-            `Processing failed: ${error instanceof Error ? error.message : String(error)}`,
-            { final: true }
-          );
-
-          await this.collection.updateOne(
-            { _id: requestId },
-            {
-              $set: {
-                status: "failed",
-                error: error instanceof Error ? error.message : String(error),
-                updatedAt: new Date(),
-              },
-            }
-          );
-        } catch (updateError) {
-          console.error(`[${this.processor.workerName}] Failed to update request as failed:`, updateError);
-        }
-      }
-
-      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      console.warn(`[${this.workerName}] Failed to trigger report generation: ${error}`);
     }
   }
 
@@ -198,7 +98,10 @@ export class QueueProcessor {
       { $set: { status: "completed", result, updatedAt: new Date() } }
     );
 
-    console.log(`[${this.processor.workerName}] Completed request ${requestId}`);
+    console.log(`[${this.workerName}] Completed request ${requestId}`);
+
+    // Fire-and-forget report generation
+    await this.triggerReportGeneration(requestId);
 
     await this.safeDeleteMessage(message.messageId, currentPopReceipt);
   }
@@ -211,7 +114,7 @@ export class QueueProcessor {
     message: DequeuedMessageItem,
     currentPopReceipt: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
-  ): Promise<string> {
+  ): Promise<void> {
     const requestId = requestDoc._id;
     const judgeServiceUrl = process.env.JUDGE_SERVICE_URL;
 
@@ -237,7 +140,7 @@ export class QueueProcessor {
       );
       currentPopReceipt = updateResponse.popReceipt!;
     } catch (error) {
-      console.warn(`[${this.processor.workerName}] Failed to extend message visibility: ${error}`);
+      console.warn(`[${this.workerName}] Failed to extend message visibility: ${error}`);
     }
 
     await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
@@ -302,27 +205,12 @@ export class QueueProcessor {
     );
 
     console.log(
-      `[${this.processor.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
+      `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
     );
 
+    // Fire-and-forget report generation
+    await this.triggerReportGeneration(requestId);
+
     await this.safeDeleteMessage(message.messageId, currentPopReceipt);
-    return currentPopReceipt;
-  }
-
-  /**
-   * Delete a queue message, logging a warning instead of throwing on failure.
-   * This handles cases where the pop receipt may have become stale (e.g., visibility timeout expired).
-   * The message will eventually expire or be reprocessed with idempotency.
-   */
-  private async safeDeleteMessage(messageId: string, popReceipt: string): Promise<void> {
-    try {
-      await this.queueClient.deleteMessage(messageId, popReceipt);
-    } catch (error) {
-      console.warn(`[${this.processor.workerName}] Failed to delete queue message (may have expired or been reprocessed): ${error}`);
-    }
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

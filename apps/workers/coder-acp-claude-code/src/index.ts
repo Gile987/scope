@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { QueueProcessor, WorkerProcessor, QueueProcessorConfig, LogEvent } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, QueueProcessorConfig, LogEvent } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -67,10 +67,11 @@ async function main(): Promise<void> {
     redisHost: process.env.REDIS_HOST || "",
     redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),
     redisPassword: process.env.REDIS_PASSWORD || "",
+    apiBaseUrl: process.env.SCOPE_MT_API_URL,
   };
 
   const processor = new ClaudeCodeProcessor();
-  const queueProcessor = new QueueProcessor(config, processor);
+  const queueProcessor = new CodingAgentQueueProcessor(config, processor);
 
   await queueProcessor.start();
 }

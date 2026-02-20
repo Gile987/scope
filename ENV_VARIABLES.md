@@ -108,3 +108,35 @@ JUDGE_MAX_PARALLELISM=5
 FEEDBACK_MAX_CRITERIA=3
 FEEDBACK_DESCENDANT_GUARD=false
 ```
+
+## Report Generator Configuration
+
+### AZURE_STORAGE_QUEUE_REPORT
+**Default:** `report-queue`
+**Type:** string
+
+Azure Storage Queue name for report generation jobs. The API enqueues messages here when a report is requested; the report-generator worker polls this queue.
+
+### REPORT_MODEL
+**Default:** `gpt-4.1`
+**Type:** string
+
+The LLM model used by the report-generator worker (via the Copilot SDK) to generate run analysis reports. Examples: `gpt-4.1`, `gpt-4o`, `claude-sonnet-4`.
+
+### SCOPE_MT_API_URL
+**Default:** `http://localhost:3001` (local), `http://api:80` (Docker)
+**Type:** URL string
+
+Base URL of the Scope MT API. The report-generator worker calls this to fetch run data (summary, turns, criteria trajectory) via REST tools during report generation.
+
+### SESSION_TIMEOUT_MS
+**Default:** `300000` (5 minutes)
+**Type:** integer (milliseconds)
+
+Timeout for the Copilot SDK session used by the report-generator worker. If the LLM takes longer than this to generate a report, the session will be terminated and the report marked as failed.
+
+### GIT_COMMIT
+**Default:** `development`
+**Type:** string
+
+Git commit hash embedded in reporter metadata. Automatically set during CI/CD builds. Used to track which version of the report-generator produced a given report.
