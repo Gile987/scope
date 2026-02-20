@@ -19,7 +19,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
 import type { Run } from "@/types";
@@ -83,6 +83,23 @@ export function RunsList() {
     },
     onError: (error) => {
       toast.error("Failed to re-submit runs", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const bulkReportMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkCreateReports(ids),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["report-statuses"] });
+      setSelectedIds(new Set());
+      toast.success(`Queued ${data.created} report${data.created !== 1 ? "s" : ""} for generation`);
+      if (data.notFound.length > 0) {
+        toast.warning(`${data.notFound.length} run${data.notFound.length !== 1 ? "s" : ""} not found`);
+      }
+    },
+    onError: (error) => {
+      toast.error("Failed to generate reports", {
         description: error instanceof Error ? error.message : "Unknown error",
       });
     },
@@ -199,6 +216,30 @@ export function RunsList() {
           >
             Clear selection
           </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <FileText className="h-4 w-4" /> Generate reports
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Generate reports for {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will queue report generation for each selected run. Runs that already have a report will get a new one.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => bulkReportMutation.mutate(Array.from(selectedIds))}
+                  disabled={bulkReportMutation.isPending}
+                >
+                  {bulkReportMutation.isPending ? "Generating…" : "Generate"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <AlertDialog open={resubmitDialogOpen} onOpenChange={setResubmitDialogOpen}>
             <AlertDialogTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5">
