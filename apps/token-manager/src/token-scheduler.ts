@@ -57,6 +57,7 @@ export function startTokenScheduler(
                 lastValidatedAt: new Date(),
                 lastValidationStatus: result.status,
                 lastValidationError: result.error ?? undefined,
+                capabilities: result.capabilities ?? [],
                 updatedAt: new Date(),
               },
             }
@@ -64,7 +65,7 @@ export function startTokenScheduler(
 
           if (result.status !== "valid") {
             console.warn(
-              `[token-scheduler] Token ${token._id} (${token.usage}): validation status = ${result.status}${result.error ? ` — ${result.error}` : ""}`
+              `[token-scheduler] Token ${token._id} (${token.type}): validation status = ${result.status}${result.error ? ` — ${result.error}` : ""}`
             );
           }
 
@@ -75,13 +76,13 @@ export function startTokenScheduler(
               (1000 * 60 * 60 * 24);
             if (daysUntilExpiry <= EXPIRATION_WARNING_DAYS) {
               console.warn(
-                `[token-scheduler] Token ${token._id} (${token.usage}) expires in ${Math.round(daysUntilExpiry)} day(s)`
+                `[token-scheduler] Token ${token._id} (${token.type}) expires in ${Math.round(daysUntilExpiry)} day(s)`
               );
             }
           }
         } catch (err) {
           console.error(
-            `[token-scheduler] Failed to validate token ${token._id} (${token.usage}):`,
+            `[token-scheduler] Failed to validate token ${token._id} (${token.type}):`,
             err instanceof Error ? err.message : err
           );
 
