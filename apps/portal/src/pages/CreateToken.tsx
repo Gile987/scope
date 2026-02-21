@@ -20,8 +20,60 @@ import {
 import {
   Alert, AlertDescription, AlertTitle,
 } from "@/components/ui/alert";
-import { ArrowLeft, ArrowRight, Loader2, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2, CheckCircle2, XCircle, AlertTriangle, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
+
+const TOKEN_INSTRUCTIONS: Record<TokenType, { steps: string[]; link?: { label: string; url: string }; note?: string }> = {
+  "github-pat-classic": {
+    steps: [
+      "Go to GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)",
+      "Click 'Generate new token (classic)'",
+      "Select scopes: 'copilot' (for Copilot SDK/CLI/VS Code) and/or 'repo' as needed",
+      "Set an expiration and click 'Generate token'",
+      "Copy the token (starts with ghp_)",
+    ],
+    link: { label: "Open GitHub token settings", url: "https://github.com/settings/tokens" },
+    note: "Classic PATs cannot access GitHub Models. Use a fine-grained PAT with models:read for that.",
+  },
+  "github-pat-fine-grained": {
+    steps: [
+      "Go to GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens",
+      "Click 'Generate new token'",
+      "Set a token name, expiration, and resource owner",
+      "Under Permissions, add 'Models' → Read access (for GitHub Models)",
+      "Click 'Generate token'",
+      "Copy the token (starts with github_pat_)",
+    ],
+    link: { label: "Open GitHub token settings", url: "https://github.com/settings/personal-access-tokens" },
+    note: "Fine-grained PATs support GitHub Models via the models:read permission. They do not support Copilot SDK.",
+  },
+  "github-oauth": {
+    steps: [
+      "Obtain a GitHub OAuth token via an OAuth App flow (authorization code grant)",
+      "The token should have the 'copilot' scope for Copilot capabilities",
+      "Copy the OAuth access token",
+    ],
+    note: "OAuth tokens typically support all GitHub capabilities including Copilot SDK, CLI, VS Code, and GitHub Models.",
+  },
+  "github-oauth-cookie-state": {
+    steps: [
+      "Open VS Code for the Web (vscode.dev) and sign in with GitHub",
+      "Open browser DevTools → Application → Cookies",
+      "Find the GitHub auth cookies and export them as a JSON object",
+      "Paste the full JSON blob below",
+    ],
+    note: "This cookie state is used by the VS Code Web worker to authenticate as a signed-in user.",
+  },
+  "anthropic-api-key": {
+    steps: [
+      "Go to the Anthropic Console → API Keys",
+      "Click 'Create Key'",
+      "Name the key and click 'Create'",
+      "Copy the API key (starts with sk-ant-)",
+    ],
+    link: { label: "Open Anthropic Console", url: "https://console.anthropic.com/settings/keys" },
+  },
+};
 
 const TOKEN_TYPES: TokenType[] = [
   "github-pat-classic",
@@ -139,6 +191,35 @@ export function CreateToken() {
                   The credential format. Capabilities are detected automatically during validation.
                 </p>
               </div>
+
+              {/* Instructions */}
+              {(() => {
+                const info = TOKEN_INSTRUCTIONS[type];
+                return (
+                  <div className="rounded-md border bg-muted/50 p-4 space-y-3">
+                    <p className="text-sm font-medium">How to create this token</p>
+                    <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
+                      {info.steps.map((s, i) => (
+                        <li key={i}>{s}</li>
+                      ))}
+                    </ol>
+                    {info.link && (
+                      <a
+                        href={info.link.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        {info.link.label}
+                      </a>
+                    )}
+                    {info.note && (
+                      <p className="text-xs text-muted-foreground italic">{info.note}</p>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Value */}
               <div className="space-y-2">
