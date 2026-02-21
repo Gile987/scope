@@ -17,6 +17,9 @@ import { CreatePromptFeature } from "@/pages/CreatePromptFeature";
 import { PromptFeatureGraphView } from "@/pages/PromptFeatureGraphView";
 import { ReportsList } from "@/pages/ReportsList";
 import { ReportDetail } from "@/pages/ReportDetail";
+import { TokenList } from "@/pages/TokenList";
+import { CreateToken } from "@/pages/CreateToken";
+import { TokenDetail } from "@/pages/TokenDetail";
 
 export function App() {
   return (
@@ -37,6 +40,9 @@ export function App() {
         <Route path="/prompt-features/graph" element={<PromptFeatureGraphView />} />
         <Route path="/prompt-features/:id" element={<PromptFeatureDetail />} />
         <Route path="/statistics" element={<Statistics />} />
+        <Route path="/tokens" element={<TokenList />} />
+        <Route path="/tokens/new" element={<CreateToken />} />
+        <Route path="/tokens/:id" element={<TokenDetail />} />
       </Route>
     </Routes>
   );
