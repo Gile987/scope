@@ -12,6 +12,7 @@ import {
   LogEvent,
   ReportDocument,
   Reporter,
+  TokenManagerClient,
 } from "shared";
 import { createReportTools } from "./tools.js";
 import { REPORT_SYSTEM_PROMPT } from "./prompt.js";
@@ -34,10 +35,12 @@ export interface ReportQueueProcessorConfig extends BaseQueueProcessorConfig {
  */
 export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
   private reportConfig: ReportQueueProcessorConfig;
+  private tokenClient: TokenManagerClient;
 
   constructor(config: ReportQueueProcessorConfig) {
     super(config, "report-generator");
     this.reportConfig = config;
+    this.tokenClient = new TokenManagerClient();
   }
 
   /**
@@ -140,7 +143,8 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     requestId: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<string> {
-    const client = new CopilotClient();
+    const githubToken = await this.tokenClient.acquireToken("copilot");
+    const client = new CopilotClient({ githubToken });
     let fullResponse = "";
 
     try {

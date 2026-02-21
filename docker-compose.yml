@@ -140,6 +140,7 @@ services:
     environment:
       PORT: "80"
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      TOKEN_MANAGER_URL: http://token-manager:80
       AZURE_STORAGE_ACCOUNT_NAME: devstoreaccount1
       STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;QueueEndpoint=http://azurite:10001/devstoreaccount1;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
       # Redis for real-time criterion progress streaming
@@ -231,6 +232,7 @@ services:
       REPORT_MODEL: ${REPORT_MODEL:-gpt-4.1}
       SCOPE_MT_API_URL: http://api:80
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      TOKEN_MANAGER_URL: http://token-manager:80
       GIT_COMMIT: ${GIT_COMMIT:-development}
       SESSION_TIMEOUT_MS: ${SESSION_TIMEOUT_MS:-300000}
     depends_on:
