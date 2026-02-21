@@ -48,6 +48,12 @@ export function RunDetail() {
     fromStart: true,
   });
 
+  // For completed/failed/exhausted runs, use REST-fetched logs instead of SSE
+  const effectiveLogs = isActive ? logStream.logs : (run?.logs ?? []);
+  const effectiveIsConnected = isActive ? logStream.isConnected : false;
+  const effectiveIsDone = isActive ? logStream.isDone : true;
+  const effectiveError = isActive ? logStream.error : null;
+
   // Fetch linked prompt feature extraction (if present)
   const extractionId = run?.promptFeatureExtractionId;
   const { data: extraction } = useQuery({
@@ -169,16 +175,16 @@ export function RunDetail() {
           {isV2 && run.scenario?.criteria && run.scenario.criteria.length > 0 && (
             <CriteriaGraphView
               scenarioCriteria={run.scenario!.criteria}
-              logs={logStream.logs}
+              logs={effectiveLogs}
             />
           )}
           <LogViewer
             runId={run._id}
             enabled={isActive}
-            logs={logStream.logs}
-            isConnected={logStream.isConnected}
-            isDone={logStream.isDone}
-            error={logStream.error}
+            logs={effectiveLogs}
+            isConnected={effectiveIsConnected}
+            isDone={effectiveIsDone}
+            error={effectiveError}
           />
         </TabsContent>
 

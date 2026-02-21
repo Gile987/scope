@@ -47,6 +47,12 @@ export function ReportDetail() {
     urlBuilder: api.reportLogsUrl,
   });
 
+  // For completed/failed reports, use REST-fetched logs instead of SSE
+  const effectiveLogs = isActive ? logStream.logs : (report?.logs ?? []);
+  const effectiveIsConnected = isActive ? logStream.isConnected : false;
+  const effectiveIsDone = isActive ? logStream.isDone : true;
+  const effectiveError = isActive ? logStream.error : null;
+
   const copyId = () => {
     navigator.clipboard.writeText(id ?? "");
     setCopied(true);
@@ -197,10 +203,10 @@ export function ReportDetail() {
           <LogViewer
             runId={report._id}
             enabled={isActive}
-            logs={logStream.logs}
-            isConnected={logStream.isConnected}
-            isDone={logStream.isDone}
-            error={logStream.error}
+            logs={effectiveLogs}
+            isConnected={effectiveIsConnected}
+            isDone={effectiveIsDone}
+            error={effectiveError}
           />
         </TabsContent>
 
