@@ -35,6 +35,7 @@ x-worker-env: &worker-env
   <<: *common-env
   JUDGE_SERVICE_URL: http://judge:80
   SCOPE_MT_API_URL: http://api:80
+  TOKEN_MANAGER_URL: http://token-manager:80
 
 x-worker-deps: &worker-deps
   mongodb:
@@ -113,6 +114,7 @@ services:
     environment:
       <<: *common-env
       PORT: "80"
+      TOKEN_MANAGER_URL: http://token-manager:80
       AZURE_STORAGE_QUEUE_WORKER_1: queue-coder-acp-claude-code
       AZURE_STORAGE_QUEUE_WORKER_2: queue-coder-acp-copilot
       AZURE_STORAGE_QUEUE_REPORT: report-queue
@@ -158,6 +160,21 @@ services:
       azurite:
         condition: service_healthy
       redis:
+        condition: service_healthy
+
+  # Token Manager - token lifecycle and KeyVault integration
+  token-manager:
+    build:
+      context: .
+      dockerfile: apps/token-manager/Dockerfile
+    ports:
+      - "${TOKEN_MANAGER_PORT:-3102}:80"
+    environment:
+      <<: *common-env
+      PORT: "80"
+      VALIDATION_INTERVAL_MS: "300000"
+    depends_on:
+      mongodb:
         condition: service_healthy
 
   # ===========================================================================
