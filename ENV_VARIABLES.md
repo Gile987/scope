@@ -140,3 +140,32 @@ Timeout for the Copilot SDK session used by the report-generator worker. If the 
 **Type:** string
 
 Git commit hash embedded in reporter metadata. Automatically set during CI/CD builds. Used to track which version of the report-generator produced a given report.
+
+## Token Manager Configuration
+
+### TOKEN_MANAGER_URL
+**Default:** (not set)
+**Type:** URL string
+
+Base URL of the Token Manager service. When set, workers, judge, and report-generator use the `TokenManagerClient` to dynamically acquire tokens via `POST /api/v1/tokens/acquire` (round-robin across enabled tokens). When not set, services fall back to static environment variables (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, etc.).
+
+- **Docker Compose:** `http://token-manager:80`
+- **Kubernetes:** `http://token-manager-service.scoped.svc.cluster.local:80`
+- **Local dev:** Leave unset to use env var fallback
+
+### AZURE_KEYVAULT_URI
+**Type:** URL string (token-manager only)
+
+Azure KeyVault URI for storing token secret values. When set, the Token Manager uses `KeyVaultTokenStore` with `DefaultAzureCredential`. When not set, an in-memory store is used (local dev only — tokens are lost on restart).
+
+### VALIDATION_INTERVAL_MS
+**Default:** `300000` (5 minutes)
+**Type:** integer (milliseconds)
+
+How often the Token Manager's scheduler validates all active tokens against their provider APIs. Each token is tested (e.g., GitHub PAT → `GET /user`, Anthropic → `GET /v1/models`) and its `lastValidationStatus` is updated in MongoDB.
+
+### TOKEN_MANAGER_PORT
+**Default:** `3102`
+**Type:** integer (Docker Compose only)
+
+Host port mapping for the token-manager service in Docker Compose.
