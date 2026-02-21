@@ -6,7 +6,8 @@ import { DefaultAzureCredential } from "@azure/identity";
 
 /**
  * Abstraction over secret storage.
- * Implemented by KeyVaultTokenStore (production) and InMemoryTokenStore (local dev).
+ * Implemented by KeyVaultTokenStore — backed by Azure Key Vault in production
+ * and Lowkey Vault (emulator) in local Docker Compose.
  */
 export interface TokenSecretStore {
   getSecret(name: string): Promise<string>;
@@ -23,6 +24,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Azure KeyVault-backed secret store with in-process caching.
+ * Works with both Azure Key Vault (production) and Lowkey Vault (local dev).
  */
 export class KeyVaultTokenStore implements TokenSecretStore {
   private client: SecretClient;
@@ -30,7 +32,9 @@ export class KeyVaultTokenStore implements TokenSecretStore {
   private cacheTtlMs: number;
 
   constructor(vaultUri: string, cacheTtlMs: number = CACHE_TTL_MS) {
-    this.client = new SecretClient(vaultUri, new DefaultAzureCredential());
+    this.client = new SecretClient(vaultUri, new DefaultAzureCredential(), {
+      disableChallengeResourceVerification: true,
+    });
     this.cacheTtlMs = cacheTtlMs;
   }
 
@@ -61,35 +65,10 @@ export class KeyVaultTokenStore implements TokenSecretStore {
 }
 
 /**
- * In-memory secret store for local development (no Azure KeyVault).
+ * Creates a KeyVaultTokenStore for the given vault URI.
+ * In production, this points to Azure Key Vault.
+ * In local Docker Compose, this points to Lowkey Vault (emulator).
  */
-export class InMemoryTokenStore implements TokenSecretStore {
-  private store: Map<string, string> = new Map();
-
-  async getSecret(name: string): Promise<string> {
-    const value = this.store.get(name);
-    if (value === undefined) {
-      throw new Error(`Secret '${name}' not found in memory store`);
-    }
-    return value;
-  }
-
-  async setSecret(name: string, value: string): Promise<void> {
-    this.store.set(name, value);
-  }
-
-  async deleteSecret(name: string): Promise<void> {
-    this.store.delete(name);
-  }
-}
-
-/**
- * Factory: returns KeyVaultTokenStore if a vault URI is provided,
- * otherwise InMemoryTokenStore for local development.
- */
-export function createTokenStore(keyvaultUri?: string): TokenSecretStore {
-  if (keyvaultUri) {
-    return new KeyVaultTokenStore(keyvaultUri);
-  }
-  return new InMemoryTokenStore();
+export function createTokenStore(keyvaultUri: string): TokenSecretStore {
+  return new KeyVaultTokenStore(keyvaultUri);
 }

@@ -2,46 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { InMemoryTokenStore, KeyVaultTokenStore } from "./keyvault-store.js";
-
-describe("InMemoryTokenStore", () => {
-  let store: InMemoryTokenStore;
-
-  beforeEach(() => {
-    store = new InMemoryTokenStore();
-  });
-
-  it("stores and retrieves a secret", async () => {
-    await store.setSecret("my-secret", "my-value");
-    const value = await store.getSecret("my-secret");
-    expect(value).toBe("my-value");
-  });
-
-  it("overwrites an existing secret", async () => {
-    await store.setSecret("my-secret", "old-value");
-    await store.setSecret("my-secret", "new-value");
-    const value = await store.getSecret("my-secret");
-    expect(value).toBe("new-value");
-  });
-
-  it("throws when getting a non-existent secret", async () => {
-    await expect(store.getSecret("no-such-secret")).rejects.toThrow(
-      /not found in memory store/
-    );
-  });
-
-  it("deletes a secret", async () => {
-    await store.setSecret("my-secret", "my-value");
-    await store.deleteSecret("my-secret");
-    await expect(store.getSecret("my-secret")).rejects.toThrow(
-      /not found in memory store/
-    );
-  });
-
-  it("does not throw when deleting a non-existent secret", async () => {
-    await expect(store.deleteSecret("no-such-secret")).resolves.toBeUndefined();
-  });
-});
+import { KeyVaultTokenStore } from "./keyvault-store.js";
 
 describe("KeyVaultTokenStore caching", () => {
   it("returns cached value within TTL", async () => {

@@ -154,9 +154,13 @@ Base URL of the Token Manager service. When set, workers, judge, and report-gene
 - **Local dev:** Leave unset to use env var fallback
 
 ### AZURE_KEYVAULT_URI
-**Type:** URL string (token-manager only)
+**Type:** URL string (token-manager only) — **Required**
 
-Azure KeyVault URI for storing token secret values. When set, the Token Manager uses `KeyVaultTokenStore` with `DefaultAzureCredential`. When not set, an in-memory store is used (local dev only — tokens are lost on restart).
+Azure KeyVault URI for storing token secret values. The Token Manager uses `KeyVaultTokenStore` with `DefaultAzureCredential`.
+
+- **Docker Compose:** Provided automatically via Lowkey Vault (Azure KV emulator): `https://lowkey-vault:8443`
+- **Kubernetes:** Azure Key Vault URI (e.g., `https://my-vault.vault.azure.net`)
+- **Local dev (no Docker):** Not supported without a vault; use Docker Compose
 
 ### VALIDATION_INTERVAL_MS
 **Default:** `300000` (5 minutes)

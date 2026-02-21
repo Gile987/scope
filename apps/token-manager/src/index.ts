@@ -52,11 +52,15 @@ async function initializeClients(): Promise<void> {
 
   console.log("[token-manager] MongoDB connected, tokens collection ready");
 
-  // Initialize secret store
+  // Initialize secret store (Azure Key Vault in production, Lowkey Vault locally)
+  if (!keyvaultUri) {
+    throw new Error(
+      "AZURE_KEYVAULT_URI is required. Set it to an Azure Key Vault URI " +
+      "or use Docker Compose which provides Lowkey Vault automatically."
+    );
+  }
   tokenStore = createTokenStore(keyvaultUri);
-  console.log(
-    `[token-manager] Secret store: ${keyvaultUri ? "Azure KeyVault" : "In-Memory"}`
-  );
+  console.log(`[token-manager] Secret store: ${keyvaultUri}`);
 
   // Mount token routes
   const router = createTokenRouter(tokensCollection, tokenStore);

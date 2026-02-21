@@ -83,6 +83,29 @@ services:
       timeout: 5s
       retries: 5
 
+  # Lowkey Vault (Azure Key Vault emulator)
+  lowkey-vault:
+    image: nagyesta/lowkey-vault:7.1.13-ubi10-minimal
+    ports:
+      - "${LOWKEY_VAULT_PORT:-8443}:8443"
+    environment:
+      LOWKEY_ARGS: >-
+        --server.port=8443
+        --LOWKEY_DEBUG_REQUEST_LOG=true
+        --LOWKEY_VAULT_NAMES=-
+        --LOWKEY_VAULT_ALIASES=default.lowkey-vault=lowkey-vault:8443
+        --LOWKEY_IMPORT_LOCATION=/import/export.json
+        --LOWKEY_EXPORT_LOCATION=/import/export.json
+        --LOWKEY_IMPORT_TEMPLATE_HOST=default.lowkey-vault
+        --LOWKEY_IMPORT_TEMPLATE_PORT=8443
+    volumes:
+      - lowkey_vault_data:/import
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:8443/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Azurite (Azure Storage emulator - queues + blobs)
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite
@@ -174,8 +197,15 @@ services:
       <<: *common-env
       PORT: "80"
       VALIDATION_INTERVAL_MS: "300000"
+      AZURE_KEYVAULT_URI: https://lowkey-vault:8443
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      IDENTITY_ENDPOINT: http://lowkey-vault:8080/metadata/identity/oauth2/token
+      IDENTITY_HEADER: header
+      AZURE_POD_IDENTITY_AUTHORITY_HOST: http://lowkey-vault:8080
     depends_on:
       mongodb:
+        condition: service_healthy
+      lowkey-vault:
         condition: service_healthy
 
   # ===========================================================================
@@ -248,3 +278,4 @@ services:
 volumes:
   mongodb_data:
   azurite_data:
+  lowkey_vault_data:
