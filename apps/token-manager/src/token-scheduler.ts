@@ -56,7 +56,7 @@ export function startTokenScheduler(
               $set: {
                 lastValidatedAt: new Date(),
                 lastValidationStatus: result.status,
-                lastValidationError: result.error || null,
+                lastValidationError: result.error ?? undefined,
                 updatedAt: new Date(),
               },
             }

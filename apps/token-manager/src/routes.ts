@@ -95,7 +95,7 @@ export function createTokenRouter(
               $set: {
                 lastValidatedAt: new Date(),
                 lastValidationStatus: result.status,
-                lastValidationError: result.error || null,
+                lastValidationError: result.error ?? undefined,
                 updatedAt: new Date(),
               },
             }
@@ -240,7 +240,7 @@ export function createTokenRouter(
           $set: {
             lastValidatedAt: new Date(),
             lastValidationStatus: result.status,
-            lastValidationError: result.error || null,
+            lastValidationError: result.error ?? undefined,
             updatedAt: new Date(),
           },
         }
