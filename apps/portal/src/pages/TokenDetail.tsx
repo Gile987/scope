@@ -5,7 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { UpdateTokenRequest } from "@/types";
-import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS } from "@/types";
+import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS, TOKEN_CAPABILITY_DESCRIPTIONS, ALL_CAPABILITIES } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +17,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Trash2, ShieldCheck, Loader2, Save } from "lucide-react";
+import { ArrowLeft, Trash2, ShieldCheck, Loader2, Save, Zap, Circle } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
@@ -123,15 +123,6 @@ export function TokenDetail() {
           <p className="text-sm text-muted-foreground">
             {TOKEN_TYPE_LABELS[token.type]}
           </p>
-          {(token.capabilities ?? []).length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1">
-              {token.capabilities.map((c) => (
-                <Badge key={c} variant="secondary" className="text-xs">
-                  {TOKEN_CAPABILITY_LABELS[c]}
-                </Badge>
-              ))}
-            </div>
-          )}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -190,6 +181,47 @@ export function TokenDetail() {
           {token.lastValidationError && (
             <p className="text-sm text-destructive">{token.lastValidationError}</p>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Capabilities card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Zap className="h-4 w-4" />
+            Capabilities
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {ALL_CAPABILITIES.map((cap) => {
+              const active = (token.capabilities ?? []).includes(cap);
+              return (
+                <div
+                  key={cap}
+                  className={`flex items-start gap-3 rounded-lg border p-3 transition-colors ${
+                    active
+                      ? "border-primary/40 bg-primary/5"
+                      : "border-muted bg-muted/30 opacity-50"
+                  }`}
+                >
+                  <Circle
+                    className={`mt-0.5 h-3 w-3 shrink-0 ${
+                      active ? "fill-primary text-primary" : "text-muted-foreground"
+                    }`}
+                  />
+                  <div className="min-w-0">
+                    <p className={`text-sm font-medium ${active ? "" : "text-muted-foreground"}`}>
+                      {TOKEN_CAPABILITY_LABELS[cap]}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {TOKEN_CAPABILITY_DESCRIPTIONS[cap]}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </CardContent>
       </Card>
 

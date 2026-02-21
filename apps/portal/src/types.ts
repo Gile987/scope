@@ -298,3 +298,14 @@ export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
   "copilot-cli": "Copilot CLI",
   "claude-code-cli": "Claude Code CLI"
 };
+
+export const TOKEN_CAPABILITY_DESCRIPTIONS: Record<TokenCapability, string> = {
+  "github-models": "Access AI models hosted on GitHub (GPT-4o, Claude, etc.)",
+  "copilot-sdk": "Use the Copilot SDK to make LLM requests programmatically",
+  "copilot-cli": "Run GitHub Copilot in the CLI for code suggestions",
+  "claude-code-cli": "Run Claude Code as an agentic coding assistant"
+};
+
+export const ALL_CAPABILITIES: TokenCapability[] = [
+  "github-models", "copilot-sdk", "copilot-cli", "claude-code-cli"
+];
