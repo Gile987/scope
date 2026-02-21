@@ -51,6 +51,10 @@ export interface TokenDocument {
   lastValidationStatus: TokenValidationStatus;
   lastValidationError?: string;
   enabled: boolean;
+  /** Number of times this token has been acquired via /acquire. */
+  acquireCount: number;
+  /** Timestamp of the last acquisition. */
+  lastAcquiredAt?: Date;
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;

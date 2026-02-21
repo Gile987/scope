@@ -254,6 +254,8 @@ export interface TokenDocument {
   lastValidationStatus: TokenValidationStatus;
   lastValidationError?: string;
   enabled: boolean;
+  acquireCount: number;
+  lastAcquiredAt?: string;
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;

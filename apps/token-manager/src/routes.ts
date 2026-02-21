@@ -97,6 +97,7 @@ export function createTokenRouter(
         secretName,
         enabled: body.enabled !== false,
         lastValidationStatus: "unknown",
+        acquireCount: 0,
         createdAt: new Date(),
       };
 
@@ -306,6 +307,16 @@ export function createTokenRouter(
 
       // Round-robin selection
       const selected = roundRobin.next(body.capability, tokens);
+
+      // Increment acquire count (fire-and-forget)
+      collection
+        .updateOne(
+          { _id: selected._id },
+          { $inc: { acquireCount: 1 }, $set: { lastAcquiredAt: new Date() } }
+        )
+        .catch((err) =>
+          console.error(`[routes] Failed to update acquireCount for ${selected._id}:`, err)
+        );
 
       // Read secret value
       const value = await store.getSecret(selected.secretName);

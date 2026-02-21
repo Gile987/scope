@@ -272,6 +272,16 @@ export function TokenDetail() {
                 <p>{formatDate(token.updatedAt)}</p>
               </div>
             )}
+            <div>
+              <span className="text-muted-foreground">Acquired</span>
+              <p>{(token.acquireCount ?? 0).toLocaleString()} times</p>
+            </div>
+            {token.lastAcquiredAt && (
+              <div>
+                <span className="text-muted-foreground">Last Acquired</span>
+                <p>{formatDate(token.lastAcquiredAt)}</p>
+              </div>
+            )}
           </div>
 
           <Separator />

@@ -122,6 +122,7 @@ export function TokenList() {
                 <TableHead>Enabled</TableHead>
                 <TableHead>Last Validated</TableHead>
                 <TableHead>Created</TableHead>
+                <TableHead>Acquired</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -166,6 +167,9 @@ export function TokenList() {
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatDate(token.createdAt)}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {(token.acquireCount ?? 0).toLocaleString()}×
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
