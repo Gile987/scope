@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, CreateTokenRequest, UpdateTokenRequest } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -257,5 +257,46 @@ export const api = {
   /** Get API version information (commit hash and build time) */
   getVersion: (): Promise<{ commit: string; buildTime: string }> => {
     return request("/version");
+  },
+
+  // ─── Token Manager ──────────────────────────────────────────────────────────
+
+  /** List all tokens (metadata only), optionally filtered by usage */
+  listTokens: (usage?: string): Promise<TokenDocument[]> => {
+    const params = new URLSearchParams();
+    if (usage) params.set("usage", usage);
+    const qs = params.toString();
+    return request(`/tokens${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single token by ID */
+  getToken: (id: string): Promise<TokenDocument> => {
+    return request(`/tokens/${id}`);
+  },
+
+  /** Register a new token */
+  createToken: (body: CreateTokenRequest): Promise<TokenDocument> => {
+    return request("/tokens", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update token metadata (enabled, expiresAt) */
+  updateToken: (id: string, body: UpdateTokenRequest): Promise<TokenDocument> => {
+    return request(`/tokens/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a token */
+  deleteToken: (id: string): Promise<void> => {
+    return request(`/tokens/${id}`, { method: "DELETE" });
+  },
+
+  /** Trigger on-demand validation for a token */
+  validateToken: (id: string): Promise<TokenDocument> => {
+    return request(`/tokens/${id}/validate`, { method: "POST" });
   },
 };

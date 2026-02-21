@@ -222,3 +222,68 @@ export const REPORT_STATUS_LIST: ReportStatus[] = [
 export interface BulkReportStatus {
   [requestId: string]: { reportId: string; status: ReportStatus };
 }
+
+// =============================================================================
+// Token Manager types
+// =============================================================================
+
+export type TokenType =
+  | "github-pat"
+  | "anthropic-api-key"
+  | "github-models-api-key"
+  | "github-oauth-state";
+
+export type TokenUsage =
+  | "copilot"
+  | "claude-code"
+  | "github-models"
+  | "vscode-web";
+
+export type TokenValidationStatus =
+  | "valid"
+  | "invalid"
+  | "expired"
+  | "error"
+  | "unknown";
+
+export interface TokenDocument {
+  _id: string;
+  type: TokenType;
+  usage: TokenUsage;
+  secretName: string;
+  expiresAt?: string;
+  lastValidatedAt?: string;
+  lastValidationStatus: TokenValidationStatus;
+  lastValidationError?: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface CreateTokenRequest {
+  type: TokenType;
+  usage: TokenUsage;
+  value: string;
+  expiresAt?: string;
+  enabled?: boolean;
+}
+
+export interface UpdateTokenRequest {
+  enabled?: boolean;
+  expiresAt?: string | null;
+}
+
+export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
+  "github-pat": "GitHub PAT",
+  "anthropic-api-key": "Anthropic API Key",
+  "github-models-api-key": "GitHub Models API Key",
+  "github-oauth-state": "GitHub OAuth State",
+};
+
+export const TOKEN_USAGE_LABELS: Record<TokenUsage, string> = {
+  copilot: "Copilot Worker",
+  "claude-code": "Claude Code Worker",
+  "github-models": "GitHub Models",
+  "vscode-web": "VS Code Web Worker",
+};
