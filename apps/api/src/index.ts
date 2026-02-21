@@ -2158,6 +2158,7 @@ if (TOKEN_MANAGER_URL) {
   };
 
   // CRUD routes proxied to Token Manager (portal uses these)
+  app.post("/api/v1/tokens/preview", proxyToTokenManager);   // must be before :id routes
   app.post("/api/v1/tokens", proxyToTokenManager);
   app.get("/api/v1/tokens", proxyToTokenManager);
   app.get("/api/v1/tokens/:id", proxyToTokenManager);
