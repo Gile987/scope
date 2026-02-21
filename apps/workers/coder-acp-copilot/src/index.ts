@@ -1,20 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, QueueProcessorConfig, LogEvent } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, QueueProcessorConfig, LogEvent, TokenManagerClient } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-copilot";
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
-const GITHUB_TOKEN_PREVIEW = GITHUB_TOKEN 
-  ? `${GITHUB_TOKEN.substring(0, 7)}...(${GITHUB_TOKEN.length} chars)` 
-  : "(empty)";
-
-// Log at startup for debugging authentication issues
-console.log(`[${WORKER_NAME}] GITHUB_TOKEN present: ${!!GITHUB_TOKEN}, preview: ${GITHUB_TOKEN_PREVIEW}`);
+const tokenClient = new TokenManagerClient();
 
 class CopilotProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
@@ -26,12 +20,18 @@ class CopilotProcessor implements WorkerProcessor {
     await log("info", "Starting Copilot ACP processor", { inputLength: message.length });
     
     try {
+      // Acquire token dynamically (env var fallback or Token Manager)
+      const githubToken = await tokenClient.acquireToken("copilot");
+      await log("info", "Acquired GITHUB_TOKEN", {
+        preview: `${githubToken.substring(0, 7)}...(${githubToken.length} chars)`,
+      });
+
       // Run ACP session with GitHub Copilot
       const result = await runACPSession(message, {
         command: "copilot",
         args: ["--acp"],
         env: {
-          GITHUB_TOKEN,
+          GITHUB_TOKEN: githubToken,
         },
         cwd: "/workspace",
         onLog: async (msg) => {

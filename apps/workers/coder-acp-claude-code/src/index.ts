@@ -1,20 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, QueueProcessorConfig, LogEvent } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, QueueProcessorConfig, LogEvent, TokenManagerClient } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-claude-code";
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
-const ANTHROPIC_API_KEY_PREVIEW = ANTHROPIC_API_KEY 
-  ? `${ANTHROPIC_API_KEY.substring(0, 7)}...(${ANTHROPIC_API_KEY.length} chars)` 
-  : "(empty)";
-
-// Log at startup for debugging authentication issues
-console.log(`[${WORKER_NAME}] ANTHROPIC_API_KEY present: ${!!ANTHROPIC_API_KEY}, preview: ${ANTHROPIC_API_KEY_PREVIEW}`);
+const tokenClient = new TokenManagerClient();
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
@@ -26,12 +20,18 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     await log("info", "Starting Claude Code ACP processor", { inputLength: message.length });
     
     try {
+      // Acquire token dynamically (env var fallback or Token Manager)
+      const apiKey = await tokenClient.acquireToken("claude-code");
+      await log("info", "Acquired ANTHROPIC_API_KEY", {
+        preview: `${apiKey.substring(0, 7)}...(${apiKey.length} chars)`,
+      });
+
       // Run ACP session with Claude Code
       const result = await runACPSession(message, {
         command: "claude-code-acp",
         args: [],
         env: {
-          ANTHROPIC_API_KEY,
+          ANTHROPIC_API_KEY: apiKey,
         },
         cwd: "/workspace",
         onLog: async (msg) => {
