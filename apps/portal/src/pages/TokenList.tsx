@@ -4,8 +4,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import type { TokenDocument } from "@/types";
-import { TOKEN_TYPE_LABELS, TOKEN_USAGE_LABELS } from "@/types";
+import type { TokenDocument, TokenCapability } from "@/types";
+import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS } from "@/types";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -24,6 +24,13 @@ import { formatDate, formatId } from "@/lib/utils";
 import { toast } from "sonner";
 import { useState } from "react";
 
+const CAPABILITY_OPTIONS: TokenCapability[] = [
+  "github-models",
+  "copilot-sdk",
+  "copilot-cli",
+  "claude-code-cli"
+];
+
 function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
   switch (status) {
     case "valid": return "default";
@@ -35,12 +42,12 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
 }
 
 export function TokenList() {
-  const [usageFilter, setUsageFilter] = useState<string>("all");
+  const [capabilityFilter, setCapabilityFilter] = useState<string>("all");
   const queryClient = useQueryClient();
 
   const { data: tokens = [], isLoading, isRefetching } = useQuery({
-    queryKey: ["tokens", usageFilter],
-    queryFn: () => api.listTokens(usageFilter === "all" ? undefined : usageFilter),
+    queryKey: ["tokens", capabilityFilter],
+    queryFn: () => api.listTokens(capabilityFilter === "all" ? undefined : capabilityFilter),
   });
 
   const deleteMutation = useMutation({
@@ -78,16 +85,15 @@ export function TokenList() {
 
       {/* Filter */}
       <div className="flex items-center gap-2 max-w-xs">
-        <Select value={usageFilter} onValueChange={setUsageFilter}>
+        <Select value={capabilityFilter} onValueChange={setCapabilityFilter}>
           <SelectTrigger className="h-9">
-            <SelectValue placeholder="Filter by usage" />
+            <SelectValue placeholder="Filter by capability" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All usages</SelectItem>
-            <SelectItem value="copilot">Copilot</SelectItem>
-            <SelectItem value="claude-code">Claude Code</SelectItem>
-            <SelectItem value="github-models">GitHub Models</SelectItem>
-            <SelectItem value="vscode-web">VS Code Web</SelectItem>
+            <SelectItem value="all">All capabilities</SelectItem>
+            {CAPABILITY_OPTIONS.map((c) => (
+              <SelectItem key={c} value={c}>{TOKEN_CAPABILITY_LABELS[c]}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
         {isRefetching && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
@@ -111,7 +117,7 @@ export function TokenList() {
               <TableRow>
                 <TableHead>ID</TableHead>
                 <TableHead>Type</TableHead>
-                <TableHead>Usage</TableHead>
+                <TableHead>Capabilities</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Enabled</TableHead>
                 <TableHead>Last Validated</TableHead>
@@ -133,7 +139,18 @@ export function TokenList() {
                       {TOKEN_TYPE_LABELS[token.type]}
                     </Badge>
                   </TableCell>
-                  <TableCell>{TOKEN_USAGE_LABELS[token.usage]}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {(token.capabilities ?? []).length > 0
+                        ? token.capabilities.map((c) => (
+                            <Badge key={c} variant="secondary" className="text-xs">
+                              {TOKEN_CAPABILITY_LABELS[c]}
+                            </Badge>
+                          ))
+                        : <span className="text-xs text-muted-foreground">—</span>
+                      }
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <Badge variant={statusVariant(token.lastValidationStatus)}>
                       {token.lastValidationStatus}

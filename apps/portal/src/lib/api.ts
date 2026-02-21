@@ -261,10 +261,10 @@ export const api = {
 
   // ─── Token Manager ──────────────────────────────────────────────────────────
 
-  /** List all tokens (metadata only), optionally filtered by usage */
-  listTokens: (usage?: string): Promise<TokenDocument[]> => {
+  /** List all tokens (metadata only), optionally filtered by capability */
+  listTokens: (capability?: string): Promise<TokenDocument[]> => {
     const params = new URLSearchParams();
-    if (usage) params.set("usage", usage);
+    if (capability) params.set("capability", capability);
     const qs = params.toString();
     return request(`/tokens${qs ? `?${qs}` : ""}`);
   },
