@@ -7,3 +7,5 @@ dist/
 .azure/
 .venv/
 downloads/
+ctrf/
+coverage/

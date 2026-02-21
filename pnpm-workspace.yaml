@@ -3,5 +3,6 @@ packages:
   - "apps/cli"
   - "apps/judge"
   - "apps/portal"
+  - "apps/token-manager"
   - "apps/workers/*"
   - "packages/shared"

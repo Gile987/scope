@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [22]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # pnpm/action-setup@v4 is not allowed on EMU
+      - name: Install pnpm
+        run: |
+          curl -fsSL https://get.pnpm.io/install.sh | sh -
+          echo "$HOME/.local/share/pnpm" >> $GITHUB_PATH
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter shared build
+
+      - name: Run tests with coverage
+        run: pnpm test:coverage
+
+      - name: Generate GitHub test summary from CTRF
+        if: always()
+        run: |
+          pnpm exec github-actions-ctrf "ctrf/*-ctrf-report.json" --title "Test Results (Node.js ${{ matrix.node-version }})"
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports-node-${{ matrix.node-version }}
+          path: coverage/
+
+      - name: Post coverage summary to Pull Request
+        if: always() && github.event_name == 'pull_request'
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          json-summary-path: coverage/coverage-summary.json
+          json-final-path: coverage/coverage-final.json
+
+      - name: Post test results to Pull Request
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          pnpm exec github-actions-ctrf pull-request "ctrf/*-ctrf-report.json" --title "Test Results (Node.js ${{ matrix.node-version }})" || {
+            echo "⚠️ Failed to post PR comment (may be due to permissions)"
+            echo "✅ Test results are still available in the Actions summary above"
+            exit 0
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload CTRF test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ctrf-test-results-node-${{ matrix.node-version }}
+          path: ctrf/
+
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # pnpm/action-setup@v4 is not allowed on EMU
+      - name: Install pnpm
+        run: |
+          curl -fsSL https://get.pnpm.io/install.sh | sh -
+          echo "$HOME/.local/share/pnpm" >> $GITHUB_PATH
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        # TODO: remove continue-on-error once ESLint is added as a dependency
+        continue-on-error: true
+        run: pnpm lint
+
+  build:
+    name: Build Applications
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # pnpm/action-setup@v4 is not allowed on EMU
+      - name: Install pnpm
+        run: |
+          curl -fsSL https://get.pnpm.io/install.sh | sh -
+          echo "$HOME/.local/share/pnpm" >> $GITHUB_PATH
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+  # Summary job that depends on all other jobs
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [test, lint, build]
+    if: always()
+
+    steps:
+      - name: Check overall status
+        run: |
+          if [ "${{ needs.test.result }}" = "success" ] && \
+             [ "${{ needs.lint.result }}" = "success" ] && \
+             [ "${{ needs.build.result }}" = "success" ]; then
+            echo "✅ All checks passed!"
+            exit 0
+          else
+            echo "❌ Some checks failed:"
+            echo "  Tests: ${{ needs.test.result }}"
+            echo "  Lint: ${{ needs.lint.result }}"
+            echo "  Build: ${{ needs.build.result }}"
+            exit 1
+          fi

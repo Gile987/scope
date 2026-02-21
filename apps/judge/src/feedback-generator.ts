@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { CopilotClient, SessionEvent } from "@github/copilot-sdk";
-import { CriteriaConfig, CriterionResult, DependencyGraph } from "shared";
+import { CriteriaConfig, CriterionResult, DependencyGraph, TokenManagerClient } from "shared";
 
 export interface FeedbackContext {
   judgeResults: CriterionResult[];
@@ -54,9 +54,11 @@ Examples of bad feedback:
  */
 export class FeedbackGenerator {
   private model: string;
+  private tokenClient: TokenManagerClient;
 
   constructor(model?: string) {
     this.model = model || process.env.FEEDBACK_MODEL || "gpt-4.1";
+    this.tokenClient = new TokenManagerClient();
   }
 
   async generateFeedback(
@@ -176,7 +178,8 @@ export class FeedbackGenerator {
     systemPrompt: string,
     failureContext: string
   ): Promise<string> {
-    const client = new CopilotClient();
+    const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
+    const client = new CopilotClient({ githubToken });
     let fullResponse = "";
 
     try {

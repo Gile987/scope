@@ -1153,7 +1153,7 @@ app.post("/api/v1/criteria/generate-prompt", async (req: Request, res: Response,
     }
 
     if (!isLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: GITHUB_MODELS_API_KEY is not set" });
+      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
     }
 
     // Fetch existing criteria to give the LLM context for parent/children suggestions
@@ -1441,7 +1441,7 @@ app.post("/api/v1/prompt-features/generate-prompt", async (req: Request, res: Re
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: GITHUB_MODELS_API_KEY is not set" });
+      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
     }
 
     const allFeatures = await promptFeatureCollection
@@ -1550,7 +1550,7 @@ app.post("/api/v1/prompt-features/extract", async (req: Request, res: Response, 
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: GITHUB_MODELS_API_KEY is not set" });
+      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
     }
 
     const allFeatures = await promptFeatureCollection
@@ -2130,6 +2130,48 @@ app.get("/api/v1/requests/:id/reports", async (req: Request, res: Response, next
     next(error);
   }
 });
+
+// =============================================================================
+// Token Manager proxy (admin CRUD - excludes /acquire which is worker-only)
+// =============================================================================
+const TOKEN_MANAGER_URL = process.env.TOKEN_MANAGER_URL || "";
+
+if (TOKEN_MANAGER_URL) {
+  const proxyToTokenManager = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const targetUrl = `${TOKEN_MANAGER_URL}${req.originalUrl}`;
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      const fetchOpts: RequestInit = {
+        method: req.method,
+        headers,
+      };
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        fetchOpts.body = JSON.stringify(req.body);
+      }
+      const upstream = await fetch(targetUrl, fetchOpts);
+      const contentType = upstream.headers.get("content-type") || "application/json";
+      const body = await upstream.text();
+      res.status(upstream.status).set("content-type", contentType).send(body);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  // CRUD routes proxied to Token Manager (portal uses these)
+  app.post("/api/v1/tokens/preview", proxyToTokenManager);   // must be before :id routes
+  app.post("/api/v1/tokens", proxyToTokenManager);
+  app.get("/api/v1/tokens", proxyToTokenManager);
+  app.get("/api/v1/tokens/:id", proxyToTokenManager);
+  app.put("/api/v1/tokens/:id", proxyToTokenManager);
+  app.delete("/api/v1/tokens/:id", proxyToTokenManager);
+  app.post("/api/v1/tokens/:id/validate", proxyToTokenManager);
+  // NOTE: POST /api/v1/tokens/acquire is intentionally NOT proxied.
+  // Workers call token-manager directly (ClusterIP) for /acquire.
+
+  console.log(`[api] Token Manager proxy enabled → ${TOKEN_MANAGER_URL}`);
+} else {
+  console.log("[api] Token Manager proxy disabled (TOKEN_MANAGER_URL not set)");
+}
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

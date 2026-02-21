@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -14,6 +14,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || `HTTP ${res.status}`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -257,5 +258,54 @@ export const api = {
   /** Get API version information (commit hash and build time) */
   getVersion: (): Promise<{ commit: string; buildTime: string }> => {
     return request("/version");
+  },
+
+  // ─── Token Manager ──────────────────────────────────────────────────────────
+
+  /** List all tokens (metadata only), optionally filtered by capability */
+  listTokens: (capability?: string): Promise<TokenDocument[]> => {
+    const params = new URLSearchParams();
+    if (capability) params.set("capability", capability);
+    const qs = params.toString();
+    return request(`/tokens${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single token by ID */
+  getToken: (id: string): Promise<TokenDocument> => {
+    return request(`/tokens/${id}`);
+  },
+
+  /** Preview token — validate without storing */
+  previewToken: (body: { type: string; value: string }): Promise<TokenValidationResult> => {
+    return request("/tokens/preview", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Register a new token */
+  createToken: (body: CreateTokenRequest): Promise<TokenDocument> => {
+    return request("/tokens", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update token metadata (enabled, expiresAt) */
+  updateToken: (id: string, body: UpdateTokenRequest): Promise<TokenDocument> => {
+    return request(`/tokens/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a token */
+  deleteToken: (id: string): Promise<void> => {
+    return request(`/tokens/${id}`, { method: "DELETE" });
+  },
+
+  /** Trigger on-demand validation for a token */
+  validateToken: (id: string): Promise<TokenDocument> => {
+    return request(`/tokens/${id}/validate`, { method: "POST" });
   },
 };

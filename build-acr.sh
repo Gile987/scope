@@ -28,7 +28,7 @@ IMAGE_ARGS=("${@:-all}")
 echo "Using ACR: ${ACR_NAME}"
 
 # Image list
-ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal"
+ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal token-manager"
 
 get_dockerfile() {
   local name=$1

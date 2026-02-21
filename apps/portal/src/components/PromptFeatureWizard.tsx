@@ -409,7 +409,7 @@ export function PromptFeatureWizard({
 
                 {generateMutation.isError && (
                   <p className="text-xs text-amber-600">
-                    AI generation unavailable — write your prompt manually
+                    AI generation unavailable — register a GitHub Models token or write your prompt manually
                   </p>
                 )}
               </div>

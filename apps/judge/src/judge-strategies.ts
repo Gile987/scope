@@ -11,6 +11,7 @@ import {
   DetailedEvaluationResult,
   ConversationTurn,
   DependencyGraph,
+  TokenManagerClient,
 } from "shared";
 
 export interface JudgeStrategyContext {
@@ -33,10 +34,12 @@ const DEFAULT_JUDGE_TIMEOUT = 300_000;
 export abstract class JudgeStrategy {
   protected model: string;
   protected timeout: number;
+  protected tokenClient: TokenManagerClient;
 
   constructor(model?: string) {
     this.model = model || process.env.JUDGE_MODEL || "gpt-4.1";
     this.timeout = parseInt(process.env.JUDGE_TIMEOUT || String(DEFAULT_JUDGE_TIMEOUT));
+    this.tokenClient = new TokenManagerClient();
   }
 
   abstract evaluate(
@@ -229,7 +232,8 @@ export abstract class JudgeStrategy {
     userPrompt: string
   ): Promise<string> {
     const tools = this.createFileTools(workspacePath);
-    const client = new CopilotClient();
+    const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
+    const client = new CopilotClient({ githubToken });
     let fullResponse = "";
 
     try {

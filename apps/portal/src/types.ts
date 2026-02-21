@@ -222,3 +222,92 @@ export const REPORT_STATUS_LIST: ReportStatus[] = [
 export interface BulkReportStatus {
   [requestId: string]: { reportId: string; status: ReportStatus };
 }
+
+// =============================================================================
+// Token Manager types
+// =============================================================================
+
+export type TokenType =
+  | "github-pat-classic"
+  | "github-pat-fine-grained"
+  | "github-oauth"
+  | "github-oauth-cookie-state"
+  | "anthropic-api-key";
+
+export type TokenCapability =
+  "github-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
+
+export type TokenValidationStatus =
+  | "valid"
+  | "invalid"
+  | "expired"
+  | "error"
+  | "unknown";
+
+export interface TokenDocument {
+  _id: string;
+  type: TokenType;
+  capabilities: TokenCapability[];
+  secretName: string;
+  expiresAt?: string;
+  lastValidatedAt?: string;
+  lastValidationStatus: TokenValidationStatus;
+  lastValidationError?: string;
+  enabled: boolean;
+  acquireCount: number;
+  lastAcquiredAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface TokenValidationResult {
+  status: TokenValidationStatus;
+  scopes?: string[];
+  capabilities?: TokenCapability[];
+  expiresAt?: string;
+  error?: string;
+  rateLimit?: {
+    limit: number;
+    remaining: number;
+    reset: string;
+  };
+}
+
+export interface CreateTokenRequest {
+  type: TokenType;
+  value: string;
+  expiresAt?: string;
+  enabled?: boolean;
+}
+
+export interface UpdateTokenRequest {
+  enabled?: boolean;
+  expiresAt?: string | null;
+}
+
+export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
+  "github-pat-classic": "GitHub PAT (classic)",
+  "github-pat-fine-grained": "GitHub PAT (fine-grained)",
+  "github-oauth": "GitHub OAuth",
+  "github-oauth-cookie-state": "GitHub OAuth Cookie State",
+  "anthropic-api-key": "Anthropic API Key",
+};
+
+export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
+  "github-models": "GitHub Models",
+  "copilot-sdk": "Copilot SDK",
+  "copilot-cli": "Copilot CLI",
+  "claude-code-cli": "Claude Code CLI"
+};
+
+export const TOKEN_CAPABILITY_DESCRIPTIONS: Record<TokenCapability, string> = {
+  "github-models": "Access AI models hosted on GitHub (GPT-4o, Claude, etc.)",
+  "copilot-sdk": "Use the Copilot SDK to make LLM requests programmatically",
+  "copilot-cli": "Run GitHub Copilot in the CLI for code suggestions",
+  "claude-code-cli": "Run Claude Code as an agentic coding assistant"
+};
+
+export const ALL_CAPABILITIES: TokenCapability[] = [
+  "github-models", "copilot-sdk", "copilot-cli", "claude-code-cli"
+];
