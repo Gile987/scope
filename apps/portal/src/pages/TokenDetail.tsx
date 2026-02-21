@@ -5,7 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { UpdateTokenRequest } from "@/types";
-import { TOKEN_TYPE_LABELS, TOKEN_USAGE_LABELS } from "@/types";
+import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -121,8 +121,17 @@ export function TokenDetail() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight font-mono">{token.secretName}</h1>
           <p className="text-sm text-muted-foreground">
-            {TOKEN_USAGE_LABELS[token.usage]} · {TOKEN_TYPE_LABELS[token.type]}
+            {TOKEN_TYPE_LABELS[token.type]}
           </p>
+          {(token.capabilities ?? []).length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {token.capabilities.map((c) => (
+                <Badge key={c} variant="secondary" className="text-xs">
+                  {TOKEN_CAPABILITY_LABELS[c]}
+                </Badge>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button
