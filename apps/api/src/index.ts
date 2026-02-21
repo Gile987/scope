@@ -1116,7 +1116,7 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       ...(runDoc.maxIterations ? { maxIterations: runDoc.maxIterations } : {}),
       ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
       ...(runDoc.persona ? { persona: runDoc.persona } : {}),
-      // Note: logs are intentionally not imported (they were excluded from download)
+      ...(runDoc.logs && Array.isArray(runDoc.logs) ? { logs: runDoc.logs } : {}),
     };
 
     // Insert into MongoDB
