@@ -17,40 +17,39 @@ describe("TokenManagerClient", () => {
   });
 
   describe("acquireToken - env var fallback", () => {
-    it("returns GITHUB_TOKEN env var for copilot usage", async () => {
+    it("returns GITHUB_TOKEN env var for copilot-sdk capability", async () => {
       process.env.GITHUB_TOKEN = "ghp_test123";
       const client = new TokenManagerClient("http://localhost:3000");
 
-      const result = await client.acquireToken("copilot");
+      const result = await client.acquireToken("copilot-sdk");
 
       expect(result).toBe("ghp_test123");
     });
 
-    it("returns ANTHROPIC_API_KEY env var for claude-code usage", async () => {
+    it("returns ANTHROPIC_API_KEY env var for claude-code-cli capability", async () => {
       process.env.ANTHROPIC_API_KEY = "sk-ant-test456";
       const client = new TokenManagerClient("http://localhost:3000");
 
-      const result = await client.acquireToken("claude-code");
+      const result = await client.acquireToken("claude-code-cli");
 
       expect(result).toBe("sk-ant-test456");
     });
 
-    it("returns GITHUB_MODELS_API_KEY env var for github-models usage", async () => {
-      process.env.GITHUB_MODELS_API_KEY = "ghm-key-789";
+    it("returns GITHUB_TOKEN env var for github-models capability", async () => {
+      process.env.GITHUB_TOKEN = "ghp_models_789";
       const client = new TokenManagerClient("http://localhost:3000");
 
       const result = await client.acquireToken("github-models");
 
-      expect(result).toBe("ghm-key-789");
+      expect(result).toBe("ghp_models_789");
     });
-
-    it("returns GITHUB_AUTH_STATE env var for vscode-web usage", async () => {
-      process.env.GITHUB_AUTH_STATE = '{"session":"data"}';
+    it("returns GITHUB_TOKEN env var for copilot-cli capability", async () => {
+      process.env.GITHUB_TOKEN = "ghp_cli_test";
       const client = new TokenManagerClient("http://localhost:3000");
 
-      const result = await client.acquireToken("vscode-web");
+      const result = await client.acquireToken("copilot-cli");
 
-      expect(result).toBe('{"session":"data"}');
+      expect(result).toBe("ghp_cli_test");
     });
 
     it("does not make HTTP call when env var is set", async () => {
@@ -58,7 +57,7 @@ describe("TokenManagerClient", () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
       const client = new TokenManagerClient("http://localhost:3000");
 
-      await client.acquireToken("copilot");
+      await client.acquireToken("copilot-sdk");
 
       expect(fetchSpy).not.toHaveBeenCalled();
     });
@@ -72,7 +71,7 @@ describe("TokenManagerClient", () => {
         json: async () => ({
           value: "ghp_from_api",
           tokenId: "abc-123",
-          usage: "copilot",
+          capability: "copilot-sdk",
         }),
       };
       const fetchSpy = vi
@@ -80,7 +79,7 @@ describe("TokenManagerClient", () => {
         .mockResolvedValue(mockResponse as Response);
 
       const client = new TokenManagerClient("http://token-manager:80");
-      const result = await client.acquireToken("copilot");
+      const result = await client.acquireToken("copilot-sdk");
 
       expect(result).toBe("ghp_from_api");
       expect(fetchSpy).toHaveBeenCalledWith(
@@ -88,7 +87,7 @@ describe("TokenManagerClient", () => {
         expect.objectContaining({
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ usage: "copilot" }),
+          body: JSON.stringify({ capability: "copilot-sdk" }),
         })
       );
     });
@@ -97,14 +96,14 @@ describe("TokenManagerClient", () => {
       delete process.env.GITHUB_TOKEN;
       const mockResponse = {
         ok: true,
-        json: async () => ({ value: "ghp_test", tokenId: "x", usage: "copilot" }),
+        json: async () => ({ value: "ghp_test", tokenId: "x", capability: "copilot-sdk" }),
       };
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
         .mockResolvedValue(mockResponse as Response);
 
       const client = new TokenManagerClient("http://token-manager:80///");
-      await client.acquireToken("copilot");
+      await client.acquireToken("copilot-sdk");
 
       expect(fetchSpy).toHaveBeenCalledWith(
         "http://token-manager:80/api/v1/tokens/acquire",
@@ -117,14 +116,14 @@ describe("TokenManagerClient", () => {
       process.env.TOKEN_MANAGER_URL = "http://tm-from-env:80";
       const mockResponse = {
         ok: true,
-        json: async () => ({ value: "ghp_env", tokenId: "x", usage: "copilot" }),
+        json: async () => ({ value: "ghp_env", tokenId: "x", capability: "copilot-sdk" }),
       };
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
         .mockResolvedValue(mockResponse as Response);
 
       const client = new TokenManagerClient();
-      await client.acquireToken("copilot");
+      await client.acquireToken("copilot-sdk");
 
       expect(fetchSpy).toHaveBeenCalledWith(
         "http://tm-from-env:80/api/v1/tokens/acquire",
@@ -139,14 +138,14 @@ describe("TokenManagerClient", () => {
       const mockResponse = {
         ok: false,
         status: 404,
-        text: async () => "No valid tokens available for usage 'copilot'",
+        text: async () => "No valid tokens available for capability 'copilot-sdk'",
       };
       vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse as Response);
 
       const client = new TokenManagerClient("http://token-manager:80");
 
-      await expect(client.acquireToken("copilot")).rejects.toThrow(
-        /Token acquisition failed.*copilot.*404/
+      await expect(client.acquireToken("copilot-sdk")).rejects.toThrow(
+        /Token acquisition failed.*copilot-sdk.*404/
       );
     });
 
@@ -161,8 +160,8 @@ describe("TokenManagerClient", () => {
 
       const client = new TokenManagerClient("http://token-manager:80");
 
-      await expect(client.acquireToken("copilot")).rejects.toThrow(
-        /Token acquisition failed.*copilot.*500/
+      await expect(client.acquireToken("copilot-sdk")).rejects.toThrow(
+        /Token acquisition failed.*copilot-sdk.*500/
       );
     });
 
@@ -170,14 +169,14 @@ describe("TokenManagerClient", () => {
       delete process.env.GITHUB_TOKEN;
       const mockResponse = {
         ok: true,
-        json: async () => ({ tokenId: "x", usage: "copilot" }),
+        json: async () => ({ tokenId: "x", capability: "copilot-sdk" }),
       };
       vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse as Response);
 
       const client = new TokenManagerClient("http://token-manager:80");
 
-      await expect(client.acquireToken("copilot")).rejects.toThrow(
-        /Invalid token response.*copilot.*no value/
+      await expect(client.acquireToken("copilot-sdk")).rejects.toThrow(
+        /Invalid token response.*copilot-sdk.*no value/
       );
     });
 
@@ -187,8 +186,8 @@ describe("TokenManagerClient", () => {
 
       const client = new TokenManagerClient();
 
-      await expect(client.acquireToken("copilot")).rejects.toThrow(
-        /No token available.*copilot.*GITHUB_TOKEN.*TOKEN_MANAGER_URL/
+      await expect(client.acquireToken("copilot-sdk")).rejects.toThrow(
+        /No token available.*copilot-sdk.*GITHUB_TOKEN.*TOKEN_MANAGER_URL/
       );
     });
   });

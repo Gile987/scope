@@ -8,9 +8,9 @@ import { TokenDocument } from "shared";
 function makeToken(overrides: Partial<TokenDocument> = {}): TokenDocument {
   return {
     _id: "test-id-1",
-    type: "github-pat",
-    usage: "copilot",
-    secretName: "token-copilot-test-id-",
+    type: "github-pat-classic",
+    capabilities: ["copilot-sdk", "copilot-cli"],
+    secretName: "token-github-pat-classic-test-id-",
     enabled: true,
     lastValidationStatus: "unknown",
     createdAt: new Date(),
@@ -56,9 +56,9 @@ describe("TokenScheduler", () => {
 
   it("validates all active tokens on tick", async () => {
     const tokens = [
-      makeToken({ _id: "id-1", secretName: "token-copilot-id-1" }),
-      makeToken({ _id: "id-2", secretName: "token-copilot-id-2" }),
-      makeToken({ _id: "id-3", secretName: "token-copilot-id-3" }),
+      makeToken({ _id: "id-1", secretName: "token-github-pat-classic-id-1" }),
+      makeToken({ _id: "id-2", secretName: "token-github-pat-classic-id-2" }),
+      makeToken({ _id: "id-3", secretName: "token-github-pat-classic-id-3" }),
     ];
 
     const deps = createMockDeps(tokens);
@@ -114,8 +114,8 @@ describe("TokenScheduler", () => {
 
   it("continues validating other tokens when one fails", async () => {
     const tokens = [
-      makeToken({ _id: "id-1", secretName: "token-copilot-id-1" }),
-      makeToken({ _id: "id-2", secretName: "token-copilot-id-2" }),
+      makeToken({ _id: "id-1", secretName: "token-github-pat-classic-id-1" }),
+      makeToken({ _id: "id-2", secretName: "token-github-pat-classic-id-2" }),
     ];
 
     const deps = createMockDeps(tokens);

@@ -9,7 +9,7 @@ describe("validateToken", () => {
     vi.restoreAllMocks();
   });
 
-  describe("github-pat", () => {
+  describe("github-pat-classic", () => {
     it("returns valid for 200 response with scopes", async () => {
       const headers = new Headers({
         "x-oauth-scopes": "repo, read:org",
@@ -24,13 +24,14 @@ describe("validateToken", () => {
         headers,
       } as Response);
 
-      const result = await validateToken("github-pat", "ghp_test123");
+      const result = await validateToken("github-pat-classic", "ghp_test123");
 
       expect(result.status).toBe("valid");
       expect(result.scopes).toEqual(["repo", "read:org"]);
       expect(result.rateLimit).toBeDefined();
       expect(result.rateLimit!.limit).toBe(5000);
       expect(result.rateLimit!.remaining).toBe(4999);
+      expect(result.capabilities).toBeDefined();
     });
 
     it("returns invalid for 401 response", async () => {
@@ -40,7 +41,7 @@ describe("validateToken", () => {
         headers: new Headers(),
       } as Response);
 
-      const result = await validateToken("github-pat", "ghp_bad");
+      const result = await validateToken("github-pat-classic", "ghp_bad");
 
       expect(result.status).toBe("invalid");
       expect(result.error).toMatch(/Authentication failed/);
@@ -53,7 +54,7 @@ describe("validateToken", () => {
         headers: new Headers(),
       } as Response);
 
-      const result = await validateToken("github-pat", "ghp_test");
+      const result = await validateToken("github-pat-classic", "ghp_test");
 
       expect(result.status).toBe("error");
       expect(result.error).toMatch(/500/);
@@ -64,10 +65,38 @@ describe("validateToken", () => {
         new Error("Network timeout")
       );
 
-      const result = await validateToken("github-pat", "ghp_test");
+      const result = await validateToken("github-pat-classic", "ghp_test");
 
       expect(result.status).toBe("error");
       expect(result.error).toMatch(/Network timeout/);
+    });
+  });
+
+  describe("github-pat-fine-grained", () => {
+    it("returns valid for 200 response and probes Models API", async () => {
+      const headers = new Headers({
+        "x-oauth-scopes": "",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4999",
+        "x-ratelimit-reset": "1700000000",
+      });
+
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers,
+        } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+        } as Response);
+
+      const result = await validateToken("github-pat-fine-grained", "github_pat_test");
+
+      expect(result.status).toBe("valid");
+      expect(result.capabilities).toBeDefined();
+      expect(result.capabilities).toContain("github-models");
     });
   });
 
@@ -106,56 +135,6 @@ describe("validateToken", () => {
       expect(result.error).toMatch(/Connection refused/);
     });
   });
-
-  describe("github-models-api-key", () => {
-    it("returns valid for 200 response", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue({
-        ok: true,
-        status: 200,
-      } as Response);
-
-      const result = await validateToken("github-models-api-key", "ghm-key");
-
-      expect(result.status).toBe("valid");
-    });
-
-    it("returns invalid for 401 response", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue({
-        ok: false,
-        status: 401,
-      } as Response);
-
-      const result = await validateToken("github-models-api-key", "ghm-bad");
-
-      expect(result.status).toBe("invalid");
-    });
-  });
-
-  describe("github-oauth-state", () => {
-    it("returns valid for valid JSON object", async () => {
-      const result = await validateToken(
-        "github-oauth-state",
-        '{"session": "data", "cookies": []}'
-      );
-
-      expect(result.status).toBe("valid");
-    });
-
-    it("returns invalid for non-JSON", async () => {
-      const result = await validateToken("github-oauth-state", "not-json");
-
-      expect(result.status).toBe("invalid");
-      expect(result.error).toMatch(/not valid JSON/);
-    });
-
-    it("returns invalid for non-object JSON", async () => {
-      const result = await validateToken("github-oauth-state", '"just a string"');
-
-      expect(result.status).toBe("invalid");
-      expect(result.error).toMatch(/not a valid JSON object/);
-    });
-  });
-
   describe("dispatcher", () => {
     it("calls correct validator for each type", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -164,7 +143,7 @@ describe("validateToken", () => {
         headers: new Headers(),
       } as Response);
 
-      await validateToken("github-pat", "ghp_test");
+      await validateToken("github-pat-classic", "ghp_test");
       expect(fetchSpy).toHaveBeenCalledWith(
         "https://api.github.com/user",
         expect.anything()
@@ -178,9 +157,10 @@ describe("validateToken", () => {
       );
 
       fetchSpy.mockClear();
-      await validateToken("github-models-api-key", "ghm-key");
+      // github-pat-fine-grained also hits /user first, then probes Models API
+      await validateToken("github-pat-fine-grained", "github_pat_test");
       expect(fetchSpy).toHaveBeenCalledWith(
-        "https://models.inference.ai.azure.com/models",
+        "https://api.github.com/user",
         expect.anything()
       );
     });
