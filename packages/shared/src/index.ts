@@ -19,3 +19,4 @@ export * from "./prompt-feature-store.js";
 export * from "./prompt-feature-provider.js";
 export * from "./prompt-feature-provider-fs.js";
 export * from "./prompt-feature-provider-api.js";
+export * from "./token-manager/index.js";
