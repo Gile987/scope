@@ -74,9 +74,11 @@ export function TokenDetail() {
 
   const validateMutation = useMutation({
     mutationFn: () => api.validateToken(id!),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["token", id] });
-      toast.success("Validation complete");
+    onSuccess: (updatedToken) => {
+      // Immediately update the cached token with the server response
+      queryClient.setQueryData(["token", id], updatedToken);
+      queryClient.invalidateQueries({ queryKey: ["tokens"] });
+      toast.success(`Validation complete — ${updatedToken.lastValidationStatus}`);
     },
   });
 

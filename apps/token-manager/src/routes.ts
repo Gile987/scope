@@ -255,20 +255,22 @@ export function createTokenRouter(
       const value = await store.getSecret(token.secretName);
       const result = await validateToken(token.type, value);
 
+      const now = new Date();
+      const update = {
+        lastValidatedAt: now,
+        lastValidationStatus: result.status,
+        lastValidationError: result.error ?? undefined,
+        capabilities: result.capabilities ?? [],
+        updatedAt: now,
+      };
+
       await collection.updateOne(
         { _id: token._id },
-        {
-          $set: {
-            lastValidatedAt: new Date(),
-            lastValidationStatus: result.status,
-            lastValidationError: result.error ?? undefined,
-            capabilities: result.capabilities ?? [],
-            updatedAt: new Date(),
-          },
-        }
+        { $set: update }
       );
 
-      res.json(result);
+      // Return full updated document so the UI can refresh immediately
+      res.json({ ...token, ...update });
     } catch (err) {
       next(err);
     }
