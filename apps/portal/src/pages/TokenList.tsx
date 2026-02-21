@@ -20,9 +20,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Plus, Trash2, Eye, RefreshCw, ShieldCheck, KeyRound, AlertTriangle } from "lucide-react";
-import {
-  Alert, AlertDescription,
-} from "@/components/ui/alert";
 import { formatDate, formatId } from "@/lib/utils";
 import { toast } from "sonner";
 import { useState } from "react";
@@ -115,14 +112,14 @@ export function TokenList() {
 
       {/* Uncovered capabilities warning */}
       {!isLoading && uncoveredCapabilities.length > 0 && (
-        <Alert variant="destructive" className="flex items-start gap-3">
-          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-          <AlertDescription>
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span>
             <span className="font-medium">Missing coverage:</span>{" "}
             {uncoveredCapabilities.map((c) => TOKEN_CAPABILITY_LABELS[c]).join(", ")}.
             Register a token with these capabilities to enable the corresponding features.
-          </AlertDescription>
-        </Alert>
+          </span>
+        </div>
       )}
 
       {/* Table */}
