@@ -9,22 +9,21 @@
  */
 
 /**
- * The kind of credential stored.
+ * The kind of credential stored (token format).
  */
 export type TokenType =
-  | "github-pat"
-  | "anthropic-api-key"
-  | "github-models-api-key"
-  | "github-oauth-state";
+  | "github-pat-classic"
+  | "github-pat-fine-grained"
+  | "github-oauth"
+  | "github-oauth-cookie-state"
+  | "anthropic-api-key";
 
 /**
- * What the token is used for — maps to a worker or service that consumes it.
+ * What a token can do — derived from (type + detected scopes/permissions).
+ * Workers acquire tokens by capability, not by type.
  */
-export type TokenUsage =
-  | "copilot"
-  | "claude-code"
-  | "github-models"
-  | "vscode-web";
+export type TokenCapability =
+  "github-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
 
 /**
  * Validation status of a token.
@@ -43,8 +42,9 @@ export type TokenValidationStatus =
 export interface TokenDocument {
   _id: string;
   type: TokenType;
-  usage: TokenUsage;
-  /** Auto-derived: token-{usage}-{_id.substring(0,8)} */
+  /** Auto-detected capabilities based on token type and validated scopes/permissions. */
+  capabilities: TokenCapability[];
+  /** Auto-derived: token-{type}-{_id.substring(0,8)} */
   secretName: string;
   expiresAt?: Date;
   lastValidatedAt?: Date;
@@ -63,7 +63,7 @@ export interface TokenDocument {
 export interface AcquireTokenResponse {
   value: string;
   tokenId: string;
-  usage: TokenUsage;
+  capability: TokenCapability;
   expiresAt?: Date;
 }
 
@@ -73,6 +73,7 @@ export interface AcquireTokenResponse {
 export interface TokenValidationResult {
   status: TokenValidationStatus;
   scopes?: string[];
+  capabilities?: TokenCapability[];
   expiresAt?: Date;
   error?: string;
   rateLimit?: {
@@ -84,10 +85,10 @@ export interface TokenValidationResult {
 
 /**
  * Request body for POST /api/v1/tokens.
+ * Capabilities are auto-detected during validation — not user-specified.
  */
 export interface CreateTokenRequest {
   type: TokenType;
-  usage: TokenUsage;
   value: string;
   expiresAt?: string;
   enabled?: boolean;
@@ -106,23 +107,23 @@ export interface UpdateTokenRequest {
  * Request body for POST /api/v1/tokens/acquire.
  */
 export interface AcquireTokenRequest {
-  usage: TokenUsage;
+  capability: TokenCapability;
 }
 
 /**
- * Maps each TokenUsage to the environment variable that workers check
+ * Maps each TokenCapability to the environment variable that workers check
  * for a local fallback (e.g., Docker Compose with env vars).
  */
-export const TOKEN_USAGE_ENV_VARS: Record<TokenUsage, string> = {
-  copilot: "GITHUB_TOKEN",
-  "claude-code": "ANTHROPIC_API_KEY",
-  "github-models": "GITHUB_MODELS_API_KEY",
-  "vscode-web": "GITHUB_AUTH_STATE",
+export const TOKEN_CAPABILITY_ENV_VARS: Record<TokenCapability, string> = {
+  "copilot-sdk": "GITHUB_TOKEN",
+  "copilot-cli": "GITHUB_TOKEN",
+  "github-models": "GITHUB_TOKEN",
+  "claude-code-cli": "ANTHROPIC_API_KEY",
 };
 
 /**
- * Derive the KeyVault secret name from a token's usage and ID.
+ * Derive the KeyVault secret name from a token's type and ID.
  */
-export function deriveSecretName(usage: TokenUsage, id: string): string {
-  return `token-${usage}-${id.substring(0, 8)}`;
+export function deriveSecretName(type: TokenType, id: string): string {
+  return `token-${type}-${id.substring(0, 8)}`;
 }
