@@ -45,6 +45,7 @@ jobs:
       portal: ${{ steps.changes.outputs.portal }}
       coder-acp-copilot: ${{ steps.changes.outputs.coder-acp-copilot }}
       coder-acp-claude-code: ${{ steps.changes.outputs.coder-acp-claude-code }}
+      token-manager: ${{ steps.changes.outputs.token-manager }}
       shared: ${{ steps.changes.outputs.shared }}
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +69,8 @@ jobs:
               - 'apps/workers/coder-acp-copilot/**'
             coder-acp-claude-code:
               - 'apps/workers/coder-acp-claude-code/**'
+            token-manager:
+              - 'apps/token-manager/**'
 
   build-on-push:
     if: github.event_name == 'push'
@@ -93,6 +96,9 @@ jobs:
           - name: coder-acp-claude-code
             dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
             changed: ${{ (needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: token-manager
+            dockerfile: apps/token-manager/Dockerfile
+            changed: ${{ (needs.detect-changes.outputs.token-manager == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: 'false'
@@ -159,6 +165,9 @@ jobs:
           - name: coder-acp-claude-code
             dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
             changed: ${{ (needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: token-manager
+            dockerfile: apps/token-manager/Dockerfile
+            changed: ${{ (needs.detect-changes.outputs.token-manager == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: 'false'
