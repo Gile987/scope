@@ -1153,7 +1153,7 @@ app.post("/api/v1/criteria/generate-prompt", async (req: Request, res: Response,
     }
 
     if (!isLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: GITHUB_MODELS_API_KEY is not set" });
+      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
     }
 
     // Fetch existing criteria to give the LLM context for parent/children suggestions
@@ -1441,7 +1441,7 @@ app.post("/api/v1/prompt-features/generate-prompt", async (req: Request, res: Re
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: GITHUB_MODELS_API_KEY is not set" });
+      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
     }
 
     const allFeatures = await promptFeatureCollection
@@ -1550,7 +1550,7 @@ app.post("/api/v1/prompt-features/extract", async (req: Request, res: Response, 
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: GITHUB_MODELS_API_KEY is not set" });
+      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
     }
 
     const allFeatures = await promptFeatureCollection
