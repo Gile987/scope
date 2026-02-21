@@ -105,7 +105,7 @@ async function validateGitHubModelsKey(
 ): Promise<TokenValidationResult> {
   try {
     const response = await fetch(
-      "https://models.inference.ai.azure.com/info",
+      "https://models.inference.ai.azure.com/models",
       {
         headers: {
           Authorization: `Bearer ${key}`,

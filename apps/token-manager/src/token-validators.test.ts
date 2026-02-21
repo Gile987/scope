@@ -180,7 +180,7 @@ describe("validateToken", () => {
       fetchSpy.mockClear();
       await validateToken("github-models-api-key", "ghm-key");
       expect(fetchSpy).toHaveBeenCalledWith(
-        "https://models.inference.ai.azure.com/info",
+        "https://models.inference.ai.azure.com/models",
         expect.anything()
       );
     });
