@@ -1,31 +1,48 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { TokenType, TokenValidationResult } from "shared";
+import { TokenType, TokenValidationResult, deriveCapabilities } from "shared";
 
 /**
- * Validate a token by calling the provider's API.
+ * Validate a token by calling the provider's API and derive its capabilities.
  * Returns a result object — never throws.
  */
 export async function validateToken(
   type: TokenType,
   value: string
 ): Promise<TokenValidationResult> {
+  let result: TokenValidationResult;
+
   switch (type) {
-    case "github-pat":
-      return validateGitHubPat(value);
+    case "github-pat-classic":
+      result = await validateGitHubToken(value);
+      break;
+    case "github-pat-fine-grained":
+      result = await validateGitHubFineGrainedPat(value);
+      break;
+    case "github-oauth":
+      result = await validateGitHubToken(value);
+      break;
     case "anthropic-api-key":
-      return validateAnthropicKey(value);
-    case "github-models-api-key":
-      return validateGitHubModelsKey(value);
-    case "github-oauth-state":
-      return validateGitHubOAuthState(value);
+      result = await validateAnthropicKey(value);
+      break;
+    case "github-oauth-cookie-state":
+      result = await validateGitHubOAuthCookieState(value);
+      break;
     default:
       return { status: "error", error: `Unknown token type: ${type}` };
   }
+
+  // Derive capabilities from validation result
+  result.capabilities = deriveCapabilities(type, result);
+  return result;
 }
 
-async function validateGitHubPat(
+/**
+ * Validate a GitHub token (classic PAT or OAuth) via the /user endpoint.
+ * Extracts scopes from x-oauth-scopes header.
+ */
+async function validateGitHubToken(
   token: string
 ): Promise<TokenValidationResult> {
   try {
@@ -63,9 +80,42 @@ async function validateGitHubPat(
   } catch (err) {
     return {
       status: "error",
-      error: `GitHub PAT validation failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: `GitHub token validation failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+/**
+ * Validate a fine-grained PAT: first check /user, then probe GitHub Models API
+ * to detect models:read permission.
+ */
+async function validateGitHubFineGrainedPat(
+  token: string
+): Promise<TokenValidationResult> {
+  // First validate the token itself
+  const baseResult = await validateGitHubToken(token);
+  if (baseResult.status !== "valid") {
+    return baseResult;
+  }
+
+  // Probe GitHub Models API to detect models:read permission
+  const capabilities: TokenValidationResult["capabilities"] = [];
+  try {
+    const modelsResponse = await fetch(
+      "https://models.inference.ai.azure.com/models",
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(10_000),
+      }
+    );
+    if (modelsResponse.ok) {
+      capabilities.push("github-models");
+    }
+  } catch {
+    // Probe failed — models:read not available
+  }
+
+  return { ...baseResult, capabilities };
 }
 
 async function validateAnthropicKey(
@@ -100,54 +150,20 @@ async function validateAnthropicKey(
   }
 }
 
-async function validateGitHubModelsKey(
-  key: string
-): Promise<TokenValidationResult> {
-  try {
-    const response = await fetch(
-      "https://models.inference.ai.azure.com/models",
-      {
-        headers: {
-          Authorization: `Bearer ${key}`,
-        },
-        signal: AbortSignal.timeout(10_000),
-      }
-    );
-
-    if (response.status === 401) {
-      return { status: "invalid", error: "Authentication failed" };
-    }
-
-    if (!response.ok) {
-      return {
-        status: "error",
-        error: `GitHub Models API returned ${response.status}`,
-      };
-    }
-
-    return { status: "valid" };
-  } catch (err) {
-    return {
-      status: "error",
-      error: `GitHub Models key validation failed: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
-}
-
-async function validateGitHubOAuthState(
+async function validateGitHubOAuthCookieState(
   value: string
 ): Promise<TokenValidationResult> {
   try {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed !== "object") {
-      return { status: "invalid", error: "OAuth state is not a valid JSON object" };
+      return { status: "invalid", error: "OAuth cookie state is not a valid JSON object" };
     }
     // Structural check — we can't validate the session without a browser
     return { status: "valid" };
   } catch (err) {
     return {
       status: "invalid",
-      error: `OAuth state is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      error: `OAuth cookie state is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }
