@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, CreateTokenRequest, UpdateTokenRequest } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -273,6 +273,14 @@ export const api = {
   /** Get a single token by ID */
   getToken: (id: string): Promise<TokenDocument> => {
     return request(`/tokens/${id}`);
+  },
+
+  /** Preview token — validate without storing */
+  previewToken: (body: { type: string; value: string }): Promise<TokenValidationResult> => {
+    return request("/tokens/preview", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   },
 
   /** Register a new token */

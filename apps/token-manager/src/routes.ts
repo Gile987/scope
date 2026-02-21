@@ -40,6 +40,31 @@ export function createTokenRouter(
   const roundRobin = new RoundRobinMap<TokenDocument>();
 
   // ──────────────────────────────────────────────
+  // POST /api/v1/tokens/preview — Validate without storing
+  // ──────────────────────────────────────────────
+  router.post("/api/v1/tokens/preview", async (req, res, next) => {
+    try {
+      const { type, value } = req.body as { type: TokenType; value: string };
+
+      if (!type || !VALID_TYPES.includes(type)) {
+        res.status(400).json({
+          error: `Invalid type. Must be one of: ${VALID_TYPES.join(", ")}`,
+        });
+        return;
+      }
+      if (!value || typeof value !== "string") {
+        res.status(400).json({ error: "value is required" });
+        return;
+      }
+
+      const result = await validateToken(type, value);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ──────────────────────────────────────────────
   // POST /api/v1/tokens — Register a new token
   // ──────────────────────────────────────────────
   router.post("/api/v1/tokens", async (req, res, next) => {

@@ -259,6 +259,19 @@ export interface TokenDocument {
   deletedAt?: string;
 }
 
+export interface TokenValidationResult {
+  status: TokenValidationStatus;
+  scopes?: string[];
+  capabilities?: TokenCapability[];
+  expiresAt?: string;
+  error?: string;
+  rateLimit?: {
+    limit: number;
+    remaining: number;
+    reset: string;
+  };
+}
+
 export interface CreateTokenRequest {
   type: TokenType;
   value: string;
