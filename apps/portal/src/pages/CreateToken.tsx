@@ -83,6 +83,35 @@ const TOKEN_TYPES: TokenType[] = [
   "anthropic-api-key",
 ];
 
+/** Expected prefix per token type for surface-level validation. */
+const TOKEN_PREFIXES: Record<TokenType, { prefix: string; description: string }> = {
+  "github-pat-classic": { prefix: "ghp_", description: "ghp_" },
+  "github-pat-fine-grained": { prefix: "github_pat_", description: "github_pat_" },
+  "github-oauth": { prefix: "gho_", description: "gho_ or ghu_" }, // also ghu_ for user tokens
+  "github-oauth-cookie-state": { prefix: "{", description: "JSON object" },
+  "anthropic-api-key": { prefix: "sk-ant-", description: "sk-ant-" },
+};
+
+/** Check if the token value matches the expected prefix for the selected type. */
+function validateTokenPrefix(tokenType: TokenType, tokenValue: string): string | null {
+  const trimmed = tokenValue.trim();
+  if (!trimmed) return null; // Don't warn on empty input
+
+  const expected = TOKEN_PREFIXES[tokenType];
+
+  // Special case: github-oauth can start with gho_ or ghu_
+  if (tokenType === "github-oauth") {
+    if (trimmed.startsWith("gho_") || trimmed.startsWith("ghu_")) return null;
+    return `Expected prefix: ${expected.description}`;
+  }
+
+  if (!trimmed.startsWith(expected.prefix)) {
+    return `Expected prefix: ${expected.description}`;
+  }
+
+  return null; // Valid prefix
+}
+
 type Step = "input" | "review";
 
 function StatusIcon({ status }: { status: string }) {
@@ -132,6 +161,11 @@ export function CreateToken() {
     e.preventDefault();
     if (!value.trim()) {
       toast.error("Token value is required");
+      return;
+    }
+    const prefixError = validateTokenPrefix(type, value);
+    if (prefixError) {
+      toast.error(`Invalid token format: ${prefixError}`);
       return;
     }
     previewMutation.mutate();
@@ -245,6 +279,17 @@ export function CreateToken() {
                 <p className="text-xs text-muted-foreground">
                   Will be stored securely in KeyVault. Cannot be retrieved after creation.
                 </p>
+                {/* Prefix validation warning */}
+                {(() => {
+                  const warning = validateTokenPrefix(type, value);
+                  if (!warning) return null;
+                  return (
+                    <p className="flex items-center gap-1.5 text-xs text-amber-600">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      Token format doesn't match selected type. {warning}
+                    </p>
+                  );
+                })()}
               </div>
 
               {/* Expires At */}
@@ -259,7 +304,11 @@ export function CreateToken() {
               </div>
 
               {/* Validate */}
-              <Button type="submit" disabled={previewMutation.isPending} className="gap-1.5">
+              <Button
+                type="submit"
+                disabled={previewMutation.isPending || !value.trim() || !!validateTokenPrefix(type, value)}
+                className="gap-1.5"
+              >
                 {previewMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                 Validate & Preview
                 <ArrowRight className="h-4 w-4" />
