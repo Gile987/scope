@@ -178,7 +178,7 @@ export class FeedbackGenerator {
     systemPrompt: string,
     failureContext: string
   ): Promise<string> {
-    const githubToken = await this.tokenClient.acquireToken("copilot");
+    const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
     const client = new CopilotClient({ githubToken });
     let fullResponse = "";
 

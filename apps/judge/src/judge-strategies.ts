@@ -232,7 +232,7 @@ export abstract class JudgeStrategy {
     userPrompt: string
   ): Promise<string> {
     const tools = this.createFileTools(workspacePath);
-    const githubToken = await this.tokenClient.acquireToken("copilot");
+    const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
     const client = new CopilotClient({ githubToken });
     let fullResponse = "";
 
