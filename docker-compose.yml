@@ -95,8 +95,6 @@ services:
         --LOWKEY_DEBUG_REQUEST_LOG=false
         --LOWKEY_VAULT_NAMES=default.lowkey-vault
         --LOWKEY_VAULT_ALIASES=default.lowkey-vault=lowkey-vault:8443
-        --LOWKEY_IMPORT_LOCATION=/import/export.json
-        --LOWKEY_EXPORT_LOCATION=/import/export.json
         --LOWKEY_IMPORT_TEMPLATE_HOST=default.lowkey-vault
         --LOWKEY_IMPORT_TEMPLATE_PORT=8443
     volumes:
