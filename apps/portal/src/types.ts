@@ -228,16 +228,14 @@ export interface BulkReportStatus {
 // =============================================================================
 
 export type TokenType =
-  | "github-pat"
-  | "anthropic-api-key"
-  | "github-models-api-key"
-  | "github-oauth-state";
+  | "github-pat-classic"
+  | "github-pat-fine-grained"
+  | "github-oauth"
+  | "github-oauth-cookie-state"
+  | "anthropic-api-key";
 
-export type TokenUsage =
-  | "copilot"
-  | "claude-code"
-  | "github-models"
-  | "vscode-web";
+export type TokenCapability =
+  "github-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
 
 export type TokenValidationStatus =
   | "valid"
@@ -249,7 +247,7 @@ export type TokenValidationStatus =
 export interface TokenDocument {
   _id: string;
   type: TokenType;
-  usage: TokenUsage;
+  capabilities: TokenCapability[];
   secretName: string;
   expiresAt?: string;
   lastValidatedAt?: string;
@@ -263,7 +261,6 @@ export interface TokenDocument {
 
 export interface CreateTokenRequest {
   type: TokenType;
-  usage: TokenUsage;
   value: string;
   expiresAt?: string;
   enabled?: boolean;
@@ -275,15 +272,16 @@ export interface UpdateTokenRequest {
 }
 
 export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
-  "github-pat": "GitHub PAT",
+  "github-pat-classic": "GitHub PAT (classic)",
+  "github-pat-fine-grained": "GitHub PAT (fine-grained)",
+  "github-oauth": "GitHub OAuth",
+  "github-oauth-cookie-state": "GitHub OAuth Cookie State",
   "anthropic-api-key": "Anthropic API Key",
-  "github-models-api-key": "GitHub Models API Key",
-  "github-oauth-state": "GitHub OAuth State",
 };
 
-export const TOKEN_USAGE_LABELS: Record<TokenUsage, string> = {
-  copilot: "Copilot Worker",
-  "claude-code": "Claude Code Worker",
+export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
   "github-models": "GitHub Models",
-  "vscode-web": "VS Code Web Worker",
+  "copilot-sdk": "Copilot SDK",
+  "copilot-cli": "Copilot CLI",
+  "claude-code-cli": "Claude Code CLI"
 };
