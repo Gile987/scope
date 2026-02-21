@@ -41,6 +41,11 @@ export function TokenDetail() {
     queryKey: ["token", id],
     queryFn: () => api.getToken(id!),
     enabled: !!id,
+    // Poll every 2s while validation hasn't landed yet
+    refetchInterval: (query) => {
+      const t = query.state.data;
+      return t && t.lastValidationStatus === "unknown" ? 2000 : false;
+    },
   });
 
   const [editing, setEditing] = useState(false);

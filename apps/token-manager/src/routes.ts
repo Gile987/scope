@@ -106,28 +106,22 @@ export function createTokenRouter(
 
       await collection.insertOne(doc as any);
 
-      // Run immediate validation (fire-and-forget) — sets capabilities
-      validateToken(body.type, body.value)
-        .then(async (result) => {
-          await collection.updateOne(
-            { _id: id },
-            {
-              $set: {
-                lastValidatedAt: new Date(),
-                lastValidationStatus: result.status,
-                lastValidationError: result.error ?? undefined,
-                capabilities: result.capabilities ?? [],
-                updatedAt: new Date(),
-              },
-            }
-          );
-        })
-        .catch((err) => {
-          console.error(
-            `[routes] Background validation failed for ${id}:`,
-            err
-          );
-        });
+      // Run validation synchronously so the response includes capabilities
+      try {
+        const result = await validateToken(body.type, body.value);
+        const now = new Date();
+        const update = {
+          lastValidatedAt: now,
+          lastValidationStatus: result.status,
+          lastValidationError: result.error ?? undefined,
+          capabilities: result.capabilities ?? [],
+          updatedAt: now,
+        };
+        await collection.updateOne({ _id: id }, { $set: update });
+        Object.assign(doc, update);
+      } catch (err) {
+        console.error(`[routes] Validation failed for ${id}:`, err);
+      }
 
       // Return metadata (never the value)
       res.status(201).json(doc);
