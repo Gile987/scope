@@ -21,7 +21,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     
     try {
       // Acquire token dynamically (env var fallback or Token Manager)
-      const apiKey = await tokenClient.acquireToken("claude-code");
+      const apiKey = await tokenClient.acquireToken("claude-code-cli");
       await log("info", "Acquired ANTHROPIC_API_KEY", {
         preview: `${apiKey.substring(0, 7)}...(${apiKey.length} chars)`,
       });

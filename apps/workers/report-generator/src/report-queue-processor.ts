@@ -143,7 +143,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     requestId: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<string> {
-    const githubToken = await this.tokenClient.acquireToken("copilot");
+    const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
     const client = new CopilotClient({ githubToken });
     let fullResponse = "";
 

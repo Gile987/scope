@@ -21,7 +21,7 @@ class CopilotProcessor implements WorkerProcessor {
     
     try {
       // Acquire token dynamically (env var fallback or Token Manager)
-      const githubToken = await tokenClient.acquireToken("copilot");
+      const githubToken = await tokenClient.acquireToken("copilot-sdk");
       await log("info", "Acquired GITHUB_TOKEN", {
         preview: `${githubToken.substring(0, 7)}...(${githubToken.length} chars)`,
       });
