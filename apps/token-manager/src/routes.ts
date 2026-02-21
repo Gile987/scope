@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import {
   TokenDocument,
   TokenType,
-  TokenUsage,
+  TokenCapability,
   AcquireTokenResponse,
   CreateTokenRequest,
   UpdateTokenRequest,
@@ -19,16 +19,17 @@ import { validateToken } from "./token-validators.js";
 import { RoundRobinMap } from "./round-robin.js";
 
 const VALID_TYPES: TokenType[] = [
-  "github-pat",
+  "github-pat-classic",
+  "github-pat-fine-grained",
+  "github-oauth",
+  "github-oauth-cookie-state",
   "anthropic-api-key",
-  "github-models-api-key",
-  "github-oauth-state",
 ];
-const VALID_USAGES: TokenUsage[] = [
-  "copilot",
-  "claude-code",
+const VALID_CAPABILITIES: TokenCapability[] = [
   "github-models",
-  "vscode-web",
+  "copilot-sdk",
+  "copilot-cli",
+  "claude-code-cli"
 ];
 
 export function createTokenRouter(
@@ -52,28 +53,22 @@ export function createTokenRouter(
         });
         return;
       }
-      if (!body.usage || !VALID_USAGES.includes(body.usage)) {
-        res.status(400).json({
-          error: `Invalid usage. Must be one of: ${VALID_USAGES.join(", ")}`,
-        });
-        return;
-      }
       if (!body.value || typeof body.value !== "string") {
         res.status(400).json({ error: "value is required" });
         return;
       }
 
       const id = uuidv4();
-      const secretName = deriveSecretName(body.usage, id);
+      const secretName = deriveSecretName(body.type, id);
 
       // Store secret value
       await store.setSecret(secretName, body.value);
 
-      // Create metadata document
+      // Create metadata document (capabilities set after validation)
       const doc: TokenDocument = {
         _id: id,
         type: body.type,
-        usage: body.usage,
+        capabilities: [],
         secretName,
         enabled: body.enabled !== false,
         lastValidationStatus: "unknown",
@@ -86,7 +81,7 @@ export function createTokenRouter(
 
       await collection.insertOne(doc as any);
 
-      // Run immediate validation (fire-and-forget)
+      // Run immediate validation (fire-and-forget) — sets capabilities
       validateToken(body.type, body.value)
         .then(async (result) => {
           await collection.updateOne(
@@ -96,6 +91,7 @@ export function createTokenRouter(
                 lastValidatedAt: new Date(),
                 lastValidationStatus: result.status,
                 lastValidationError: result.error ?? undefined,
+                capabilities: result.capabilities ?? [],
                 updatedAt: new Date(),
               },
             }
@@ -124,8 +120,8 @@ export function createTokenRouter(
         deletedAt: { $exists: false },
       };
 
-      if (req.query.usage) {
-        filter.usage = req.query.usage;
+      if (req.query.capability) {
+        filter.capabilities = { $in: [req.query.capability] };
       }
 
       const tokens = await collection.find(filter).toArray();
@@ -241,6 +237,7 @@ export function createTokenRouter(
             lastValidatedAt: new Date(),
             lastValidationStatus: result.status,
             lastValidationError: result.error ?? undefined,
+            capabilities: result.capabilities ?? [],
             updatedAt: new Date(),
           },
         }
@@ -259,16 +256,16 @@ export function createTokenRouter(
     try {
       const body = req.body as AcquireTokenRequest;
 
-      if (!body.usage || !VALID_USAGES.includes(body.usage)) {
+      if (!body.capability || !VALID_CAPABILITIES.includes(body.capability)) {
         res.status(400).json({
-          error: `Invalid usage. Must be one of: ${VALID_USAGES.join(", ")}`,
+          error: `Invalid capability. Must be one of: ${VALID_CAPABILITIES.join(", ")}`,
         });
         return;
       }
 
       const tokens = await collection
         .find({
-          usage: body.usage,
+          capabilities: { $in: [body.capability] },
           enabled: true,
           lastValidationStatus: "valid",
           deletedAt: { $exists: false },
@@ -277,13 +274,13 @@ export function createTokenRouter(
 
       if (tokens.length === 0) {
         res.status(404).json({
-          error: `No valid tokens available for usage '${body.usage}'`,
+          error: `No valid tokens available for capability '${body.capability}'`,
         });
         return;
       }
 
       // Round-robin selection
-      const selected = roundRobin.next(body.usage, tokens);
+      const selected = roundRobin.next(body.capability, tokens);
 
       // Read secret value
       const value = await store.getSecret(selected.secretName);
@@ -291,7 +288,7 @@ export function createTokenRouter(
       const response: AcquireTokenResponse = {
         value,
         tokenId: selected._id,
-        usage: selected.usage,
+        capability: body.capability,
         expiresAt: selected.expiresAt,
       };
 
