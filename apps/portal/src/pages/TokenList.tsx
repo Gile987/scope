@@ -19,7 +19,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2, Eye, RefreshCw, ShieldCheck, KeyRound } from "lucide-react";
+import { Plus, Trash2, Eye, RefreshCw, ShieldCheck, KeyRound, AlertTriangle } from "lucide-react";
+import {
+  Alert, AlertDescription,
+} from "@/components/ui/alert";
 import { formatDate, formatId } from "@/lib/utils";
 import { toast } from "sonner";
 import { useState } from "react";
@@ -68,6 +71,17 @@ export function TokenList() {
 
   const activeTokens = tokens.filter((t: TokenDocument) => !t.deletedAt);
 
+  // Find capabilities that have no valid, enabled tokens
+  const coveredCapabilities = new Set<TokenCapability>();
+  for (const t of activeTokens) {
+    if (t.enabled && t.lastValidationStatus === "valid") {
+      for (const c of t.capabilities ?? []) {
+        coveredCapabilities.add(c);
+      }
+    }
+  }
+  const uncoveredCapabilities = CAPABILITY_OPTIONS.filter((c) => !coveredCapabilities.has(c));
+
   return (
     <div className="space-y-6">
       {/* Page header */}
@@ -98,6 +112,18 @@ export function TokenList() {
         </Select>
         {isRefetching && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
+
+      {/* Uncovered capabilities warning */}
+      {!isLoading && uncoveredCapabilities.length > 0 && (
+        <Alert variant="destructive" className="flex items-start gap-3">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <AlertDescription>
+            <span className="font-medium">Missing coverage:</span>{" "}
+            {uncoveredCapabilities.map((c) => TOKEN_CAPABILITY_LABELS[c]).join(", ")}.
+            Register a token with these capabilities to enable the corresponding features.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Table */}
       {isLoading ? (
