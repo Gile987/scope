@@ -458,9 +458,8 @@ run
       mkdirSync(runDir, { recursive: true });
 
       try {
-        // Step 3: Write run document as YAML (exclude bulky logs array)
-        const { logs: _logs, ...runDoc } = request;
-        writeFileSync(join(runDir, "run.yaml"), yamlStringify(runDoc, { lineWidth: 120 }));
+        // Step 3: Write run document as YAML
+        writeFileSync(join(runDir, "run.yaml"), yamlStringify(request, { lineWidth: 120 }));
         console.log(`  ${successText('+')} run.yaml`);
 
         // Step 4: Download each iteration snapshot
