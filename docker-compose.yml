@@ -92,8 +92,8 @@ services:
       LOWKEY_ARGS: >-
         --server.port=8443
         --spring.main.banner-mode=off
-        --LOWKEY_DEBUG_REQUEST_LOG=true
-        --LOWKEY_VAULT_NAMES=-
+        --LOWKEY_DEBUG_REQUEST_LOG=false
+        --LOWKEY_VAULT_NAMES=default.lowkey-vault
         --LOWKEY_VAULT_ALIASES=default.lowkey-vault=lowkey-vault:8443
         --LOWKEY_IMPORT_LOCATION=/import/export.json
         --LOWKEY_EXPORT_LOCATION=/import/export.json
