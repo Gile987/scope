@@ -19,15 +19,52 @@ import { toast } from "sonner";
 
 const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
+/** Convert a display name to a kebab-case slug */
+function nameToSlug(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+/** Convert a kebab-case slug to a Title Case display name */
+function slugToName(slug: string): string {
+  return slug
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 export function CreateMcpServer() {
   const navigate = useNavigate();
 
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+  const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
   const [type, setType] = useState<McpTransportType>("http");
   const [url, setUrl] = useState("");
   const [description, setDescription] = useState("");
   const [headers, setHeaders] = useState<McpServerHeader[]>([]);
+
+  const handleNameChange = (value: string) => {
+    setName(value);
+    setNameManuallyEdited(true);
+    if (!slugManuallyEdited) {
+      setSlug(nameToSlug(value));
+    }
+  };
+
+  const handleSlugChange = (value: string) => {
+    const lower = value.toLowerCase();
+    setSlug(lower);
+    setSlugManuallyEdited(true);
+    if (!nameManuallyEdited) {
+      setName(slugToName(lower));
+    }
+  };
 
   const createMutation = useMutation({
     mutationFn: api.createMcpServer,
@@ -96,7 +133,7 @@ export function CreateMcpServer() {
                   id="slug"
                   placeholder="e.g., my-search-server"
                   value={slug}
-                  onChange={(e) => setSlug(e.target.value.toLowerCase())}
+                  onChange={(e) => handleSlugChange(e.target.value)}
                   pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
                   className="font-mono"
                 />
@@ -115,7 +152,7 @@ export function CreateMcpServer() {
                   id="name"
                   placeholder="e.g., My Search Server"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => handleNameChange(e.target.value)}
                 />
               </div>
             </div>
