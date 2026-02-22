@@ -156,7 +156,12 @@ export function RunDetail() {
               {run.mcpServers && run.mcpServers.length > 0 && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
-                  <span>{run.mcpServers.length} MCP server{run.mcpServers.length !== 1 ? "s" : ""}</span>
+                  <span>MCP:</span>
+                  {run.mcpServers.map((slug) => (
+                    <Link key={slug} to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                      {slug}
+                    </Link>
+                  ))}
                 </>
               )}
             </div>
