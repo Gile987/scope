@@ -10,3 +10,4 @@ export * from "./graph/index.js";
 export * from "./criteria/index.js";
 export * from "./prompt-features/index.js";
 export * from "./token-manager/index.js";
+export * from "./mcp/index.js";
