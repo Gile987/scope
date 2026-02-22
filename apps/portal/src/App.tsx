@@ -22,6 +22,8 @@ import { CreateToken } from "@/pages/CreateToken";
 import { TokenDetail } from "@/pages/TokenDetail";
 import { AgentList } from "@/pages/AgentList";
 import { AgentDetail } from "@/pages/AgentDetail";
+import { InsightsList } from "@/pages/InsightsList";
+import { InsightDetail } from "@/pages/InsightDetail";
 
 export function App() {
   return (
@@ -33,6 +35,8 @@ export function App() {
         <Route path="/runs/:id" element={<RunDetail />} />
         <Route path="/reports" element={<ReportsList />} />
         <Route path="/reports/:id" element={<ReportDetail />} />
+        <Route path="/insights" element={<InsightsList />} />
+        <Route path="/insights/:id" element={<InsightDetail />} />
         <Route path="/criteria" element={<CriteriaList />} />
         <Route path="/criteria/new" element={<CreateCriterion />} />
         <Route path="/criteria/graph" element={<CriteriaGraphView />} />
