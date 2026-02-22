@@ -139,6 +139,12 @@ export function RunDetail() {
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <StatusBadge status={run.status} />
               <span className="font-mono">{run.workerType}</span>
+              {run.model && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <span className="font-mono">{run.model}</span>
+                </>
+              )}
               <Separator orientation="vertical" className="h-4" />
               <span>Created {formatDate(run.createdAt)}</span>
               {run.maxIterations && (

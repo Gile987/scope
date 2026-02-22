@@ -3,7 +3,7 @@
 
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound } from "lucide-react";
+import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot } from "lucide-react";
 import { VersionFooter } from "./VersionFooter";
 
 const navItems = [
@@ -14,6 +14,7 @@ const navItems = [
   { to: "/criteria", label: "Criteria", icon: FlaskConical },
   { to: "/prompt-features", label: "Features", icon: Tags },
   { to: "/tokens", label: "Tokens", icon: KeyRound },
+  { to: "/agents", label: "Agents", icon: Bot },
 ];
 
 export function Layout() {

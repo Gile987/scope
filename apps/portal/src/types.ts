@@ -48,6 +48,7 @@ export interface Run {
   id: string;
   scenario?: Scenario;
   workerType: string;
+  model?: string;
   status: RunStatus;
   result?: string;
   error?: string;
@@ -314,3 +315,15 @@ export const TOKEN_CAPABILITY_DESCRIPTIONS: Record<TokenCapability, string> = {
 export const ALL_CAPABILITIES: TokenCapability[] = [
   "github-models", "copilot-sdk", "copilot-cli", "claude-code-cli"
 ];
+
+// Coding Agent types
+export interface CodingAgent {
+  _id: string;
+  name: string;
+  description?: string;
+  supportedModels: string[];
+  defaultModel?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
