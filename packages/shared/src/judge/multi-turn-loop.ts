@@ -9,6 +9,7 @@ import {
   LogEvent,
   MULTI_TURN_DEFAULTS,
 } from "../types/types.js";
+import type { McpServerConfig } from "../types/mcp.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
 import { JudgeClient } from "./judge-client.js";
 
@@ -43,6 +44,8 @@ export interface MultiTurnConfig {
   personaInstructions?: string;
   /** Model to pass to the coding agent */
   model?: string;
+  /** Resolved MCP server configurations to pass to the coding agent */
+  mcpServerConfigs?: McpServerConfig[];
 }
 
 export interface MultiTurnResult {
@@ -80,6 +83,7 @@ export async function runMultiTurnLoop(
     onTurnComplete,
     personaInstructions,
     model,
+    mcpServerConfigs,
   } = config;
 
   const turns: ConversationTurn[] = [];
@@ -117,7 +121,7 @@ export async function runMultiTurnLoop(
     await iterLog("info", "Calling coding agent...");
     let codingResponse: string;
     try {
-      codingResponse = await processor.processMessage(nextPrompt, iterLog, { model });
+      codingResponse = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       await iterLog("error", `Coding agent failed: ${errorMsg}`, { error: errorMsg });
