@@ -4,6 +4,35 @@
 import { Command } from 'commander';
 import { styleText } from 'node:util';
 
+/** Output format definition for help text generation */
+export interface OutputFormatDef {
+  section: string;
+  description: string;
+}
+
+/**
+ * Generate a help text block documenting available output formats.
+ * Appended to the main program --help via addHelpText('after', ...).
+ */
+export function generateOutputFormatsHelp(
+  formats: Record<string, OutputFormatDef>,
+): string {
+  const sections = new Map<string, Array<{ name: string; description: string }>>();
+  for (const [name, def] of Object.entries(formats)) {
+    if (!sections.has(def.section)) sections.set(def.section, []);
+    sections.get(def.section)!.push({ name, description: def.description });
+  }
+
+  let output = '\n' + styleText('bold', 'Output Formats (-o, --output):') + '\n';
+  for (const [section, items] of sections) {
+    output += '\n  ' + styleText('italic', section) + '\n';
+    for (const item of items) {
+      output += `    ${styleText('cyan', item.name.padEnd(12))}  ${item.description}\n`;
+    }
+  }
+  return output;
+}
+
 /**
  * Recursively collect all commands and subcommands from a Commander program
  */
