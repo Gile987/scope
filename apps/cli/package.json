@@ -11,7 +11,9 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "cli-table3": "^0.6.5",
     "commander": "^14.0.0",
+    "csv-stringify": "^6.6.0",
     "dotenv": "^16.6.1",
     "eventsource": "^2.0.2",
     "ink": "^6.0.0",
