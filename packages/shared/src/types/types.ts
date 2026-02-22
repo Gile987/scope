@@ -46,11 +46,24 @@ export interface TraitDescriptions {
   type: Record<UserType, string>;
 }
 
+// Coding agent definition stored in MongoDB
+export interface CodingAgentDocument {
+  _id: string;               // Agent ID (e.g. "coder-acp-copilot")
+  name: string;              // Display name
+  description?: string;
+  supportedModels: string[];  // Empty array = model selection disabled
+  defaultModel?: string;
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;           // Soft-delete timestamp
+}
+
 // Request document stored in MongoDB
 export interface RequestDocument {
   _id: string;  // UUID as _id (for CosmosDB sharding compatibility)
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
+  model?: string;              // Model selected for this run
   status: "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
   result?: string;
   error?: string;
@@ -80,10 +93,15 @@ export interface QueueMessagePayload {
   requestId: string;
 }
 
+// Options passed to worker processor
+export interface WorkerProcessorOptions {
+  model?: string;
+}
+
 // Worker processor interface - each worker implements this
 export interface WorkerProcessor {
   readonly workerName: string;
-  processMessage(message: string, log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>): Promise<string>;
+  processMessage(message: string, log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>, options?: WorkerProcessorOptions): Promise<string>;
 }
 
 // Base configuration for queue processors

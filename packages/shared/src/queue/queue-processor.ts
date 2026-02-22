@@ -88,7 +88,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     await log("info", `Starting processing with ${this.processor.workerName}`);
 
     // Process the task using the worker-specific processor
-    const result = await this.processor.processMessage(requestDoc.scenario.task, log);
+    const result = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model });
 
     await log("info", "Processing completed", { result, final: true });
 
@@ -169,6 +169,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       requestId,
       log,
       personaInstructions: requestDoc.personaInstructions,
+      model: requestDoc.model,
       onTurnComplete: async (turn: ConversationTurn) => {
         // Persist each turn incrementally to MongoDB
         await this.collection.updateOne(
