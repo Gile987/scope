@@ -11,6 +11,7 @@
 import { spawn, ChildProcess } from "node:child_process";
 import { Duplex } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
+import type { McpServerConfig } from "shared";
 
 export interface ACPClientOptions {
   command: string;
@@ -18,6 +19,7 @@ export interface ACPClientOptions {
   env?: Record<string, string>;
   cwd?: string;
   onLog?: (message: string) => void;
+  mcpServers?: McpServerConfig[];
 }
 
 export interface ACPSessionResult {
@@ -113,7 +115,7 @@ export async function runACPSession(
   prompt: string,
   options: ACPClientOptions
 ): Promise<ACPSessionResult> {
-  const { command, args = [], env = {}, cwd, onLog = console.log } = options;
+  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [] } = options;
 
   onLog(`Starting ACP agent: ${command} ${args.join(" ")}`);
 
@@ -186,7 +188,12 @@ export async function runACPSession(
     // Create a new session
     const sessionResult = await connection.newSession({
       cwd: cwd || "/workspace",
-      mcpServers: [],
+      mcpServers: mcpServers.map((s) => ({
+        type: s.type,
+        name: s.name,
+        url: s.url,
+        headers: s.headers?.map((h) => ({ name: h.name, value: h.value })) ?? [],
+      })),
     });
 
     onLog(`Created session: ${sessionResult.sessionId}`);

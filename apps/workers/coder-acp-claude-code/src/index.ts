@@ -42,6 +42,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         onLog: async (msg) => {
           await log("debug", msg);
         },
+        mcpServers: options?.mcpServerConfigs,
       });
 
       await log("info", "Claude Code processing complete", { 

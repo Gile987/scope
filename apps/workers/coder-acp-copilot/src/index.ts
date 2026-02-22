@@ -42,6 +42,7 @@ class CopilotProcessor implements WorkerProcessor {
         onLog: async (msg) => {
           await log("debug", msg);
         },
+        mcpServers: options?.mcpServerConfigs,
       });
 
       await log("info", "Copilot processing complete", { 
