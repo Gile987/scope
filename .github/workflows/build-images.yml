@@ -73,7 +73,16 @@ jobs:
               - 'apps/token-manager/**'
 
   build-on-push:
-    if: github.event_name == 'push'
+    if: >-
+      github.event_name == 'push' && (
+        needs.detect-changes.outputs.api == 'true' ||
+        needs.detect-changes.outputs.judge == 'true' ||
+        needs.detect-changes.outputs.portal == 'true' ||
+        needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
+        needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
+        needs.detect-changes.outputs.token-manager == 'true' ||
+        needs.detect-changes.outputs.shared == 'true'
+      )
     needs: detect-changes
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'integration' }}
@@ -142,7 +151,16 @@ jobs:
             .
 
   build-on-pr:
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request' && (
+        needs.detect-changes.outputs.api == 'true' ||
+        needs.detect-changes.outputs.judge == 'true' ||
+        needs.detect-changes.outputs.portal == 'true' ||
+        needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
+        needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
+        needs.detect-changes.outputs.token-manager == 'true' ||
+        needs.detect-changes.outputs.shared == 'true'
+      )
     needs: detect-changes
     runs-on: ubuntu-latest
     environment: integration

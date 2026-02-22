@@ -20,6 +20,7 @@ import { configureHelp, generateOutputFormatsHelp } from "./utils/helpFormatter.
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "./utils/style.js";
 import { formatData, isMachineReadable } from "./utils/formatters.js";
 import type { OutputFormat, DisplayField } from "./utils/types.js";
+import { runGetAction } from "./run-get-action.js";
 
 dotenv.config();
 
@@ -29,6 +30,7 @@ const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
 function printFollowUpCommands(id: string): void {
   console.log(`\n${label('Run ID:')} ${value(id)}`);
   console.log(`\n${label('Next steps:')}`);
+  console.log(`  ${dimTimestamp('Get details:')}   pnpm cli run get -i ${id}`);
   console.log(`  ${dimTimestamp('Check status:')}  pnpm cli run status -i ${id}`);
   console.log(`  ${dimTimestamp('Stream logs:')}   pnpm cli run logs -i ${id}`);
   console.log(`  ${dimTimestamp('Download:')}      pnpm cli run download -i ${id}`);
@@ -269,6 +271,16 @@ run
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
     }
+  });
+
+run
+  .command("get")
+  .description("Get full details of a run")
+  .requiredOption("-i, --id <id>", "Run ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+  .action(async (options) => {
+    await runGetAction({ id: options.id, url: options.url, output: options.output });
   });
 
 run
