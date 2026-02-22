@@ -133,6 +133,7 @@ export function CreateToken() {
   const [type, setType] = useState<TokenType>("github-pat-classic");
   const [value, setValue] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
+  const [comment, setComment] = useState("");
   const [previewResult, setPreviewResult] = useState<TokenValidationResult | null>(null);
 
   const previewMutation = useMutation({
@@ -176,6 +177,7 @@ export function CreateToken() {
       type,
       value: value.trim(),
       expiresAt: expiresAt || undefined,
+      comment: comment.trim() || undefined,
     });
   };
 
@@ -301,6 +303,21 @@ export function CreateToken() {
                   value={expiresAt}
                   onChange={(e) => setExpiresAt(e.target.value)}
                 />
+              </div>
+
+              {/* Comment */}
+              <div className="space-y-2">
+                <Label htmlFor="comment">Comment (optional)</Label>
+                <Input
+                  id="comment"
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="e.g. John's CI token"
+                  maxLength={500}
+                />
+                <p className="text-xs text-muted-foreground">
+                  A short note to help identify this token later.
+                </p>
               </div>
 
               {/* Validate */}

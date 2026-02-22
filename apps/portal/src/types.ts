@@ -254,6 +254,7 @@ export interface TokenDocument {
   lastValidationStatus: TokenValidationStatus;
   lastValidationError?: string;
   enabled: boolean;
+  comment?: string;
   acquireCount: number;
   lastAcquiredAt?: string;
   createdAt: string;
@@ -279,11 +280,13 @@ export interface CreateTokenRequest {
   value: string;
   expiresAt?: string;
   enabled?: boolean;
+  comment?: string;
 }
 
 export interface UpdateTokenRequest {
   enabled?: boolean;
   expiresAt?: string | null;
+  comment?: string | null;
 }
 
 export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {

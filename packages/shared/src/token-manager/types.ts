@@ -51,6 +51,8 @@ export interface TokenDocument {
   lastValidationStatus: TokenValidationStatus;
   lastValidationError?: string;
   enabled: boolean;
+  /** Optional free-text annotation (e.g. "John's CI token"). */
+  comment?: string;
   /** Number of times this token has been acquired via /acquire. */
   acquireCount: number;
   /** Timestamp of the last acquisition. */
@@ -96,6 +98,7 @@ export interface CreateTokenRequest {
   value: string;
   expiresAt?: string;
   enabled?: boolean;
+  comment?: string;
 }
 
 /**
@@ -105,6 +108,7 @@ export interface CreateTokenRequest {
 export interface UpdateTokenRequest {
   enabled?: boolean;
   expiresAt?: string | null;
+  comment?: string | null;
 }
 
 /**

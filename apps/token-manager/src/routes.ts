@@ -105,6 +105,10 @@ export function createTokenRouter(
         doc.expiresAt = new Date(body.expiresAt);
       }
 
+      if (typeof body.comment === "string" && body.comment.trim()) {
+        doc.comment = body.comment.trim().substring(0, 500);
+      }
+
       await collection.insertOne(doc as any);
 
       // Fire-and-forget validation — portal polls until status !== "unknown"
@@ -194,6 +198,12 @@ export function createTokenRouter(
 
       if (body.expiresAt !== undefined) {
         update.expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
+      }
+
+      if (body.comment !== undefined) {
+        update.comment = typeof body.comment === "string" && body.comment.trim()
+          ? body.comment.trim().substring(0, 500)
+          : null;
       }
 
       const result = await collection.findOneAndUpdate(
