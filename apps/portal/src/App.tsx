@@ -20,6 +20,8 @@ import { ReportDetail } from "@/pages/ReportDetail";
 import { TokenList } from "@/pages/TokenList";
 import { CreateToken } from "@/pages/CreateToken";
 import { TokenDetail } from "@/pages/TokenDetail";
+import { AgentList } from "@/pages/AgentList";
+import { AgentDetail } from "@/pages/AgentDetail";
 
 export function App() {
   return (
@@ -43,6 +45,8 @@ export function App() {
         <Route path="/tokens" element={<TokenList />} />
         <Route path="/tokens/new" element={<CreateToken />} />
         <Route path="/tokens/:id" element={<TokenDetail />} />
+        <Route path="/agents" element={<AgentList />} />
+        <Route path="/agents/:id" element={<AgentDetail />} />
       </Route>
     </Routes>
   );

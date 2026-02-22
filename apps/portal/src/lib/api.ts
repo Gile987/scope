@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -36,6 +36,7 @@ export const api = {
   submitRun: (body: {
     scenario: { task: string; criteria: string[]; version?: "v1" | "v2" };
     worker: string;
+    model?: string;
     maxIterations?: number;
     personaInstructions?: string;
     persona?: { personality: string; experience: string; verbosity: string; type: string };
@@ -190,6 +191,31 @@ export const api = {
   /** Get a single prompt feature extraction by ID */
   getPromptFeatureExtraction: (id: string): Promise<PromptFeatureExtraction> => {
     return request(`/prompt-features/extractions/${encodeURIComponent(id)}`);
+  },
+
+  // ─── Agents ─────────────────────────────────────────────────────────────────
+
+  /** List all coding agents */
+  listAgents: (): Promise<CodingAgent[]> => {
+    return request("/agents");
+  },
+
+  /** Get a single coding agent by ID */
+  getAgent: (id: string): Promise<CodingAgent> => {
+    return request(`/agents/${encodeURIComponent(id)}`);
+  },
+
+  /** Update a coding agent */
+  updateAgent: (id: string, body: Partial<Pick<CodingAgent, 'name' | 'description' | 'supportedModels' | 'defaultModel'>>): Promise<CodingAgent> => {
+    return request(`/agents/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a coding agent */
+  deleteAgent: (id: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
   // ─── Analysis ──────────────────────────────────────────────────────────────

@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -15,7 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus, Check } from "lucide-react";
-import { WORKER_TYPES, type PromptFeatureExtraction, type SuggestedPromptFeature } from "@/types";
+import { WORKER_TYPES, type PromptFeatureExtraction, type SuggestedPromptFeature, type CodingAgent } from "@/types";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { Stepper } from "@/components/Stepper";
 import { PromptFeatureWizard } from "@/components/PromptFeatureWizard";
@@ -33,8 +33,27 @@ export function SubmitRun() {
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
   const [version, setVersion] = useState<"v1" | "v2">("v2");
   const [worker, setWorker] = useState<string>("coder-acp-copilot");
+  const [model, setModel] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<string>("10");
   const [occurrences, setOccurrences] = useState<number>(1);
+
+  // Fetch agents from the API
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents"],
+    queryFn: () => api.listAgents(),
+  });
+
+  const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
+  const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
+
+  // When agent changes, reset model to the agent's default
+  useEffect(() => {
+    if (selectedAgent) {
+      setModel(selectedAgent.defaultModel ?? "");
+    } else {
+      setModel("");
+    }
+  }, [worker, selectedAgent?.defaultModel]);
 
   // Optional persona
   const [personality, setPersonality] = useState<string>("");
@@ -95,6 +114,7 @@ export function SubmitRun() {
         version,
       },
       worker,
+      ...(model ? { model } : {}),
       maxIterations: parseInt(maxIterations, 10) || undefined,
       ...(occurrences > 1 ? { count: occurrences } : {}),
       ...(hasPersona
@@ -212,14 +232,38 @@ export function SubmitRun() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {WORKER_TYPES.map((w) => (
-                      <SelectItem key={w} value={w}>
-                        {w}
-                      </SelectItem>
-                    ))}
+                    {activeAgents.length > 0
+                      ? activeAgents.map((a: CodingAgent) => (
+                          <SelectItem key={a._id} value={a._id}>
+                            {a.name}
+                          </SelectItem>
+                        ))
+                      : WORKER_TYPES.map((w) => (
+                          <SelectItem key={w} value={w}>
+                            {w}
+                          </SelectItem>
+                        ))
+                    }
                   </SelectContent>
                 </Select>
               </div>
+              {selectedAgent && selectedAgent.supportedModels.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="model">Model</Label>
+                  <Select value={model} onValueChange={setModel}>
+                    <SelectTrigger id="model">
+                      <SelectValue placeholder="Select model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedAgent.supportedModels.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="occurrences">Number of occurrences</Label>
                 <Input

@@ -5,6 +5,7 @@ import {
   ConversationTurn,
   CriterionResult,
   WorkerProcessor,
+  WorkerProcessorOptions,
   LogEvent,
   MULTI_TURN_DEFAULTS,
 } from "../types/types.js";
@@ -40,6 +41,8 @@ export interface MultiTurnConfig {
   onTurnComplete?: (turn: ConversationTurn) => Promise<void>;
   /** Persona instructions for the judge (resolved prose from traits) */
   personaInstructions?: string;
+  /** Model to pass to the coding agent */
+  model?: string;
 }
 
 export interface MultiTurnResult {
@@ -76,6 +79,7 @@ export async function runMultiTurnLoop(
     log,
     onTurnComplete,
     personaInstructions,
+    model,
   } = config;
 
   const turns: ConversationTurn[] = [];
@@ -113,7 +117,7 @@ export async function runMultiTurnLoop(
     await iterLog("info", "Calling coding agent...");
     let codingResponse: string;
     try {
-      codingResponse = await processor.processMessage(nextPrompt, iterLog);
+      codingResponse = await processor.processMessage(nextPrompt, iterLog, { model });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       await iterLog("error", `Coding agent failed: ${errorMsg}`, { error: errorMsg });

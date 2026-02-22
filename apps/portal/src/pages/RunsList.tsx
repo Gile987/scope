@@ -359,6 +359,9 @@ export function RunsList() {
                 </TableCell>
                 <TableCell>
                   <span className="font-mono text-xs">{run.workerType}</span>
+                  {run.model && (
+                    <span className="block font-mono text-xs text-muted-foreground">{run.model}</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <StatusBadge status={run.status} />
