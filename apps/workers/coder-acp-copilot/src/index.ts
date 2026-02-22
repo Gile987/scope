@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, QueueProcessorConfig, LogEvent, TokenManagerClient } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, QueueProcessorConfig, LogEvent, TokenManagerClient } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -15,9 +15,10 @@ class CopilotProcessor implements WorkerProcessor {
 
   async processMessage(
     message: string,
-    log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>
+    log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
+    options?: WorkerProcessorOptions
   ): Promise<string> {
-    await log("info", "Starting Copilot ACP processor", { inputLength: message.length });
+    await log("info", "Starting Copilot ACP processor", { inputLength: message.length, model: options?.model });
     
     try {
       // Acquire token dynamically (env var fallback or Token Manager)
@@ -27,9 +28,13 @@ class CopilotProcessor implements WorkerProcessor {
       });
 
       // Run ACP session with GitHub Copilot
+      const args = ["--acp"];
+      if (options?.model) {
+        args.push("--model", options.model);
+      }
       const result = await runACPSession(message, {
         command: "copilot",
-        args: ["--acp"],
+        args,
         env: {
           GITHUB_TOKEN: githubToken,
         },
