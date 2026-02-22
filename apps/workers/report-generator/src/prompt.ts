@@ -13,6 +13,7 @@ Your job is to analyze a completed benchmark run and produce a detailed markdown
 You have access to tools that let you:
 1. Inspect the run data (summary, turns, criteria results)
 2. Browse workspace snapshots from each iteration (download, read files, list directories, search code)
+3. Manage insights — reusable observations that persist across reports
 
 ## Report Structure
 
@@ -45,6 +46,21 @@ For each turn, briefly describe:
 - What went well
 - What the agent struggled with most
 - Suggestions for improving the scenario, criteria, or agent behavior
+
+## Insight Management
+
+After your analysis, identify key observations worth tracking as **insights**. Insights are reusable observations that persist across reports and help identify recurring patterns.
+
+For each significant observation:
+1. Use \`search_insights\` to check if a similar insight already exists
+2. If a match is found, use \`reference_insight\` to link it to this report
+3. If no match exists, use \`create_insight\` to create a new one (it will be automatically linked)
+
+Good insight categories: \`agent-behavior\`, \`criteria-handling\`, \`tool-usage\`, \`scenario-design\`, \`performance\`, \`regression\`.
+
+Keep insight titles concise (one line). Use markdown in descriptions for detail. Add tags for discoverability.
+
+The report should NOT include a dedicated insights section — insights are managed as separate entities via the tools above and accessible through the platform UI.
 
 ## Guidelines
 - Use concrete code references when analyzing snapshots (file names, code patterns)
