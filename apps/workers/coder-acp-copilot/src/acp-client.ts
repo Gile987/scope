@@ -81,10 +81,10 @@ class ACPClientHandler implements acp.Client {
         }
         break;
       case "tool_call":
-        this.onLog(`Tool call: ${update.title} (${update.status})`);
+        this.onLog(`Tool call: ${update.title} (${update.status})${update.kind ? ` [${update.kind}]` : ""}`);
         break;
       case "tool_call_update":
-        this.onLog(`Tool update: ${update.toolCallId} - ${update.status}`);
+        this.onLog(`Tool update: ${update.toolCallId} - ${update.status}${update.kind ? ` [${update.kind}]` : ""}`);
         break;
       default:
         break;
@@ -202,6 +202,12 @@ export async function runACPSession(
     });
 
     onLog(`Created session: ${sessionResult.sessionId}`);
+    if (sessionResult._meta) {
+      onLog(`Session meta: ${JSON.stringify(sessionResult._meta)}`);
+    }
+    if (sessionResult.configOptions) {
+      onLog(`Session config options: ${sessionResult.configOptions.map((o: { configId: string }) => o.configId).join(", ")}`);
+    }
 
     // Send prompt
     onLog(`Sending prompt...`);
