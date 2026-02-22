@@ -139,6 +139,7 @@ export function TokenList() {
             <TableHeader>
               <TableRow>
                 <TableHead>ID</TableHead>
+                <TableHead>Comment</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Capabilities</TableHead>
                 <TableHead>Status</TableHead>
@@ -156,6 +157,9 @@ export function TokenList() {
                     <Link to={`/tokens/${token._id}`} className="hover:underline">
                       {formatId(token._id)}
                     </Link>
+                  </TableCell>
+                  <TableCell className="text-sm max-w-[200px] truncate" title={token.comment ?? undefined}>
+                    {token.comment || <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="gap-1">

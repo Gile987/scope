@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -51,11 +52,13 @@ export function TokenDetail() {
   const [editing, setEditing] = useState(false);
   const [enabled, setEnabled] = useState(true);
   const [expiresAt, setExpiresAt] = useState("");
+  const [comment, setComment] = useState("");
 
   useEffect(() => {
     if (token) {
       setEnabled(token.enabled);
       setExpiresAt(token.expiresAt ? new Date(token.expiresAt).toISOString().slice(0, 16) : "");
+      setComment(token.comment ?? "");
     }
   }, [token]);
 
@@ -91,6 +94,7 @@ export function TokenDetail() {
     updateMutation.mutate({
       enabled,
       expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+      comment: comment.trim() || null,
     });
   };
 
@@ -288,6 +292,22 @@ export function TokenDetail() {
 
           {/* Editable fields */}
           <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Comment</Label>
+              {editing ? (
+                <Textarea
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="e.g. John's CI token"
+                  maxLength={500}
+                  rows={2}
+                />
+              ) : (
+                <p className="text-sm">
+                  {token.comment || <span className="text-muted-foreground">No comment</span>}
+                </p>
+              )}
+            </div>
             <div className="flex items-center gap-3">
               <Label>Enabled</Label>
               {editing ? (
