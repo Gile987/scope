@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
 import { Collection } from "mongodb";
 import { circuitBreaker, handleAll, ConsecutiveBreaker, CircuitState } from "cockatiel";
-import { LogEvent, RequestDocument } from "./types.js";
+import { LogEvent, RequestDocument } from "../types/types.js";
 
 export interface RedisConfig {
   redisHost: string;

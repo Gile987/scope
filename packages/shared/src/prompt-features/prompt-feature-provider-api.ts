@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { PromptFeatureConfig } from './types.js';
+import { PromptFeatureConfig } from '../types/types.js';
 import { PromptFeatureProvider } from './prompt-feature-provider.js';
 
 interface CacheEntry {

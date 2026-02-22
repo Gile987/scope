@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { CriteriaConfig, CriteriaDocument } from './types.js';
-import { DependencyGraph } from './dependency-graph.js';
+import { CriteriaConfig, CriteriaDocument } from '../types/types.js';
+import { DependencyGraph } from '../graph/dependency-graph.js';
 
 /**
  * MongoDB-backed criteria store for CRUD operations on criteria definitions.

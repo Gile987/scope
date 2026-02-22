@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CriteriaConfig } from './types.js';
+import { CriteriaConfig } from '../types/types.js';
 
 /**
  * Normalize criteria from v1 format (string prompts) or v2 format (CriteriaConfig[])

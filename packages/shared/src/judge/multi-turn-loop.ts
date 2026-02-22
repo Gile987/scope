@@ -7,8 +7,8 @@ import {
   WorkerProcessor,
   LogEvent,
   MULTI_TURN_DEFAULTS,
-} from "./types.js";
-import { BlobStorage, BlobStorageConfig } from "./blob-storage.js";
+} from "../types/types.js";
+import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
 import { JudgeClient } from "./judge-client.js";
 
 export interface MultiTurnConfig {

@@ -4,8 +4,8 @@
 import { MongoClient, Collection, Db } from "mongodb";
 import { QueueClient, DequeuedMessageItem } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
-import { LogEvent, BaseQueueProcessorConfig } from "./types.js";
-import { LogPublisher } from "./log-publisher.js";
+import { LogEvent, BaseQueueProcessorConfig } from "../types/types.js";
+import { LogPublisher } from "../logging/log-publisher.js";
 
 /**
  * Generic queue processor that polls an Azure Storage Queue and processes messages.
