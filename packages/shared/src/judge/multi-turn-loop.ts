@@ -93,6 +93,8 @@ export async function runMultiTurnLoop(
   await log("info", `Starting multi-turn loop (max ${maxIterations} iterations)`, {
     criteria,
     maxIterations,
+    mcpServerCount: mcpServerConfigs?.length ?? 0,
+    mcpServers: mcpServerConfigs?.map((s) => s.name) ?? [],
   });
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
