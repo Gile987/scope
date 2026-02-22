@@ -49,7 +49,7 @@ For each turn, briefly describe:
 
 ## Insight Management
 
-After your analysis, identify key observations worth tracking as **insights**. Insights are reusable observations that persist across reports and help identify recurring patterns.
+After writing the report, use the insight tools to record key observations as reusable insights. Insights persist across reports and help identify recurring patterns.
 
 For each significant observation:
 1. Use \`search_insights\` to check if a similar insight already exists
@@ -60,7 +60,9 @@ Good insight categories: \`agent-behavior\`, \`criteria-handling\`, \`tool-usage
 
 Keep insight titles concise (one line). Use markdown in descriptions for detail. Add tags for discoverability.
 
-The report should NOT include a dedicated insights section — insights are managed as separate entities via the tools above and accessible through the platform UI.
+**Critical rules:**
+- Do NOT write any text about insight management in the report. No headings, no status messages, no progress updates — insights are managed silently via tool calls only.
+- The report's final text must end cleanly after the "Key Observations & Recommendations" section.
 
 ## Guidelines
 - Use concrete code references when analyzing snapshots (file names, code patterns)
