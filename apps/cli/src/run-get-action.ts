@@ -33,19 +33,19 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   // Machine-readable output
   if (isMachineReadable(format)) {
     const fields: DisplayField[] = [
-      { key: 'id', header: 'ID' },
-      { key: 'workerType', header: 'Worker' },
-      { key: 'model', header: 'Model' },
-      { key: 'status', header: 'Status' },
-      { key: 'maxIterations', header: 'Max Iterations' },
-      { key: 'turnsCount', header: 'Turns' },
-      { key: 'passed', header: 'Passed' },
-      { key: 'task', header: 'Task' },
-      { key: 'criteriaCount', header: 'Criteria' },
-      { key: 'logsCount', header: 'Logs' },
-      { key: 'createdAt', header: 'Created' },
-      { key: 'updatedAt', header: 'Updated' },
-      { key: 'error', header: 'Error' },
+      { key: 'id', label: 'ID' },
+      { key: 'workerType', label: 'Worker' },
+      { key: 'model', label: 'Model' },
+      { key: 'status', label: 'Status' },
+      { key: 'maxIterations', label: 'Max Iterations' },
+      { key: 'turnsCount', label: 'Turns' },
+      { key: 'passed', label: 'Passed' },
+      { key: 'task', label: 'Task' },
+      { key: 'criteriaCount', label: 'Criteria' },
+      { key: 'logsCount', label: 'Logs' },
+      { key: 'createdAt', label: 'Created' },
+      { key: 'updatedAt', label: 'Updated' },
+      { key: 'error', label: 'Error' },
     ];
     const row = {
       ...run,
