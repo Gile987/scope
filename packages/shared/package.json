@@ -11,16 +11,16 @@
     },
 
     "./criteria-store": {
-      "types": "./dist/criteria-store.d.ts",
-      "import": "./dist/criteria-store.js"
+      "types": "./dist/criteria/criteria-store.d.ts",
+      "import": "./dist/criteria/criteria-store.js"
     },
     "./criteria-provider": {
-      "types": "./dist/criteria-provider.d.ts",
-      "import": "./dist/criteria-provider.js"
+      "types": "./dist/criteria/criteria-provider.d.ts",
+      "import": "./dist/criteria/criteria-provider.js"
     },
     "./criteria-provider-factory": {
-      "types": "./dist/criteria-provider-factory.d.ts",
-      "import": "./dist/criteria-provider-factory.js"
+      "types": "./dist/criteria/criteria-provider-factory.d.ts",
+      "import": "./dist/criteria/criteria-provider-factory.js"
     }
   },
   "scripts": {

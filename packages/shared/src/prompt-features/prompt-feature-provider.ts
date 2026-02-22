@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { PromptFeatureConfig } from './types.js';
+import { PromptFeatureConfig } from '../types/types.js';
 
 /**
  * Unified interface for loading prompt features from different sources.

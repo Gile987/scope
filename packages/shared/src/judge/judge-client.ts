@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { ConversationTurn, CriterionResult } from "./types.js";
+import { ConversationTurn, CriterionResult } from "../types/types.js";
 
 /**
  * Request payload for the judge service's /api/v1/evaluate endpoint.

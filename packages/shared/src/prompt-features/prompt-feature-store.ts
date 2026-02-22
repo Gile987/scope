@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { PromptFeatureConfig, PromptFeatureDocument } from './types.js';
-import { DependencyGraph } from './dependency-graph.js';
+import { PromptFeatureConfig, PromptFeatureDocument } from '../types/types.js';
+import { DependencyGraph } from '../graph/dependency-graph.js';
 
 /**
  * MongoDB-backed prompt feature store for CRUD operations on prompt feature definitions.

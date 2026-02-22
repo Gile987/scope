@@ -9,11 +9,11 @@ import {
   LogEvent,
   MULTI_TURN_DEFAULTS,
   ConversationTurn,
-} from "./types.js";
+} from "../types/types.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
-import { BlobStorage } from "./blob-storage.js";
-import { JudgeClient } from "./judge-client.js";
-import { runMultiTurnLoop } from "./multi-turn-loop.js";
+import { BlobStorage } from "../storage/blob-storage.js";
+import { JudgeClient } from "../judge/judge-client.js";
+import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
 
 /**
  * Queue processor for coding agent workers.

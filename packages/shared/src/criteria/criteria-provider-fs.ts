@@ -4,38 +4,38 @@
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { parse as parseYaml } from 'yaml';
-import { PromptFeatureConfig } from './types.js';
-import { PromptFeatureProvider } from './prompt-feature-provider.js';
+import { CriteriaConfig } from '../types/types.js';
+import { CriteriaProvider } from './criteria-provider.js';
 
 /**
- * PromptFeatureProvider backed by YAML files on the filesystem.
+ * CriteriaProvider backed by YAML files on the filesystem.
  *
- * Loads all prompt features eagerly on construction and serves from an in-memory Map.
+ * Loads all criteria eagerly on construction and serves from an in-memory Map.
  * Reads YAML files from a directory, supporting both `depends_on` (snake_case)
  * and `dependsOn` (camelCase) formats.
  */
-export class FileSystemPromptFeatureProvider implements PromptFeatureProvider {
-  private registry: Map<string, PromptFeatureConfig>;
+export class FileSystemCriteriaProvider implements CriteriaProvider {
+  private registry: Map<string, CriteriaConfig>;
 
-  constructor(promptFeaturesDir: string) {
+  constructor(criteriaDir: string) {
     this.registry = new Map();
 
-    if (!existsSync(promptFeaturesDir)) {
-      console.warn(`[FileSystemPromptFeatureProvider] Directory does not exist: ${promptFeaturesDir}`);
+    if (!existsSync(criteriaDir)) {
+      console.warn(`[FileSystemCriteriaProvider] Criteria directory does not exist: ${criteriaDir}`);
       return;
     }
 
-    this.loadAll(promptFeaturesDir);
+    this.loadAllCriteria(criteriaDir);
   }
 
-  private loadAll(dir: string): void {
-    const files = readdirSync(dir).filter(f =>
+  private loadAllCriteria(criteriaDir: string): void {
+    const files = readdirSync(criteriaDir).filter(f =>
       f.endsWith('.yaml') || f.endsWith('.yml')
     );
 
     for (const file of files) {
       try {
-        const filePath = join(dir, file);
+        const filePath = join(criteriaDir, file);
         const content = readFileSync(filePath, 'utf-8');
         const data = parseYaml(content);
 
@@ -54,54 +54,54 @@ export class FileSystemPromptFeatureProvider implements PromptFeatureProvider {
           throw new Error(`'depends_on'/'dependsOn' must be an array in ${file}`);
         }
 
-        const feature: PromptFeatureConfig = {
+        const criteria: CriteriaConfig = {
           id: data.id.trim(),
           prompt: data.prompt.trim(),
           dependsOn: dependsOn.map((d: any) => String(d).trim()),
         };
 
-        if (this.registry.has(feature.id)) {
-          throw new Error(`Duplicate prompt feature id '${feature.id}' found in ${file}`);
+        if (this.registry.has(criteria.id)) {
+          throw new Error(`Duplicate criteria id '${criteria.id}' found in ${file}`);
         }
 
-        this.registry.set(feature.id, feature);
+        this.registry.set(criteria.id, criteria);
       } catch (error) {
         throw new Error(
-          `Failed to load prompt feature from ${file}: ${error instanceof Error ? error.message : String(error)}`
+          `Failed to load criteria from ${file}: ${error instanceof Error ? error.message : String(error)}`
         );
       }
     }
 
-    console.log(`[FileSystemPromptFeatureProvider] Loaded ${this.registry.size} prompt features from ${dir}`);
+    console.log(`[FileSystemCriteriaProvider] Loaded ${this.registry.size} criteria from ${criteriaDir}`);
   }
 
-  async get(id: string): Promise<PromptFeatureConfig | undefined> {
+  async get(id: string): Promise<CriteriaConfig | undefined> {
     return this.registry.get(id);
   }
 
-  async getAll(): Promise<PromptFeatureConfig[]> {
+  async getAll(): Promise<CriteriaConfig[]> {
     return Array.from(this.registry.values());
   }
 
-  async resolveWithAncestors(ids: string[]): Promise<PromptFeatureConfig[]> {
-    const collected = new Map<string, PromptFeatureConfig>();
+  async resolveWithAncestors(ids: string[]): Promise<CriteriaConfig[]> {
+    const collected = new Map<string, CriteriaConfig>();
     const queue = [...ids];
 
     while (queue.length > 0) {
       const id = queue.shift()!;
       if (collected.has(id)) continue;
 
-      const feature = this.registry.get(id);
-      if (!feature) {
+      const criteria = this.registry.get(id);
+      if (!criteria) {
         const availableIds = Array.from(this.registry.keys()).join(', ');
         throw new Error(
-          `Prompt feature '${id}' not found in registry. Available: ${availableIds || 'none'}`
+          `Criteria '${id}' not found in registry. Available criteria: ${availableIds || 'none'}`
         );
       }
-      collected.set(id, feature);
+      collected.set(id, criteria);
 
-      if (feature.dependsOn) {
-        for (const parentId of feature.dependsOn) {
+      if (criteria.dependsOn) {
+        for (const parentId of criteria.dependsOn) {
           if (!collected.has(parentId)) {
             queue.push(parentId);
           }
