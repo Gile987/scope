@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import type { McpServerConfig } from './mcp.js';
+
 // Multi-turn conversation turn (one coding + judge iteration)
 export interface ConversationTurn {
   iteration: number;
@@ -77,6 +79,7 @@ export interface RequestDocument {
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
   promptFeatureExtractionId?: string; // Linked prompt feature extraction (hash-deduped)
+  mcpServers?: string[];          // MCP server slugs selected for this run
 }
 
 // Log event for real-time streaming and persistence
@@ -96,6 +99,7 @@ export interface QueueMessagePayload {
 // Options passed to worker processor
 export interface WorkerProcessorOptions {
   model?: string;
+  mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
 }
 
 // Worker processor interface - each worker implements this
