@@ -16,8 +16,10 @@ import React from "react";
 import { render } from "ink";
 import { DemoApp } from "./components/DemoApp.js";
 import { resolveScenarioAndPersona } from "./config-loader.js";
-import { configureHelp } from "./utils/helpFormatter.js";
+import { configureHelp, generateOutputFormatsHelp } from "./utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "./utils/style.js";
+import { formatData, isMachineReadable } from "./utils/formatters.js";
+import type { OutputFormat, DisplayField } from "./utils/types.js";
 
 dotenv.config();
 
@@ -41,13 +43,21 @@ const DEFAULT_WORKERS = [
   "coder-vscode-web",
 ];
 
+// Output format definitions with descriptions and categories
+const OUTPUT_FORMATS = {
+  table: { section: 'Human-readable formats', description: 'Formatted table with borders (default for lists)' },
+  tsv:   { section: 'Machine-readable formats', description: 'Tab-separated values for Unix tools (cut, awk, grep, xargs)' },
+  json:  { section: 'Machine-readable formats', description: 'JSON format for programmatic access and AI agents' },
+} as const;
+
 program
   .name("scope-mt")
   .description("Scope MT — AI coding agent benchmarking CLI")
   .version("1.0.0")
   .action(() => {
     program.help();
-  });
+  })
+  .addHelpText('after', generateOutputFormatsHelp(OUTPUT_FORMATS));
 
 configureHelp(program);
 
@@ -321,7 +331,9 @@ run
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
   .option("--include-deleted", "Include soft-deleted runs")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       let url = `${normalizeUrl(options.url)}/api/v1/requests`;
       const params = new URLSearchParams();
@@ -344,17 +356,21 @@ run
 
       const requests = await response.json();
       if (Array.isArray(requests) && requests.length === 0) {
-        console.log(warnBanner('No requests found.'));
+        if (!isMachineReadable(format)) console.log(warnBanner('No requests found.'));
         return;
       }
       if (Array.isArray(requests)) {
-        console.log(label(`Found ${requests.length} request(s):\n`));
-        for (const req of requests) {
-          const status = req.status === 'completed' ? successText(req.status)
-            : req.status === 'failed' ? errorText(req.status)
-            : value(req.status ?? 'unknown');
-          console.log(`  ${value(req.id ?? '(no id)')}  ${label('worker=')}${req.workerType ?? 'unknown'}  ${label('status=')}${status}`);
+        if (!isMachineReadable(format)) {
+          console.log(label(`Found ${requests.length} request(s):\n`));
         }
+
+        const displayFields: DisplayField[] = [
+          { key: 'id', label: 'ID', formatter: (req: any) => req.id ?? '(no id)' },
+          { key: 'workerType', label: 'Worker', formatter: (req: any) => req.workerType ?? 'unknown' },
+          { key: 'status', label: 'Status', formatter: (req: any) => req.status ?? 'unknown' },
+        ];
+
+        console.log(formatData(requests, displayFields, format));
       } else {
         console.log(JSON.stringify(requests, null, 2));
       }
@@ -635,7 +651,9 @@ criteria
   .description("List all criteria")
   .option("-q, --query <search>", "Filter by ID or prompt text")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const params = new URLSearchParams();
       if (options.query) params.set("q", options.query);
@@ -650,22 +668,24 @@ criteria
 
       const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
       if (items.length === 0) {
-        console.log(warnBanner("No criteria found."));
+        if (!isMachineReadable(format)) console.log(warnBanner("No criteria found."));
         return;
       }
 
-      console.log(label(`Found ${items.length} criteria:\n`));
-
-      // Table header
-      const idW = Math.max(24, ...items.map(c => c.id.length)) + 2;
-      console.log(`  ${styleText('bold', 'ID'.padEnd(idW))}${styleText('bold', 'Deps'.padEnd(6))}${'Prompt'}`);
-      console.log(`  ${'─'.repeat(idW)}${'─'.repeat(6)}${'─'.repeat(50)}`);
-
-      for (const c of items) {
-        const deps = (c.dependsOn ?? []).length;
-        const prompt = c.prompt.replace(/\n/g, ' ').substring(0, 60);
-        console.log(`  ${value(c.id.padEnd(idW))}${String(deps).padEnd(6)}${dimTimestamp(prompt)}${c.prompt.length > 60 ? '…' : ''}`);
+      if (!isMachineReadable(format)) {
+        console.log(label(`Found ${items.length} criteria:\n`));
       }
+
+      const displayFields: DisplayField[] = [
+        { key: 'id', label: 'ID' },
+        { key: 'dependsOn', label: 'Deps', formatter: (c: any) => String((c.dependsOn ?? []).length) },
+        { key: 'prompt', label: 'Prompt', formatter: (c: any) => {
+          const prompt = c.prompt.replace(/\n/g, ' ');
+          return prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
+        }},
+      ];
+
+      console.log(formatData(items, displayFields, format));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -1043,7 +1063,9 @@ promptFeature
   .description("List all prompt features")
   .option("-q, --query <search>", "Filter by ID or prompt text")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const params = new URLSearchParams();
       if (options.query) params.set("q", options.query);
@@ -1058,21 +1080,24 @@ promptFeature
 
       const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
       if (items.length === 0) {
-        console.log(warnBanner("No prompt features found."));
+        if (!isMachineReadable(format)) console.log(warnBanner("No prompt features found."));
         return;
       }
 
-      console.log(label(`Found ${items.length} prompt features:\n`));
-
-      const idW = Math.max(24, ...items.map(f => f.id.length)) + 2;
-      console.log(`  ${styleText('bold', 'ID'.padEnd(idW))}${styleText('bold', 'Deps'.padEnd(6))}${'Prompt'}`);
-      console.log(`  ${'─'.repeat(idW)}${'─'.repeat(6)}${'─'.repeat(50)}`);
-
-      for (const f of items) {
-        const deps = (f.dependsOn ?? []).length;
-        const prompt = f.prompt.replace(/\n/g, ' ').substring(0, 60);
-        console.log(`  ${value(f.id.padEnd(idW))}${String(deps).padEnd(6)}${dimTimestamp(prompt)}${f.prompt.length > 60 ? '…' : ''}`);
+      if (!isMachineReadable(format)) {
+        console.log(label(`Found ${items.length} prompt features:\n`));
       }
+
+      const displayFields: DisplayField[] = [
+        { key: 'id', label: 'ID' },
+        { key: 'dependsOn', label: 'Deps', formatter: (f: any) => String((f.dependsOn ?? []).length) },
+        { key: 'prompt', label: 'Prompt', formatter: (f: any) => {
+          const prompt = f.prompt.replace(/\n/g, ' ');
+          return prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
+        }},
+      ];
+
+      console.log(formatData(items, displayFields, format));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -1643,7 +1668,9 @@ report
   .description("List all reports (optionally filter by run)")
   .option("-r, --run <requestId>", "Filter by run ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const params = new URLSearchParams();
       if (options.run) params.set("requestId", options.run);
@@ -1665,17 +1692,23 @@ report
       }>;
 
       if (reports.length === 0) {
-        console.log(dimTimestamp("No reports found"));
+        if (!isMachineReadable(format)) console.log(dimTimestamp("No reports found"));
         return;
       }
 
-      console.log(`${label(`Reports (${reports.length}):`)}\n`);
-      for (const r of reports) {
-        const status = r.status === "completed" ? successText("✓") : r.status === "failed" ? errorText("✗") : dimTimestamp("…");
-        const model = r.reporter?.model ? ` ${dimTimestamp(`[${r.reporter.model}]`)}` : "";
-        const ts = dimTimestamp(new Date(r.createdAt).toLocaleString());
-        console.log(`  ${status} ${value(r.id)} → ${dimTimestamp(r.requestId)}${model} ${ts}`);
+      if (!isMachineReadable(format)) {
+        console.log(`${label(`Reports (${reports.length}):`)}\n`);
       }
+
+      const displayFields: DisplayField[] = [
+        { key: 'id', label: 'ID' },
+        { key: 'requestId', label: 'Run ID' },
+        { key: 'status', label: 'Status' },
+        { key: 'model', label: 'Model', formatter: (r: any) => r.reporter?.model ?? 'N/A' },
+        { key: 'createdAt', label: 'Created', formatter: (r: any) => new Date(r.createdAt).toLocaleString() },
+      ];
+
+      console.log(formatData(reports, displayFields, format));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
