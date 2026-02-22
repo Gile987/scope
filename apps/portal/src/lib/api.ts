@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -65,10 +65,10 @@ export const api = {
   },
 
   /** Bulk re-submit runs (create new runs from existing ones) */
-  bulkResubmitRuns: (ids: string[], count = 1): Promise<{ submitted: number; failed: string[]; newIds: string[] }> => {
+  bulkResubmitRuns: (ids: string[], count = 1, overrides?: BulkResubmitOverrides): Promise<{ submitted: number; failed: string[]; newIds: string[] }> => {
     return request(`/requests/bulk-resubmit`, {
       method: "POST",
-      body: JSON.stringify({ ids, count }),
+      body: JSON.stringify({ ids, count, ...(overrides ? { overrides } : {}) }),
     });
   },
 

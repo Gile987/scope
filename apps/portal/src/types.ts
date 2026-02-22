@@ -181,6 +181,14 @@ export interface AnalysisResponse {
   selectedCriteria: string[];
 }
 
+// Bulk re-submit overrides
+export interface BulkResubmitOverrides {
+  workerType?: string;
+  model?: string | null;
+  maxIterations?: number | null;
+  mcpServers?: string[] | null;
+}
+
 // Bulk re-submit response
 export interface BulkResubmitResponse {
   submitted: number;

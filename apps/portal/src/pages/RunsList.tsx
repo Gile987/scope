@@ -22,7 +22,7 @@ import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
-import type { Run } from "@/types";
+import type { Run, BulkResubmitOverrides, McpServerDocument } from "@/types";
 
 export function RunsList() {
   const [workerFilter, setWorkerFilter] = useState("all");
@@ -31,12 +31,19 @@ export function RunsList() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [resubmitCount, setResubmitCount] = useState(1);
   const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
+  const [resubmitOverrides, setResubmitOverrides] = useState<BulkResubmitOverrides>({});
   const queryClient = useQueryClient();
 
   const { data: runs = [], isLoading, isRefetching } = useQuery({
     queryKey: ["runs", workerFilter],
     queryFn: () => api.listRuns(workerFilter === "all" ? undefined : workerFilter),
     refetchInterval: 10_000,
+  });
+
+  // Fetch MCP servers for the resubmit dialog
+  const { data: mcpServers = [] } = useQuery<McpServerDocument[]>({
+    queryKey: ["mcp-servers"],
+    queryFn: api.listMcpServers,
   });
 
   // Fetch bulk report status for all visible runs
@@ -73,12 +80,14 @@ export function RunsList() {
   });
 
   const bulkResubmitMutation = useMutation({
-    mutationFn: ({ ids, count }: { ids: string[]; count: number }) => api.bulkResubmitRuns(ids, count),
+    mutationFn: ({ ids, count, overrides }: { ids: string[]; count: number; overrides?: BulkResubmitOverrides }) =>
+      api.bulkResubmitRuns(ids, count, Object.keys(overrides ?? {}).length > 0 ? overrides : undefined),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["runs"] });
       setSelectedIds(new Set());
       setResubmitDialogOpen(false);
       setResubmitCount(1);
+      setResubmitOverrides({});
       toast.success(`Re-submitted ${data.submitted} run${data.submitted !== 1 ? "s" : ""}`);
     },
     onError: (error) => {
@@ -246,32 +255,169 @@ export function RunsList() {
                 <Repeat className="h-4 w-4" /> Re-submit selected
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent>
+            <AlertDialogContent className="max-w-lg">
               <AlertDialogHeader>
                 <AlertDialogTitle>Re-submit {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will create new runs with the same scenario, worker, and settings as the selected runs.
+                  New runs copy the original scenario and settings. Use overrides below to change specific fields.
                 </AlertDialogDescription>
               </AlertDialogHeader>
-              <div className="py-4">
-                <Label htmlFor="resubmit-count" className="text-sm font-medium">Copies per run</Label>
-                <Input
-                  id="resubmit-count"
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={resubmitCount}
-                  onChange={(e) => setResubmitCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
-                  className="mt-1.5 w-24"
-                />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Total new runs: {selectedIds.size * resubmitCount}
-                </p>
+              <div className="space-y-4 py-2">
+                {/* Copies per run */}
+                <div className="flex items-center gap-4">
+                  <Label htmlFor="resubmit-count" className="text-sm font-medium w-32 shrink-0">Copies per run</Label>
+                  <Input
+                    id="resubmit-count"
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={resubmitCount}
+                    onChange={(e) => setResubmitCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                    className="w-24"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    = {selectedIds.size * resubmitCount} new run{selectedIds.size * resubmitCount !== 1 ? "s" : ""}
+                  </span>
+                </div>
+
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium mb-3">Overrides <span className="text-muted-foreground font-normal">(leave as "keep original" to copy from source)</span></p>
+
+                  {/* Worker type override */}
+                  <div className="flex items-center gap-4 mb-3">
+                    <Label className="text-sm w-32 shrink-0">Worker</Label>
+                    <Select
+                      value={resubmitOverrides.workerType ?? "__keep__"}
+                      onValueChange={(v) => setResubmitOverrides((prev) => {
+                        const next = { ...prev };
+                        if (v === "__keep__") { delete next.workerType; } else { next.workerType = v; }
+                        return next;
+                      })}
+                    >
+                      <SelectTrigger className="w-56">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__keep__">Keep original</SelectItem>
+                        {WORKER_TYPES.map((w) => (
+                          <SelectItem key={w} value={w}>{w}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Model override */}
+                  <div className="flex items-center gap-4 mb-3">
+                    <Label className="text-sm w-32 shrink-0">Model</Label>
+                    <Select
+                      value={resubmitOverrides.model === null ? "__clear__" : resubmitOverrides.model ?? "__keep__"}
+                      onValueChange={(v) => setResubmitOverrides((prev) => {
+                        const next = { ...prev };
+                        if (v === "__keep__") { delete next.model; }
+                        else if (v === "__clear__") { next.model = null; }
+                        else { next.model = v; }
+                        return next;
+                      })}
+                    >
+                      <SelectTrigger className="w-56">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__keep__">Keep original</SelectItem>
+                        <SelectItem value="__clear__">Clear (use default)</SelectItem>
+                        <SelectItem value="gpt-4.1">gpt-4.1</SelectItem>
+                        <SelectItem value="gpt-4.1-mini">gpt-4.1-mini</SelectItem>
+                        <SelectItem value="gpt-4.1-nano">gpt-4.1-nano</SelectItem>
+                        <SelectItem value="o4-mini">o4-mini</SelectItem>
+                        <SelectItem value="claude-sonnet-4-20250514">claude-sonnet-4-20250514</SelectItem>
+                        <SelectItem value="claude-opus-4-20250514">claude-opus-4-20250514</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Max iterations override */}
+                  <div className="flex items-center gap-4 mb-3">
+                    <Label className="text-sm w-32 shrink-0">Max iterations</Label>
+                    <Select
+                      value={resubmitOverrides.maxIterations === null ? "__clear__" : resubmitOverrides.maxIterations?.toString() ?? "__keep__"}
+                      onValueChange={(v) => setResubmitOverrides((prev) => {
+                        const next = { ...prev };
+                        if (v === "__keep__") { delete next.maxIterations; }
+                        else if (v === "__clear__") { next.maxIterations = null; }
+                        else { next.maxIterations = parseInt(v); }
+                        return next;
+                      })}
+                    >
+                      <SelectTrigger className="w-56">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__keep__">Keep original</SelectItem>
+                        <SelectItem value="__clear__">Clear (use default)</SelectItem>
+                        {[1, 2, 3, 5, 10, 15, 20].map((n) => (
+                          <SelectItem key={n} value={n.toString()}>{n}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* MCP servers override */}
+                  <div className="flex items-start gap-4">
+                    <Label className="text-sm w-32 shrink-0 pt-2">MCP Servers</Label>
+                    <div className="flex-1 space-y-1.5">
+                      <Select
+                        value={resubmitOverrides.mcpServers === null ? "__clear__" : resubmitOverrides.mcpServers !== undefined ? "__custom__" : "__keep__"}
+                        onValueChange={(v) => setResubmitOverrides((prev) => {
+                          const next = { ...prev };
+                          if (v === "__keep__") { delete next.mcpServers; }
+                          else if (v === "__clear__") { next.mcpServers = null; }
+                          else { next.mcpServers = []; }
+                          return next;
+                        })}
+                      >
+                        <SelectTrigger className="w-56">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__keep__">Keep original</SelectItem>
+                          <SelectItem value="__clear__">Clear (no MCP servers)</SelectItem>
+                          <SelectItem value="__custom__">Choose servers…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {resubmitOverrides.mcpServers !== undefined && resubmitOverrides.mcpServers !== null && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {mcpServers.map((s) => {
+                            const selected = resubmitOverrides.mcpServers?.includes(s._id) ?? false;
+                            return (
+                              <Button
+                                key={s._id}
+                                type="button"
+                                variant={selected ? "default" : "outline"}
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => setResubmitOverrides((prev) => {
+                                  const current = prev.mcpServers ?? [];
+                                  const next = selected ? current.filter((id) => id !== s._id) : [...current, s._id];
+                                  return { ...prev, mcpServers: next };
+                                })}
+                              >
+                                {s.name}
+                              </Button>
+                            );
+                          })}
+                          {mcpServers.length === 0 && (
+                            <span className="text-xs text-muted-foreground italic">No MCP servers configured</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
               <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => setResubmitCount(1)}>Cancel</AlertDialogCancel>
+                <AlertDialogCancel onClick={() => { setResubmitCount(1); setResubmitOverrides({}); }}>Cancel</AlertDialogCancel>
                 <AlertDialogAction
-                  onClick={() => bulkResubmitMutation.mutate({ ids: Array.from(selectedIds), count: resubmitCount })}
+                  onClick={() => bulkResubmitMutation.mutate({ ids: Array.from(selectedIds), count: resubmitCount, overrides: resubmitOverrides })}
                   disabled={bulkResubmitMutation.isPending}
                 >
                   {bulkResubmitMutation.isPending ? "Re-submitting…" : "Re-submit"}

@@ -850,7 +850,16 @@ app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFuncti
 // Bulk re-submit requests (create new runs from existing ones)
 app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { ids, count = 1 } = req.body as { ids?: string[]; count?: number };
+    const { ids, count = 1, overrides } = req.body as {
+      ids?: string[];
+      count?: number;
+      overrides?: {
+        workerType?: string;
+        model?: string | null;
+        maxIterations?: number | null;
+        mcpServers?: string[] | null;
+      };
+    };
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       res.status(400).json({ error: "Request body must include 'ids' array" });
@@ -859,6 +868,12 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
 
     if (typeof count !== "number" || count < 1 || count > 10) {
       res.status(400).json({ error: "count must be a number between 1 and 10" });
+      return;
+    }
+
+    // Validate overrides if provided
+    if (overrides?.workerType && !VALID_WORKERS.includes(overrides.workerType as WorkerType)) {
+      res.status(400).json({ error: `Invalid workerType override: ${overrides.workerType}` });
       return;
     }
 
@@ -879,24 +894,30 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
         const requestId = uuidv4();
         newIds.push(requestId);
 
+        // Resolve effective values: override > original > omit
+        const effectiveWorkerType = (overrides?.workerType ?? original.workerType) as WorkerType;
+        const effectiveModel = overrides?.model !== undefined ? overrides.model : original.model;
+        const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
+        const effectiveMcpServers = overrides?.mcpServers !== undefined ? overrides.mcpServers : original.mcpServers;
+
         const newDoc: RequestDocument = {
           _id: requestId,
           scenario: original.scenario,
-          workerType: original.workerType,
+          workerType: effectiveWorkerType,
           status: "pending",
           createdAt: new Date(),
-          ...(original.maxIterations ? { maxIterations: original.maxIterations } : {}),
+          ...(effectiveMaxIterations ? { maxIterations: effectiveMaxIterations } : {}),
           ...(original.personaInstructions ? { personaInstructions: original.personaInstructions } : {}),
           ...(original.persona ? { persona: original.persona } : {}),
-          ...(original.model ? { model: original.model } : {}),
-          ...(original.mcpServers && original.mcpServers.length > 0 ? { mcpServers: original.mcpServers } : {}),
+          ...(effectiveModel ? { model: effectiveModel } : {}),
+          ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
         };
 
         newDocs.push(newDoc);
 
         const queueMessage: QueueMessage = { requestId };
         const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
-        queueMessages.push({ workerType: original.workerType as WorkerType, message: messageContent });
+        queueMessages.push({ workerType: effectiveWorkerType as WorkerType, message: messageContent });
       }
     }
 
