@@ -69,6 +69,7 @@ let criteriaCollection: Collection<CriteriaDocument>;
 let promptFeatureCollection: Collection<PromptFeatureDocument>;
 let promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
 let reportCollection: Collection<ReportDocument>;
+let agentCollection: Collection<CodingAgentDocument>;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
@@ -136,6 +137,7 @@ interface RequestDocument {
   _id: string;
   scenario: { task: string; criteria: string[]; version?: 'v1' | 'v2' };
   workerType: WorkerType;
+  model?: string;
   status: "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
   result?: string;
   error?: string;
@@ -151,6 +153,18 @@ interface RequestDocument {
   }>;
   personaInstructions?: string;
   persona?: { personality: string; experience: string; verbosity: string; type: string };
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;
+}
+
+// Coding agent document interface
+interface CodingAgentDocument {
+  _id: string;
+  name: string;
+  description?: string;
+  supportedModels: string[];
+  defaultModel?: string;
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;
@@ -280,6 +294,7 @@ async function initializeClients(): Promise<void> {
   promptFeatureCollection = db.collection<PromptFeatureDocument>("prompt-features");
   promptFeatureExtractionCollection = db.collection<PromptFeatureExtractionDocument>("prompt-feature-extractions");
   reportCollection = db.collection<ReportDocument>("reports");
+  agentCollection = db.collection<CodingAgentDocument>("agents");
   
   // Create index for createdAt (required for sorting in CosmosDB MongoDB API)
   try {
@@ -323,12 +338,23 @@ async function initializeClients(): Promise<void> {
     console.log("Indexes on reports collection already exist or couldn't be created");
   }
 
+  // Create index for agents collection
+  try {
+    await agentCollection.createIndex({ createdAt: -1 });
+    console.log("Created index on agents collection");
+  } catch (err) {
+    console.log("Index on agents collection already exists or couldn't be created");
+  }
+
   // Seed criteria from YAML files on first boot (skipped — use POST /api/v1/criteria/seed)
   const criteriaCount = await criteriaCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Criteria collection has ${criteriaCount} documents`);
 
   const promptFeatureCount = await promptFeatureCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Prompt features collection has ${promptFeatureCount} documents`);
+
+  const agentCount = await agentCollection.countDocuments({ deletedAt: { $exists: false } });
+  console.log(`Agents collection has ${agentCount} documents`);
   
   console.log(`Connected to MongoDB: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
 
@@ -385,7 +411,7 @@ app.get("/api/v1/version", (_req: Request, res: Response) => {
 // Submit a request
 app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel } = req.body;
     const worker = req.query.worker as string;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
@@ -434,6 +460,22 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
 
     const workerType = worker as WorkerType;
 
+    // Resolve model: validate against agent's supportedModels if available
+    let model: string | undefined = requestedModel;
+    const agentDoc = await agentCollection.findOne({ _id: workerType, deletedAt: { $exists: false } });
+    if (agentDoc && agentDoc.supportedModels.length > 0) {
+      if (model && !agentDoc.supportedModels.includes(model)) {
+        res.status(400).json({
+          error: `Invalid model "${model}" for agent "${workerType}"`,
+          supportedModels: agentDoc.supportedModels,
+        });
+        return;
+      }
+      if (!model && agentDoc.defaultModel) {
+        model = agentDoc.defaultModel;
+      }
+    }
+
     // Normalize scenario: ensure criteria is always an array, preserve version
     const scenario: RequestDocument['scenario'] = {
       task: scenarioObj.task as string,
@@ -460,6 +502,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
           workerType,
           status: "pending",
           createdAt: new Date(),
+          ...(model ? { model } : {}),
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
@@ -486,6 +529,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
         ids: newIds,
         count,
         workerType,
+        ...(model ? { model } : {}),
         status: "pending",
         mode,
         message: `${count} requests submitted successfully`,
@@ -505,6 +549,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       workerType,
       status: "pending",
       createdAt: new Date(),
+      ...(model ? { model } : {}),
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
@@ -524,6 +569,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
     res.status(201).json({
       id: requestId,
       workerType,
+      ...(model ? { model } : {}),
       status: requestDoc.status,
       mode,
       message: "Request submitted successfully",
@@ -2172,6 +2218,165 @@ if (TOKEN_MANAGER_URL) {
 } else {
   console.log("[api] Token Manager proxy disabled (TOKEN_MANAGER_URL not set)");
 }
+
+// =============================================
+// Coding Agents CRUD
+// =============================================
+
+// List all agents
+app.get("/api/v1/agents", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const agents = await agentCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+    // Sort in JS for CosmosDB compatibility
+    agents.sort((a, b) => a._id.localeCompare(b._id));
+    res.json(agents.map((a) => ({ ...a, id: a._id })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get a single agent
+app.get("/api/v1/agents/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    res.json({ ...agent, id: agent._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create or upsert an agent (idempotent — used by seed jobs)
+app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { _id, name, description, supportedModels, defaultModel } = req.body;
+
+    if (!_id || typeof _id !== "string") {
+      res.status(400).json({ error: "_id is required and must be a string" });
+      return;
+    }
+    if (!name || typeof name !== "string") {
+      res.status(400).json({ error: "name is required and must be a string" });
+      return;
+    }
+    if (!Array.isArray(supportedModels) || !supportedModels.every((m: unknown) => typeof m === "string")) {
+      res.status(400).json({ error: "supportedModels is required and must be an array of strings" });
+      return;
+    }
+    if (defaultModel !== undefined && typeof defaultModel !== "string") {
+      res.status(400).json({ error: "defaultModel must be a string" });
+      return;
+    }
+    if (defaultModel && supportedModels.length > 0 && !supportedModels.includes(defaultModel)) {
+      res.status(400).json({ error: "defaultModel must be one of supportedModels" });
+      return;
+    }
+
+    const now = new Date();
+    const existing = await agentCollection.findOne({ _id });
+
+    if (existing) {
+      // Upsert: update existing (un-delete if soft-deleted)
+      await agentCollection.updateOne(
+        { _id },
+        {
+          $set: {
+            name,
+            ...(description !== undefined ? { description } : {}),
+            supportedModels,
+            ...(defaultModel !== undefined ? { defaultModel } : {}),
+            updatedAt: now,
+          },
+          $unset: { deletedAt: "" },
+        }
+      );
+      const updated = await agentCollection.findOne({ _id });
+      res.json({ ...updated, id: updated!._id });
+    } else {
+      // Create new
+      const agentDoc: CodingAgentDocument = {
+        _id,
+        name,
+        ...(description ? { description } : {}),
+        supportedModels,
+        ...(defaultModel ? { defaultModel } : {}),
+        createdAt: now,
+      };
+      await agentCollection.insertOne(agentDoc);
+      res.status(201).json({ ...agentDoc, id: agentDoc._id });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update an agent
+app.put("/api/v1/agents/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { name, description, supportedModels, defaultModel } = req.body;
+
+    const existing = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+    if (name !== undefined) updateFields.name = name;
+    if (description !== undefined) updateFields.description = description;
+    if (supportedModels !== undefined) {
+      if (!Array.isArray(supportedModels) || !supportedModels.every((m: unknown) => typeof m === "string")) {
+        res.status(400).json({ error: "supportedModels must be an array of strings" });
+        return;
+      }
+      updateFields.supportedModels = supportedModels;
+    }
+    if (defaultModel !== undefined) {
+      const models = (supportedModels as string[] | undefined) || existing.supportedModels;
+      if (defaultModel && models.length > 0 && !models.includes(defaultModel)) {
+        res.status(400).json({ error: "defaultModel must be one of supportedModels" });
+        return;
+      }
+      updateFields.defaultModel = defaultModel;
+    }
+
+    await agentCollection.updateOne({ _id: id }, { $set: updateFields });
+
+    const updated = await agentCollection.findOne({ _id: id });
+    res.json({ ...updated, id: updated!._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Soft-delete an agent
+app.delete("/api/v1/agents/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    await agentCollection.updateOne(
+      { _id: id },
+      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+    );
+
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
