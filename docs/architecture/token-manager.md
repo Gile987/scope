@@ -85,16 +85,16 @@ The Token Manager uses a **capability-based model** where tokens are associated 
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Registered: POST /tokens
-    Registered --> Validating: Async validation
-    Validating --> Valid: Validation passed
-    Validating --> Invalid: Validation failed
-    Valid --> Acquired: GET /tokens/acquire
-    Acquired --> Valid: Token returned to pool
-    Valid --> Validating: Scheduler tick (5min)
-    Invalid --> Validating: Manual revalidate
-    Invalid --> [*]: DELETE /tokens/:id
-    Valid --> [*]: DELETE /tokens/:id
+    [*] --> Registered : POST /tokens
+    Registered --> Validating : Async validation
+    Validating --> Valid : Validation passed
+    Validating --> Invalid : Validation failed
+    Valid --> Acquired : GET /tokens/acquire
+    Acquired --> Valid : Token returned to pool
+    Valid --> Validating : Scheduler tick (5 min)
+    Invalid --> Validating : Manual revalidate
+    Invalid --> [*] : DELETE
+    Valid --> [*] : DELETE
 ```
 
 ### States
