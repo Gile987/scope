@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -42,6 +42,7 @@ export const api = {
     persona?: { personality: string; experience: string; verbosity: string; type: string };
     count?: number;
     promptFeatureExtractionId?: string;
+    mcpServers?: string[];
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     return request(`/requests?worker=${encodeURIComponent(worker)}`, {
@@ -216,6 +217,39 @@ export const api = {
   /** Soft-delete a coding agent */
   deleteAgent: (id: string): Promise<{ id: string; deleted: boolean }> => {
     return request(`/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  // ─── MCP Servers ────────────────────────────────────────────────────────────
+
+  /** List all MCP servers */
+  listMcpServers: (): Promise<McpServerDocument[]> => {
+    return request("/mcp/servers");
+  },
+
+  /** Get a single MCP server by slug */
+  getMcpServer: (slug: string): Promise<McpServerDocument> => {
+    return request(`/mcp/servers/${encodeURIComponent(slug)}`);
+  },
+
+  /** Create a new MCP server (upsert by slug) */
+  createMcpServer: (body: CreateMcpServerRequest): Promise<McpServerDocument> => {
+    return request("/mcp/servers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update an MCP server */
+  updateMcpServer: (slug: string, body: UpdateMcpServerRequest): Promise<McpServerDocument> => {
+    return request(`/mcp/servers/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete an MCP server */
+  deleteMcpServer: (slug: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/mcp/servers/${encodeURIComponent(slug)}`, { method: "DELETE" });
   },
 
   // ─── Analysis ──────────────────────────────────────────────────────────────

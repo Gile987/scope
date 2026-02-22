@@ -153,6 +153,12 @@ export function RunDetail() {
                   <span>Max {run.maxIterations} iterations</span>
                 </>
               )}
+              {run.mcpServers && run.mcpServers.length > 0 && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <span>{run.mcpServers.length} MCP server{run.mcpServers.length !== 1 ? "s" : ""}</span>
+                </>
+              )}
             </div>
           </div>
         </div>

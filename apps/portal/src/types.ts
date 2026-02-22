@@ -61,6 +61,7 @@ export interface Run {
   updatedAt?: string;
   deletedAt?: string;
   promptFeatureExtractionId?: string;
+  mcpServers?: string[];
 }
 
 export const WORKER_TYPES = [
@@ -326,4 +327,41 @@ export interface CodingAgent {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
+}
+
+// MCP Server types
+export type McpTransportType = "sse" | "http";
+
+export interface McpServerHeader {
+  name: string;
+  value: string;
+}
+
+export interface McpServerDocument {
+  _id: string;
+  name: string;
+  type: McpTransportType;
+  url: string;
+  headers?: McpServerHeader[];
+  description?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface CreateMcpServerRequest {
+  _id: string;
+  name: string;
+  type: McpTransportType;
+  url: string;
+  headers?: McpServerHeader[];
+  description?: string;
+}
+
+export interface UpdateMcpServerRequest {
+  name?: string;
+  type?: McpTransportType;
+  url?: string;
+  headers?: McpServerHeader[];
+  description?: string;
 }
