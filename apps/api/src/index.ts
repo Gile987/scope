@@ -70,6 +70,7 @@ let promptFeatureCollection: Collection<PromptFeatureDocument>;
 let promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
 let reportCollection: Collection<ReportDocument>;
 let agentCollection: Collection<CodingAgentDocument>;
+let insightsCollection: Collection<InsightDocument>;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
@@ -103,6 +104,13 @@ interface PromptFeatureExtractionDocument {
   model?: string;
 }
 
+// Insight reference interface (embedded in ReportDocument)
+interface InsightReference {
+  insightId: string;
+  referencedAt: Date;
+  isNew: boolean;
+}
+
 // Report document interface
 interface ReportDocument {
   _id: string;
@@ -119,8 +127,28 @@ interface ReportDocument {
   status: "pending" | "generating" | "completed" | "failed";
   error?: string;
   logs: LogEvent[];
+  insightReferences?: InsightReference[];
   createdAt: Date;
   updatedAt?: Date;
+}
+
+// Insight document interface
+interface InsightDocument {
+  _id: string;
+  title: string;
+  /** Markdown-formatted detailed observation */
+  description: string;
+  category?: string;
+  tags?: string[];
+  upvotes: number;
+  downvotes: number;
+  blocked: boolean;
+  referenceCount: number;
+  createdBy: "agent" | "user";
+  sourceReportId?: string;
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;
 }
 
 // Log event interface
@@ -295,6 +323,7 @@ async function initializeClients(): Promise<void> {
   promptFeatureExtractionCollection = db.collection<PromptFeatureExtractionDocument>("prompt-feature-extractions");
   reportCollection = db.collection<ReportDocument>("reports");
   agentCollection = db.collection<CodingAgentDocument>("agents");
+  insightsCollection = db.collection<InsightDocument>("insights");
   
   // Create index for createdAt (required for sorting in CosmosDB MongoDB API)
   try {
@@ -346,6 +375,14 @@ async function initializeClients(): Promise<void> {
     console.log("Index on agents collection already exists or couldn't be created");
   }
 
+  // Create indexes for insights collection
+  try {
+    await insightsCollection.createIndex({ createdAt: -1 });
+    console.log("Created indexes on insights collection");
+  } catch (err) {
+    console.log("Indexes on insights collection already exist or couldn't be created");
+  }
+
   // Seed criteria from YAML files on first boot (skipped — use POST /api/v1/criteria/seed)
   const criteriaCount = await criteriaCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Criteria collection has ${criteriaCount} documents`);
@@ -355,6 +392,9 @@ async function initializeClients(): Promise<void> {
 
   const agentCount = await agentCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Agents collection has ${agentCount} documents`);
+
+  const insightCount = await insightsCollection.countDocuments({ deletedAt: { $exists: false } });
+  console.log(`Insights collection has ${insightCount} documents`);
   
   console.log(`Connected to MongoDB: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
 
@@ -2373,6 +2413,369 @@ app.delete("/api/v1/agents/:id", async (req: Request, res: Response, next: NextF
     );
 
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// =====================================================================
+// Insights API
+// =====================================================================
+
+// List all insights (with optional ?q= text search, ?blocked= filter)
+app.get("/api/v1/insights", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { q, blocked } = req.query;
+    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+
+    if (blocked !== undefined) {
+      filter.blocked = blocked === "true";
+    }
+
+    if (q && typeof q === "string" && q.trim()) {
+      // Case-insensitive regex search across title, description, category, and tags
+      const regex = { $regex: q.trim(), $options: "i" };
+      filter.$or = [
+        { title: regex },
+        { description: regex },
+        { category: regex },
+        { tags: regex },
+      ];
+    }
+
+    const insights = await insightsCollection
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(insights.map((i) => ({ ...i, id: i._id })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Search insights by keyword (fuzzy regex match)
+app.get("/api/v1/insights/search", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { q, blocked } = req.query;
+
+    if (!q || typeof q !== "string" || !q.trim()) {
+      res.status(400).json({ error: "Query parameter 'q' is required" });
+      return;
+    }
+
+    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+
+    if (blocked !== undefined) {
+      filter.blocked = blocked === "true";
+    } else {
+      // Default: exclude blocked insights from search
+      filter.blocked = { $ne: true };
+    }
+
+    // Split query into words and match all of them (AND) across title/description/tags
+    const words = q.trim().split(/\s+/);
+    filter.$and = words.map((word) => {
+      const regex = { $regex: word, $options: "i" };
+      return {
+        $or: [
+          { title: regex },
+          { description: regex },
+          { category: regex },
+          { tags: regex },
+        ],
+      };
+    });
+
+    const insights = await insightsCollection
+      .find(filter)
+      .sort({ referenceCount: -1, createdAt: -1 })
+      .limit(20)
+      .toArray();
+
+    res.json(insights.map((i) => ({ ...i, id: i._id })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get a single insight
+app.get("/api/v1/insights/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const insight = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!insight) {
+      res.status(404).json({ error: "Insight not found" });
+      return;
+    }
+    res.json({ ...insight, id: insight._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create a new insight
+app.post("/api/v1/insights", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { title, description, category, tags, createdBy, sourceReportId } = req.body;
+
+    if (!title || typeof title !== "string" || !title.trim()) {
+      res.status(400).json({ error: "title is required" });
+      return;
+    }
+    if (!description || typeof description !== "string" || !description.trim()) {
+      res.status(400).json({ error: "description is required" });
+      return;
+    }
+
+    const now = new Date();
+    const doc: InsightDocument = {
+      _id: uuidv4(),
+      title: title.trim(),
+      description: description.trim(),
+      category: category?.trim() || undefined,
+      tags: Array.isArray(tags) ? tags.map((t: string) => t.trim()).filter(Boolean) : undefined,
+      upvotes: 0,
+      downvotes: 0,
+      blocked: false,
+      referenceCount: 0,
+      createdBy: createdBy === "agent" ? "agent" : "user",
+      sourceReportId: sourceReportId || undefined,
+      createdAt: now,
+    };
+
+    await insightsCollection.insertOne(doc);
+    res.status(201).json({ ...doc, id: doc._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update an insight
+app.put("/api/v1/insights/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "Insight not found" });
+      return;
+    }
+
+    const { title, description, category, tags } = req.body;
+    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+
+    if (title !== undefined) updateFields.title = title.trim();
+    if (description !== undefined) updateFields.description = description.trim();
+    if (category !== undefined) updateFields.category = category?.trim() || undefined;
+    if (tags !== undefined) updateFields.tags = Array.isArray(tags) ? tags.map((t: string) => t.trim()).filter(Boolean) : undefined;
+
+    await insightsCollection.updateOne({ _id: id }, { $set: updateFields });
+    const updated = await insightsCollection.findOne({ _id: id });
+    res.json({ ...updated, id: updated!._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Soft-delete an insight
+app.delete("/api/v1/insights/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "Insight not found" });
+      return;
+    }
+
+    await insightsCollection.updateOne(
+      { _id: id },
+      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+    );
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Upvote an insight
+app.post("/api/v1/insights/:id/upvote", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "Insight not found" });
+      return;
+    }
+
+    await insightsCollection.updateOne({ _id: id }, { $inc: { upvotes: 1 }, $set: { updatedAt: new Date() } });
+    const updated = await insightsCollection.findOne({ _id: id });
+    res.json({ ...updated, id: updated!._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Downvote an insight
+app.post("/api/v1/insights/:id/downvote", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "Insight not found" });
+      return;
+    }
+
+    await insightsCollection.updateOne({ _id: id }, { $inc: { downvotes: 1 }, $set: { updatedAt: new Date() } });
+    const updated = await insightsCollection.findOne({ _id: id });
+    res.json({ ...updated, id: updated!._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Block an insight
+app.post("/api/v1/insights/:id/block", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "Insight not found" });
+      return;
+    }
+
+    await insightsCollection.updateOne({ _id: id }, { $set: { blocked: true, updatedAt: new Date() } });
+    const updated = await insightsCollection.findOne({ _id: id });
+    res.json({ ...updated, id: updated!._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Unblock an insight
+app.post("/api/v1/insights/:id/unblock", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "Insight not found" });
+      return;
+    }
+
+    await insightsCollection.updateOne({ _id: id }, { $set: { blocked: false, updatedAt: new Date() } });
+    const updated = await insightsCollection.findOne({ _id: id });
+    res.json({ ...updated, id: updated!._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get reports that reference a specific insight
+app.get("/api/v1/insights/:id/reports", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const insight = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!insight) {
+      res.status(404).json({ error: "Insight not found" });
+      return;
+    }
+
+    const reports = await reportCollection
+      .find({ "insightReferences.insightId": id })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(reports.map((r) => ({ ...r, id: r._id })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get insights referenced by a specific report
+app.get("/api/v1/reports/:id/insights", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const report = await reportCollection.findOne({ _id: id });
+    if (!report) {
+      res.status(404).json({ error: "Report not found" });
+      return;
+    }
+
+    if (!report.insightReferences || report.insightReferences.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    const insightIds = report.insightReferences.map((ref) => ref.insightId);
+    const insights = await insightsCollection
+      .find({ _id: { $in: insightIds }, deletedAt: { $exists: false } })
+      .toArray();
+
+    // Enrich with reference metadata
+    const enriched = insights.map((insight) => {
+      const ref = report.insightReferences!.find((r) => r.insightId === insight._id);
+      return {
+        ...insight,
+        id: insight._id,
+        referencedAt: ref?.referencedAt,
+        isNew: ref?.isNew,
+      };
+    });
+
+    res.json(enriched);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Add an insight reference to a report
+app.post("/api/v1/reports/:id/insights", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { insightId, isNew } = req.body;
+
+    if (!insightId || typeof insightId !== "string") {
+      res.status(400).json({ error: "insightId is required" });
+      return;
+    }
+
+    const report = await reportCollection.findOne({ _id: id });
+    if (!report) {
+      res.status(404).json({ error: "Report not found" });
+      return;
+    }
+
+    const insight = await insightsCollection.findOne({ _id: insightId, deletedAt: { $exists: false } });
+    if (!insight) {
+      res.status(404).json({ error: "Insight not found" });
+      return;
+    }
+
+    // Check if already referenced
+    const alreadyReferenced = report.insightReferences?.some((ref) => ref.insightId === insightId);
+    if (alreadyReferenced) {
+      res.status(409).json({ error: "Insight already referenced by this report" });
+      return;
+    }
+
+    const reference: InsightReference = {
+      insightId,
+      referencedAt: new Date(),
+      isNew: isNew === true,
+    };
+
+    // Add reference to report
+    await reportCollection.updateOne(
+      { _id: id },
+      { $push: { insightReferences: reference }, $set: { updatedAt: new Date() } }
+    );
+
+    // Increment reference count on insight
+    await insightsCollection.updateOne(
+      { _id: insightId },
+      { $inc: { referenceCount: 1 }, $set: { updatedAt: new Date() } }
+    );
+
+    res.status(201).json(reference);
   } catch (error) {
     next(error);
   }
