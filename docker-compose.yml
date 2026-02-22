@@ -158,6 +158,41 @@ services:
       azurite:
         condition: service_healthy
 
+  # Seed agents - registers agent definitions on startup
+  seed-agents:
+    image: curlimages/curl:latest
+    depends_on:
+      api:
+        condition: service_started
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        API_URL="http://api:80"
+        echo "Waiting for API to be ready..."
+        until curl -sf "$$API_URL/health" > /dev/null 2>&1; do
+          echo "API not ready, retrying in 3s..."
+          sleep 3
+        done
+        echo "API is ready. Seeding agents..."
+
+        curl -sf -X POST "$$API_URL/api/v1/agents" \
+          -H "Content-Type: application/json" \
+          -d '{"_id":"coder-acp-copilot","name":"Copilot (ACP)","description":"GitHub Copilot coding agent via ACP protocol","supportedModels":["gpt-4.1","claude-sonnet-4"],"defaultModel":"gpt-4.1"}'
+        echo ""
+
+        curl -sf -X POST "$$API_URL/api/v1/agents" \
+          -H "Content-Type: application/json" \
+          -d '{"_id":"coder-acp-claude-code","name":"Claude Code (ACP)","description":"Anthropic Claude Code coding agent via ACP protocol","supportedModels":["claude-sonnet-4","claude-opus-4"],"defaultModel":"claude-sonnet-4"}'
+        echo ""
+
+        curl -sf -X POST "$$API_URL/api/v1/agents" \
+          -H "Content-Type: application/json" \
+        echo ""
+
+        echo "All agents seeded."
+
   # Judge - evaluation service (always starts)
   judge:
     build:
