@@ -888,6 +888,8 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
           ...(original.maxIterations ? { maxIterations: original.maxIterations } : {}),
           ...(original.personaInstructions ? { personaInstructions: original.personaInstructions } : {}),
           ...(original.persona ? { persona: original.persona } : {}),
+          ...(original.model ? { model: original.model } : {}),
+          ...(original.mcpServers && original.mcpServers.length > 0 ? { mcpServers: original.mcpServers } : {}),
         };
 
         newDocs.push(newDoc);
