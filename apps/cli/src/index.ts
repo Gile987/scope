@@ -365,9 +365,20 @@ run
         }
 
         const displayFields: DisplayField[] = [
-          { key: 'id', label: 'ID', formatter: (req: any) => req.id ?? '(no id)' },
-          { key: 'workerType', label: 'Worker', formatter: (req: any) => req.workerType ?? 'unknown' },
-          { key: 'status', label: 'Status', formatter: (req: any) => req.status ?? 'unknown' },
+          { key: 'id', label: 'ID',
+            formatter: (req: any) => req.id ?? '(no id)',
+            tableFormatter: (req: any) => value(req.id ?? '(no id)'),
+          },
+          { key: 'workerType', label: 'Worker',
+            formatter: (req: any) => req.workerType ?? 'unknown',
+          },
+          { key: 'status', label: 'Status',
+            formatter: (req: any) => req.status ?? 'unknown',
+            tableFormatter: (req: any) => {
+              const s = req.status ?? 'unknown';
+              return s === 'completed' ? successText(s) : s === 'failed' ? errorText(s) : value(s);
+            },
+          },
         ];
 
         console.log(formatData(requests, displayFields, format));
@@ -677,11 +688,17 @@ criteria
       }
 
       const displayFields: DisplayField[] = [
-        { key: 'id', label: 'ID' },
+        { key: 'id', label: 'ID',
+          tableFormatter: (c: any) => value(c.id),
+        },
         { key: 'dependsOn', label: 'Deps', formatter: (c: any) => String((c.dependsOn ?? []).length) },
         { key: 'prompt', label: 'Prompt', formatter: (c: any) => {
           const prompt = c.prompt.replace(/\n/g, ' ');
           return prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
+        }, tableFormatter: (c: any) => {
+          const prompt = c.prompt.replace(/\n/g, ' ');
+          const truncated = prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
+          return dimTimestamp(truncated);
         }},
       ];
 
@@ -1089,11 +1106,17 @@ promptFeature
       }
 
       const displayFields: DisplayField[] = [
-        { key: 'id', label: 'ID' },
+        { key: 'id', label: 'ID',
+          tableFormatter: (f: any) => value(f.id),
+        },
         { key: 'dependsOn', label: 'Deps', formatter: (f: any) => String((f.dependsOn ?? []).length) },
         { key: 'prompt', label: 'Prompt', formatter: (f: any) => {
           const prompt = f.prompt.replace(/\n/g, ' ');
           return prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
+        }, tableFormatter: (f: any) => {
+          const prompt = f.prompt.replace(/\n/g, ' ');
+          const truncated = prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
+          return dimTimestamp(truncated);
         }},
       ];
 
@@ -1701,11 +1724,25 @@ report
       }
 
       const displayFields: DisplayField[] = [
-        { key: 'id', label: 'ID' },
-        { key: 'requestId', label: 'Run ID' },
-        { key: 'status', label: 'Status' },
-        { key: 'model', label: 'Model', formatter: (r: any) => r.reporter?.model ?? 'N/A' },
-        { key: 'createdAt', label: 'Created', formatter: (r: any) => new Date(r.createdAt).toLocaleString() },
+        { key: 'id', label: 'ID',
+          tableFormatter: (r: any) => value(r.id),
+        },
+        { key: 'requestId', label: 'Run ID',
+          tableFormatter: (r: any) => dimTimestamp(r.requestId),
+        },
+        { key: 'status', label: 'Status',
+          tableFormatter: (r: any) => {
+            return r.status === 'completed' ? successText('✓ ' + r.status)
+              : r.status === 'failed' ? errorText('✗ ' + r.status)
+              : dimTimestamp('… ' + r.status);
+          },
+        },
+        { key: 'model', label: 'Model', formatter: (r: any) => r.reporter?.model ?? 'N/A',
+          tableFormatter: (r: any) => r.reporter?.model ? dimTimestamp(r.reporter.model) : 'N/A',
+        },
+        { key: 'createdAt', label: 'Created', formatter: (r: any) => new Date(r.createdAt).toLocaleString(),
+          tableFormatter: (r: any) => dimTimestamp(new Date(r.createdAt).toLocaleString()),
+        },
       ];
 
       console.log(formatData(reports, displayFields, format));

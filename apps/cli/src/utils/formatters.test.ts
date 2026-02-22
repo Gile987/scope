@@ -118,6 +118,21 @@ describe('formatAsTable', () => {
     expect(result).toContain('[abc-123]');
   });
 
+  it('prefers tableFormatter over formatter for table output', () => {
+    const columns: TableColumn[] = [
+      {
+        key: 'id',
+        header: 'ID',
+        formatter: (item) => item.id,
+        tableFormatter: (item) => `**${item.id}**`,
+      },
+    ];
+
+    const result = formatAsTable(sampleItems, columns);
+    expect(result).toContain('**abc-123**');
+    expect(result).not.toMatch(/│\s*abc-123\s*│/); // plain version should not appear
+  });
+
   it('handles empty array', () => {
     const columns: TableColumn[] = [
       { key: 'id', header: 'ID' },
@@ -246,6 +261,28 @@ describe('formatData', () => {
     expect(() => formatData(sampleItems, displayFields, 'yaml' as any)).toThrow(
       'Unsupported output format: yaml',
     );
+  });
+
+  it('uses tableFormatter for table format, plain formatter for tsv/json', () => {
+    const fields: DisplayField[] = [
+      {
+        key: 'id',
+        label: 'ID',
+        formatter: (item: any) => item.id,
+        tableFormatter: (item: any) => `STYLED:${item.id}`,
+      },
+    ];
+
+    const tableResult = formatData(sampleItems, fields, 'table');
+    expect(tableResult).toContain('STYLED:abc-123');
+
+    const tsvResult = formatData(sampleItems, fields, 'tsv');
+    expect(tsvResult).toContain('abc-123');
+    expect(tsvResult).not.toContain('STYLED:');
+
+    const jsonResult = formatData(sampleItems, fields, 'json');
+    expect(jsonResult).toContain('abc-123');
+    expect(jsonResult).not.toContain('STYLED:');
   });
 });
 

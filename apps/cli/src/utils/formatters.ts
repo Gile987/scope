@@ -84,6 +84,8 @@ export function formatAsTable<T extends ListItem>(
 
   for (const item of items) {
     const row = columns.map((col) => {
+      // Prefer tableFormatter (styled) over formatter (plain) for table output
+      if (col.tableFormatter) return col.tableFormatter(item);
       if (col.formatter) return col.formatter(item);
       return getValueOrNA(item[col.key]);
     });
@@ -159,6 +161,7 @@ export function formatData<T extends ListItem>(
         header: field.label,
         width: field.width,
         formatter: field.formatter,
+        tableFormatter: field.tableFormatter,
       }));
       return formatAsTable(items, columns);
     }

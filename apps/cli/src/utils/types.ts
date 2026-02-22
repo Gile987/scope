@@ -20,8 +20,10 @@ export interface DisplayField<T = any> {
   label: string;
   /** Optional fixed column width for table format */
   width?: number;
-  /** Optional custom formatter — receives the full item, returns display string */
+  /** Optional custom formatter — receives the full item, returns plain display string (used by tsv/json) */
   formatter?: (item: T) => string;
+  /** Optional styled formatter — used only for table output to add colors/styling. Falls back to formatter if not provided. */
+  tableFormatter?: (item: T) => string;
 }
 
 /** Table column descriptor (used internally by formatAsTable) */
@@ -30,6 +32,8 @@ export interface TableColumn<T = any> {
   header: string;
   width?: number;
   formatter?: (item: T) => string;
+  /** Styled formatter for colored/styled table output. Falls back to formatter if not provided. */
+  tableFormatter?: (item: T) => string;
 }
 
 /** Generic list item with flexible properties */
