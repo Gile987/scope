@@ -81,10 +81,11 @@ run
   .option("-c, --criteria <criteria...>", "Evaluation criteria (overrides scenario criteria)")
   .option("--max-iterations <number>", "Max judge iterations for multi-turn mode", parseInt)
   .option("--model <model>", "Model to use for the coding agent")
+  .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs } = options;
 
     try {
       // Resolve scenario + persona YAML if provided
@@ -134,6 +135,9 @@ run
       }
       if (personaObj) {
         body.persona = personaObj;
+      }
+      if (mcpServerSlugs && mcpServerSlugs.length > 0) {
+        body.mcpServers = mcpServerSlugs;
       }
 
       const response = await fetch(`${normalizeUrl(url)}/api/v1/requests?worker=${worker}`, {
@@ -2108,6 +2112,214 @@ agentModel
         process.exit(1);
       }
       console.log(successText(`Default model for ${agentDoc._id} set to ${options.model}.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// ─── MCP server management ──────────────────────────────────────────────────
+
+const mcp = program
+  .command("mcp")
+  .description("Manage MCP (Model Context Protocol) resources")
+  .action(() => {
+    mcp.help();
+  });
+
+configureHelp(mcp);
+
+const mcpServer = mcp
+  .command("server")
+  .description("Manage remote MCP servers (SSE and streamable HTTP)")
+  .action(() => {
+    mcpServer.help();
+  });
+
+configureHelp(mcpServer);
+
+mcpServer
+  .command("list")
+  .description("List all MCP servers")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+  .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/mcp/servers`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const servers = await response.json() as Array<{ _id: string; name: string; type: string; url: string; description?: string }>;
+      if (servers.length === 0) {
+        if (!isMachineReadable(format)) console.log(warnBanner("No MCP servers found."));
+        return;
+      }
+      if (!isMachineReadable(format)) {
+        console.log(label(`Found ${servers.length} MCP server(s):\n`));
+      }
+      const displayFields: DisplayField[] = [
+        { key: '_id', label: 'Slug', tableFormatter: (s: any) => value(s._id) },
+        { key: 'name', label: 'Name' },
+        { key: 'type', label: 'Type' },
+        { key: 'url', label: 'URL' },
+        { key: 'description', label: 'Description', formatter: (s: any) => s.description || '—' },
+      ];
+      console.log(formatData(servers, displayFields, format));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+mcpServer
+  .command("get")
+  .description("Get details of an MCP server")
+  .requiredOption("-i, --id <id>", "MCP server slug")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/mcp/servers/${encodeURIComponent(options.id)}`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const server = await response.json();
+      console.log(`${label('Slug:')} ${value(server._id)}`);
+      console.log(`${label('Name:')} ${value(server.name)}`);
+      console.log(`${label('Type:')} ${value(server.type)}`);
+      console.log(`${label('URL:')} ${value(server.url)}`);
+      if (server.description) console.log(`${label('Description:')} ${server.description}`);
+      if (server.headers && server.headers.length > 0) {
+        console.log(`${label('Headers:')}`);
+        for (const h of server.headers) {
+          console.log(`  ${h.name}: ${h.value}`);
+        }
+      }
+      console.log(`${label('Created:')} ${new Date(server.createdAt).toLocaleString()}`);
+      if (server.updatedAt) console.log(`${label('Updated:')} ${new Date(server.updatedAt).toLocaleString()}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+mcpServer
+  .command("create")
+  .description("Create a new MCP server")
+  .requiredOption("--id <slug>", "Slug identifier (lowercase, hyphens allowed)")
+  .requiredOption("--name <name>", "Display name")
+  .requiredOption("--type <type>", "Transport type (sse or http)")
+  .requiredOption("--url <url>", "Server URL")
+  .option("--description <desc>", "Description")
+  .option("--header <header...>", "Headers in name:value format (repeatable)")
+  .option("-u, --api-url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const headers = options.header?.map((h: string) => {
+        const idx = h.indexOf(':');
+        if (idx === -1) {
+          console.error(errorText(`Invalid header format: "${h}". Expected name:value`));
+          process.exit(1);
+        }
+        return { name: h.substring(0, idx).trim(), value: h.substring(idx + 1).trim() };
+      });
+
+      const body: Record<string, unknown> = {
+        _id: options.id,
+        name: options.name,
+        type: options.type,
+        url: options.url,
+      };
+      if (options.description) body.description = options.description;
+      if (headers && headers.length > 0) body.headers = headers;
+
+      const response = await fetch(`${normalizeUrl(options.apiUrl)}/api/v1/mcp/servers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const created = await response.json();
+      console.log(successText(`MCP server "${created._id}" created.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+mcpServer
+  .command("update")
+  .description("Update an MCP server")
+  .requiredOption("-i, --id <id>", "MCP server slug")
+  .option("--name <name>", "Display name")
+  .option("--type <type>", "Transport type (sse or http)")
+  .option("--url <url>", "Server URL")
+  .option("--description <desc>", "Description")
+  .option("--header <header...>", "Headers in name:value format (replaces all headers)")
+  .option("-u, --api-url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {};
+      if (options.name) body.name = options.name;
+      if (options.type) body.type = options.type;
+      if (options.url) body.url = options.url;
+      if (options.description) body.description = options.description;
+      if (options.header) {
+        body.headers = options.header.map((h: string) => {
+          const idx = h.indexOf(':');
+          if (idx === -1) {
+            console.error(errorText(`Invalid header format: "${h}". Expected name:value`));
+            process.exit(1);
+          }
+          return { name: h.substring(0, idx).trim(), value: h.substring(idx + 1).trim() };
+        });
+      }
+      if (Object.keys(body).length === 0) {
+        console.error(errorText("Error: provide at least one field to update"));
+        process.exit(1);
+      }
+      const response = await fetch(`${normalizeUrl(options.apiUrl)}/api/v1/mcp/servers/${encodeURIComponent(options.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const updated = await response.json();
+      console.log(successText(`MCP server "${updated._id}" updated.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+mcpServer
+  .command("delete")
+  .description("Delete an MCP server (soft-delete)")
+  .requiredOption("-i, --id <id>", "MCP server slug")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/mcp/servers/${encodeURIComponent(options.id)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      console.log(successText(`MCP server "${options.id}" deleted.`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
