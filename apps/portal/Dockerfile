@@ -20,8 +20,8 @@ RUN pnpm --filter portal build
 FROM builder AS dev
 ENV NODE_ENV=development
 WORKDIR /app/apps/portal
-EXPOSE 5173
-CMD ["npx", "vite", "--host", "0.0.0.0"]
+EXPOSE 80
+CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "80"]
 
 # Stage 2: Serve with nginx
 FROM nginx:alpine

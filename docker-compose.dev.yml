@@ -84,8 +84,6 @@ services:
   portal:
     build:
       target: dev
-    ports:
-      - "${PORTAL_PORT:-5180}:5173"
     environment:
       VITE_API_PROXY_TARGET: http://api:80
     develop:
