@@ -3,11 +3,12 @@
 
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb } from "lucide-react";
+import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, MessageSquareText } from "lucide-react";
 import { VersionFooter } from "./VersionFooter";
 
 const navItems = [
   { to: "/statistics", label: "Statistics", icon: BarChart3 },
+  { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
   { to: "/runs", label: "Runs", icon: List },
   { to: "/runs/new", label: "New Run", icon: Plus },
   { to: "/reports", label: "Reports", icon: FileText },

@@ -1,0 +1,24 @@
+{
+  "name": "db-migrations",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "migrate:up": "npx tsx src/migrate.ts up",
+    "migrate:down": "npx tsx src/migrate.ts down --last",
+    "migrate:status": "npx tsx src/migrate.ts status",
+    "migrate:new": "npx tsx src/migrate.ts new"
+  },
+  "dependencies": {
+    "mongo-migrate-ts": "^2.0.0",
+    "mongodb": "^6.16.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.0",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

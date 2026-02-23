@@ -6,3 +6,4 @@ packages:
   - "apps/token-manager"
   - "apps/workers/*"
   - "packages/shared"
+  - "packages/db-migrations"

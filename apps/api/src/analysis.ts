@@ -11,6 +11,7 @@
 // Types for analysis response
 export interface TaskWorkerGroup {
   task: string;
+  taskPromptId: string;
   workerType: string;
   total: number;
   completed: number;
@@ -51,9 +52,12 @@ export interface CriterionResult {
   evaluated: boolean;
 }
 
+import { computeTaskPromptId } from 'shared';
+
 // Run data needed for analysis (subset of RequestDocument)
 export interface AnalyzableRun {
   scenario: { task: string; criteria?: string[] };
+  taskPromptId?: string;
   workerType: string;
   status: string;
   turns?: Array<{
@@ -188,11 +192,12 @@ export function computeAnalysis(
       })
     : allValidRuns;
   
-  // Group by task + workerType
+  // Group by taskPromptId + workerType (falls back to computing ID from text for legacy runs)
   const groupMap = new Map<string, AnalyzableRun[]>();
   
   for (const run of validRuns) {
-    const key = `${run.scenario.task}|||${run.workerType}`;
+    const tpId = run.taskPromptId || computeTaskPromptId(run.scenario.task);
+    const key = `${tpId}|||${run.workerType}`;
     if (!groupMap.has(key)) {
       groupMap.set(key, []);
     }
@@ -204,7 +209,8 @@ export function computeAnalysis(
   let globalMaxT = 1;
 
   for (const [key, groupRuns] of groupMap) {
-    const [task, workerType] = key.split('|||');
+    const [taskPromptId, workerType] = key.split('|||');
+    const task = groupRuns[0].scenario.task;  // Use task text from first run in group
     
     const completed = groupRuns.filter(r => r.status === 'completed');
     const passedRuns = completed.filter(r => isPassedRun(r, selectedCriteria));
@@ -243,6 +249,7 @@ export function computeAnalysis(
 
     groups.push({
       task,
+      taskPromptId,
       workerType,
       total: groupRuns.length,
       completed: completed.length,
@@ -256,7 +263,8 @@ export function computeAnalysis(
 
   // Now fill in Success@≤T for all groups using globalMaxT
   for (const group of groups) {
-    const groupRuns = groupMap.get(`${group.task}|||${group.workerType}`)!;
+    const tpId = group.taskPromptId;
+    const groupRuns = groupMap.get(`${tpId}|||${group.workerType}`)!;
     const passedRuns = groupRuns.filter(r => r.status === 'completed').filter(r => isPassedRun(r, selectedCriteria));
     const passedIterations = passedRuns
       .map(r => getPassedIteration(r, selectedCriteria))

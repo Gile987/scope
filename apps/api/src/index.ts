@@ -25,6 +25,7 @@ import {
   extractPromptFeatures,
 } from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
+import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument } from "shared";
 
 const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
@@ -72,6 +73,8 @@ let reportCollection: Collection<ReportDocument>;
 let agentCollection: Collection<CodingAgentDocument>;
 let mcpServerCollection: Collection<McpServerDocument>;
 let insightsCollection: Collection<InsightDocument>;
+let taskPromptCollection: Collection<TaskPromptDocument>;
+let taskPromptStore: TaskPromptStore;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
@@ -185,6 +188,7 @@ interface RequestDocument {
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;
+  taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → task-prompts._id)
   mcpServers?: string[];          // MCP server slugs selected for this run
 }
 
@@ -340,6 +344,8 @@ async function initializeClients(): Promise<void> {
   agentCollection = db.collection<CodingAgentDocument>("agents");
   mcpServerCollection = db.collection<McpServerDocument>("mcp-servers");
   insightsCollection = db.collection<InsightDocument>("insights");
+  taskPromptCollection = db.collection<TaskPromptDocument>("task-prompts");
+  taskPromptStore = new TaskPromptStore(taskPromptCollection);
   
   // Create index for createdAt (required for sorting in CosmosDB MongoDB API)
   try {
@@ -574,6 +580,10 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
     const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
     const queueClient = queueClients.get(workerType)!;
 
+    // Ensure a TaskPrompt entity exists for this task text (idempotent)
+    const taskPrompt = await taskPromptStore.findOrCreate(scenario.task);
+    const taskPromptId = taskPrompt._id;
+
     // Handle multiple runs (count > 1)
     if (count > 1) {
       const newIds: string[] = [];
@@ -588,6 +598,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
           _id: requestId,
           scenario,
           workerType,
+          taskPromptId,
           status: "pending",
           createdAt: new Date(),
           ...(model ? { model } : {}),
@@ -618,6 +629,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
         ids: newIds,
         count,
         workerType,
+        taskPromptId,
         ...(model ? { model } : {}),
         status: "pending",
         mode,
@@ -636,6 +648,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       _id: requestId,
       scenario,
       workerType,
+      taskPromptId,
       status: "pending",
       createdAt: new Date(),
       ...(model ? { model } : {}),
@@ -823,11 +836,15 @@ app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: N
 app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const workerFilter = req.query.worker as string;
+    const taskPromptIdFilter = req.query.taskPromptId as string;
     const includeDeleted = req.query.includeDeleted === "true";
     
     const filter: Record<string, unknown> = {};
     if (workerFilter && VALID_WORKERS.includes(workerFilter as WorkerType)) {
       filter.workerType = workerFilter;
+    }
+    if (taskPromptIdFilter) {
+      filter.taskPromptId = taskPromptIdFilter;
     }
     if (!includeDeleted) {
       filter.deletedAt = { $exists: false };
@@ -1687,25 +1704,87 @@ app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, nex
   }
 });
 
-// POST /api/v1/prompt-features/extract — extract prompt features from a task text
-// Dedup: returns cached extraction if taskTextHash matches, unless ?force=true
-app.post("/api/v1/prompt-features/extract", async (req: Request, res: Response, next: NextFunction) => {
+// ==========================================
+// Task Prompt endpoints
+// ==========================================
+
+// GET /api/v1/task-prompts — list all task prompts (paginated, optional search)
+app.get("/api/v1/task-prompts", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { taskText, model } = req.body;
-    const force = req.query.force === "true";
-    if (!taskText || typeof taskText !== "string" || !taskText.trim()) {
-      return res.status(400).json({ error: "Body must contain a non-empty 'taskText' string" });
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const search = req.query.search as string | undefined;
+
+    const { items, total } = await taskPromptStore.getAll({ limit, offset, search });
+    res.json({ items, total, limit, offset });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/v1/task-prompts/:id — get a single task prompt by ID
+app.get("/api/v1/task-prompts/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const taskPrompt = await taskPromptStore.get(id);
+    if (!taskPrompt) {
+      return res.status(404).json({ error: "Task prompt not found" });
+    }
+    res.json(taskPrompt);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/v1/task-prompts — create (or find existing) task prompt. Idempotent.
+app.post("/api/v1/task-prompts", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { text } = req.body;
+    if (!text || typeof text !== "string" || !text.trim()) {
+      return res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
     }
 
-    const trimmedTask = taskText.trim();
-    const taskTextHash = createHash("sha256").update(trimmedTask).digest("hex");
+    const taskPrompt = await taskPromptStore.findOrCreate(text);
+    res.status(201).json(taskPrompt);
+  } catch (error) {
+    next(error);
+  }
+});
 
-    // Check cache (dedup by task text hash)
-    if (!force) {
-      const cached = await promptFeatureExtractionCollection.findOne({ taskTextHash });
-      if (cached) {
-        return res.json({ ...cached, cached: true });
-      }
+// DELETE /api/v1/task-prompts/:id — soft-delete a task prompt
+app.delete("/api/v1/task-prompts/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    await taskPromptStore.delete(id);
+    res.json({ deleted: true });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("not found")) {
+      return res.status(404).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+// POST /api/v1/task-prompts/:id/extract-features — extract prompt features for a task prompt
+app.post("/api/v1/task-prompts/:id/extract-features", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { model } = req.body;
+    const force = req.query.force === "true";
+
+    const taskPrompt = await taskPromptStore.get(id);
+    if (!taskPrompt) {
+      return res.status(404).json({ error: "Task prompt not found" });
+    }
+
+    // Return cached features if available (unless force re-extraction)
+    if (!force && taskPrompt.features && taskPrompt.features.length > 0) {
+      return res.json({
+        taskPromptId: taskPrompt._id,
+        features: taskPrompt.features,
+        featuresExtractedAt: taskPrompt.featuresExtractedAt,
+        cached: true,
+      });
     }
 
     if (!isPromptFeatureLlmAvailable()) {
@@ -1717,30 +1796,53 @@ app.post("/api/v1/prompt-features/extract", async (req: Request, res: Response, 
       .toArray();
 
     const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn }));
-    const { results, suggestedFeatures } = await extractPromptFeatures(trimmedTask, featureConfigs, model);
+    const { results, suggestedFeatures } = await extractPromptFeatures(taskPrompt.text, featureConfigs, model);
 
-    // Store extraction result (upsert by hash for idempotency)
-    const extraction: PromptFeatureExtractionDocument = {
-      taskText: trimmedTask,
-      taskTextHash,
-      promptFeatureResults: results,
-      ...(suggestedFeatures.length > 0 ? { suggestedFeatures } : {}),
-      extractedAt: new Date(),
-      model: model || process.env.LLM_MODEL || "gpt-4.1",
-    };
+    // Store features on the task prompt entity
+    const updated = await taskPromptStore.attachFeatures(id, results);
 
-    if (force) {
-      // Replace existing extraction for this hash
-      await promptFeatureExtractionCollection.replaceOne(
-        { taskTextHash },
-        extraction,
-        { upsert: true },
-      );
-    } else {
-      await promptFeatureExtractionCollection.insertOne(extraction as any);
+    res.json({
+      taskPromptId: updated._id,
+      features: updated.features,
+      featuresExtractedAt: updated.featuresExtractedAt,
+      suggestedFeatures: suggestedFeatures.length > 0 ? suggestedFeatures : undefined,
+      cached: false,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not configured")) {
+      return res.status(503).json({ error: err.message });
+    }
+    if (err instanceof Error && err.message.includes("not found")) {
+      return res.status(404).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// POST /api/v1/prompt-features/extract-from-text — extract features from raw text without persisting
+app.post("/api/v1/prompt-features/extract-from-text", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { text, model } = req.body;
+    if (!text || typeof text !== "string" || !text.trim()) {
+      return res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
     }
 
-    res.json({ ...extraction, cached: false });
+    if (!isPromptFeatureLlmAvailable()) {
+      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+    }
+
+    const allFeatures = await promptFeatureCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+
+    const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn }));
+    const { results, suggestedFeatures } = await extractPromptFeatures(text.trim(), featureConfigs, model);
+
+    res.json({
+      features: results,
+      suggestedFeatures: suggestedFeatures.length > 0 ? suggestedFeatures : undefined,
+      cached: false,
+    });
   } catch (err) {
     if (err instanceof Error && err.message.includes("not configured")) {
       return res.status(503).json({ error: err.message });
@@ -1749,33 +1851,23 @@ app.post("/api/v1/prompt-features/extract", async (req: Request, res: Response, 
   }
 });
 
-// GET /api/v1/prompt-features/extractions — list all extractions
-app.get("/api/v1/prompt-features/extractions", async (_req: Request, res: Response, next: NextFunction) => {
+// PATCH /api/v1/task-prompts/:id/features/:featureId — toggle a feature's detected flag
+app.patch("/api/v1/task-prompts/:id/features/:featureId", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const extractions = await promptFeatureExtractionCollection.find({}).sort({ extractedAt: -1 }).toArray();
-    res.json(extractions);
-  } catch (error) {
-    next(error);
-  }
-});
+    const { id, featureId } = req.params;
+    const { detected } = req.body;
 
-// GET /api/v1/prompt-features/extractions/:id — get a single extraction by _id
-app.get("/api/v1/prompt-features/extractions/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const { ObjectId } = await import("mongodb");
-    let extraction;
-    try {
-      extraction = await promptFeatureExtractionCollection.findOne({ _id: new ObjectId(id) as any });
-    } catch {
-      extraction = await promptFeatureExtractionCollection.findOne({ _id: id as any });
+    if (typeof detected !== "boolean") {
+      return res.status(400).json({ error: "'detected' must be a boolean" });
     }
-    if (!extraction) {
-      return res.status(404).json({ error: "Extraction not found" });
+
+    const updated = await taskPromptStore.toggleFeature(id, featureId, detected);
+    res.json(updated);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not found")) {
+      return res.status(404).json({ error: err.message });
     }
-    res.json(extraction);
-  } catch (error) {
-    next(error);
+    next(err);
   }
 });
 
