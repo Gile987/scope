@@ -16,6 +16,7 @@ on:
     paths:
       - 'apps/**'
       - 'packages/shared/**'
+      - 'packages/model-scanning/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'tsconfig.base.json'
@@ -24,6 +25,7 @@ on:
     paths:
       - 'apps/**'
       - 'packages/shared/**'
+      - 'packages/model-scanning/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'tsconfig.base.json'
@@ -46,7 +48,10 @@ jobs:
       coder-acp-copilot: ${{ steps.changes.outputs.coder-acp-copilot }}
       coder-acp-claude-code: ${{ steps.changes.outputs.coder-acp-claude-code }}
       token-manager: ${{ steps.changes.outputs.token-manager }}
+      model-scanner-copilot: ${{ steps.changes.outputs.model-scanner-copilot }}
+      model-scanner-anthropic: ${{ steps.changes.outputs.model-scanner-anthropic }}
       shared: ${{ steps.changes.outputs.shared }}
+      model-scanning: ${{ steps.changes.outputs.model-scanning }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -59,6 +64,8 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'tsconfig.base.json'
+            model-scanning:
+              - 'packages/model-scanning/**'
             api:
               - 'apps/api/**'
             judge:
@@ -71,6 +78,10 @@ jobs:
               - 'apps/workers/coder-acp-claude-code/**'
             token-manager:
               - 'apps/token-manager/**'
+            model-scanner-copilot:
+              - 'apps/model-scanners/copilot/**'
+            model-scanner-anthropic:
+              - 'apps/model-scanners/anthropic/**'
 
   build-on-push:
     if: >-
@@ -81,7 +92,10 @@ jobs:
         needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
         needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
         needs.detect-changes.outputs.token-manager == 'true' ||
-        needs.detect-changes.outputs.shared == 'true'
+        needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
+        needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
+        needs.detect-changes.outputs.shared == 'true' ||
+        needs.detect-changes.outputs.model-scanning == 'true'
       )
     needs: detect-changes
     runs-on: ubuntu-latest
@@ -108,6 +122,12 @@ jobs:
           - name: token-manager
             dockerfile: apps/token-manager/Dockerfile
             changed: ${{ (needs.detect-changes.outputs.token-manager == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: model-scanner-copilot
+            dockerfile: apps/model-scanners/copilot/Dockerfile
+            changed: ${{ (needs.detect-changes.outputs.model-scanner-copilot == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
+          - name: model-scanner-anthropic
+            dockerfile: apps/model-scanners/anthropic/Dockerfile
+            changed: ${{ (needs.detect-changes.outputs.model-scanner-anthropic == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: 'false'
@@ -159,7 +179,10 @@ jobs:
         needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
         needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
         needs.detect-changes.outputs.token-manager == 'true' ||
-        needs.detect-changes.outputs.shared == 'true'
+        needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
+        needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
+        needs.detect-changes.outputs.shared == 'true' ||
+        needs.detect-changes.outputs.model-scanning == 'true'
       )
     needs: detect-changes
     runs-on: ubuntu-latest
@@ -186,6 +209,12 @@ jobs:
           - name: token-manager
             dockerfile: apps/token-manager/Dockerfile
             changed: ${{ (needs.detect-changes.outputs.token-manager == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: model-scanner-copilot
+            dockerfile: apps/model-scanners/copilot/Dockerfile
+            changed: ${{ (needs.detect-changes.outputs.model-scanner-copilot == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
+          - name: model-scanner-anthropic
+            dockerfile: apps/model-scanners/anthropic/Dockerfile
+            changed: ${{ (needs.detect-changes.outputs.model-scanner-anthropic == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: 'false'
@@ -239,6 +268,8 @@ jobs:
           case "${{ matrix.image }}" in
             api|judge|portal) DOCKERFILE="apps/${{ matrix.image }}/Dockerfile" ;;
             coder-*) DOCKERFILE="apps/workers/${{ matrix.image }}/Dockerfile" ;;
+            model-scanner-copilot) DOCKERFILE="apps/model-scanners/copilot/Dockerfile" ;;
+            model-scanner-anthropic) DOCKERFILE="apps/model-scanners/anthropic/Dockerfile" ;;
             *) DOCKERFILE="apps/${{ matrix.image }}/Dockerfile" ;;
           esac
           echo "path=$DOCKERFILE" >> "$GITHUB_OUTPUT"
