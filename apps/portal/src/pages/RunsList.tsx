@@ -60,6 +60,29 @@ export function RunsList() {
     [runs],
   );
 
+  // Compute summary of selected runs' values for the resubmit dialog
+  const selectedRunsSummary = useMemo(() => {
+    const selected = runs.filter((r) => selectedIds.has(r._id));
+    if (selected.length === 0) return { worker: null, model: null, maxIterations: null, mcpServers: null };
+
+    const workers = [...new Set(selected.map((r) => r.workerType))];
+    const models = [...new Set(selected.map((r) => r.model ?? ""))];
+    const iterations = [...new Set(selected.map((r) => r.maxIterations ?? 0))];
+    const mcpSets = selected.map((r) => (r.mcpServers ?? []).sort().join(","));
+    const uniqueMcp = [...new Set(mcpSets)];
+
+    return {
+      worker: workers.length === 1 ? workers[0] : null,
+      model: models.length === 1 ? (models[0] || null) : null,
+      maxIterations: iterations.length === 1 ? (iterations[0] || null) : null,
+      mcpServers: uniqueMcp.length === 1 ? (selected[0].mcpServers ?? []) : null,
+      isMultiWorker: workers.length > 1,
+      isMultiModel: models.length > 1,
+      isMultiIterations: iterations.length > 1,
+      isMultiMcp: uniqueMcp.length > 1,
+    };
+  }, [runs, selectedIds]);
+
   const deleteMutation = useMutation({
     mutationFn: api.deleteRun,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
@@ -281,7 +304,7 @@ export function RunsList() {
                 </div>
 
                 <div className="border-t pt-4">
-                  <p className="text-sm font-medium mb-3">Overrides <span className="text-muted-foreground font-normal">(leave as "keep original" to copy from source)</span></p>
+                  <p className="text-sm font-medium mb-3">Overrides <span className="text-muted-foreground font-normal">(leave unchanged to copy from source)</span></p>
 
                   {/* Worker type override */}
                   <div className="flex items-center gap-4 mb-3">
@@ -298,7 +321,11 @@ export function RunsList() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__keep__">Keep original</SelectItem>
+                        <SelectItem value="__keep__">
+                          {selectedRunsSummary.worker
+                            ? selectedRunsSummary.worker
+                            : selectedRunsSummary.isMultiWorker ? "Mixed (keep each)" : "—"}
+                        </SelectItem>
                         {WORKER_TYPES.map((w) => (
                           <SelectItem key={w} value={w}>{w}</SelectItem>
                         ))}
@@ -323,7 +350,11 @@ export function RunsList() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__keep__">Keep original</SelectItem>
+                        <SelectItem value="__keep__">
+                          {selectedRunsSummary.model
+                            ? selectedRunsSummary.model
+                            : selectedRunsSummary.isMultiModel ? "Mixed (keep each)" : "Default"}
+                        </SelectItem>
                         <SelectItem value="__clear__">Clear (use default)</SelectItem>
                         <SelectItem value="gpt-4.1">gpt-4.1</SelectItem>
                         <SelectItem value="gpt-4.1-mini">gpt-4.1-mini</SelectItem>
@@ -352,7 +383,11 @@ export function RunsList() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__keep__">Keep original</SelectItem>
+                        <SelectItem value="__keep__">
+                          {selectedRunsSummary.maxIterations
+                            ? String(selectedRunsSummary.maxIterations)
+                            : selectedRunsSummary.isMultiIterations ? "Mixed (keep each)" : "Default"}
+                        </SelectItem>
                         <SelectItem value="__clear__">Clear (use default)</SelectItem>
                         {[1, 2, 3, 5, 10, 15, 20].map((n) => (
                           <SelectItem key={n} value={n.toString()}>{n}</SelectItem>
@@ -376,10 +411,23 @@ export function RunsList() {
                         })}
                       >
                         <SelectTrigger className="w-56">
-                          <SelectValue />
+                          <SelectValue>
+                            {resubmitOverrides.mcpServers === null
+                              ? "Clear (no MCP servers)"
+                              : resubmitOverrides.mcpServers !== undefined
+                                ? "Choose servers…"
+                                : selectedRunsSummary.mcpServers && selectedRunsSummary.mcpServers.length > 0
+                                  ? selectedRunsSummary.mcpServers.join(", ")
+                                  : selectedRunsSummary.isMultiMcp ? "Mixed (keep each)" : "None"
+                            }
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__keep__">Keep original</SelectItem>
+                          <SelectItem value="__keep__">
+                            {selectedRunsSummary.mcpServers && selectedRunsSummary.mcpServers.length > 0
+                              ? selectedRunsSummary.mcpServers.join(", ")
+                              : selectedRunsSummary.isMultiMcp ? "Mixed (keep each)" : "None"}
+                          </SelectItem>
                           <SelectItem value="__clear__">Clear (no MCP servers)</SelectItem>
                           <SelectItem value="__custom__">Choose servers…</SelectItem>
                         </SelectContent>
