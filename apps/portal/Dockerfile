@@ -16,6 +16,13 @@ RUN pnpm install --frozen-lockfile --filter portal
 COPY apps/portal/ apps/portal/
 RUN pnpm --filter portal build
 
+# --- Dev stage: Vite dev server with HMR ---
+FROM builder AS dev
+ENV NODE_ENV=development
+WORKDIR /app/apps/portal
+EXPOSE 5173
+CMD ["npx", "vite", "--host", "0.0.0.0"]
+
 # Stage 2: Serve with nginx
 FROM nginx:alpine
 COPY --from=builder /app/apps/portal/dist /usr/share/nginx/html

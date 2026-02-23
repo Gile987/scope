@@ -18,6 +18,17 @@ COPY apps/workers/report-generator/src ./apps/workers/report-generator/src/
 
 RUN pnpm --filter shared build && pnpm --filter report-generator build
 
+# --- Dev stage: hot reload with tsx watch ---
+FROM builder AS dev
+ENV NODE_ENV=development
+ENV SERVICE_DIR=workers/report-generator
+COPY scripts/dev-entrypoint.sh /app/scripts/dev-entrypoint.sh
+COPY config /app/config/
+EXPOSE 80
+ENV PORT=80
+CMD ["/app/scripts/dev-entrypoint.sh"]
+
+# --- Production stage ---
 FROM node:22.22.0-slim
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
