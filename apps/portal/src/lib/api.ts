@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, Model } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -439,5 +439,21 @@ export const api = {
   /** Get insights referenced by a specific report */
   getReportInsights: (reportId: string): Promise<InsightWithReference[]> => {
     return request(`/reports/${reportId}/insights`);
+  },
+
+  // ─── Models ────────────────────────────────────────────────────────────────
+
+  /** List all scanned models, optionally filtered by agentId or provider */
+  listModels: (params?: { agentId?: string; provider?: string }): Promise<Model[]> => {
+    const searchParams = new URLSearchParams();
+    if (params?.agentId) searchParams.set("agentId", params.agentId);
+    if (params?.provider) searchParams.set("provider", params.provider);
+    const qs = searchParams.toString();
+    return request(`/models${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single model by compound ID */
+  getModel: (id: string): Promise<Model> => {
+    return request(`/models/${encodeURIComponent(id)}`);
   },
 };

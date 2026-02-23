@@ -27,6 +27,8 @@ import { CreateMcpServer } from "@/pages/CreateMcpServer";
 import { McpServerDetail } from "@/pages/McpServerDetail";
 import { InsightsList } from "@/pages/InsightsList";
 import { InsightDetail } from "@/pages/InsightDetail";
+import { ModelList } from "@/pages/ModelList";
+import { ModelDetail } from "@/pages/ModelDetail";
 
 export function App() {
   return (
@@ -54,6 +56,8 @@ export function App() {
         <Route path="/tokens/:id" element={<TokenDetail />} />
         <Route path="/agents" element={<AgentList />} />
         <Route path="/agents/:id" element={<AgentDetail />} />
+        <Route path="/models" element={<ModelList />} />
+        <Route path="/models/:id" element={<ModelDetail />} />
         <Route path="/mcp-servers" element={<McpServerList />} />
         <Route path="/mcp-servers/new" element={<CreateMcpServer />} />
         <Route path="/mcp-servers/:slug" element={<McpServerDetail />} />
