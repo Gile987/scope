@@ -19,16 +19,21 @@ import type { Migration, MigrationRecord } from "./types.js";
 
 const MIGRATIONS_COLLECTION = "_migrations";
 
+// Defaults match docker-compose.yml local dev environment
+const DEFAULT_MONGO_URI = "mongodb://localhost:27117";
+const DEFAULT_MONGO_DATABASE = "requests-db";
+
 function getMongoUri(): string {
-  const uri = process.env.MONGODB_URI ?? process.env.COSMOSDB_CONNECTION_STRING;
-  if (!uri) {
-    throw new Error("Set MONGODB_URI or COSMOSDB_CONNECTION_STRING environment variable");
-  }
-  return uri;
+  return (
+    process.env.MONGODB_URI ??
+    process.env.MONGO_CONNECTION_STRING ??
+    process.env.COSMOSDB_CONNECTION_STRING ??
+    DEFAULT_MONGO_URI
+  );
 }
 
 function getDbName(): string {
-  return process.env.MONGODB_DATABASE ?? "scope-mt";
+  return process.env.MONGODB_DATABASE ?? process.env.MONGO_DATABASE ?? DEFAULT_MONGO_DATABASE;
 }
 
 async function discoverMigrations(): Promise<{ name: string; path: string }[]> {
