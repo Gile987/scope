@@ -15,7 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus, Check, Server } from "lucide-react";
-import { WORKER_TYPES, type PromptFeatureExtraction, type SuggestedPromptFeature, type CodingAgent, type McpServerDocument } from "@/types";
+import { WORKER_TYPES, type TaskPromptFeatureExtractionResult, type SuggestedPromptFeature, type CodingAgent, type McpServerDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { Stepper } from "@/components/Stepper";
@@ -74,14 +74,19 @@ export function SubmitRun() {
   const [userType, setUserType] = useState<string>("");
 
   // Extraction state
-  const [extraction, setExtraction] = useState<PromptFeatureExtraction | null>(null);
+  const [extraction, setExtraction] = useState<TaskPromptFeatureExtractionResult | null>(null);
 
   // Sheet wizard state for creating suggested features
   const [activeSuggestion, setActiveSuggestion] = useState<SuggestedPromptFeature | null>(null);
   const [createdSuggestionIds, setCreatedSuggestionIds] = useState<Set<string>>(new Set());
 
   const extractMutation = useMutation({
-    mutationFn: (opts?: { force?: boolean }) => api.extractPromptFeatures(task.trim(), undefined, opts?.force),
+    mutationFn: async (opts?: { force?: boolean }) => {
+      // First ensure the task prompt entity exists (idempotent)
+      const taskPrompt = await api.createTaskPrompt(task.trim());
+      // Then extract features for the task prompt
+      return api.extractTaskPromptFeatures(taskPrompt._id, { force: opts?.force });
+    },
     onSuccess: (data) => setExtraction(data),
   });
 
@@ -139,14 +144,13 @@ export function SubmitRun() {
             },
           }
         : {}),
-      ...(extraction?._id ? { promptFeatureExtractionId: extraction._id } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
     });
   };
 
-  const detectedFeatures = extraction?.promptFeatureResults?.filter((f) => f.detected) ?? [];
-  const notDetectedFeatures = extraction?.promptFeatureResults?.filter((f) => !f.detected && f.evaluated) ?? [];
-  const skippedFeatures = extraction?.promptFeatureResults?.filter((f) => !f.evaluated) ?? [];
+  const detectedFeatures = extraction?.features?.filter((f) => f.detected) ?? [];
+  const notDetectedFeatures = extraction?.features?.filter((f) => !f.detected && f.evaluated) ?? [];
+  const skippedFeatures = extraction?.features?.filter((f) => !f.evaluated) ?? [];
   const suggestedFeatures = extraction?.suggestedFeatures ?? [];
 
   return (
@@ -539,7 +543,7 @@ export function SubmitRun() {
                       </div>
                     </div>
                   )}
-                  {extraction.promptFeatureResults.length === 0 && (
+                  {extraction.features.length === 0 && (
                     <p className="text-sm text-muted-foreground italic">No prompt features defined yet.</p>
                   )}
                 </div>

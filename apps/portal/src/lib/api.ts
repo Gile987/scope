@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -41,7 +41,6 @@ export const api = {
     personaInstructions?: string;
     persona?: { personality: string; experience: string; verbosity: string; type: string };
     count?: number;
-    promptFeatureExtractionId?: string;
     mcpServers?: string[];
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
@@ -180,18 +179,43 @@ export const api = {
     });
   },
 
-  /** Extract prompt features from a task text */
-  extractPromptFeatures: (taskText: string, model?: string, force?: boolean): Promise<PromptFeatureExtraction> => {
-    const url = force ? "/prompt-features/extract?force=true" : "/prompt-features/extract";
-    return request(url, {
+  // ─── Task Prompts ──────────────────────────────────────────────────────────
+
+  /** List all task prompts (paginated, optional search) */
+  listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string }): Promise<{ items: TaskPrompt[]; total: number }> => {
+    const params = new URLSearchParams();
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.offset) params.set("offset", String(opts.offset));
+    if (opts?.search) params.set("search", opts.search);
+    const qs = params.toString();
+    return request(`/task-prompts${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single task prompt by ID */
+  getTaskPrompt: (id: string): Promise<TaskPrompt> => {
+    return request(`/task-prompts/${encodeURIComponent(id)}`);
+  },
+
+  /** Create (or find existing) task prompt — idempotent */
+  createTaskPrompt: (text: string): Promise<TaskPrompt> => {
+    return request("/task-prompts", {
       method: "POST",
-      body: JSON.stringify({ taskText, ...(model && { model }) }),
+      body: JSON.stringify({ text }),
     });
   },
 
-  /** Get a single prompt feature extraction by ID */
-  getPromptFeatureExtraction: (id: string): Promise<PromptFeatureExtraction> => {
-    return request(`/prompt-features/extractions/${encodeURIComponent(id)}`);
+  /** Soft-delete a task prompt */
+  deleteTaskPrompt: (id: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/task-prompts/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  /** Extract prompt features for a task prompt entity */
+  extractTaskPromptFeatures: (id: string, opts?: { model?: string; force?: boolean }): Promise<TaskPromptFeatureExtractionResult> => {
+    const url = opts?.force ? `/task-prompts/${encodeURIComponent(id)}/extract-features?force=true` : `/task-prompts/${encodeURIComponent(id)}/extract-features`;
+    return request(url, {
+      method: "POST",
+      body: JSON.stringify({ ...(opts?.model && { model: opts.model }) }),
+    });
   },
 
   // ─── Agents ─────────────────────────────────────────────────────────────────
