@@ -8,7 +8,7 @@ import { VersionFooter } from "./VersionFooter";
 
 const navItems = [
   { to: "/statistics", label: "Statistics", icon: BarChart3 },
-  { to: "/task-prompts", label: "Prompts", icon: MessageSquareText },
+  { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
   { to: "/runs", label: "Runs", icon: List },
   { to: "/runs/new", label: "New Run", icon: Plus },
   { to: "/reports", label: "Reports", icon: FileText },

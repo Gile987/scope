@@ -20,6 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { Stepper } from "@/components/Stepper";
 import { PromptFeatureWizard } from "@/components/PromptFeatureWizard";
+import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { toast } from "sonner";
 
 const STEPS = ["Configure", "Review & Submit"];
@@ -174,6 +175,7 @@ export function SubmitRun() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="task">Task *</Label>
+                <TaskPromptPicker onSelect={(text) => setTask(text)} />
                 <Textarea
                   id="task"
                   placeholder="e.g., Create a Hello World Express API"
