@@ -10,6 +10,7 @@ Central documentation hub for the Scope MT platform — an AI coding agent bench
 | [Architecture Layers](architecture/architecture-layers.md) | 5-layer responsibility model — from cloud foundation to app workloads |
 | [Application Design](architecture/app-design.md) | Data models, API design, judge pipeline, queue patterns, criteria system |
 | [Token Manager](architecture/token-manager.md) | Capability-based token management, validation, round-robin distribution |
+| [Database Migrations](architecture/db-migrations.md) | Lightweight MongoDB migration framework, writing and running migrations |
 | [GitOps & Deployment](architecture/gitops-deploy.md) | FluxCD design, kustomization phases, variable substitution |
 
 ## Infrastructure
