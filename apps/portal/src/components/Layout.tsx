@@ -8,13 +8,13 @@ import { VersionFooter } from "./VersionFooter";
 
 const navItems = [
   { to: "/statistics", label: "Statistics", icon: BarChart3 },
+  { to: "/task-prompts", label: "Prompts", icon: MessageSquareText },
   { to: "/runs", label: "Runs", icon: List },
   { to: "/runs/new", label: "New Run", icon: Plus },
   { to: "/reports", label: "Reports", icon: FileText },
   { to: "/insights", label: "Insights", icon: Lightbulb },
   { to: "/criteria", label: "Criteria", icon: FlaskConical },
   { to: "/prompt-features", label: "Features", icon: Tags },
-  { to: "/task-prompts", label: "Prompts", icon: MessageSquareText },
   { to: "/tokens", label: "Tokens", icon: KeyRound },
   { to: "/agents", label: "Agents", icon: Bot },
   { to: "/mcp-servers", label: "MCP", icon: Server },
