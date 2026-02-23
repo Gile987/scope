@@ -135,9 +135,14 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     await this.safeDeleteMessage(message.messageId, currentPopReceipt);
   }
 
+  /** Char-count interval for emitting delta progress logs */
+  private static readonly DELTA_LOG_INTERVAL = 2000;
+
   /**
    * Run a Copilot SDK session with the report tools and system prompt.
-   * Streams response deltas and logs progress.
+   * Streams response deltas and logs progress.  Forwards key
+   * {@link SessionEvent} types to `log()` so the portal can display
+   * real-time progress on the Logs tab.
    */
   private async runCopilotSession(
     tools: ReturnType<typeof createReportTools>,
@@ -145,8 +150,14 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<string> {
     const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
+    await log("info", "Acquired Copilot SDK token");
+
     const client = new CopilotClient({ githubToken });
     let fullResponse = "";
+    let lastLoggedCharCount = 0;
+
+    // Track in-flight tool names so we can pair start/complete events
+    const toolNames = new Map<string, string>();
 
     try {
       const session = await client.createSession({
@@ -156,10 +167,71 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         systemMessage: { mode: "replace", content: REPORT_SYSTEM_PROMPT },
       });
 
-      // Accumulate streamed response
+      // Forward session events to structured log
       session.on((event: SessionEvent) => {
-        if (event.type === "assistant.message_delta") {
-          fullResponse += event.data.deltaContent;
+        switch (event.type) {
+          // --- Session lifecycle ---
+          case "session.start":
+            void log("info", "Copilot session started", {
+              sessionId: event.data.sessionId,
+              model: event.data.selectedModel,
+            });
+            break;
+
+          case "session.error":
+            void log("error", `Session error: ${event.data.message}`, {
+              errorType: event.data.errorType,
+            });
+            break;
+
+          case "session.info":
+            void log("info", `Session: ${event.data.message}`);
+            break;
+
+          // --- Assistant turns ---
+          case "assistant.turn_start":
+            void log("info", "Assistant turn started", {
+              turnId: event.data.turnId,
+            });
+            break;
+
+          case "assistant.turn_end":
+            void log("info", "Assistant turn ended", {
+              turnId: event.data.turnId,
+            });
+            break;
+
+          // --- Tool calls ---
+          case "tool.execution_start":
+            toolNames.set(event.data.toolCallId, event.data.toolName);
+            void log("info", `Tool call: ${event.data.toolName}`, {
+              toolCallId: event.data.toolCallId,
+              arguments: event.data.arguments as Record<string, unknown> | undefined,
+            });
+            break;
+
+          case "tool.execution_complete": {
+            const name = toolNames.get(event.data.toolCallId) ?? "unknown";
+            toolNames.delete(event.data.toolCallId);
+            const status = event.data.success ? "success" : "failed";
+            const extra: Record<string, unknown> = { toolCallId: event.data.toolCallId };
+            if (event.data.error) {
+              extra.error = event.data.error.message;
+            }
+            void log("info", `Tool result: ${name} (${status})`, extra);
+            break;
+          }
+
+          // --- Streamed response ---
+          case "assistant.message_delta":
+            fullResponse += event.data.deltaContent;
+
+            // Emit periodic progress logs (throttled by char count)
+            if (fullResponse.length - lastLoggedCharCount >= ReportQueueProcessor.DELTA_LOG_INTERVAL) {
+              lastLoggedCharCount = fullResponse.length;
+              void log("info", `Generating report… (${fullResponse.length} chars so far)`);
+            }
+            break;
         }
       });
 
