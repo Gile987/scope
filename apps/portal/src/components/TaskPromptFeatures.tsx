@@ -191,6 +191,7 @@ export function TaskPromptFeatures({
           </p>
         </div>
         <Button
+          type="button"
           variant="outline"
           size="sm"
           className="gap-1.5"
@@ -311,6 +312,7 @@ export function TaskPromptFeatures({
                 </p>
               </div>
               <Button
+                type="button"
                 variant="outline"
                 size="sm"
                 className="gap-1.5"
