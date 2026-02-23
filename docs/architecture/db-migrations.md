@@ -1,13 +1,13 @@
 # Database Migrations
 
-Lightweight MongoDB migration framework for evolving the database schema and backfilling data.
+MongoDB migration framework powered by [mongo-migrate-ts](https://github.com/mycodeself/mongo-migrate-ts) for evolving the database schema and backfilling data.
 
 ## Overview
 
-Migrations live in `packages/db-migrations/`. Each migration is a TypeScript file that exports a class implementing the `Migration` interface. Migrations are:
+Migrations live in `packages/db-migrations/`. Each migration is a TypeScript file that exports a named class implementing the `MigrationInterface` from `mongo-migrate-ts`. Migrations are:
 
 - **Ordered** — discovered alphabetically by filename, applied in that order
-- **Tracked** — a `_migrations` collection records which migrations have been applied
+- **Tracked** — a `_migrations` collection records which migrations have been applied (stores `className` and `timestamp`)
 - **Reversible** — each migration implements both `up()` and `down()`
 - **Idempotent** — designed to be safe to re-run (upserts, `$setOnInsert`, guards)
 
@@ -24,14 +24,19 @@ pnpm migrate:down
 
 # Show migration status (applied vs pending)
 pnpm migrate:status
+
+# Scaffold a new migration file
+pnpm migrate:new
 ```
 
-### Required Environment Variables
+### Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `MONGODB_URI` or `COSMOSDB_CONNECTION_STRING` | Yes (one of) | MongoDB connection string |
-| `MONGODB_DATABASE` | No | Database name (default: `scope-mt`) |
+| `MONGODB_URI` or `MONGO_CONNECTION_STRING` or `COSMOSDB_CONNECTION_STRING` | No | MongoDB connection string (default: `mongodb://localhost:27117`) |
+| `MONGODB_DATABASE` or `MONGO_DATABASE` | No | Database name (default: `requests-db`) |
+
+Defaults match the `docker-compose.yml` local dev environment, so no configuration is needed for local development.
 
 ## Writing a New Migration
 
@@ -43,15 +48,13 @@ pnpm migrate:status
 
    Where `NNN` is a zero-padded sequence number (e.g., `002-add-indexes.ts`).
 
-2. Export a default class implementing the `Migration` interface:
+2. Export a **named** class implementing `MigrationInterface`:
 
    ```typescript
    import type { Db } from "mongodb";
-   import type { Migration } from "../types.js";
+   import type { MigrationInterface } from "mongo-migrate-ts";
 
-   export default class AddIndexes implements Migration {
-     description = "Add indexes for common query patterns";
-
+   export class AddIndexes implements MigrationInterface {
      async up(db: Db): Promise<void> {
        // Apply changes
        await db.collection("requests").createIndex({ taskPromptId: 1 });
@@ -64,17 +67,27 @@ pnpm migrate:status
    }
    ```
 
-3. Test locally with `pnpm migrate:up` and `pnpm migrate:status`.
+   > **Important**: Use a **named export** (not `export default`). `mongo-migrate-ts` discovers migrations by iterating over all named exports from each file and uses the class name as the migration identifier in the `_migrations` collection.
+
+3. Keep migrations **self-contained** — avoid importing from workspace packages (e.g., `shared`). `mongo-migrate-ts` dynamically imports migration files, which can break workspace package resolution. Inline any shared utilities directly in the migration file.
+
+4. Test locally with `pnpm migrate:up` and `pnpm migrate:status`.
 
 ## How It Works
 
-The migration runner (`packages/db-migrations/src/run.ts`):
+The CLI entry point (`packages/db-migrations/src/migrate.ts`) configures `mongo-migrate-ts` with:
 
-1. Scans `src/migrations/` for `.ts`/`.js` files, sorted alphabetically
-2. Reads the `_migrations` collection to find already-applied migrations
-3. For `up`: applies each pending migration in order, records it in `_migrations`
-4. For `down`: reverts the last applied migration, removes its record
-5. For `status`: prints a table showing applied (✓) and pending (○) migrations
+- Connection URI and database name from environment variables (with local dev defaults)
+- Migration directory: `src/migrations/`
+- Collection name: `_migrations`
+- Glob pattern: `**/*.ts`
+
+When you run a command:
+
+1. `up` — applies all pending migrations in order, records each in the `_migrations` collection with `className` and `timestamp`
+2. `down --last` — reverts the last applied migration, removes its record
+3. `status` — prints a table showing applied (`up`) and pending migrations
+4. `new` — scaffolds a new migration file in the migrations directory
 
 ## Existing Migrations
 
