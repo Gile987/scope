@@ -76,6 +76,7 @@ let mcpServerCollection: Collection<McpServerDocument>;
 let insightsCollection: Collection<InsightDocument>;
 let taskPromptCollection: Collection<TaskPromptDocument>;
 let taskPromptStore: TaskPromptStore;
+let featureFlagCollection: Collection<FeatureFlagDocument>;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
@@ -232,6 +233,14 @@ interface McpServerDocument {
   deletedAt?: Date;
 }
 
+// Feature flag document interface
+interface FeatureFlagDocument {
+  key: string;
+  label: string;
+  enabled: boolean;
+  updatedAt: Date;
+}
+
 // Queue message interface
 interface QueueMessage {
   requestId: string;
@@ -362,6 +371,7 @@ async function initializeClients(): Promise<void> {
   insightsCollection = db.collection<InsightDocument>("insights");
   taskPromptCollection = db.collection<TaskPromptDocument>("task-prompts");
   taskPromptStore = new TaskPromptStore(taskPromptCollection);
+  featureFlagCollection = db.collection<FeatureFlagDocument>("feature-flags");
   
   // Create index for createdAt (required for sorting in CosmosDB MongoDB API)
   try {
@@ -454,6 +464,31 @@ async function initializeClients(): Promise<void> {
 
   const mcpServerCount = await mcpServerCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`MCP servers collection has ${mcpServerCount} documents`);
+
+  // Create unique index and seed default feature flags
+  try {
+    await featureFlagCollection.createIndex({ key: 1 }, { unique: true });
+    console.log("Created unique index on feature-flags.key");
+  } catch (err) {
+    console.log("Index on feature-flags.key already exists or couldn't be created");
+  }
+
+  // Seed default feature flags (upsert — won't overwrite existing enabled state)
+  const defaultFlags: Array<{ key: string; label: string }> = [
+    { key: "mcp", label: "MCP Servers" },
+    { key: "models", label: "Models" },
+    { key: "agents", label: "Agents" },
+    { key: "tokens", label: "Tokens" },
+  ];
+  for (const flag of defaultFlags) {
+    await featureFlagCollection.updateOne(
+      { key: flag.key },
+      { $setOnInsert: { key: flag.key, label: flag.label, enabled: true, updatedAt: new Date() } },
+      { upsert: true }
+    );
+  }
+  const featureFlagCount = await featureFlagCollection.countDocuments();
+  console.log(`Feature flags collection has ${featureFlagCount} documents`);
 
   const insightCount = await insightsCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Insights collection has ${insightCount} documents`);
@@ -3304,6 +3339,46 @@ app.post("/api/v1/reports/:id/insights", async (req: Request, res: Response, nex
     );
 
     res.status(201).json(reference);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─── Feature Flags ────────────────────────────────────────────────────────────
+
+// GET /api/v1/feature-flags — list all feature flags
+app.get("/api/v1/feature-flags", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const flags = await featureFlagCollection.find({}).toArray();
+    res.json(flags);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/v1/feature-flags/:key — update a feature flag
+app.put("/api/v1/feature-flags/:key", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { key } = req.params;
+    const { enabled } = req.body;
+
+    if (typeof enabled !== "boolean") {
+      res.status(400).json({ error: "'enabled' must be a boolean" });
+      return;
+    }
+
+    const result = await featureFlagCollection.findOneAndUpdate(
+      { key },
+      { $set: { enabled, updatedAt: new Date() } },
+      { returnDocument: "after" }
+    );
+
+    if (!result) {
+      res.status(404).json({ error: `Feature flag '${key}' not found` });
+      return;
+    }
+
+    res.json(result);
   } catch (error) {
     next(error);
   }

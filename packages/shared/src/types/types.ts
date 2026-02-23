@@ -305,3 +305,19 @@ export interface PromptFeatureExtraction {
   model?: string;
   cached?: boolean;
 }
+
+// =============================================================================
+// Feature flag types
+// =============================================================================
+
+/** A runtime feature flag controlling portal feature visibility */
+export interface FeatureFlagDocument {
+  /** Unique identifier for the feature (e.g. "mcp", "models", "agents", "tokens") */
+  key: string;
+  /** Human-readable display label */
+  label: string;
+  /** Whether the feature is enabled and visible in the portal */
+  enabled: boolean;
+  /** Last time this flag was modified */
+  updatedAt: Date;
+}
