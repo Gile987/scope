@@ -22,6 +22,8 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
   protected config: BaseQueueProcessorConfig;
   protected logPublisher!: LogPublisher;
   protected workerName: string;
+  private stopping = false;
+  private processing = false;
 
   constructor(config: BaseQueueProcessorConfig, workerName: string) {
     this.config = config;
@@ -42,6 +44,57 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
       const credential = new DefaultAzureCredential();
       const queueUrl = `https://${config.storageAccountName}.queue.core.windows.net`;
       this.queueClient = new QueueClient(`${queueUrl}/${config.queueName}`, credential);
+    }
+
+    // Register graceful shutdown handlers
+    const shutdown = () => this.shutdown();
+    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", shutdown);
+  }
+
+  /**
+   * Signal the worker to stop after finishing the current message.
+   * Closes MongoDB and Redis connections, then exits.
+   */
+  private async shutdown(): Promise<void> {
+    if (this.stopping) return; // prevent double shutdown
+    this.stopping = true;
+    console.log(`[${this.workerName}] Shutdown signal received, finishing current work...`);
+
+    // If currently processing a message, wait briefly for it to finish
+    if (this.processing) {
+      console.log(`[${this.workerName}] Waiting for in-flight message to complete...`);
+      const deadline = Date.now() + 10_000; // 10s grace period
+      while (this.processing && Date.now() < deadline) {
+        await this.sleep(250);
+      }
+      if (this.processing) {
+        console.warn(`[${this.workerName}] Grace period expired, forcing shutdown`);
+      }
+    }
+
+    await this.cleanup();
+    process.exit(0);
+  }
+
+  /**
+   * Close MongoDB and Redis connections. Subclasses can override to add
+   * additional cleanup (e.g., killing child processes).
+   */
+  protected async cleanup(): Promise<void> {
+    try {
+      if (this.logPublisher) {
+        await this.logPublisher.close();
+        console.log(`[${this.workerName}] Redis connection closed`);
+      }
+    } catch (err) {
+      console.warn(`[${this.workerName}] Error closing Redis:`, err);
+    }
+    try {
+      await this.mongoClient.close();
+      console.log(`[${this.workerName}] MongoDB connection closed`);
+    } catch (err) {
+      console.warn(`[${this.workerName}] Error closing MongoDB:`, err);
     }
   }
 
@@ -72,7 +125,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
       this.workerName
     );
 
-    while (true) {
+    while (!this.stopping) {
       try {
         const response = await this.queueClient.receiveMessages({
           numberOfMessages: this.config.batchSize,
@@ -85,15 +138,27 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
           console.log(`[${this.workerName}] Received ${messages.length} message(s)`);
 
           for (const message of messages) {
-            await this.processMessage(message);
+            if (this.stopping) break;
+            this.processing = true;
+            try {
+              await this.processMessage(message);
+            } finally {
+              this.processing = false;
+            }
           }
         }
       } catch (error) {
+        if (this.stopping) break;
         console.error(`[${this.workerName}] Error polling queue:`, error);
       }
 
-      await this.sleep(this.config.pollIntervalMs);
+      if (!this.stopping) {
+        await this.sleep(this.config.pollIntervalMs);
+      }
     }
+
+    console.log(`[${this.workerName}] Poll loop exited`);
+    await this.cleanup();
   }
 
   private async processMessage(message: DequeuedMessageItem): Promise<void> {

@@ -18,6 +18,17 @@ COPY apps/judge/src ./apps/judge/src/
 
 RUN pnpm --filter shared build && pnpm --filter judge build
 
+# --- Dev stage: hot reload with tsx watch ---
+FROM builder AS dev
+ENV NODE_ENV=development
+ENV SERVICE_DIR=judge
+COPY scripts/dev-entrypoint.sh /app/scripts/dev-entrypoint.sh
+COPY config /app/config/
+EXPOSE 80
+ENV PORT=80
+CMD ["/app/scripts/dev-entrypoint.sh"]
+
+# --- Production stage ---
 FROM node:22.22.0-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*

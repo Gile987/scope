@@ -98,11 +98,20 @@ curl -N "$API_ENDPOINT/api/v1/requests/:id/logs?fromStart=true"
 
 ## Local Development
 
+### Quickstart
+
+```bash
+GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot
+```
+
+This starts all core services (MongoDB, Redis, Azurite, API, judge, token-manager) plus the Copilot worker and report generator — with hot reload. Edit any source file and the running service restarts automatically.
+
 ### Prerequisites
 
 - Node.js 22+
 - pnpm
 - Docker & Docker Compose
+- GitHub CLI (`gh`) with authentication
 - Azure CLI (for Azure deployment)
 
 ### Local Development with Docker Compose
@@ -135,6 +144,37 @@ pnpm dev:coder-acp-copilot
 ### Environment Variables
 
 See `.env.example` for all required variables.
+
+### Hot Reload with Docker Compose
+
+For active development, use the dev mode which provides **hot reload** for all services:
+
+```bash
+# Start core services (API, judge, token-manager) with hot reload
+pnpm docker:dev
+
+# With specific worker profiles
+pnpm docker:dev:claude-code    # + Claude Code + Report Generator
+pnpm docker:dev:copilot        # + Copilot + Report Generator
+pnpm docker:dev:portal         # + Portal (Vite HMR)
+pnpm docker:dev:all            # All services
+```
+
+**How it works:**
+- Uses [Docker Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/) to sync source files into containers
+- Backend services run `tsx watch` — restarts in ~1-2 seconds on file changes
+- Portal runs Vite dev server — instant HMR in the browser
+- Shared package (`packages/shared`) changes are recompiled automatically inside each container
+- `package.json` or lockfile changes trigger a full image rebuild
+
+**Change propagation speeds:**
+| Change | Reload Time |
+|--------|-------------|
+| Service source (`apps/*/src`) | ~1-2s (tsx watch restart) |
+| Shared package (`packages/shared/src`) | ~2-3s (tsc recompile + tsx restart) |
+| Portal source (`apps/portal/src`) | Instant (Vite HMR) |
+| Config files (`config/`) | ~1-2s (tsx watch restart) |
+| Dependencies (`package.json`, lockfile) | Full rebuild (~30-60s) |
 
 ## Deployment
 

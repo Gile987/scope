@@ -75,12 +75,14 @@ async function initializeClients(): Promise<void> {
   });
 
   // Graceful shutdown
-  process.on("SIGTERM", () => {
-    console.log("[token-manager] SIGTERM received, stopping scheduler...");
+  const shutdownHandler = () => {
+    console.log("[token-manager] Shutdown signal received, stopping scheduler...");
     scheduler.stop();
     client.close();
     process.exit(0);
-  });
+  };
+  process.on("SIGTERM", shutdownHandler);
+  process.on("SIGINT", shutdownHandler);
 }
 
 // Error handler
