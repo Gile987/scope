@@ -23,7 +23,7 @@ import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
-import type { Run, BulkResubmitOverrides, McpServerDocument } from "@/types";
+import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent } from "@/types";
 
 export function RunsList() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -51,6 +51,13 @@ export function RunsList() {
     queryKey: ["mcp-servers"],
     queryFn: api.listMcpServers,
   });
+
+  // Fetch agents for model selection in resubmit dialog
+  const { data: agents = [] } = useQuery<CodingAgent[]>({
+    queryKey: ["agents"],
+    queryFn: api.listAgents,
+  });
+  const activeAgents = useMemo(() => agents.filter((a) => !a.deletedAt), [agents]);
 
   // Fetch bulk report status for all visible runs
   const runIds = useMemo(() => runs.map((r) => r._id), [runs]);
@@ -88,6 +95,14 @@ export function RunsList() {
       isMultiMcp: uniqueMcp.length > 1,
     };
   }, [runs, selectedIds]);
+
+  // Determine supported models for the effective worker in the resubmit dialog
+  const effectiveWorker = resubmitOverrides.workerType ?? selectedRunsSummary.worker;
+  const effectiveAgent = useMemo(
+    () => activeAgents.find((a) => a._id === effectiveWorker),
+    [activeAgents, effectiveWorker],
+  );
+  const availableModels = effectiveAgent?.supportedModels ?? [];
 
   const deleteMutation = useMutation({
     mutationFn: api.deleteRun,
@@ -344,6 +359,8 @@ export function RunsList() {
                       onValueChange={(v) => setResubmitOverrides((prev) => {
                         const next = { ...prev };
                         if (v === "__keep__") { delete next.workerType; } else { next.workerType = v; }
+                        // Reset model override when worker changes (supported models differ per worker)
+                        delete next.model;
                         return next;
                       })}
                     >
@@ -386,9 +403,16 @@ export function RunsList() {
                             : selectedRunsSummary.isMultiModel ? "Mixed (keep each)" : "Default"}
                         </SelectItem>
                         <SelectItem value="__clear__">Clear (use default)</SelectItem>
-                        {["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini", "claude-sonnet-4-20250514", "claude-opus-4-20250514"].filter((m) => m !== selectedRunsSummary.model).map((m) => (
-                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        {availableModels.filter((m) => m !== selectedRunsSummary.model).map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {m}{m === effectiveAgent?.defaultModel ? " (default)" : ""}
+                          </SelectItem>
                         ))}
+                        {!effectiveWorker && (
+                          <SelectItem value="__hint__" disabled>
+                            Select a worker to see models
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
