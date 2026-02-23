@@ -326,7 +326,7 @@ export function RunsList() {
                             ? selectedRunsSummary.worker
                             : selectedRunsSummary.isMultiWorker ? "Mixed (keep each)" : "—"}
                         </SelectItem>
-                        {WORKER_TYPES.map((w) => (
+                        {WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
                           <SelectItem key={w} value={w}>{w}</SelectItem>
                         ))}
                       </SelectContent>
@@ -356,12 +356,9 @@ export function RunsList() {
                             : selectedRunsSummary.isMultiModel ? "Mixed (keep each)" : "Default"}
                         </SelectItem>
                         <SelectItem value="__clear__">Clear (use default)</SelectItem>
-                        <SelectItem value="gpt-4.1">gpt-4.1</SelectItem>
-                        <SelectItem value="gpt-4.1-mini">gpt-4.1-mini</SelectItem>
-                        <SelectItem value="gpt-4.1-nano">gpt-4.1-nano</SelectItem>
-                        <SelectItem value="o4-mini">o4-mini</SelectItem>
-                        <SelectItem value="claude-sonnet-4-20250514">claude-sonnet-4-20250514</SelectItem>
-                        <SelectItem value="claude-opus-4-20250514">claude-opus-4-20250514</SelectItem>
+                        {["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini", "claude-sonnet-4-20250514", "claude-opus-4-20250514"].filter((m) => m !== selectedRunsSummary.model).map((m) => (
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -389,7 +386,7 @@ export function RunsList() {
                             : selectedRunsSummary.isMultiIterations ? "Mixed (keep each)" : "Default"}
                         </SelectItem>
                         <SelectItem value="__clear__">Clear (use default)</SelectItem>
-                        {[1, 2, 3, 5, 10, 15, 20].map((n) => (
+                        {[1, 2, 3, 5, 10, 15, 20].filter((n) => n !== selectedRunsSummary.maxIterations).map((n) => (
                           <SelectItem key={n} value={n.toString()}>{n}</SelectItem>
                         ))}
                       </SelectContent>
