@@ -1474,10 +1474,11 @@ promptFeature
 
 promptFeature
   .command("extract")
-  .description("Extract prompt features from a task text or scenario file")
+  .description("Extract prompt features from a task text or scenario file (uses task prompt pipeline)")
   .option("-t, --task <text>", "Task text to analyze")
   .option("-s, --scenario <path>", "Path to scenario YAML file (uses its task text)")
   .option("--model <model>", "LLM model to use for extraction")
+  .option("--force", "Force re-extraction even if already extracted")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
@@ -1504,12 +1505,31 @@ promptFeature
         process.exit(1);
       }
 
+      // Step 1: Register task prompt (idempotent)
+      console.log(`${label('Registering task prompt...')}`);
+      const createResponse = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: taskText }),
+      });
+
+      if (!createResponse.ok) {
+        const error = await createResponse.json();
+        console.error(errorText("Error creating task prompt:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const taskPromptDoc = await createResponse.json() as { _id: string };
+      console.log(`${label('Task prompt ID:')} ${value(taskPromptDoc._id)}`);
+
+      // Step 2: Extract features on the task prompt entity
       console.log(`${label('Extracting prompt features...')}`);
 
-      const body: Record<string, unknown> = { taskText };
+      const qs = options.force ? "?force=true" : "";
+      const body: Record<string, unknown> = {};
       if (options.model) body.model = options.model;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/extract`, {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(taskPromptDoc._id)}/extract-features${qs}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1522,14 +1542,17 @@ promptFeature
       }
 
       const extraction = await response.json() as {
-        promptFeatureResults: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
-        extractedAt: string;
-        model?: string;
+        features: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
+        cached: boolean;
       };
 
-      const detected = extraction.promptFeatureResults.filter(r => r.detected);
-      const notDetected = extraction.promptFeatureResults.filter(r => !r.detected && r.evaluated);
-      const skipped = extraction.promptFeatureResults.filter(r => !r.evaluated);
+      if (extraction.cached) {
+        console.log(dimTimestamp('(cached — use --force to re-extract)'));
+      }
+
+      const detected = extraction.features.filter(r => r.detected);
+      const notDetected = extraction.features.filter(r => !r.detected && r.evaluated);
+      const skipped = extraction.features.filter(r => !r.evaluated);
 
       console.log(`\n${label('Results:')}`);
       if (detected.length > 0) {
@@ -1552,7 +1575,6 @@ promptFeature
       }
 
       console.log(`\n${label('Summary:')} ${value(String(detected.length))} detected, ${dimTimestamp(String(notDetected.length))} not detected, ${dimTimestamp(String(skipped.length))} skipped`);
-      if (extraction.model) console.log(`${label('Model:')}   ${value(extraction.model)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -2608,6 +2630,277 @@ insight
         process.exit(1);
       }
       console.log(successText(`Insight ${options.id} unblocked.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// ─── Task Prompt management ─────────────────────────────────────────────────
+
+const taskPrompt = program
+  .command("task-prompt")
+  .description("Manage task prompts (content-addressed, immutable prompt entities)")
+  .action(() => {
+    taskPrompt.help();
+  });
+
+configureHelp(taskPrompt);
+
+taskPrompt
+  .command("list")
+  .description("List all task prompts")
+  .option("-s, --search <search>", "Filter by text content")
+  .option("-l, --limit <n>", "Maximum number of results", "50")
+  .option("--offset <n>", "Number of results to skip", "0")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+  .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
+    try {
+      const params = new URLSearchParams();
+      if (options.search) params.set("search", options.search);
+      if (options.limit) params.set("limit", options.limit);
+      if (options.offset) params.set("offset", options.offset);
+      const qs = params.toString();
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts${qs ? `?${qs}` : ""}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const data = await response.json() as { items: Array<{ _id: string; text: string; features?: Array<{ featureId: string; detected: boolean; evaluated: boolean }>; createdAt: string }>; total: number };
+      if (data.items.length === 0) {
+        if (!isMachineReadable(format)) console.log(warnBanner("No task prompts found."));
+        return;
+      }
+
+      if (!isMachineReadable(format)) {
+        console.log(label(`Found ${data.items.length} of ${data.total} task prompts:\n`));
+      }
+
+      const displayFields: DisplayField[] = [
+        { key: '_id', label: 'ID',
+          formatter: (tp: any) => tp._id.substring(0, 8) + '…',
+          tableFormatter: (tp: any) => value(tp._id.substring(0, 8) + '…'),
+        },
+        { key: 'text', label: 'Text', formatter: (tp: any) => {
+          const text = tp.text.replace(/\n/g, ' ');
+          return text.length > 60 ? text.substring(0, 60) + '…' : text;
+        }, tableFormatter: (tp: any) => {
+          const text = tp.text.replace(/\n/g, ' ');
+          const truncated = text.length > 60 ? text.substring(0, 60) + '…' : text;
+          return dimTimestamp(truncated);
+        }},
+        { key: 'features', label: 'Features', formatter: (tp: any) => {
+          if (!tp.features) return '—';
+          const detected = tp.features.filter((f: any) => f.detected).length;
+          return `${detected}/${tp.features.length}`;
+        }},
+        { key: 'createdAt', label: 'Created', formatter: (tp: any) => tp.createdAt ? new Date(tp.createdAt).toLocaleDateString() : '—' },
+      ];
+
+      console.log(formatData(data.items, displayFields, format));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+taskPrompt
+  .command("get")
+  .description("Get details of a single task prompt")
+  .requiredOption("-i, --id <id>", "Task prompt ID (UUID)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const tp = await response.json() as {
+        _id: string; text: string;
+        features?: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
+        featuresExtractedAt?: string;
+        createdAt: string; deletedAt?: string;
+      };
+
+      console.log(`${label('ID:')}        ${value(tp._id)}`);
+      console.log(`${label('Created:')}   ${value(tp.createdAt)}`);
+      if (tp.deletedAt) console.log(`${label('Deleted:')}   ${value(tp.deletedAt)}`);
+      console.log(`${label('Text:')}`);
+      for (const line of tp.text.trim().split('\n')) {
+        console.log(`  ${line}`);
+      }
+
+      if (tp.features && tp.features.length > 0) {
+        const detected = tp.features.filter(f => f.detected);
+        const notDetected = tp.features.filter(f => !f.detected && f.evaluated);
+        const skipped = tp.features.filter(f => !f.evaluated);
+
+        console.log(`\n${label('Features:')} ${value(String(detected.length))} detected, ${dimTimestamp(String(notDetected.length))} not detected, ${dimTimestamp(String(skipped.length))} skipped`);
+        if (tp.featuresExtractedAt) console.log(`${label('Extracted:')} ${value(tp.featuresExtractedAt)}`);
+
+        if (detected.length > 0) {
+          console.log(`  ${successText('Detected:')}`);
+          for (const r of detected) {
+            console.log(`    ${criterionIcon(true, true)} ${value(r.featureId)}`);
+          }
+        }
+        if (notDetected.length > 0) {
+          console.log(`  ${dimTimestamp('Not detected:')}`);
+          for (const r of notDetected) {
+            console.log(`    ${criterionIcon(true, false)} ${dimTimestamp(r.featureId)}`);
+          }
+        }
+      } else {
+        console.log(`\n${label('Features:')} ${dimTimestamp('(not extracted)')}`);
+      }
+
+      console.log(`\n${label('View runs:')} ${dimTimestamp(`pnpm cli run list --task-prompt-id ${tp._id}`)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+taskPrompt
+  .command("create")
+  .description("Register a task prompt (idempotent — same text returns existing entity)")
+  .option("-t, --text <text>", "Task prompt text")
+  .option("-f, --file <path>", "Read task prompt text from file")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      let text = options.text;
+      if (!text && options.file) {
+        const absPath = resolve(options.file);
+        if (!existsSync(absPath)) {
+          console.error(errorText(`File not found: ${absPath}`));
+          process.exit(1);
+        }
+        text = readFileSync(absPath, 'utf-8');
+      }
+      if (!text) {
+        console.error(errorText("Error: provide --text or --file"));
+        process.exit(1);
+      }
+
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const tp = await response.json() as { _id: string; text: string; createdAt: string };
+      console.log(successText(`Task prompt registered.`));
+      console.log(`${label('ID:')}      ${value(tp._id)}`);
+      console.log(`${label('Created:')} ${value(tp.createdAt)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+taskPrompt
+  .command("delete")
+  .description("Soft-delete a task prompt")
+  .requiredOption("-i, --id <id>", "Task prompt ID (UUID)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      console.log(successText(`Task prompt ${options.id} deleted.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+taskPrompt
+  .command("extract-features")
+  .description("Extract prompt features for a task prompt")
+  .requiredOption("-i, --id <id>", "Task prompt ID (UUID)")
+  .option("--model <model>", "LLM model to use for extraction")
+  .option("--force", "Force re-extraction even if already extracted")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      console.log(`${label('Extracting prompt features for task prompt')} ${value(options.id)}${label('...')}`);
+
+      const qs = options.force ? "?force=true" : "";
+      const body: Record<string, unknown> = {};
+      if (options.model) body.model = options.model;
+
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}/extract-features${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const extraction = await response.json() as {
+        taskPromptId: string;
+        features: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
+        featuresExtractedAt: string;
+        cached: boolean;
+      };
+
+      const detected = extraction.features.filter(r => r.detected);
+      const notDetected = extraction.features.filter(r => !r.detected && r.evaluated);
+      const skipped = extraction.features.filter(r => !r.evaluated);
+
+      if (extraction.cached) {
+        console.log(dimTimestamp('(cached — use --force to re-extract)'));
+      }
+
+      console.log(`\n${label('Results:')}`);
+      if (detected.length > 0) {
+        console.log(`  ${successText('Detected:')}`);
+        for (const r of detected) {
+          console.log(`    ${criterionIcon(true, true)} ${value(r.featureId)}`);
+        }
+      }
+      if (notDetected.length > 0) {
+        console.log(`  ${dimTimestamp('Not detected:')}`);
+        for (const r of notDetected) {
+          console.log(`    ${criterionIcon(true, false)} ${dimTimestamp(r.featureId)}`);
+        }
+      }
+      if (skipped.length > 0) {
+        console.log(`  ${warnBanner('Skipped (not evaluated):')}`);
+        for (const r of skipped) {
+          console.log(`    ○ ${dimTimestamp(r.featureId)}`);
+        }
+      }
+
+      console.log(`\n${label('Summary:')} ${value(String(detected.length))} detected, ${dimTimestamp(String(notDetected.length))} not detected, ${dimTimestamp(String(skipped.length))} skipped`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

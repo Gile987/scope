@@ -19,10 +19,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  /** List all runs, optionally filtered by worker */
-  listRuns: (worker?: string): Promise<Run[]> => {
+  /** List all runs, optionally filtered by worker and/or task prompt */
+  listRuns: (opts?: { worker?: string; taskPromptId?: string }): Promise<Run[]> => {
     const params = new URLSearchParams();
-    if (worker) params.set("worker", worker);
+    if (opts?.worker) params.set("worker", opts.worker);
+    if (opts?.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
     const qs = params.toString();
     return request(`/requests${qs ? `?${qs}` : ""}`);
   },

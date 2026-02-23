@@ -836,11 +836,15 @@ app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: N
 app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const workerFilter = req.query.worker as string;
+    const taskPromptIdFilter = req.query.taskPromptId as string;
     const includeDeleted = req.query.includeDeleted === "true";
     
     const filter: Record<string, unknown> = {};
     if (workerFilter && VALID_WORKERS.includes(workerFilter as WorkerType)) {
       filter.workerType = workerFilter;
+    }
+    if (taskPromptIdFilter) {
+      filter.taskPromptId = taskPromptIdFilter;
     }
     if (!includeDeleted) {
       filter.deletedAt = { $exists: false };
