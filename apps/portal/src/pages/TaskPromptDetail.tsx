@@ -138,7 +138,7 @@ export function TaskPromptDetail() {
           <CardTitle className="text-lg">Prompt Features</CardTitle>
         </CardHeader>
         <CardContent>
-          <TaskPromptFeatures taskPromptId={taskPrompt._id} autoExtract={false} />
+          <TaskPromptFeatures taskPromptId={taskPrompt._id} autoExtract />
         </CardContent>
       </Card>
     </div>

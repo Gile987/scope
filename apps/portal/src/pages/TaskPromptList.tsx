@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Trash2, Eye, Search, RefreshCw, Plus, List, ArrowRight, Info } from "lucide-react";
+import { Trash2, Eye, Search, RefreshCw, Plus, List, ArrowRight, ArrowLeft, Info, Loader2 } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
@@ -57,7 +57,6 @@ export function TaskPromptList() {
     onSuccess: (prompt) => {
       queryClient.invalidateQueries({ queryKey: ["task-prompts"] });
       setCreatedPrompt(prompt);
-      setDialogStep(2);
     },
   });
 
@@ -90,7 +89,9 @@ export function TaskPromptList() {
               <DialogDescription>
                 {dialogStep === 1
                   ? "Enter the task text. If it already exists, the existing one is returned."
-                  : <span className="font-mono text-xs select-all">{createdPrompt?._id}</span>}
+                  : createdPrompt
+                    ? <span className="font-mono text-xs select-all">{createdPrompt._id}</span>
+                    : "Review and create the task prompt entity."}
               </DialogDescription>
             </DialogHeader>
 
@@ -112,30 +113,60 @@ export function TaskPromptList() {
                 </p>
                 <DialogFooter>
                   <Button
-                    onClick={() => createMutation.mutate(newText)}
-                    disabled={!newText.trim() || createMutation.isPending}
+                    onClick={() => setDialogStep(2)}
+                    disabled={!newText.trim()}
                     className="gap-1.5"
                   >
-                    {createMutation.isPending ? "Creating…" : <>Continue <ArrowRight className="h-4 w-4" /></>}
+                    Continue <ArrowRight className="h-4 w-4" />
                   </Button>
                 </DialogFooter>
               </>
-            ) : createdPrompt ? (
+            ) : (
               <>
                 <pre className="whitespace-pre-wrap text-sm bg-muted p-3 rounded-md font-mono leading-relaxed max-h-[150px] overflow-y-auto">
-                  {createdPrompt.text}
+                  {createdPrompt?.text ?? newText}
                 </pre>
-                <TaskPromptFeatures taskPromptId={createdPrompt._id} autoExtract />
-                <DialogFooter className="gap-2 sm:gap-0">
-                  <Button variant="outline" onClick={resetDialog}>
-                    Done
-                  </Button>
-                  <Button onClick={() => { resetDialog(); navigate(`/task-prompts/${createdPrompt._id}`); }}>
-                    View Details
-                  </Button>
-                </DialogFooter>
+
+                {createMutation.isError && (
+                  <p className="text-sm text-destructive">
+                    {createMutation.error instanceof Error
+                      ? createMutation.error.message
+                      : "Failed to create task prompt"}
+                  </p>
+                )}
+
+                {createdPrompt ? (
+                  <>
+                    <TaskPromptFeatures taskPromptId={createdPrompt._id} autoExtract />
+                    <DialogFooter className="gap-2 sm:gap-0">
+                      <Button variant="outline" onClick={resetDialog}>
+                        Done
+                      </Button>
+                      <Button onClick={() => { resetDialog(); navigate(`/task-prompts/${createdPrompt._id}`); }}>
+                        View Details
+                      </Button>
+                    </DialogFooter>
+                  </>
+                ) : (
+                  <DialogFooter className="gap-2 sm:gap-0">
+                    <Button variant="outline" onClick={() => { setDialogStep(1); createMutation.reset(); }} className="gap-1.5">
+                      <ArrowLeft className="h-4 w-4" /> Back
+                    </Button>
+                    <Button
+                      onClick={() => createMutation.mutate(newText)}
+                      disabled={createMutation.isPending}
+                      className="gap-1.5"
+                    >
+                      {createMutation.isPending ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
+                      ) : (
+                        <><Plus className="h-4 w-4" /> Create Task Prompt</>
+                      )}
+                    </Button>
+                  </DialogFooter>
+                )}
               </>
-            ) : null}
+            )}
           </DialogContent>
         </Dialog>
       </div>
