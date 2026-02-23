@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus, Check, Server } from "lucide-react";
+import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus, Check, Server, Info } from "lucide-react";
 import { WORKER_TYPES, type TaskPromptFeatureExtractionResult, type SuggestedPromptFeature, type CodingAgent, type McpServerDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
@@ -184,6 +184,10 @@ export function SubmitRun() {
                   rows={3}
                   required
                 />
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  New task prompts are automatically added to the task prompt library.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
