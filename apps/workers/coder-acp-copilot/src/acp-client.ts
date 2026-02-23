@@ -11,6 +11,7 @@
 import { spawn, ChildProcess } from "node:child_process";
 import { Duplex } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
+import type { McpServerConfig } from "shared";
 
 export interface ACPClientOptions {
   command: string;
@@ -18,6 +19,7 @@ export interface ACPClientOptions {
   env?: Record<string, string>;
   cwd?: string;
   onLog?: (message: string) => void;
+  mcpServers?: McpServerConfig[];
 }
 
 export interface ACPSessionResult {
@@ -79,10 +81,10 @@ class ACPClientHandler implements acp.Client {
         }
         break;
       case "tool_call":
-        this.onLog(`Tool call: ${update.title} (${update.status})`);
+        this.onLog(`Tool call: ${update.title} (${update.status})${update.kind ? ` [${update.kind}]` : ""}`);
         break;
       case "tool_call_update":
-        this.onLog(`Tool update: ${update.toolCallId} - ${update.status}`);
+        this.onLog(`Tool update: ${update.toolCallId} - ${update.status}${update.kind ? ` [${update.kind}]` : ""}`);
         break;
       default:
         break;
@@ -113,7 +115,7 @@ export async function runACPSession(
   prompt: string,
   options: ACPClientOptions
 ): Promise<ACPSessionResult> {
-  const { command, args = [], env = {}, cwd, onLog = console.log } = options;
+  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [] } = options;
 
   onLog(`Starting ACP agent: ${command} ${args.join(" ")}`);
 
@@ -184,12 +186,28 @@ export async function runACPSession(
     }
 
     // Create a new session
+    if (mcpServers.length > 0) {
+      onLog(`Configuring ${mcpServers.length} MCP server(s): ${mcpServers.map((s) => `${s.name} (${s.type})`).join(", ")}`);
+    } else {
+      onLog(`No MCP servers configured for this session`);
+    }
     const sessionResult = await connection.newSession({
       cwd: cwd || "/workspace",
-      mcpServers: [],
+      mcpServers: mcpServers.map((s) => ({
+        type: s.type,
+        name: s.name,
+        url: s.url,
+        headers: s.headers?.map((h) => ({ name: h.name, value: h.value })) ?? [],
+      })),
     });
 
     onLog(`Created session: ${sessionResult.sessionId}`);
+    if (sessionResult._meta) {
+      onLog(`Session meta: ${JSON.stringify(sessionResult._meta)}`);
+    }
+    if (sessionResult.configOptions) {
+      onLog(`Session config options: ${sessionResult.configOptions.map((o: { configId: string }) => o.configId).join(", ")}`);
+    }
 
     // Send prompt
     onLog(`Sending prompt...`);

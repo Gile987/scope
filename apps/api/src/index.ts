@@ -70,6 +70,7 @@ let promptFeatureCollection: Collection<PromptFeatureDocument>;
 let promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
 let reportCollection: Collection<ReportDocument>;
 let agentCollection: Collection<CodingAgentDocument>;
+let mcpServerCollection: Collection<McpServerDocument>;
 let insightsCollection: Collection<InsightDocument>;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
@@ -184,6 +185,7 @@ interface RequestDocument {
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;
+  mcpServers?: string[];          // MCP server slugs selected for this run
 }
 
 // Coding agent document interface
@@ -193,6 +195,19 @@ interface CodingAgentDocument {
   description?: string;
   supportedModels: string[];
   defaultModel?: string;
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;
+}
+
+// MCP server document interface
+interface McpServerDocument {
+  _id: string;                    // Slug identifier
+  name: string;
+  type: "sse" | "http";
+  url: string;
+  headers?: Array<{ name: string; value: string }>;
+  description?: string;
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;
@@ -323,6 +338,7 @@ async function initializeClients(): Promise<void> {
   promptFeatureExtractionCollection = db.collection<PromptFeatureExtractionDocument>("prompt-feature-extractions");
   reportCollection = db.collection<ReportDocument>("reports");
   agentCollection = db.collection<CodingAgentDocument>("agents");
+  mcpServerCollection = db.collection<McpServerDocument>("mcp-servers");
   insightsCollection = db.collection<InsightDocument>("insights");
   
   // Create index for createdAt (required for sorting in CosmosDB MongoDB API)
@@ -393,6 +409,17 @@ async function initializeClients(): Promise<void> {
   const agentCount = await agentCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Agents collection has ${agentCount} documents`);
 
+  // Create index for MCP servers collection
+  try {
+    await mcpServerCollection.createIndex({ createdAt: -1 });
+    console.log("Created index on mcp-servers collection");
+  } catch (err) {
+    console.log("Index on mcp-servers collection already exists or couldn't be created");
+  }
+
+  const mcpServerCount = await mcpServerCollection.countDocuments({ deletedAt: { $exists: false } });
+  console.log(`MCP servers collection has ${mcpServerCount} documents`);
+
   const insightCount = await insightsCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Insights collection has ${insightCount} documents`);
   
@@ -451,7 +478,7 @@ app.get("/api/v1/version", (_req: Request, res: Response) => {
 // Submit a request
 app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs } = req.body;
     const worker = req.query.worker as string;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
@@ -516,6 +543,27 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       }
     }
 
+    // Validate MCP server slugs if provided
+    let validatedMcpServers: string[] | undefined;
+    if (mcpServerSlugs !== undefined) {
+      if (!Array.isArray(mcpServerSlugs) || !mcpServerSlugs.every((s: unknown) => typeof s === "string")) {
+        res.status(400).json({ error: "mcpServers must be an array of strings (MCP server slugs)" });
+        return;
+      }
+      if (mcpServerSlugs.length > 0) {
+        const existingServers = await mcpServerCollection
+          .find({ _id: { $in: mcpServerSlugs }, deletedAt: { $exists: false } })
+          .toArray();
+        const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
+        const missingSlugs = mcpServerSlugs.filter((slug: string) => !existingSlugs.has(slug));
+        if (missingSlugs.length > 0) {
+          res.status(400).json({ error: `MCP server(s) not found: ${missingSlugs.join(", ")}` });
+          return;
+        }
+        validatedMcpServers = mcpServerSlugs;
+      }
+    }
+
     // Normalize scenario: ensure criteria is always an array, preserve version
     const scenario: RequestDocument['scenario'] = {
       task: scenarioObj.task as string,
@@ -547,6 +595,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
           ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
+          ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
         };
         newDocs.push(requestDoc);
 
@@ -594,6 +643,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
       ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
+      ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
     };
 
     // Store in MongoDB
@@ -840,7 +890,16 @@ app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFuncti
 // Bulk re-submit requests (create new runs from existing ones)
 app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { ids, count = 1 } = req.body as { ids?: string[]; count?: number };
+    const { ids, count = 1, overrides } = req.body as {
+      ids?: string[];
+      count?: number;
+      overrides?: {
+        workerType?: string;
+        model?: string | null;
+        maxIterations?: number | null;
+        mcpServers?: string[] | null;
+      };
+    };
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       res.status(400).json({ error: "Request body must include 'ids' array" });
@@ -849,6 +908,12 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
 
     if (typeof count !== "number" || count < 1 || count > 10) {
       res.status(400).json({ error: "count must be a number between 1 and 10" });
+      return;
+    }
+
+    // Validate overrides if provided
+    if (overrides?.workerType && !VALID_WORKERS.includes(overrides.workerType as WorkerType)) {
+      res.status(400).json({ error: `Invalid workerType override: ${overrides.workerType}` });
       return;
     }
 
@@ -869,22 +934,30 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
         const requestId = uuidv4();
         newIds.push(requestId);
 
+        // Resolve effective values: override > original > omit
+        const effectiveWorkerType = (overrides?.workerType ?? original.workerType) as WorkerType;
+        const effectiveModel = overrides?.model !== undefined ? overrides.model : original.model;
+        const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
+        const effectiveMcpServers = overrides?.mcpServers !== undefined ? overrides.mcpServers : original.mcpServers;
+
         const newDoc: RequestDocument = {
           _id: requestId,
           scenario: original.scenario,
-          workerType: original.workerType,
+          workerType: effectiveWorkerType,
           status: "pending",
           createdAt: new Date(),
-          ...(original.maxIterations ? { maxIterations: original.maxIterations } : {}),
+          ...(effectiveMaxIterations ? { maxIterations: effectiveMaxIterations } : {}),
           ...(original.personaInstructions ? { personaInstructions: original.personaInstructions } : {}),
           ...(original.persona ? { persona: original.persona } : {}),
+          ...(effectiveModel ? { model: effectiveModel } : {}),
+          ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
         };
 
         newDocs.push(newDoc);
 
         const queueMessage: QueueMessage = { requestId };
         const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
-        queueMessages.push({ workerType: original.workerType as WorkerType, message: messageContent });
+        queueMessages.push({ workerType: effectiveWorkerType as WorkerType, message: messageContent });
       }
     }
 
@@ -2408,6 +2481,172 @@ app.delete("/api/v1/agents/:id", async (req: Request, res: Response, next: NextF
     }
 
     await agentCollection.updateOne(
+      { _id: id },
+      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+    );
+
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================
+// MCP Server CRUD routes (/api/v1/mcp/servers)
+// ============================================================
+
+const VALID_MCP_TRANSPORT_TYPES = ["sse", "http"] as const;
+
+// List MCP servers
+app.get("/api/v1/mcp/servers", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const servers = await mcpServerCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+    servers.sort((a, b) => a._id.localeCompare(b._id));
+    res.json(servers.map((s) => ({ ...s, id: s._id })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get MCP server by slug
+app.get("/api/v1/mcp/servers/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const server = await mcpServerCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!server) {
+      res.status(404).json({ error: "MCP server not found" });
+      return;
+    }
+    res.json({ ...server, id: server._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create MCP server
+app.post("/api/v1/mcp/servers", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { _id, name, type, url, headers, description } = req.body;
+
+    if (!_id || typeof _id !== "string") {
+      res.status(400).json({ error: "_id (slug) is required and must be a string" });
+      return;
+    }
+    if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(_id) && !/^[a-z0-9]$/.test(_id)) {
+      res.status(400).json({ error: "_id must be a lowercase slug (letters, numbers, hyphens)" });
+      return;
+    }
+    if (!name || typeof name !== "string") {
+      res.status(400).json({ error: "name is required and must be a string" });
+      return;
+    }
+    if (!type || !VALID_MCP_TRANSPORT_TYPES.includes(type)) {
+      res.status(400).json({ error: `type is required and must be one of: ${VALID_MCP_TRANSPORT_TYPES.join(", ")}` });
+      return;
+    }
+    if (!url || typeof url !== "string") {
+      res.status(400).json({ error: "url is required and must be a string" });
+      return;
+    }
+    if (headers !== undefined) {
+      if (!Array.isArray(headers) || !headers.every((h: unknown) => typeof h === "object" && h !== null && typeof (h as Record<string, unknown>).name === "string" && typeof (h as Record<string, unknown>).value === "string")) {
+        res.status(400).json({ error: "headers must be an array of { name: string, value: string }" });
+        return;
+      }
+    }
+
+    const now = new Date();
+    const existing = await mcpServerCollection.findOne({ _id });
+
+    if (existing) {
+      // Upsert: un-delete if soft-deleted, update fields
+      await mcpServerCollection.updateOne(
+        { _id },
+        {
+          $set: {
+            name,
+            type,
+            url,
+            ...(headers !== undefined ? { headers } : {}),
+            ...(description !== undefined ? { description } : {}),
+            updatedAt: now,
+          },
+          $unset: { deletedAt: "" },
+        }
+      );
+      const updated = await mcpServerCollection.findOne({ _id });
+      res.json({ ...updated, id: updated!._id });
+    } else {
+      const serverDoc: McpServerDocument = {
+        _id,
+        name,
+        type,
+        url,
+        ...(headers ? { headers } : {}),
+        ...(description ? { description } : {}),
+        createdAt: now,
+      };
+      await mcpServerCollection.insertOne(serverDoc);
+      res.status(201).json({ ...serverDoc, id: serverDoc._id });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update MCP server
+app.put("/api/v1/mcp/servers/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { name, type, url, headers, description } = req.body;
+
+    const existing = await mcpServerCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "MCP server not found" });
+      return;
+    }
+
+    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+    if (name !== undefined) updateFields.name = name;
+    if (type !== undefined) {
+      if (!VALID_MCP_TRANSPORT_TYPES.includes(type)) {
+        res.status(400).json({ error: `type must be one of: ${VALID_MCP_TRANSPORT_TYPES.join(", ")}` });
+        return;
+      }
+      updateFields.type = type;
+    }
+    if (url !== undefined) updateFields.url = url;
+    if (headers !== undefined) {
+      if (!Array.isArray(headers) || !headers.every((h: unknown) => typeof h === "object" && h !== null && typeof (h as Record<string, unknown>).name === "string" && typeof (h as Record<string, unknown>).value === "string")) {
+        res.status(400).json({ error: "headers must be an array of { name: string, value: string }" });
+        return;
+      }
+      updateFields.headers = headers;
+    }
+    if (description !== undefined) updateFields.description = description;
+
+    await mcpServerCollection.updateOne({ _id: id }, { $set: updateFields });
+    const updated = await mcpServerCollection.findOne({ _id: id });
+    res.json({ ...updated, id: updated!._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete MCP server (soft-delete)
+app.delete("/api/v1/mcp/servers/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await mcpServerCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "MCP server not found" });
+      return;
+    }
+
+    await mcpServerCollection.updateOne(
       { _id: id },
       { $set: { deletedAt: new Date(), updatedAt: new Date() } }
     );

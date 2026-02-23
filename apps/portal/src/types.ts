@@ -61,6 +61,7 @@ export interface Run {
   updatedAt?: string;
   deletedAt?: string;
   promptFeatureExtractionId?: string;
+  mcpServers?: string[];
 }
 
 export const WORKER_TYPES = [
@@ -178,6 +179,14 @@ export interface AnalysisResponse {
   availableCriteria: string[];
   /** Criteria IDs that were used to define success (empty = use turn.passed) */
   selectedCriteria: string[];
+}
+
+// Bulk re-submit overrides
+export interface BulkResubmitOverrides {
+  workerType?: string;
+  model?: string | null;
+  maxIterations?: number | null;
+  mcpServers?: string[] | null;
 }
 
 // Bulk re-submit response
@@ -327,6 +336,43 @@ export interface CodingAgent {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
+}
+
+// MCP Server types
+export type McpTransportType = "sse" | "http";
+
+export interface McpServerHeader {
+  name: string;
+  value: string;
+}
+
+export interface McpServerDocument {
+  _id: string;
+  name: string;
+  type: McpTransportType;
+  url: string;
+  headers?: McpServerHeader[];
+  description?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface CreateMcpServerRequest {
+  _id: string;
+  name: string;
+  type: McpTransportType;
+  url: string;
+  headers?: McpServerHeader[];
+  description?: string;
+}
+
+export interface UpdateMcpServerRequest {
+  name?: string;
+  type?: McpTransportType;
+  url?: string;
+  headers?: McpServerHeader[];
+  description?: string;
 }
 
 // =============================================================================

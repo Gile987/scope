@@ -10,10 +10,12 @@ import {
   MULTI_TURN_DEFAULTS,
   ConversationTurn,
 } from "../types/types.js";
+import type { McpServerConfig } from "../types/mcp.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { JudgeClient } from "../judge/judge-client.js";
 import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
+import { McpServerClient } from "../mcp/mcp-server-client.js";
 
 /**
  * Queue processor for coding agent workers.
@@ -34,13 +36,26 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     currentPopReceipt: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<void> {
+    // Resolve MCP server slugs to configs via API
+    let mcpServerConfigs: McpServerConfig[] | undefined;
+    if (requestDoc.mcpServers && requestDoc.mcpServers.length > 0) {
+      const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+      if (!apiBaseUrl) {
+        throw new Error("MCP servers requested but SCOPE_MT_API_URL is not configured");
+      }
+      const mcpClient = new McpServerClient(apiBaseUrl);
+      await log("info", `Resolving ${requestDoc.mcpServers.length} MCP server(s)`, { mcpServers: requestDoc.mcpServers });
+      mcpServerConfigs = await mcpClient.resolveServers(requestDoc.mcpServers);
+      await log("info", `Resolved MCP servers: ${mcpServerConfigs.map(s => s.name).join(", ")}`);
+    }
+
     // Determine if this is a multi-turn request (criteria present in scenario)
     const isMultiTurn = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
 
     if (isMultiTurn) {
-      await this.processMultiTurn(requestDoc, message, currentPopReceipt, log);
+      await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs);
     } else {
-      await this.processOneShot(requestDoc, message, currentPopReceipt, log);
+      await this.processOneShot(requestDoc, message, currentPopReceipt, log, mcpServerConfigs);
     }
   }
 
@@ -75,7 +90,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
     currentPopReceipt: string,
-    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+    mcpServerConfigs?: McpServerConfig[]
   ): Promise<void> {
     const requestId = requestDoc._id;
 
@@ -88,7 +104,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     await log("info", `Starting processing with ${this.processor.workerName}`);
 
     // Process the task using the worker-specific processor
-    const result = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model });
+    const result = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs });
 
     await log("info", "Processing completed", { result, final: true });
 
@@ -113,7 +129,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
     currentPopReceipt: string,
-    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+    mcpServerConfigs?: McpServerConfig[]
   ): Promise<void> {
     const requestId = requestDoc._id;
     const judgeServiceUrl = process.env.JUDGE_SERVICE_URL;
@@ -170,6 +187,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       log,
       personaInstructions: requestDoc.personaInstructions,
       model: requestDoc.model,
+      mcpServerConfigs,
       onTurnComplete: async (turn: ConversationTurn) => {
         // Persist each turn incrementally to MongoDB
         await this.collection.updateOne(

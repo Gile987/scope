@@ -18,7 +18,13 @@ class CopilotProcessor implements WorkerProcessor {
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
     options?: WorkerProcessorOptions
   ): Promise<string> {
-    await log("info", "Starting Copilot ACP processor", { inputLength: message.length, model: options?.model });
+    const mcpConfigs = options?.mcpServerConfigs ?? [];
+    await log("info", "Starting Copilot ACP processor", {
+      inputLength: message.length,
+      model: options?.model,
+      mcpServerCount: mcpConfigs.length,
+      mcpServers: mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
+    });
     
     try {
       // Acquire token dynamically (env var fallback or Token Manager)
@@ -42,6 +48,7 @@ class CopilotProcessor implements WorkerProcessor {
         onLog: async (msg) => {
           await log("debug", msg);
         },
+        mcpServers: options?.mcpServerConfigs,
       });
 
       await log("info", "Copilot processing complete", { 

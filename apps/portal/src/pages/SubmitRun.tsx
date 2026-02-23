@@ -14,8 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus, Check } from "lucide-react";
-import { WORKER_TYPES, type PromptFeatureExtraction, type SuggestedPromptFeature, type CodingAgent } from "@/types";
+import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus, Check, Server } from "lucide-react";
+import { WORKER_TYPES, type PromptFeatureExtraction, type SuggestedPromptFeature, type CodingAgent, type McpServerDocument } from "@/types";
+import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { Stepper } from "@/components/Stepper";
 import { PromptFeatureWizard } from "@/components/PromptFeatureWizard";
@@ -37,11 +38,22 @@ export function SubmitRun() {
   const [maxIterations, setMaxIterations] = useState<string>("10");
   const [occurrences, setOccurrences] = useState<number>(1);
 
+  // MCP servers
+  const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
+
   // Fetch agents from the API
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
     queryFn: () => api.listAgents(),
   });
+
+  // Fetch MCP servers
+  const { data: mcpServers = [] } = useQuery({
+    queryKey: ["mcp-servers"],
+    queryFn: () => api.listMcpServers(),
+  });
+
+  const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
 
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
   const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
@@ -128,6 +140,7 @@ export function SubmitRun() {
           }
         : {}),
       ...(extraction?._id ? { promptFeatureExtractionId: extraction._id } : {}),
+      ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
     });
   };
 
@@ -282,6 +295,52 @@ export function SubmitRun() {
             </CardContent>
           </Card>
 
+          {/* MCP Servers (optional) */}
+          {activeMcpServers.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Server className="h-5 w-5" />
+                  MCP Servers <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+                </CardTitle>
+                <CardDescription>Select remote MCP servers to make available to the coding agent</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {activeMcpServers.map((s: McpServerDocument) => (
+                    <label
+                      key={s._id}
+                      className="flex items-center gap-3 rounded-md border p-3 cursor-pointer hover:bg-accent/50 transition-colors"
+                    >
+                      <Checkbox
+                        checked={selectedMcpServers.includes(s._id)}
+                        onCheckedChange={(checked) => {
+                          setSelectedMcpServers(prev =>
+                            checked
+                              ? [...prev, s._id]
+                              : prev.filter(id => id !== s._id)
+                          );
+                        }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm">{s._id}</span>
+                          <Badge variant="outline" className="text-xs uppercase">{s.type}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">{s.name}{s.description ? ` — ${s.description}` : ""}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                {selectedMcpServers.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {selectedMcpServers.length} server{selectedMcpServers.length !== 1 ? "s" : ""} selected
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Persona (optional) */}
           <Card>
             <CardHeader>
@@ -381,6 +440,18 @@ export function SubmitRun() {
                       {pickedCriteria.map((c) => (
                         <Badge key={c} variant="secondary" className="font-mono text-xs">
                           {c}
+                        </Badge>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {selectedMcpServers.length > 0 && (
+                  <>
+                    <span className="text-muted-foreground">MCP Servers</span>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedMcpServers.map((s) => (
+                        <Badge key={s} variant="secondary" className="font-mono text-xs">
+                          {s}
                         </Badge>
                       ))}
                     </div>
