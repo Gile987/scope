@@ -1,0 +1,164 @@
+# =============================================================================
+# Scoped - Docker Compose Dev Overlay (Hot Reload)
+# =============================================================================
+#
+# Overrides service build targets to use the "dev" stage and adds
+# Docker Compose Watch (develop.watch) for live file sync.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml watch
+#   pnpm docker:dev                    # shorthand (see package.json)
+#
+# How it works:
+#   - Each service builds the "dev" Dockerfile stage (tsx watch / Vite dev server)
+#   - Source file changes are synced into the container via Compose Watch
+#   - tsx watch detects synced files and restarts the service (~1-2s)
+#   - shared package changes are recompiled in-container via tsc --watch
+#   - package.json / lockfile changes trigger a full image rebuild
+#
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Application services
+  # ===========================================================================
+
+  api:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/api/src
+          target: /app/apps/api/src
+        - action: sync
+          path: ./packages/shared/src
+          target: /app/packages/shared/src
+        - action: sync
+          path: ./config
+          target: /app/config
+        - action: rebuild
+          path: ./apps/api/package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+
+  judge:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/judge/src
+          target: /app/apps/judge/src
+        - action: sync
+          path: ./packages/shared/src
+          target: /app/packages/shared/src
+        - action: sync
+          path: ./config
+          target: /app/config
+        - action: rebuild
+          path: ./apps/judge/package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+
+  token-manager:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/token-manager/src
+          target: /app/apps/token-manager/src
+        - action: sync
+          path: ./packages/shared/src
+          target: /app/packages/shared/src
+        - action: rebuild
+          path: ./apps/token-manager/package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+
+  # ===========================================================================
+  # Portal (Vite HMR)
+  # ===========================================================================
+
+  portal:
+    build:
+      target: dev
+    ports:
+      - "${PORTAL_PORT:-5180}:5173"
+    environment:
+      VITE_API_PROXY_TARGET: http://api:80
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/portal/src
+          target: /app/apps/portal/src
+        - action: rebuild
+          path: ./apps/portal/package.json
+        - action: rebuild
+          path: ./apps/portal/tailwind.config.ts
+        - action: rebuild
+          path: ./apps/portal/vite.config.ts
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+
+  # ===========================================================================
+  # Worker services
+  # ===========================================================================
+
+  coder-acp-claude-code:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/workers/coder-acp-claude-code/src
+          target: /app/apps/workers/coder-acp-claude-code/src
+        - action: sync
+          path: ./packages/shared/src
+          target: /app/packages/shared/src
+        - action: sync
+          path: ./config
+          target: /app/config
+        - action: rebuild
+          path: ./apps/workers/coder-acp-claude-code/package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+
+  coder-acp-copilot:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/workers/coder-acp-copilot/src
+          target: /app/apps/workers/coder-acp-copilot/src
+        - action: sync
+          path: ./packages/shared/src
+          target: /app/packages/shared/src
+        - action: sync
+          path: ./config
+          target: /app/config
+        - action: rebuild
+          path: ./apps/workers/coder-acp-copilot/package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+
+  report-generator:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/workers/report-generator/src
+          target: /app/apps/workers/report-generator/src
+        - action: sync
+          path: ./packages/shared/src
+          target: /app/packages/shared/src
+        - action: sync
+          path: ./config
+          target: /app/config
+        - action: rebuild
+          path: ./apps/workers/report-generator/package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
