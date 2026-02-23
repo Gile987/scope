@@ -60,6 +60,20 @@ export interface CodingAgentDocument {
   deletedAt?: Date;           // Soft-delete timestamp
 }
 
+// Model document stored in MongoDB — tracks lifecycle of scanned models
+export interface ModelDocument {
+  _id: string;                     // Compound: "{agentId}:{modelId}" for uniqueness
+  modelId: string;                 // Model identifier (e.g. "gpt-4.1")
+  provider: string;                // Provider identifier (e.g. "github-copilot", "anthropic")
+  agentId: string;                 // Which coding agent this model was discovered for
+  firstSeenAt: Date;               // First time our scanner discovered this model
+  lastSeenAt: Date;                // Last scan where this model was still present
+  disappearedAt?: Date;            // Set when a previously-seen model is no longer returned by the provider
+  providerAvailableFrom?: Date;    // Provider-reported availability date
+  providerEndOfLife?: Date;        // Provider-reported planned end-of-life / deprecation date
+  metadata?: Record<string, unknown>; // Additional provider-specific metadata
+}
+
 // Request document stored in MongoDB
 export interface RequestDocument {
   _id: string;  // UUID as _id (for CosmosDB sharding compatibility)

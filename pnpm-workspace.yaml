@@ -5,4 +5,6 @@ packages:
   - "apps/portal"
   - "apps/token-manager"
   - "apps/workers/*"
+  - "apps/model-scanners/*"
   - "packages/shared"
+  - "packages/model-scanning"
