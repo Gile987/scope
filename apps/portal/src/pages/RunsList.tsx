@@ -523,6 +523,7 @@ export function RunsList() {
               <TableHead className="w-[100px]">ID</TableHead>
               <TableHead>Task</TableHead>
               <TableHead className="w-[180px]">Worker</TableHead>
+              <TableHead>MCP</TableHead>
               <TableHead className="w-[120px]">Status</TableHead>
               <TableHead className="w-[100px]">Report</TableHead>
               <TableHead className="w-[80px]">Turns</TableHead>
@@ -552,6 +553,19 @@ export function RunsList() {
                   <span className="font-mono text-xs">{run.workerType}</span>
                   {run.model && (
                     <span className="block font-mono text-xs text-muted-foreground">{run.model}</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {run.mcpServers && run.mcpServers.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {run.mcpServers.map((slug) => (
+                        <Link key={slug} to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                          {slug}
+                        </Link>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">–</span>
                   )}
                 </TableCell>
                 <TableCell>
