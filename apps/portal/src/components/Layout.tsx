@@ -28,7 +28,6 @@ const navItems: NavItem[] = [
   { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
   { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
   { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
-  { to: "/admin", label: "Admin", icon: Settings },
 ];
 
 export function Layout() {
@@ -48,7 +47,7 @@ export function Layout() {
             <Activity className="h-6 w-6" />
             <span className="hidden font-bold sm:inline-block">Scope MT</span>
           </Link>
-          <nav className="flex items-center space-x-6 text-sm font-medium">
+          <nav className="flex flex-1 items-center space-x-6 text-sm font-medium">
             {visibleNavItems.map((item) => {
               const isActive = location.pathname.startsWith(item.to);
               return (
@@ -66,6 +65,17 @@ export function Layout() {
               );
             })}
           </nav>
+          {/* Admin gear icon - right aligned */}
+          <Link
+            to="/admin"
+            className={cn(
+              "ml-auto p-2 transition-colors hover:text-foreground/80",
+              location.pathname === "/admin" ? "text-foreground" : "text-foreground/60"
+            )}
+            title="Admin"
+          >
+            <Settings className="h-5 w-5" />
+          </Link>
         </div>
       </header>
 
