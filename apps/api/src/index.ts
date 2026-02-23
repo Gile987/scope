@@ -70,6 +70,7 @@ let promptFeatureCollection: Collection<PromptFeatureDocument>;
 let promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
 let reportCollection: Collection<ReportDocument>;
 let agentCollection: Collection<CodingAgentDocument>;
+let modelCollection: Collection<ModelDocument>;
 let mcpServerCollection: Collection<McpServerDocument>;
 let insightsCollection: Collection<InsightDocument>;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
@@ -198,6 +199,20 @@ interface CodingAgentDocument {
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;
+}
+
+// Model document interface — tracks lifecycle of scanned models
+interface ModelDocument {
+  _id: string;                     // Compound: "{agentId}:{modelId}"
+  modelId: string;                 // Model identifier (e.g. "gpt-4.1")
+  provider: string;                // Provider identifier (e.g. "github-copilot", "anthropic")
+  agentId: string;                 // Which coding agent this model was discovered for
+  firstSeenAt: Date;               // First time our scanner discovered this model
+  lastSeenAt: Date;                // Last scan where this model was still present
+  disappearedAt?: Date;            // Set when model no longer returned by provider
+  providerAvailableFrom?: Date;    // Provider-reported availability date
+  providerEndOfLife?: Date;        // Provider-reported planned end-of-life
+  metadata?: Record<string, unknown>; // Additional provider-specific metadata
 }
 
 // MCP server document interface
@@ -338,6 +353,7 @@ async function initializeClients(): Promise<void> {
   promptFeatureExtractionCollection = db.collection<PromptFeatureExtractionDocument>("prompt-feature-extractions");
   reportCollection = db.collection<ReportDocument>("reports");
   agentCollection = db.collection<CodingAgentDocument>("agents");
+  modelCollection = db.collection<ModelDocument>("models");
   mcpServerCollection = db.collection<McpServerDocument>("mcp-servers");
   insightsCollection = db.collection<InsightDocument>("insights");
   
@@ -391,6 +407,16 @@ async function initializeClients(): Promise<void> {
     console.log("Index on agents collection already exists or couldn't be created");
   }
 
+  // Create indexes for models collection
+  try {
+    await modelCollection.createIndex({ agentId: 1 });
+    await modelCollection.createIndex({ provider: 1 });
+    await modelCollection.createIndex({ agentId: 1, provider: 1 });
+    console.log("Created indexes on models collection");
+  } catch (err) {
+    console.log("Indexes on models collection already exist or couldn't be created");
+  }
+
   // Create indexes for insights collection
   try {
     await insightsCollection.createIndex({ createdAt: -1 });
@@ -408,6 +434,9 @@ async function initializeClients(): Promise<void> {
 
   const agentCount = await agentCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Agents collection has ${agentCount} documents`);
+
+  const modelCount = await modelCollection.countDocuments();
+  console.log(`Models collection has ${modelCount} documents`);
 
   // Create index for MCP servers collection
   try {
@@ -2486,6 +2515,174 @@ app.delete("/api/v1/agents/:id", async (req: Request, res: Response, next: NextF
     );
 
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================
+// Models routes (/api/v1/models) — lifecycle-tracked model scanning
+// ============================================================
+
+// List models (filterable by agentId and/or provider)
+app.get("/api/v1/models", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { agentId, provider } = req.query;
+    const filter: Record<string, unknown> = {};
+    if (agentId && typeof agentId === "string") filter.agentId = agentId;
+    if (provider && typeof provider === "string") filter.provider = provider;
+
+    const models = await modelCollection
+      .find(filter)
+      .sort({ modelId: 1 })
+      .toArray();
+    res.json(models);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get a single model by compound ID (agentId:modelId)
+app.get("/api/v1/models/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const model = await modelCollection.findOne({ _id: id });
+    if (!model) {
+      res.status(404).json({ error: "Model not found" });
+      return;
+    }
+    res.json(model);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Sync models from a scanner — bulk upsert with lifecycle reconciliation
+// POST /api/v1/models/sync
+// Body: { agentId, provider, models: [{ id, providerAvailableFrom?, providerEndOfLife?, metadata? }], scannedAt }
+app.post("/api/v1/models/sync", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { agentId, provider, models, scannedAt } = req.body;
+
+    // Validate required fields
+    if (!agentId || typeof agentId !== "string") {
+      res.status(400).json({ error: "agentId is required and must be a string" });
+      return;
+    }
+    if (!provider || typeof provider !== "string") {
+      res.status(400).json({ error: "provider is required and must be a string" });
+      return;
+    }
+    if (!Array.isArray(models)) {
+      res.status(400).json({ error: "models is required and must be an array" });
+      return;
+    }
+    if (!scannedAt || typeof scannedAt !== "string") {
+      res.status(400).json({ error: "scannedAt is required and must be an ISO 8601 string" });
+      return;
+    }
+
+    const now = new Date(scannedAt);
+    const scannedModelIds = new Set<string>();
+
+    const added: string[] = [];
+    const unchanged: string[] = [];
+
+    // Upsert each scanned model
+    for (const model of models) {
+      if (!model.id || typeof model.id !== "string") continue; // skip invalid entries
+      scannedModelIds.add(model.id);
+
+      const compoundId = `${agentId}:${model.id}`;
+      const existing = await modelCollection.findOne({ _id: compoundId });
+
+      if (existing) {
+        // Model still present — update lastSeenAt, clear disappearedAt
+        const updateFields: Record<string, unknown> = { lastSeenAt: now };
+        if (existing.disappearedAt) {
+          // Model reappeared
+          updateFields.disappearedAt = undefined;
+        }
+        if (model.providerAvailableFrom) {
+          updateFields.providerAvailableFrom = new Date(model.providerAvailableFrom);
+        }
+        if (model.providerEndOfLife) {
+          updateFields.providerEndOfLife = new Date(model.providerEndOfLife);
+        }
+        if (model.metadata) {
+          updateFields.metadata = model.metadata;
+        }
+
+        const unsetFields: Record<string, string> = {};
+        if (existing.disappearedAt) {
+          unsetFields.disappearedAt = "";
+        }
+
+        await modelCollection.updateOne(
+          { _id: compoundId },
+          {
+            $set: updateFields,
+            ...(Object.keys(unsetFields).length > 0 ? { $unset: unsetFields } : {}),
+          },
+        );
+        unchanged.push(model.id);
+      } else {
+        // New model — insert
+        const doc: ModelDocument = {
+          _id: compoundId,
+          modelId: model.id,
+          provider,
+          agentId,
+          firstSeenAt: now,
+          lastSeenAt: now,
+          ...(model.providerAvailableFrom
+            ? { providerAvailableFrom: new Date(model.providerAvailableFrom) }
+            : {}),
+          ...(model.providerEndOfLife
+            ? { providerEndOfLife: new Date(model.providerEndOfLife) }
+            : {}),
+          ...(model.metadata ? { metadata: model.metadata } : {}),
+        };
+        await modelCollection.insertOne(doc);
+        added.push(model.id);
+      }
+    }
+
+    // Mark disappeared models — those in DB for this agent+provider but not in scan
+    const existingModels = await modelCollection
+      .find({ agentId, provider, disappearedAt: { $exists: false } })
+      .toArray();
+
+    const removed: string[] = [];
+    for (const existing of existingModels) {
+      if (!scannedModelIds.has(existing.modelId)) {
+        await modelCollection.updateOne(
+          { _id: existing._id },
+          { $set: { disappearedAt: now } },
+        );
+        removed.push(existing.modelId);
+      }
+    }
+
+    // Update agent's supportedModels with active (non-disappeared) models
+    const activeModels = await modelCollection
+      .find({ agentId, disappearedAt: { $exists: false } })
+      .toArray();
+    const activeModelIds = activeModels.map((m) => m.modelId).sort();
+
+    const agent = await agentCollection.findOne({ _id: agentId });
+    if (agent) {
+      await agentCollection.updateOne(
+        { _id: agentId },
+        { $set: { supportedModels: activeModelIds, updatedAt: new Date() } },
+      );
+    }
+
+    const report = { added, removed, unchanged };
+    console.log(
+      `Model sync for ${agentId}/${provider}: +${added.length} -${removed.length} =${unchanged.length}`,
+    );
+    res.json(report);
   } catch (error) {
     next(error);
   }
