@@ -2613,7 +2613,7 @@ app.post("/api/v1/models/sync", async (req: Request, res: Response, next: NextFu
           updateFields.metadata = model.metadata;
         }
 
-        const unsetFields: Record<string, string> = {};
+        const unsetFields: Record<string, "" | true | 1> = {};
         if (existing.disappearedAt) {
           unsetFields.disappearedAt = "";
         }
