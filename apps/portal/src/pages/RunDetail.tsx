@@ -100,7 +100,7 @@ export function RunDetail() {
   if (error || !run) {
     return (
       <div className="space-y-4">
-        <Link to="/">
+        <Link to="/runs">
           <Button variant="ghost" className="gap-1.5">
             <ArrowLeft className="h-4 w-4" /> Back to runs
           </Button>
@@ -118,7 +118,7 @@ export function RunDetail() {
     <div className="space-y-6">
       {/* Back link + header */}
       <div>
-        <Link to="/">
+        <Link to="/runs">
           <Button variant="ghost" size="sm" className="gap-1.5 mb-2">
             <ArrowLeft className="h-4 w-4" /> Back to runs
           </Button>
