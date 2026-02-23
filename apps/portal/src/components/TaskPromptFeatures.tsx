@@ -477,7 +477,9 @@ export function TaskPromptFeatures({
                   setActiveSuggestion(null);
                   toast.success(`Feature "${feature.id}" created`);
                   // Re-extract with force to pick up the new feature
-                  extractMutation.mutate({ force: true });
+                  if (entityMode) {
+                    extractEntityMutation.mutate({ force: true });
+                  }
                 }}
                 onCancel={() => setActiveSuggestion(null)}
               />
