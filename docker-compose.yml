@@ -158,8 +158,8 @@ services:
       azurite:
         condition: service_healthy
 
-  # Seed agents - registers agent definitions on startup
-  seed-agents:
+  # Seed agents - registers agent definitions that aren't covered by model scanners
+  seed-agent-vscode-web:
     image: curlimages/curl:latest
     depends_on:
       api:
@@ -175,30 +175,47 @@ services:
           echo "API not ready, retrying in 3s..."
           sleep 3
         done
-        echo "API is ready. Seeding agents..."
 
-        seed_agent() {
-          AGENT_ID="$$1"
-          shift
-          if curl -sf "$$API_URL/api/v1/agents/$$AGENT_ID" > /dev/null 2>&1; then
-            echo "Agent $$AGENT_ID already exists, skipping."
-          else
-            curl -sf -X POST "$$API_URL/api/v1/agents" \
-              -H "Content-Type: application/json" \
-              -d "$$@"
-            echo ""
-            echo "Agent $$AGENT_ID seeded."
-          fi
-        }
+        if curl -sf "$$API_URL/api/v1/agents/$$AGENT_ID" > /dev/null 2>&1; then
+          echo "Agent $$AGENT_ID already exists, skipping."
+        else
+          curl -sf -X POST "$$API_URL/api/v1/agents" \
+            -H "Content-Type: application/json" \
+          echo ""
+          echo "Agent $$AGENT_ID seeded."
+        fi
 
-        seed_agent "coder-acp-copilot" \
-          '{"_id":"coder-acp-copilot","name":"Copilot (ACP)","description":"GitHub Copilot coding agent via ACP protocol","supportedModels":["gpt-4.1","claude-sonnet-4"],"defaultModel":"gpt-4.1"}'
+  # Model scanner: GitHub Copilot - scans available models and syncs to API
+  model-scanner-copilot:
+    build:
+      context: .
+      dockerfile: apps/model-scanners/copilot/Dockerfile
+    depends_on:
+      api:
+        condition: service_started
+      token-manager:
+        condition: service_started
+    restart: "no"
+    environment:
+      API_URL: http://api:80
+      TOKEN_MANAGER_URL: http://token-manager:80
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
 
-        seed_agent "coder-acp-claude-code" \
-          '{"_id":"coder-acp-claude-code","name":"Claude Code (ACP)","description":"Anthropic Claude Code coding agent via ACP protocol","supportedModels":["claude-sonnet-4","claude-opus-4"],"defaultModel":"claude-sonnet-4"}'
-
-
-        echo "All agents seeded."
+  # Model scanner: Anthropic - scans available models and syncs to API
+  model-scanner-anthropic:
+    build:
+      context: .
+      dockerfile: apps/model-scanners/anthropic/Dockerfile
+    depends_on:
+      api:
+        condition: service_started
+      token-manager:
+        condition: service_started
+    restart: "no"
+    environment:
+      API_URL: http://api:80
+      TOKEN_MANAGER_URL: http://token-manager:80
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
   # Judge - evaluation service (always starts)
   judge:
