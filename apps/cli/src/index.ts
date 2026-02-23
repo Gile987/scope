@@ -20,6 +20,7 @@ import { configureHelp, generateOutputFormatsHelp } from "./utils/helpFormatter.
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "./utils/style.js";
 import { formatData, isMachineReadable } from "./utils/formatters.js";
 import type { OutputFormat, DisplayField } from "./utils/types.js";
+import { runGetAction } from "./run-get-action.js";
 
 dotenv.config();
 
@@ -29,6 +30,7 @@ const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
 function printFollowUpCommands(id: string): void {
   console.log(`\n${label('Run ID:')} ${value(id)}`);
   console.log(`\n${label('Next steps:')}`);
+  console.log(`  ${dimTimestamp('Get details:')}   pnpm cli run get -i ${id}`);
   console.log(`  ${dimTimestamp('Check status:')}  pnpm cli run status -i ${id}`);
   console.log(`  ${dimTimestamp('Stream logs:')}   pnpm cli run logs -i ${id}`);
   console.log(`  ${dimTimestamp('Download:')}      pnpm cli run download -i ${id}`);
@@ -273,6 +275,16 @@ run
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
     }
+  });
+
+run
+  .command("get")
+  .description("Get full details of a run")
+  .requiredOption("-i, --id <id>", "Run ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+  .action(async (options) => {
+    await runGetAction({ id: options.id, url: options.url, output: options.output });
   });
 
 run
@@ -2320,6 +2332,282 @@ mcpServer
         process.exit(1);
       }
       console.log(successText(`MCP server "${options.id}" deleted.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// ─── Insight management ──────────────────────────────────────────────────────
+
+const insight = program
+  .command("insight")
+  .description("Manage insights discovered during report analysis")
+  .action(() => {
+    insight.help();
+  });
+
+configureHelp(insight);
+
+insight
+  .command("list")
+  .description("List all insights")
+  .option("-q, --query <query>", "Search by keyword")
+  .option("--blocked", "Show only blocked insights")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+  .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
+    try {
+      const params = new URLSearchParams();
+      if (options.query) params.set("q", options.query);
+      if (options.blocked) params.set("blocked", "true");
+      const qs = params.toString();
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights${qs ? `?${qs}` : ""}`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const insights = await response.json();
+      if (insights.length === 0) {
+        if (!isMachineReadable(format)) console.log(warnBanner("No insights found."));
+        return;
+      }
+      const displayFields: DisplayField[] = [
+        { key: '_id', label: 'ID', tableFormatter: (r: any) => value(r._id.slice(0, 8) + '…') },
+        { key: 'title', label: 'Title', formatter: (r: any) => r.title.length > 60 ? r.title.slice(0, 57) + '…' : r.title },
+        { key: 'category', label: 'Category', formatter: (r: any) => r.category || '—' },
+        { key: 'referenceCount', label: 'Refs', formatter: (r: any) => String(r.referenceCount) },
+        { key: 'votes', label: 'Votes', formatter: (r: any) => String(r.upvotes - r.downvotes) },
+        { key: 'blocked', label: 'Blocked', formatter: (r: any) => r.blocked ? '✗' : '' },
+        { key: 'createdBy', label: 'Source' },
+      ];
+      console.log(formatData(insights, displayFields, format));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+insight
+  .command("get")
+  .description("Get details of an insight (renders markdown description)")
+  .requiredOption("-i, --id <id>", "Insight ID")
+  .option("--raw", "Print raw markdown without formatting")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const insightDoc = await response.json();
+
+      if (options.raw) {
+        console.log(insightDoc.description);
+        return;
+      }
+
+      console.log(`${label('ID:')} ${value(insightDoc._id)}`);
+      console.log(`${label('Title:')} ${value(insightDoc.title)}`);
+      if (insightDoc.category) console.log(`${label('Category:')} ${insightDoc.category}`);
+      if (insightDoc.tags?.length) console.log(`${label('Tags:')} ${insightDoc.tags.join(', ')}`);
+      console.log(`${label('Votes:')} ▲${insightDoc.upvotes} ▼${insightDoc.downvotes} (net: ${insightDoc.upvotes - insightDoc.downvotes})`);
+      console.log(`${label('References:')} ${insightDoc.referenceCount} reports`);
+      console.log(`${label('Blocked:')} ${insightDoc.blocked ? 'Yes' : 'No'}`);
+      console.log(`${label('Created by:')} ${insightDoc.createdBy}`);
+      if (insightDoc.sourceReportId) console.log(`${label('Source report:')} ${insightDoc.sourceReportId}`);
+      console.log(`${label('Created:')} ${new Date(insightDoc.createdAt).toLocaleString()}`);
+      if (insightDoc.updatedAt) console.log(`${label('Updated:')} ${new Date(insightDoc.updatedAt).toLocaleString()}`);
+      console.log(`\n${label('Description:')}\n${insightDoc.description}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+insight
+  .command("create")
+  .description("Create a new insight")
+  .requiredOption("--title <title>", "Short summary (one line)")
+  .requiredOption("--description <description>", "Markdown description")
+  .option("--category <category>", "Category tag")
+  .option("--tags <tags>", "Comma-separated tags")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {
+        title: options.title,
+        description: options.description,
+        createdBy: "user",
+      };
+      if (options.category) body.category = options.category;
+      if (options.tags) body.tags = options.tags.split(",").map((t: string) => t.trim()).filter(Boolean);
+
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const created = await response.json();
+      console.log(successText(`Insight created: ${created._id}`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+insight
+  .command("update")
+  .description("Update an insight")
+  .requiredOption("-i, --id <id>", "Insight ID")
+  .option("--title <title>", "New title")
+  .option("--description <description>", "New markdown description")
+  .option("--category <category>", "New category")
+  .option("--tags <tags>", "New comma-separated tags")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {};
+      if (options.title) body.title = options.title;
+      if (options.description) body.description = options.description;
+      if (options.category) body.category = options.category;
+      if (options.tags) body.tags = options.tags.split(",").map((t: string) => t.trim()).filter(Boolean);
+      if (Object.keys(body).length === 0) {
+        console.error(errorText("Error: provide at least one field to update"));
+        process.exit(1);
+      }
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      console.log(successText(`Insight ${options.id} updated.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+insight
+  .command("delete")
+  .description("Delete an insight (soft-delete)")
+  .requiredOption("-i, --id <id>", "Insight ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      console.log(successText(`Insight ${options.id} deleted.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+insight
+  .command("upvote")
+  .description("Upvote an insight")
+  .requiredOption("-i, --id <id>", "Insight ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/upvote`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const updated = await response.json();
+      console.log(successText(`Upvoted. Score: ▲${updated.upvotes} ▼${updated.downvotes}`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+insight
+  .command("downvote")
+  .description("Downvote an insight")
+  .requiredOption("-i, --id <id>", "Insight ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/downvote`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const updated = await response.json();
+      console.log(successText(`Downvoted. Score: ▲${updated.upvotes} ▼${updated.downvotes}`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+insight
+  .command("block")
+  .description("Block an insight")
+  .requiredOption("-i, --id <id>", "Insight ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/block`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      console.log(successText(`Insight ${options.id} blocked.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+insight
+  .command("unblock")
+  .description("Unblock an insight")
+  .requiredOption("-i, --id <id>", "Insight ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/unblock`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      console.log(successText(`Insight ${options.id} unblocked.`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

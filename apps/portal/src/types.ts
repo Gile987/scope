@@ -218,6 +218,7 @@ export interface Report {
   status: ReportStatus;
   error?: string;
   logs: LogEvent[];
+  insightReferences?: InsightReference[];
   createdAt: string;
   updatedAt?: string;
 }
@@ -372,4 +373,41 @@ export interface UpdateMcpServerRequest {
   url?: string;
   headers?: McpServerHeader[];
   description?: string;
+}
+
+// =============================================================================
+// Insight types
+// =============================================================================
+
+/** Reference from a report to an insight */
+export interface InsightReference {
+  insightId: string;
+  referencedAt: string;
+  isNew: boolean;
+}
+
+/** Insight entity */
+export interface Insight {
+  _id: string;
+  id: string;
+  title: string;
+  /** Markdown-formatted detailed observation */
+  description: string;
+  category?: string;
+  tags?: string[];
+  upvotes: number;
+  downvotes: number;
+  blocked: boolean;
+  referenceCount: number;
+  createdBy: "agent" | "user";
+  sourceReportId?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** Insight enriched with reference metadata (when fetched via report) */
+export interface InsightWithReference extends Insight {
+  referencedAt?: string;
+  isNew?: boolean;
 }

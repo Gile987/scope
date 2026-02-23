@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { LogViewer } from "@/components/LogViewer";
 import { useLogStream } from "@/hooks/use-log-stream";
-import { ArrowLeft, Copy, Check, ExternalLink, ClipboardCopy } from "lucide-react";
+import { ArrowLeft, Copy, Check, ExternalLink, ClipboardCopy, Lightbulb } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -36,6 +36,12 @@ export function ReportDetail() {
       if (status === "completed" || status === "failed") return false;
       return 5_000;
     },
+  });
+
+  const { data: reportInsights = [] } = useQuery({
+    queryKey: ["report-insights", id],
+    queryFn: () => api.getReportInsights(id!),
+    enabled: !!id && report?.status === "completed",
   });
 
   const isActive = report?.status === "pending" || report?.status === "generating";
@@ -150,6 +156,13 @@ export function ReportDetail() {
             )}
           </TabsTrigger>
           <TabsTrigger value="logs">Logs</TabsTrigger>
+          <TabsTrigger value="insights" className="gap-1.5">
+            <Lightbulb className="h-3.5 w-3.5" />
+            Insights
+            {reportInsights.length > 0 && (
+              <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">{reportInsights.length}</Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
         </TabsList>
 
@@ -208,6 +221,62 @@ export function ReportDetail() {
             isDone={effectiveIsDone}
             error={effectiveError}
           />
+        </TabsContent>
+
+        {/* Insights tab */}
+        <TabsContent value="insights" className="mt-4">
+          {reportInsights.length > 0 ? (
+            <div className="space-y-4">
+              {reportInsights.map((insight) => (
+                <Card key={insight._id}>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between">
+                      <CardTitle className="text-base">
+                        <Link
+                          to={`/insights/${insight._id}`}
+                          className="text-primary hover:underline"
+                        >
+                          {insight.title}
+                        </Link>
+                      </CardTitle>
+                      <div className="flex items-center gap-2">
+                        {insight.isNew && (
+                          <Badge variant="default" className="text-xs">New</Badge>
+                        )}
+                        {insight.category && (
+                          <Badge variant="secondary" className="text-xs">{insight.category}</Badge>
+                        )}
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="prose prose-sm dark:prose-invert max-w-none">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm, remarkGithubAlerts]}
+                        rehypePlugins={[rehypeRaw]}
+                      >
+                        {insight.description}
+                      </ReactMarkdown>
+                    </div>
+                    {insight.tags && insight.tags.length > 0 && (
+                      <div className="flex gap-1 mt-3">
+                        {insight.tags.map((tag) => (
+                          <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <Lightbulb className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+              <p className="text-muted-foreground">
+                No insights have been linked to this report yet.
+              </p>
+            </div>
+          )}
         </TabsContent>
 
         {/* Details tab */}

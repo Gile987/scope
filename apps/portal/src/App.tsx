@@ -25,6 +25,8 @@ import { AgentDetail } from "@/pages/AgentDetail";
 import { McpServerList } from "@/pages/McpServerList";
 import { CreateMcpServer } from "@/pages/CreateMcpServer";
 import { McpServerDetail } from "@/pages/McpServerDetail";
+import { InsightsList } from "@/pages/InsightsList";
+import { InsightDetail } from "@/pages/InsightDetail";
 
 export function App() {
   return (
@@ -36,6 +38,8 @@ export function App() {
         <Route path="/runs/:id" element={<RunDetail />} />
         <Route path="/reports" element={<ReportsList />} />
         <Route path="/reports/:id" element={<ReportDetail />} />
+        <Route path="/insights" element={<InsightsList />} />
+        <Route path="/insights/:id" element={<InsightDetail />} />
         <Route path="/criteria" element={<CriteriaList />} />
         <Route path="/criteria/new" element={<CreateCriterion />} />
         <Route path="/criteria/graph" element={<CriteriaGraphView />} />

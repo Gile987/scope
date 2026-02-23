@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import type { WorkerProcessor, WorkerProcessorOptions, LogEvent, CodingAgentDocument } from "./types.js";
+import type { WorkerProcessor, WorkerProcessorOptions, LogEvent, CodingAgentDocument, InsightDocument, InsightReference } from "./types.js";
 
 describe("WorkerProcessorOptions", () => {
   it("passes model through processMessage", async () => {
@@ -115,5 +115,98 @@ describe("CodingAgentDocument", () => {
 
     // Application-level validation: defaultModel should be in supportedModels
     expect(agent.supportedModels).toContain(agent.defaultModel);
+  });
+});
+
+describe("InsightDocument", () => {
+  it("supports all required fields", () => {
+    const insight: InsightDocument = {
+      _id: "abc-123",
+      title: "Agent retries same approach despite failure",
+      description: "## Observation\nThe agent repeatedly attempts the same fix.",
+      upvotes: 3,
+      downvotes: 1,
+      blocked: false,
+      referenceCount: 5,
+      createdBy: "agent",
+      createdAt: new Date(),
+    };
+
+    expect(insight._id).toBe("abc-123");
+    expect(insight.createdBy).toBe("agent");
+    expect(insight.referenceCount).toBe(5);
+    expect(insight.blocked).toBe(false);
+    expect(insight.category).toBeUndefined();
+    expect(insight.tags).toBeUndefined();
+    expect(insight.deletedAt).toBeUndefined();
+  });
+
+  it("supports optional fields", () => {
+    const insight: InsightDocument = {
+      _id: "def-456",
+      title: "Scenario criteria too vague",
+      description: "Details here",
+      category: "scenario-design",
+      tags: ["criteria", "vague", "improvement"],
+      upvotes: 0,
+      downvotes: 0,
+      blocked: false,
+      referenceCount: 1,
+      createdBy: "user",
+      sourceReportId: "report-789",
+      createdAt: new Date("2025-01-01"),
+      updatedAt: new Date("2025-06-01"),
+      deletedAt: new Date("2025-06-15"),
+    };
+
+    expect(insight.category).toBe("scenario-design");
+    expect(insight.tags).toEqual(["criteria", "vague", "improvement"]);
+    expect(insight.sourceReportId).toBe("report-789");
+    expect(insight.deletedAt).toBeInstanceOf(Date);
+  });
+
+  it("allows createdBy to be agent or user", () => {
+    const agentInsight: InsightDocument = {
+      _id: "1",
+      title: "t",
+      description: "d",
+      upvotes: 0,
+      downvotes: 0,
+      blocked: false,
+      referenceCount: 0,
+      createdBy: "agent",
+      createdAt: new Date(),
+    };
+
+    const userInsight: InsightDocument = {
+      ...agentInsight,
+      _id: "2",
+      createdBy: "user",
+    };
+
+    expect(agentInsight.createdBy).toBe("agent");
+    expect(userInsight.createdBy).toBe("user");
+  });
+});
+
+describe("InsightReference", () => {
+  it("supports new insight reference", () => {
+    const ref: InsightReference = {
+      insightId: "insight-1",
+      referencedAt: new Date(),
+      isNew: true,
+    };
+
+    expect(ref.isNew).toBe(true);
+  });
+
+  it("supports existing insight reference", () => {
+    const ref: InsightReference = {
+      insightId: "insight-2",
+      referencedAt: new Date(),
+      isNew: false,
+    };
+
+    expect(ref.isNew).toBe(false);
   });
 });

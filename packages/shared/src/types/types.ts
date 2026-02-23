@@ -195,6 +195,7 @@ export interface ReportDocument {
   status: ReportStatus;
   error?: string;
   logs: LogEvent[];
+  insightReferences?: InsightReference[];  // Insights discovered/referenced by this report
   createdAt: Date;
   updatedAt?: Date;
 }
@@ -202,6 +203,34 @@ export interface ReportDocument {
 /** Queue message payload for report generation */
 export interface ReportQueueMessagePayload {
   reportId: string;
+}
+
+// --- Insights System types ---
+
+/** Reference from a report to an insight */
+export interface InsightReference {
+  insightId: string;     // FK → InsightDocument._id
+  referencedAt: Date;    // When the reference was made
+  isNew: boolean;        // True if this report created the insight, false if referencing existing
+}
+
+/** Insight document stored in MongoDB */
+export interface InsightDocument {
+  _id: string;           // UUID
+  title: string;         // Short summary (one line)
+  /** Markdown-formatted detailed observation */
+  description: string;
+  category?: string;     // Grouping tag (e.g. "agent-behavior", "criteria-handling", "tool-usage")
+  tags?: string[];       // Free-form tags for search
+  upvotes: number;       // Simple counter (default 0)
+  downvotes: number;     // Simple counter (default 0)
+  blocked: boolean;      // Whether this insight is blocked (default false)
+  referenceCount: number; // How many reports reference this insight
+  createdBy: "agent" | "user";  // Who initially created the insight
+  sourceReportId?: string;      // FK → ReportDocument._id (if agent-created)
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;      // Soft-delete timestamp
 }
 
 // --- Prompt Features System types ---

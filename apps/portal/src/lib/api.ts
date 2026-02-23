@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, PromptFeatureExtraction, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -367,5 +367,77 @@ export const api = {
   /** Trigger on-demand validation for a token */
   validateToken: (id: string): Promise<TokenDocument> => {
     return request(`/tokens/${id}/validate`, { method: "POST" });
+  },
+
+  // ─── Insights ──────────────────────────────────────────────────────────────
+
+  /** List all insights (with optional text search and blocked filter) */
+  listInsights: (q?: string, blocked?: boolean): Promise<Insight[]> => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (blocked !== undefined) params.set("blocked", String(blocked));
+    const qs = params.toString();
+    return request(`/insights${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Search insights by keyword (fuzzy match) */
+  searchInsights: (q: string): Promise<Insight[]> => {
+    return request(`/insights/search?q=${encodeURIComponent(q)}`);
+  },
+
+  /** Get a single insight by ID */
+  getInsight: (id: string): Promise<Insight> => {
+    return request(`/insights/${id}`);
+  },
+
+  /** Create a new insight */
+  createInsight: (body: { title: string; description: string; category?: string; tags?: string[] }): Promise<Insight> => {
+    return request("/insights", {
+      method: "POST",
+      body: JSON.stringify({ ...body, createdBy: "user" }),
+    });
+  },
+
+  /** Update an insight */
+  updateInsight: (id: string, body: { title?: string; description?: string; category?: string; tags?: string[] }): Promise<Insight> => {
+    return request(`/insights/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete an insight */
+  deleteInsight: (id: string): Promise<void> => {
+    return request(`/insights/${id}`, { method: "DELETE" });
+  },
+
+  /** Upvote an insight */
+  upvoteInsight: (id: string): Promise<Insight> => {
+    return request(`/insights/${id}/upvote`, { method: "POST" });
+  },
+
+  /** Downvote an insight */
+  downvoteInsight: (id: string): Promise<Insight> => {
+    return request(`/insights/${id}/downvote`, { method: "POST" });
+  },
+
+  /** Block an insight */
+  blockInsight: (id: string): Promise<Insight> => {
+    return request(`/insights/${id}/block`, { method: "POST" });
+  },
+
+  /** Unblock an insight */
+  unblockInsight: (id: string): Promise<Insight> => {
+    return request(`/insights/${id}/unblock`, { method: "POST" });
+  },
+
+  /** Get reports that reference a specific insight */
+  getInsightReports: (insightId: string): Promise<Report[]> => {
+    return request(`/insights/${insightId}/reports`);
+  },
+
+  /** Get insights referenced by a specific report */
+  getReportInsights: (reportId: string): Promise<InsightWithReference[]> => {
+    return request(`/reports/${reportId}/insights`);
   },
 };
