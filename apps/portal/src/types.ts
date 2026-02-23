@@ -60,6 +60,8 @@ export interface Run {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
+  taskPromptId?: string;
+  /** @deprecated — use taskPromptId instead */
   promptFeatureExtractionId?: string;
   mcpServers?: string[];
 }
@@ -146,9 +148,29 @@ export interface PromptFeatureExtraction {
   cached?: boolean;
 }
 
+// Task Prompt types (first-class entity for benchmark task texts)
+export interface TaskPrompt {
+  _id: string;                          // UUIDv5 content-addressed ID
+  text: string;                         // Full task prompt text
+  features?: PromptFeatureResult[];     // Detected prompt features
+  featuresExtractedAt?: string;         // When features were last extracted
+  createdAt: string;
+  deletedAt?: string;
+}
+
+/** Response shape from feature extraction endpoints */
+export interface TaskPromptFeatureExtractionResult {
+  taskPromptId?: string;
+  features: PromptFeatureResult[];
+  featuresExtractedAt?: string;
+  suggestedFeatures?: SuggestedPromptFeature[];
+  cached: boolean;
+}
+
 // Analysis types for statistics dashboard
 export interface TaskWorkerGroup {
   task: string;
+  taskPromptId: string;
   workerType: string;
   total: number;
   completed: number;

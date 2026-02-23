@@ -92,7 +92,8 @@ export interface RequestDocument {
   personaInstructions?: string;  // Resolved persona prose (from traits.yaml)
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
-  promptFeatureExtractionId?: string; // Linked prompt feature extraction (hash-deduped)
+  taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → TaskPromptDocument._id)
+  promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
   mcpServers?: string[];          // MCP server slugs selected for this run
 }
 
@@ -245,6 +246,20 @@ export interface InsightDocument {
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;      // Soft-delete timestamp
+}
+
+// --- Task Prompt System types ---
+// Task prompts are immutable, content-addressed entities identified by UUIDv5(text, namespace).
+// Runs reference task prompts via a materialized taskPromptId derived from scenario.task.
+
+/** Task prompt document stored in MongoDB. Immutable — text cannot be changed after creation. */
+export interface TaskPromptDocument {
+  _id: string;                          // UUIDv5 of text.trim() (content-addressed)
+  text: string;                         // Full task prompt text
+  features?: PromptFeatureResult[];     // Detected prompt features
+  featuresExtractedAt?: Date;           // When features were last extracted
+  createdAt: Date;
+  deletedAt?: Date;                     // Soft-delete timestamp
 }
 
 // --- Prompt Features System types ---

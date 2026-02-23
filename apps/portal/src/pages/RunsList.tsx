@@ -3,7 +3,7 @@
 
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -16,15 +16,18 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument } from "@/types";
 
 export function RunsList() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const taskPromptId = searchParams.get("taskPromptId") ?? undefined;
   const [workerFilter, setWorkerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [taskFilter, setTaskFilter] = useState("all");
@@ -35,8 +38,11 @@ export function RunsList() {
   const queryClient = useQueryClient();
 
   const { data: runs = [], isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter],
-    queryFn: () => api.listRuns(workerFilter === "all" ? undefined : workerFilter),
+    queryKey: ["runs", workerFilter, taskPromptId],
+    queryFn: () => api.listRuns({
+      worker: workerFilter === "all" ? undefined : workerFilter,
+      taskPromptId,
+    }),
     refetchInterval: 10_000,
   });
 
@@ -233,6 +239,30 @@ export function RunsList() {
           {filteredRuns.length} run{filteredRuns.length !== 1 ? "s" : ""}
         </span>
       </div>
+
+      {/* Task prompt filter indicator */}
+      {taskPromptId && (
+        <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2">
+          <span className="text-sm text-muted-foreground">Filtered by task prompt:</span>
+          <Link to={`/task-prompts/${taskPromptId}`}>
+            <Badge variant="secondary" className="font-mono text-xs hover:bg-accent cursor-pointer">
+              {formatId(taskPromptId)}
+            </Badge>
+          </Link>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("taskPromptId");
+              setSearchParams(next);
+            }}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (

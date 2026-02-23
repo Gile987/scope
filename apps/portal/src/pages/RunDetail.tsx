@@ -54,12 +54,12 @@ export function RunDetail() {
   const effectiveIsDone = isActive ? logStream.isDone : true;
   const effectiveError = isActive ? logStream.error : null;
 
-  // Fetch linked prompt feature extraction (if present)
-  const extractionId = run?.promptFeatureExtractionId;
-  const { data: extraction } = useQuery({
-    queryKey: ["prompt-feature-extraction", extractionId],
-    queryFn: () => api.getPromptFeatureExtraction(extractionId!),
-    enabled: !!extractionId,
+  // Fetch linked task prompt (if present) — provides prompt features
+  const taskPromptId = run?.taskPromptId;
+  const { data: taskPrompt } = useQuery({
+    queryKey: ["task-prompt", taskPromptId],
+    queryFn: () => api.getTaskPrompt(taskPromptId!),
+    enabled: !!taskPromptId,
   });
 
   // Fetch reports for this run
@@ -100,7 +100,7 @@ export function RunDetail() {
   if (error || !run) {
     return (
       <div className="space-y-4">
-        <Link to="/">
+        <Link to="/runs">
           <Button variant="ghost" className="gap-1.5">
             <ArrowLeft className="h-4 w-4" /> Back to runs
           </Button>
@@ -118,7 +118,7 @@ export function RunDetail() {
     <div className="space-y-6">
       {/* Back link + header */}
       <div>
-        <Link to="/">
+        <Link to="/runs">
           <Button variant="ghost" size="sm" className="gap-1.5 mb-2">
             <ArrowLeft className="h-4 w-4" /> Back to runs
           </Button>
@@ -326,8 +326,8 @@ export function RunDetail() {
               </CardContent>
             </Card>
 
-            {/* Prompt Features card (if extraction linked) */}
-            {extraction && (
+            {/* Prompt Features card (if task prompt has features) */}
+            {taskPrompt?.features && taskPrompt.features.length > 0 && (
               <Card className="md:col-span-2">
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
@@ -336,9 +336,9 @@ export function RunDetail() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {(() => {
-                    const detected = extraction.promptFeatureResults.filter((f) => f.detected);
-                    const notDetected = extraction.promptFeatureResults.filter((f) => !f.detected && f.evaluated);
-                    const skipped = extraction.promptFeatureResults.filter((f) => !f.evaluated);
+                    const detected = taskPrompt.features!.filter((f) => f.detected);
+                    const notDetected = taskPrompt.features!.filter((f) => !f.detected && f.evaluated);
+                    const skipped = taskPrompt.features!.filter((f) => !f.evaluated);
                     return (
                       <>
                         {detected.length > 0 && (

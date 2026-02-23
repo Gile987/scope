@@ -29,6 +29,8 @@ import { InsightsList } from "@/pages/InsightsList";
 import { InsightDetail } from "@/pages/InsightDetail";
 import { ModelList } from "@/pages/ModelList";
 import { ModelDetail } from "@/pages/ModelDetail";
+import { TaskPromptList } from "@/pages/TaskPromptList";
+import { TaskPromptDetail } from "@/pages/TaskPromptDetail";
 
 export function App() {
   return (
@@ -50,6 +52,8 @@ export function App() {
         <Route path="/prompt-features/new" element={<CreatePromptFeature />} />
         <Route path="/prompt-features/graph" element={<PromptFeatureGraphView />} />
         <Route path="/prompt-features/:id" element={<PromptFeatureDetail />} />
+        <Route path="/task-prompts" element={<TaskPromptList />} />
+        <Route path="/task-prompts/:id" element={<TaskPromptDetail />} />
         <Route path="/statistics" element={<Statistics />} />
         <Route path="/tokens" element={<TokenList />} />
         <Route path="/tokens/new" element={<CreateToken />} />
