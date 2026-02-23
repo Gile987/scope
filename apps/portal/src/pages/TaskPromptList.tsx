@@ -26,7 +26,6 @@ import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { Stepper } from "@/components/Stepper";
-import type { TaskPrompt } from "@/types";
 
 const DIALOG_STEPS = ["Task Text", "Features"];
 
@@ -35,7 +34,6 @@ export function TaskPromptList() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogStep, setDialogStep] = useState<1 | 2>(1);
   const [newText, setNewText] = useState("");
-  const [createdPrompt, setCreatedPrompt] = useState<TaskPrompt | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -56,7 +54,8 @@ export function TaskPromptList() {
     mutationFn: (text: string) => api.createTaskPrompt(text),
     onSuccess: (prompt) => {
       queryClient.invalidateQueries({ queryKey: ["task-prompts"] });
-      setCreatedPrompt(prompt);
+      resetDialog();
+      navigate(`/task-prompts/${prompt._id}`);
     },
   });
 
@@ -64,7 +63,6 @@ export function TaskPromptList() {
     setDialogOpen(false);
     setDialogStep(1);
     setNewText("");
-    setCreatedPrompt(null);
     createMutation.reset();
   };
 
@@ -90,9 +88,7 @@ export function TaskPromptList() {
               <DialogDescription>
                 {dialogStep === 1
                   ? "Enter the task text. If it already exists, the existing one is returned."
-                  : createdPrompt
-                    ? <span className="font-mono text-xs select-all">{createdPrompt._id}</span>
-                    : "Review the text and create the task prompt."}
+                  : "Review the text and create the task prompt."}
               </DialogDescription>
             </DialogHeader>
 
@@ -125,11 +121,10 @@ export function TaskPromptList() {
             ) : (
               <>
                 <pre className="whitespace-pre-wrap text-sm bg-muted p-3 rounded-md font-mono leading-relaxed max-h-[150px] overflow-y-auto">
-                  {createdPrompt?.text ?? newText}
+                  {newText}
                 </pre>
 
                 <TaskPromptFeatures
-                  taskPromptId={createdPrompt?._id}
                   text={newText}
                   autoExtract
                 />
@@ -146,28 +141,17 @@ export function TaskPromptList() {
                   <Button variant="outline" onClick={() => { setDialogStep(1); createMutation.reset(); }} className="gap-1.5">
                     <ArrowLeft className="h-4 w-4" /> Back
                   </Button>
-                  {createdPrompt ? (
-                    <>
-                      <Button variant="outline" onClick={resetDialog}>
-                        Done
-                      </Button>
-                      <Button onClick={() => { resetDialog(); navigate(`/task-prompts/${createdPrompt._id}`); }}>
-                        View Details
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      onClick={() => createMutation.mutate(newText)}
-                      disabled={createMutation.isPending}
-                      className="gap-1.5"
-                    >
-                      {createMutation.isPending ? (
-                        <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
-                      ) : (
-                        <><Plus className="h-4 w-4" /> Create Task Prompt</>
-                      )}
-                    </Button>
-                  )}
+                  <Button
+                    onClick={() => createMutation.mutate(newText)}
+                    disabled={createMutation.isPending}
+                    className="gap-1.5"
+                  >
+                    {createMutation.isPending ? (
+                      <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
+                    ) : (
+                      <><Plus className="h-4 w-4" /> Create Task Prompt</>
+                    )}
+                  </Button>
                 </DialogFooter>
               </>
             )}

@@ -171,7 +171,7 @@ export function TaskPromptFeatures({
   const canToggle = entityMode;
 
   const featuresContent = (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       {/* Header with extract/re-extract button */}
       <div className="flex items-center justify-between">
         <div className="space-y-0.5">
