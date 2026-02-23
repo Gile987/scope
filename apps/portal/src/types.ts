@@ -451,3 +451,15 @@ export interface Model {
   providerEndOfLife?: string;
   metadata?: Record<string, unknown>;
 }
+
+// =============================================================================
+// Feature flag types
+// =============================================================================
+
+/** A runtime feature flag controlling portal feature visibility */
+export interface FeatureFlag {
+  key: string;
+  label: string;
+  enabled: boolean;
+  updatedAt: string;
+}

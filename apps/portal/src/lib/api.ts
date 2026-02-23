@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -496,5 +496,20 @@ export const api = {
   /** Get a single model by compound ID */
   getModel: (id: string): Promise<Model> => {
     return request(`/models/${encodeURIComponent(id)}`);
+  },
+
+  // ─── Feature Flags ──────────────────────────────────────────────────────────
+
+  /** List all feature flags */
+  listFeatureFlags: (): Promise<FeatureFlag[]> => {
+    return request("/feature-flags");
+  },
+
+  /** Update a feature flag's enabled state */
+  updateFeatureFlag: (key: string, enabled: boolean): Promise<FeatureFlag> => {
+    return request(`/feature-flags/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    });
   },
 };

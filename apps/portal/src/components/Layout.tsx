@@ -3,10 +3,19 @@
 
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText } from "lucide-react";
+import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings } from "lucide-react";
 import { VersionFooter } from "./VersionFooter";
+import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 
-const navItems = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** When set, this nav item is only shown if the corresponding feature flag is enabled */
+  featureKey?: string;
+}
+
+const navItems: NavItem[] = [
   { to: "/statistics", label: "Statistics", icon: BarChart3 },
   { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
   { to: "/runs", label: "Runs", icon: List },
@@ -15,14 +24,20 @@ const navItems = [
   { to: "/insights", label: "Insights", icon: Lightbulb },
   { to: "/criteria", label: "Criteria", icon: FlaskConical },
   { to: "/prompt-features", label: "Features", icon: Tags },
-  { to: "/tokens", label: "Tokens", icon: KeyRound },
-  { to: "/agents", label: "Agents", icon: Bot },
-  { to: "/models", label: "Models", icon: Cpu },
-  { to: "/mcp-servers", label: "MCP", icon: Server },
+  { to: "/tokens", label: "Tokens", icon: KeyRound, featureKey: "tokens" },
+  { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
+  { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
+  { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
+  { to: "/admin", label: "Admin", icon: Settings },
 ];
 
 export function Layout() {
   const location = useLocation();
+  const { isFeatureEnabled } = useFeatureFlags();
+
+  const visibleNavItems = navItems.filter(
+    (item) => !item.featureKey || isFeatureEnabled(item.featureKey)
+  );
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -34,7 +49,7 @@ export function Layout() {
             <span className="hidden font-bold sm:inline-block">Scope MT</span>
           </Link>
           <nav className="flex items-center space-x-6 text-sm font-medium">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isActive = location.pathname.startsWith(item.to);
               return (
                 <Link
