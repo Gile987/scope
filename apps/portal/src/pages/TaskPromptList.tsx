@@ -168,8 +168,6 @@ export function TaskPromptList() {
                 )}
               </>
             )}
-              </>
-            )}
           </DialogContent>
         </Dialog>
       </div>
