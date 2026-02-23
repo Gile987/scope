@@ -98,11 +98,20 @@ curl -N "$API_ENDPOINT/api/v1/requests/:id/logs?fromStart=true"
 
 ## Local Development
 
+### Quickstart
+
+```bash
+GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot
+```
+
+This starts all core services (MongoDB, Redis, Azurite, API, judge, token-manager) plus the Copilot worker and report generator — with hot reload. Edit any source file and the running service restarts automatically.
+
 ### Prerequisites
 
 - Node.js 22+
 - pnpm
 - Docker & Docker Compose
+- GitHub CLI (`gh`) with authentication
 - Azure CLI (for Azure deployment)
 
 ### Local Development with Docker Compose
