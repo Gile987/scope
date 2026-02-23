@@ -130,4 +130,35 @@ export class TaskPromptStore {
 
     return (await this.get(id))!;
   }
+
+  /**
+   * Toggle the `detected` flag on a single feature.
+   * If the feature doesn't exist in the array, it's added as evaluated+detected.
+   */
+  async toggleFeature(
+    id: string,
+    featureId: string,
+    detected: boolean
+  ): Promise<TaskPromptDocument> {
+    const existing = await this.get(id);
+    if (!existing) {
+      throw new Error(`Task prompt '${id}' not found`);
+    }
+
+    const features = existing.features ? [...existing.features] : [];
+    const idx = features.findIndex((f) => f.featureId === featureId);
+
+    if (idx >= 0) {
+      features[idx] = { ...features[idx], detected, evaluated: true };
+    } else {
+      features.push({ featureId, detected, evaluated: true });
+    }
+
+    await this.collection.updateOne(
+      { _id: id, deletedAt: { $exists: false } },
+      { $set: { features } }
+    );
+
+    return (await this.get(id))!;
+  }
 }

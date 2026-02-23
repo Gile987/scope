@@ -16,7 +16,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,6 +65,17 @@ export function TaskPromptFeatures({
       setExtraction(data);
       queryClient.invalidateQueries({ queryKey: ["task-prompt", taskPromptId] });
       queryClient.invalidateQueries({ queryKey: ["task-prompts"] });
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ featureId, detected }: { featureId: string; detected: boolean }) =>
+      api.toggleTaskPromptFeature(taskPromptId, featureId, detected),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["task-prompt", taskPromptId] });
+      queryClient.invalidateQueries({ queryKey: ["task-prompts"] });
+      // Clear cached extraction so we re-read from server
+      setExtraction(null);
     },
   });
 
@@ -147,6 +157,9 @@ export function TaskPromptFeatures({
       {/* Feature badges */}
       {features.length > 0 && !extractMutation.isPending && (
         <div className="space-y-3">
+          <p className="text-xs text-muted-foreground italic">
+            Click a feature badge to toggle its detected status
+          </p>
           {detectedFeatures.length > 0 && (
             <div>
               <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
@@ -154,12 +167,16 @@ export function TaskPromptFeatures({
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {detectedFeatures.map((f) => (
-                  <Link key={f.featureId} to={`/prompt-features/${f.featureId}`}>
-                    <Badge variant="default" className="gap-1 font-mono text-xs cursor-pointer hover:bg-primary/80">
-                      <CheckCircle2 className="h-3 w-3" />
-                      {f.featureId}
-                    </Badge>
-                  </Link>
+                  <Badge
+                    key={f.featureId}
+                    variant="default"
+                    className="gap-1 font-mono text-xs cursor-pointer hover:bg-destructive/80 transition-colors"
+                    title={`Click to mark "${f.featureId}" as not detected`}
+                    onClick={() => toggleMutation.mutate({ featureId: f.featureId, detected: false })}
+                  >
+                    <CheckCircle2 className="h-3 w-3" />
+                    {f.featureId}
+                  </Badge>
                 ))}
               </div>
             </div>
@@ -171,12 +188,16 @@ export function TaskPromptFeatures({
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {notDetectedFeatures.map((f) => (
-                  <Link key={f.featureId} to={`/prompt-features/${f.featureId}`}>
-                    <Badge variant="outline" className="gap-1 font-mono text-xs text-muted-foreground cursor-pointer hover:bg-accent">
-                      <XCircle className="h-3 w-3" />
-                      {f.featureId}
-                    </Badge>
-                  </Link>
+                  <Badge
+                    key={f.featureId}
+                    variant="outline"
+                    className="gap-1 font-mono text-xs text-muted-foreground cursor-pointer hover:bg-primary/10 transition-colors"
+                    title={`Click to mark "${f.featureId}" as detected`}
+                    onClick={() => toggleMutation.mutate({ featureId: f.featureId, detected: true })}
+                  >
+                    <XCircle className="h-3 w-3" />
+                    {f.featureId}
+                  </Badge>
                 ))}
               </div>
             </div>

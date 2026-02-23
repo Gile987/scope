@@ -219,6 +219,14 @@ export const api = {
     });
   },
 
+  /** Toggle a single feature's detected status on a task prompt */
+  toggleTaskPromptFeature: (id: string, featureId: string, detected: boolean): Promise<TaskPrompt> => {
+    return request(`/task-prompts/${encodeURIComponent(id)}/features/${encodeURIComponent(featureId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ detected }),
+    });
+  },
+
   // ─── Agents ─────────────────────────────────────────────────────────────────
 
   /** List all coding agents */

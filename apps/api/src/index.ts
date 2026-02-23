@@ -1819,6 +1819,26 @@ app.post("/api/v1/task-prompts/:id/extract-features", async (req: Request, res: 
   }
 });
 
+// PATCH /api/v1/task-prompts/:id/features/:featureId — toggle a feature's detected flag
+app.patch("/api/v1/task-prompts/:id/features/:featureId", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, featureId } = req.params;
+    const { detected } = req.body;
+
+    if (typeof detected !== "boolean") {
+      return res.status(400).json({ error: "'detected' must be a boolean" });
+    }
+
+    const updated = await taskPromptStore.toggleFeature(id, featureId, detected);
+    res.json(updated);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not found")) {
+      return res.status(404).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
 // List all prompt features (with optional search)
 app.get("/api/v1/prompt-features", async (_req: Request, res: Response, next: NextFunction) => {
   try {
