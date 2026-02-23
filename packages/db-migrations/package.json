@@ -5,13 +5,14 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "migrate:up": "npx tsx src/run.ts up",
-    "migrate:down": "npx tsx src/run.ts down",
-    "migrate:status": "npx tsx src/run.ts status"
+    "migrate:up": "npx tsx src/migrate.ts up",
+    "migrate:down": "npx tsx src/migrate.ts down --last",
+    "migrate:status": "npx tsx src/migrate.ts status",
+    "migrate:new": "npx tsx src/migrate.ts new"
   },
   "dependencies": {
+    "mongo-migrate-ts": "^2.0.0",
     "mongodb": "^6.16.0",
-    "shared": "workspace:*",
     "uuid": "^10.0.0"
   },
   "devDependencies": {

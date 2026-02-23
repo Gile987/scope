@@ -15,8 +15,18 @@
  */
 
 import type { Db } from "mongodb";
-import type { Migration } from "../types.js";
-import { computeTaskPromptId } from "shared";
+import type { MigrationInterface } from "mongo-migrate-ts";
+import { v5 as uuidv5 } from "uuid";
+
+/**
+ * Inlined from shared/task-prompt-id.ts so the migration file stays
+ * self-contained — mongo-migrate-ts dynamically imports migration files,
+ * which can break workspace package resolution.
+ */
+const TASK_PROMPT_NAMESPACE = uuidv5("task.scope-mt.dev", uuidv5.DNS);
+function computeTaskPromptId(text: string): string {
+  return uuidv5(text.trim(), TASK_PROMPT_NAMESPACE);
+}
 
 interface RequestDoc {
   _id: string;
@@ -32,9 +42,7 @@ interface ExtractionDoc {
   extractedAt?: Date;
 }
 
-export default class BackfillTaskPrompts implements Migration {
-  description = "Create task-prompts collection and backfill taskPromptId on existing runs";
-
+export class BackfillTaskPrompts implements MigrationInterface {
   async up(db: Db): Promise<void> {
     const requests = db.collection<RequestDoc>("requests");
     const taskPrompts = db.collection("task-prompts");
