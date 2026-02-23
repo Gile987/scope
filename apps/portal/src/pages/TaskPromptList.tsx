@@ -21,9 +21,10 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Trash2, Eye, Search, RefreshCw, Plus, List, ArrowRight } from "lucide-react";
+import { Trash2, Eye, Search, RefreshCw, Plus, List, ArrowRight, Info } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
+import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { Stepper } from "@/components/Stepper";
 import type { TaskPrompt } from "@/types";
 
@@ -97,6 +98,7 @@ export function TaskPromptList() {
 
             {dialogStep === 1 ? (
               <>
+                <TaskPromptPicker onSelect={(text) => setNewText(text)} />
                 <Textarea
                   placeholder="Enter task prompt text…"
                   value={newText}
@@ -104,6 +106,10 @@ export function TaskPromptList() {
                   rows={8}
                   className="font-mono text-sm"
                 />
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  Select an existing task prompt or enter new text.
+                </p>
                 <DialogFooter>
                   <Button
                     onClick={() => createMutation.mutate(newText)}
