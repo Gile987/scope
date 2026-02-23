@@ -219,6 +219,14 @@ export const api = {
     });
   },
 
+  /** Extract features from raw text without persisting a task prompt entity */
+  extractFeaturesFromText: (text: string, opts?: { model?: string }): Promise<TaskPromptFeatureExtractionResult> => {
+    return request(`/prompt-features/extract-from-text`, {
+      method: "POST",
+      body: JSON.stringify({ text, ...(opts?.model && { model: opts.model }) }),
+    });
+  },
+
   /** Toggle a single feature's detected status on a task prompt */
   toggleTaskPromptFeature: (id: string, featureId: string, detected: boolean): Promise<TaskPrompt> => {
     return request(`/task-prompts/${encodeURIComponent(id)}/features/${encodeURIComponent(featureId)}`, {

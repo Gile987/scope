@@ -128,6 +128,12 @@ export function TaskPromptList() {
                   {createdPrompt?.text ?? newText}
                 </pre>
 
+                <TaskPromptFeatures
+                  taskPromptId={createdPrompt?._id}
+                  text={newText}
+                  autoExtract
+                />
+
                 {createMutation.isError && (
                   <p className="text-sm text-destructive">
                     {createMutation.error instanceof Error
@@ -136,23 +142,20 @@ export function TaskPromptList() {
                   </p>
                 )}
 
-                {createdPrompt ? (
-                  <>
-                    <TaskPromptFeatures taskPromptId={createdPrompt._id} autoExtract />
-                    <DialogFooter className="gap-2 sm:gap-0">
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button variant="outline" onClick={() => { setDialogStep(1); createMutation.reset(); }} className="gap-1.5">
+                    <ArrowLeft className="h-4 w-4" /> Back
+                  </Button>
+                  {createdPrompt ? (
+                    <>
                       <Button variant="outline" onClick={resetDialog}>
                         Done
                       </Button>
                       <Button onClick={() => { resetDialog(); navigate(`/task-prompts/${createdPrompt._id}`); }}>
                         View Details
                       </Button>
-                    </DialogFooter>
-                  </>
-                ) : (
-                  <DialogFooter className="gap-2 sm:gap-0">
-                    <Button variant="outline" onClick={() => { setDialogStep(1); createMutation.reset(); }} className="gap-1.5">
-                      <ArrowLeft className="h-4 w-4" /> Back
-                    </Button>
+                    </>
+                  ) : (
                     <Button
                       onClick={() => createMutation.mutate(newText)}
                       disabled={createMutation.isPending}
@@ -164,8 +167,8 @@ export function TaskPromptList() {
                         <><Plus className="h-4 w-4" /> Create Task Prompt</>
                       )}
                     </Button>
-                  </DialogFooter>
-                )}
+                  )}
+                </DialogFooter>
               </>
             )}
           </DialogContent>

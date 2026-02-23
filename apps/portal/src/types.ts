@@ -158,11 +158,11 @@ export interface TaskPrompt {
   deletedAt?: string;
 }
 
-/** Response shape from POST /task-prompts/:id/extract-features */
+/** Response shape from feature extraction endpoints */
 export interface TaskPromptFeatureExtractionResult {
-  taskPromptId: string;
+  taskPromptId?: string;
   features: PromptFeatureResult[];
-  featuresExtractedAt: string;
+  featuresExtractedAt?: string;
   suggestedFeatures?: SuggestedPromptFeature[];
   cached: boolean;
 }

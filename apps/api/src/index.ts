@@ -1819,6 +1819,38 @@ app.post("/api/v1/task-prompts/:id/extract-features", async (req: Request, res: 
   }
 });
 
+// POST /api/v1/prompt-features/extract-from-text — extract features from raw text without persisting
+app.post("/api/v1/prompt-features/extract-from-text", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { text, model } = req.body;
+    if (!text || typeof text !== "string" || !text.trim()) {
+      return res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
+    }
+
+    if (!isPromptFeatureLlmAvailable()) {
+      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+    }
+
+    const allFeatures = await promptFeatureCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+
+    const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn }));
+    const { results, suggestedFeatures } = await extractPromptFeatures(text.trim(), featureConfigs, model);
+
+    res.json({
+      features: results,
+      suggestedFeatures: suggestedFeatures.length > 0 ? suggestedFeatures : undefined,
+      cached: false,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not configured")) {
+      return res.status(503).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
 // PATCH /api/v1/task-prompts/:id/features/:featureId — toggle a feature's detected flag
 app.patch("/api/v1/task-prompts/:id/features/:featureId", async (req: Request, res: Response, next: NextFunction) => {
   try {

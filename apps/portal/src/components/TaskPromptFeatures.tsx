@@ -3,15 +3,18 @@
 
 /**
  * TaskPromptFeatures — shared component for displaying & extracting prompt
- * features on a task prompt entity. Used by:
- *   - TaskPromptList (creation dialog, step 2)
- *   - TaskPromptDetail (features card)
- *   - SubmitRun (step 2 review)
+ * features. Supports two modes:
  *
- * Props:
- *   taskPromptId  — the task prompt to display features for
- *   autoExtract   — if true, triggers extraction on mount when no features exist
- *   compact       — if true, uses a more compact layout (no Card wrapper)
+ *   1. Entity mode (taskPromptId provided) — fetches stored features,
+ *      extracts via entity endpoint, supports toggle.
+ *   2. Text mode (text provided, no taskPromptId) — extracts from raw text,
+ *      shows read-only badges. When taskPromptId is later supplied the
+ *      pre-extracted features are automatically attached to the entity.
+ *
+ * Used by:
+ *   - TaskPromptList (creation dialog, step 2 — text mode → entity mode)
+ *   - TaskPromptDetail (features card — entity mode)
+ *   - SubmitRun (step 2 review — entity mode)
  */
 
 import { useState, useEffect, useRef } from "react";
@@ -24,12 +27,15 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import {
   Loader2, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus, Check, RefreshCw,
 } from "lucide-react";
-import type { TaskPromptFeatureExtractionResult, SuggestedPromptFeature } from "@/types";
+import type { TaskPromptFeatureExtractionResult, SuggestedPromptFeature, PromptFeatureResult } from "@/types";
 import { PromptFeatureWizard } from "@/components/PromptFeatureWizard";
 import { toast } from "sonner";
 
 interface TaskPromptFeaturesProps {
-  taskPromptId: string;
+  /** Task prompt entity ID — when provided, enables entity mode (toggle, persist). */
+  taskPromptId?: string;
+  /** Raw prompt text — enables text-only extraction when taskPromptId is absent. */
+  text?: string;
   /** Auto-extract on mount if no features exist (default: true) */
   autoExtract?: boolean;
   /** Use compact layout without Card wrapper (default: false) */
@@ -38,11 +44,16 @@ interface TaskPromptFeaturesProps {
 
 export function TaskPromptFeatures({
   taskPromptId,
+  text,
   autoExtract = true,
   compact = false,
 }: TaskPromptFeaturesProps) {
   const queryClient = useQueryClient();
   const hasAutoExtracted = useRef(false);
+  const hasAttachedFeatures = useRef(false);
+
+  // Whether we're operating in entity mode (taskPromptId provided)
+  const entityMode = !!taskPromptId;
 
   // Extraction result state — tracks the latest extraction response (includes suggestedFeatures)
   const [extraction, setExtraction] = useState<TaskPromptFeatureExtractionResult | null>(null);
@@ -51,16 +62,17 @@ export function TaskPromptFeatures({
   const [activeSuggestion, setActiveSuggestion] = useState<SuggestedPromptFeature | null>(null);
   const [createdSuggestionIds, setCreatedSuggestionIds] = useState<Set<string>>(new Set());
 
-  // Fetch the task prompt to check if features already exist
+  // Fetch the task prompt to check if features already exist (entity mode only)
   const { data: taskPrompt } = useQuery({
     queryKey: ["task-prompt", taskPromptId],
-    queryFn: () => api.getTaskPrompt(taskPromptId),
-    enabled: !!taskPromptId,
+    queryFn: () => api.getTaskPrompt(taskPromptId!),
+    enabled: entityMode,
   });
 
-  const extractMutation = useMutation({
+  // Entity-mode extraction (persists results)
+  const extractEntityMutation = useMutation({
     mutationFn: (opts?: { force?: boolean }) =>
-      api.extractTaskPromptFeatures(taskPromptId, { force: opts?.force }),
+      api.extractTaskPromptFeatures(taskPromptId!, { force: opts?.force }),
     onSuccess: (data) => {
       setExtraction(data);
       queryClient.invalidateQueries({ queryKey: ["task-prompt", taskPromptId] });
@@ -68,9 +80,20 @@ export function TaskPromptFeatures({
     },
   });
 
+  // Text-mode extraction (no persistence)
+  const extractTextMutation = useMutation({
+    mutationFn: () => api.extractFeaturesFromText(text!),
+    onSuccess: (data) => {
+      setExtraction(data);
+    },
+  });
+
+  // Unified accessor
+  const extractMutation = entityMode ? extractEntityMutation : extractTextMutation;
+
   const toggleMutation = useMutation({
     mutationFn: ({ featureId, detected }: { featureId: string; detected: boolean }) =>
-      api.toggleTaskPromptFeature(taskPromptId, featureId, detected),
+      api.toggleTaskPromptFeature(taskPromptId!, featureId, detected),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["task-prompt", taskPromptId] });
       queryClient.invalidateQueries({ queryKey: ["task-prompts"] });
@@ -79,27 +102,46 @@ export function TaskPromptFeatures({
     },
   });
 
-  // Auto-extract on mount if autoExtract is true and no features exist
+  // When taskPromptId appears after text-mode extraction, attach pre-extracted features
   useEffect(() => {
     if (
-      autoExtract &&
-      taskPrompt &&
-      !taskPrompt.features?.length &&
-      !hasAutoExtracted.current &&
-      !extractMutation.isPending
+      entityMode &&
+      extraction?.features?.length &&
+      !extraction.taskPromptId &&
+      !hasAttachedFeatures.current
     ) {
-      hasAutoExtracted.current = true;
-      extractMutation.mutate({});
+      hasAttachedFeatures.current = true;
+      // Re-extract via entity endpoint to persist & pick up entity-level caching
+      extractEntityMutation.mutate({ force: true });
     }
-  }, [autoExtract, taskPrompt, extractMutation.isPending]);
+  }, [entityMode, extraction]);
+
+  // Auto-extract on mount
+  useEffect(() => {
+    if (!autoExtract || hasAutoExtracted.current) return;
+    if (extractMutation.isPending) return;
+
+    if (entityMode) {
+      // Entity mode: auto-extract when entity has no features
+      if (taskPrompt && !taskPrompt.features?.length) {
+        hasAutoExtracted.current = true;
+        extractEntityMutation.mutate({});
+      }
+    } else if (text?.trim()) {
+      // Text mode: auto-extract from raw text
+      hasAutoExtracted.current = true;
+      extractTextMutation.mutate();
+    }
+  }, [autoExtract, taskPrompt, text, entityMode, extractMutation.isPending]);
 
   // Derive feature groups from extraction result or task prompt's stored features
-  const features = extraction?.features ?? taskPrompt?.features ?? [];
+  const features: PromptFeatureResult[] = extraction?.features ?? taskPrompt?.features ?? [];
   const detectedFeatures = features.filter((f) => f.detected);
   const notDetectedFeatures = features.filter((f) => !f.detected && f.evaluated);
   const skippedFeatures = features.filter((f) => !f.evaluated);
   const suggestedFeatures = extraction?.suggestedFeatures ?? [];
-  const hasFeatures = taskPrompt?.features && taskPrompt.features.length > 0;
+  const hasFeatures = features.length > 0;
+  const canToggle = entityMode;
 
   const featuresContent = (
     <div className="space-y-4">
@@ -116,14 +158,16 @@ export function TaskPromptFeatures({
                 ? "Loaded from cache (same task text was analyzed before)"
                 : taskPrompt?.featuresExtractedAt
                   ? `Last extracted ${new Date(taskPrompt.featuresExtractedAt).toLocaleString()}`
-                  : "Features have not been extracted yet"}
+                  : hasFeatures
+                    ? "Features extracted"
+                    : "Features have not been extracted yet"}
           </p>
         </div>
         <Button
           variant="outline"
           size="sm"
           className="gap-1.5"
-          onClick={() => extractMutation.mutate({ force: true })}
+          onClick={() => entityMode ? extractEntityMutation.mutate({ force: true }) : extractTextMutation.mutate()}
           disabled={extractMutation.isPending}
         >
           {extractMutation.isPending ? (
@@ -157,9 +201,11 @@ export function TaskPromptFeatures({
       {/* Feature badges */}
       {features.length > 0 && !extractMutation.isPending && (
         <div className="space-y-3">
-          <p className="text-xs text-muted-foreground italic">
-            Click a feature badge to toggle its detected status
-          </p>
+          {canToggle && (
+            <p className="text-xs text-muted-foreground italic">
+              Click a feature badge to toggle its detected status
+            </p>
+          )}
           {detectedFeatures.length > 0 && (
             <div>
               <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
@@ -170,9 +216,9 @@ export function TaskPromptFeatures({
                   <Badge
                     key={f.featureId}
                     variant="default"
-                    className="gap-1 font-mono text-xs cursor-pointer hover:bg-destructive/80 transition-colors"
-                    title={`Click to mark "${f.featureId}" as not detected`}
-                    onClick={() => toggleMutation.mutate({ featureId: f.featureId, detected: false })}
+                    className={`gap-1 font-mono text-xs ${canToggle ? "cursor-pointer hover:bg-destructive/80" : ""} transition-colors`}
+                    title={canToggle ? `Click to mark "${f.featureId}" as not detected` : f.featureId}
+                    onClick={canToggle ? () => toggleMutation.mutate({ featureId: f.featureId, detected: false }) : undefined}
                   >
                     <CheckCircle2 className="h-3 w-3" />
                     {f.featureId}
@@ -191,9 +237,9 @@ export function TaskPromptFeatures({
                   <Badge
                     key={f.featureId}
                     variant="outline"
-                    className="gap-1 font-mono text-xs text-muted-foreground cursor-pointer hover:bg-primary/10 transition-colors"
-                    title={`Click to mark "${f.featureId}" as detected`}
-                    onClick={() => toggleMutation.mutate({ featureId: f.featureId, detected: true })}
+                    className={`gap-1 font-mono text-xs text-muted-foreground ${canToggle ? "cursor-pointer hover:bg-primary/10" : ""} transition-colors`}
+                    title={canToggle ? `Click to mark "${f.featureId}" as detected` : f.featureId}
+                    onClick={canToggle ? () => toggleMutation.mutate({ featureId: f.featureId, detected: true }) : undefined}
                   >
                     <XCircle className="h-3 w-3" />
                     {f.featureId}
