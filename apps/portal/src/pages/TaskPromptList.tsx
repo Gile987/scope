@@ -21,10 +21,13 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Trash2, Eye, Search, RefreshCw, Plus, List } from "lucide-react";
+import { Trash2, Eye, Search, RefreshCw, Plus, List, ArrowRight } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
+import { Stepper } from "@/components/Stepper";
 import type { TaskPrompt } from "@/types";
+
+const DIALOG_STEPS = ["Task Text", "Features"];
 
 export function TaskPromptList() {
   const [search, setSearch] = useState("");
@@ -81,15 +84,19 @@ export function TaskPromptList() {
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>New Task Prompt</DialogTitle>
+              <DialogDescription>
+                {dialogStep === 1
+                  ? "Enter the task text. If it already exists, the existing one is returned."
+                  : <span className="font-mono text-xs select-all">{createdPrompt?._id}</span>}
+              </DialogDescription>
+            </DialogHeader>
+
+            <Stepper steps={DIALOG_STEPS} currentStep={dialogStep} />
+
             {dialogStep === 1 ? (
               <>
-                <DialogHeader>
-                  <DialogTitle>New Task Prompt</DialogTitle>
-                  <DialogDescription>
-                    Enter the task text below. If a task prompt with the same text already exists,
-                    the existing one is returned (content-addressed).
-                  </DialogDescription>
-                </DialogHeader>
                 <Textarea
                   placeholder="Enter task prompt text…"
                   value={newText}
@@ -101,19 +108,14 @@ export function TaskPromptList() {
                   <Button
                     onClick={() => createMutation.mutate(newText)}
                     disabled={!newText.trim() || createMutation.isPending}
+                    className="gap-1.5"
                   >
-                    {createMutation.isPending ? "Creating…" : "Create"}
+                    {createMutation.isPending ? "Creating…" : <>Continue <ArrowRight className="h-4 w-4" /></>}
                   </Button>
                 </DialogFooter>
               </>
             ) : createdPrompt ? (
               <>
-                <DialogHeader>
-                  <DialogTitle>Task Prompt Created</DialogTitle>
-                  <DialogDescription>
-                    <span className="font-mono text-xs select-all">{createdPrompt._id}</span>
-                  </DialogDescription>
-                </DialogHeader>
                 <pre className="whitespace-pre-wrap text-sm bg-muted p-3 rounded-md font-mono leading-relaxed max-h-[150px] overflow-y-auto">
                   {createdPrompt.text}
                 </pre>
