@@ -34,6 +34,8 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "dev:token-manager": "pnpm --filter token-manager dev",
+    "dev:model-scanner-copilot": "pnpm --filter model-scanner-copilot dev",
+    "dev:model-scanner-anthropic": "pnpm --filter model-scanner-anthropic dev",
     "migrate:up": "pnpm --filter db-migrations migrate:up",
     "migrate:down": "pnpm --filter db-migrations migrate:down",
     "migrate:status": "pnpm --filter db-migrations migrate:status"

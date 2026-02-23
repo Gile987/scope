@@ -433,3 +433,21 @@ export interface InsightWithReference extends Insight {
   referencedAt?: string;
   isNew?: boolean;
 }
+
+// =============================================================================
+// Model types
+// =============================================================================
+
+/** A scanned model tracked across agents and providers */
+export interface Model {
+  _id: string;
+  modelId: string;
+  provider: string;
+  agentId: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  disappearedAt?: string;
+  providerAvailableFrom?: string;
+  providerEndOfLife?: string;
+  metadata?: Record<string, unknown>;
+}
