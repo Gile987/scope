@@ -13,15 +13,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { Send, Loader2, ArrowLeft, ArrowRight, Sparkles, CheckCircle2, XCircle, MinusCircle, Plus, Check, Server, Info } from "lucide-react";
-import { WORKER_TYPES, type TaskPromptFeatureExtractionResult, type SuggestedPromptFeature, type CodingAgent, type McpServerDocument } from "@/types";
+import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info } from "lucide-react";
+import { WORKER_TYPES, type CodingAgent, type McpServerDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { Stepper } from "@/components/Stepper";
-import { PromptFeatureWizard } from "@/components/PromptFeatureWizard";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
-import { toast } from "sonner";
+import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 
 const STEPS = ["Configure", "Review & Submit"];
 
@@ -74,21 +72,15 @@ export function SubmitRun() {
   const [verbosity, setVerbosity] = useState<string>("");
   const [userType, setUserType] = useState<string>("");
 
-  // Extraction state
-  const [extraction, setExtraction] = useState<TaskPromptFeatureExtractionResult | null>(null);
+  // Task prompt entity state (created on "Continue" to step 2)
+  const [taskPromptId, setTaskPromptId] = useState<string | null>(null);
 
-  // Sheet wizard state for creating suggested features
-  const [activeSuggestion, setActiveSuggestion] = useState<SuggestedPromptFeature | null>(null);
-  const [createdSuggestionIds, setCreatedSuggestionIds] = useState<Set<string>>(new Set());
-
-  const extractMutation = useMutation({
-    mutationFn: async (opts?: { force?: boolean }) => {
-      // First ensure the task prompt entity exists (idempotent)
+  const createTaskPromptMutation = useMutation({
+    mutationFn: async () => {
       const taskPrompt = await api.createTaskPrompt(task.trim());
-      // Then extract features for the task prompt
-      return api.extractTaskPromptFeatures(taskPrompt._id, { force: opts?.force });
+      return taskPrompt;
     },
-    onSuccess: (data) => setExtraction(data),
+    onSuccess: (data) => setTaskPromptId(data._id),
   });
 
   const submitMutation = useMutation({
@@ -106,9 +98,8 @@ export function SubmitRun() {
 
   const handleContinue = () => {
     if (!task.trim()) return;
-    // Optimistically advance to step 2 and fire extraction
     setStep(2);
-    extractMutation.mutate({});
+    createTaskPromptMutation.mutate();
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -148,11 +139,6 @@ export function SubmitRun() {
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
     });
   };
-
-  const detectedFeatures = extraction?.features?.filter((f) => f.detected) ?? [];
-  const notDetectedFeatures = extraction?.features?.filter((f) => !f.detected && f.evaluated) ?? [];
-  const skippedFeatures = extraction?.features?.filter((f) => !f.evaluated) ?? [];
-  const suggestedFeatures = extraction?.suggestedFeatures ?? [];
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -472,136 +458,36 @@ export function SubmitRun() {
           </Card>
 
           {/* Prompt Features */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5" />
-                Detected Prompt Features
-              </CardTitle>
-              <CardDescription>
-                {extractMutation.isPending
-                  ? "Analyzing task prompt..."
-                  : extraction?.cached
-                    ? "Loaded from cache (same task text was analyzed before)"
-                    : "Features detected by LLM analysis of the task prompt"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {extractMutation.isPending && (
-                <div className="flex items-center gap-2 text-muted-foreground py-4">
+          {createTaskPromptMutation.isPending && (
+            <Card>
+              <CardContent className="py-6">
+                <div className="flex items-center gap-2 text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Extracting prompt features…</span>
+                  <span>Registering task prompt…</span>
                 </div>
-              )}
+              </CardContent>
+            </Card>
+          )}
 
-              {extractMutation.isError && (
-                <p className="text-sm text-destructive py-2">
-                  {extractMutation.error instanceof Error
-                    ? extractMutation.error.message
-                    : "Feature extraction failed"}
+          {createTaskPromptMutation.isError && (
+            <Card>
+              <CardContent className="py-6">
+                <p className="text-sm text-destructive">
+                  {createTaskPromptMutation.error instanceof Error
+                    ? createTaskPromptMutation.error.message
+                    : "Failed to register task prompt"}
                 </p>
-              )}
+              </CardContent>
+            </Card>
+          )}
 
-              {extraction && !extractMutation.isPending && (
-                <div className="space-y-3">
-                  {detectedFeatures.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
-                        Detected ({detectedFeatures.length})
-                      </h4>
-                      <div className="flex flex-wrap gap-1.5">
-                        {detectedFeatures.map((f) => (
-                          <Badge key={f.featureId} variant="default" className="gap-1 font-mono text-xs">
-                            <CheckCircle2 className="h-3 w-3" />
-                            {f.featureId}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {notDetectedFeatures.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
-                        Not detected ({notDetectedFeatures.length})
-                      </h4>
-                      <div className="flex flex-wrap gap-1.5">
-                        {notDetectedFeatures.map((f) => (
-                          <Badge key={f.featureId} variant="outline" className="gap-1 font-mono text-xs text-muted-foreground">
-                            <XCircle className="h-3 w-3" />
-                            {f.featureId}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {skippedFeatures.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
-                        Skipped ({skippedFeatures.length})
-                      </h4>
-                      <div className="flex flex-wrap gap-1.5">
-                        {skippedFeatures.map((f) => (
-                          <Badge key={f.featureId} variant="outline" className="gap-1 font-mono text-xs text-muted-foreground/50">
-                            <MinusCircle className="h-3 w-3" />
-                            {f.featureId}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {extraction.features.length === 0 && (
-                    <p className="text-sm text-muted-foreground italic">No prompt features defined yet.</p>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Suggested New Features */}
-          {suggestedFeatures.length > 0 && !extractMutation.isPending && (
+          {taskPromptId && (
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Plus className="h-4 w-4" />
-                  Suggested New Features
-                </CardTitle>
-                <CardDescription>
-                  The AI detected characteristics not covered by existing features
-                </CardDescription>
+                <CardTitle>Prompt Features</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {suggestedFeatures.map((s) => {
-                    const alreadyCreated = createdSuggestionIds.has(s.suggestedId);
-                    return (
-                      <div key={s.suggestedId} className={`flex items-start justify-between gap-3 rounded-md border p-3 ${alreadyCreated ? "opacity-60" : ""}`}>
-                        <div className="space-y-1 min-w-0">
-                          <Badge variant="secondary" className="font-mono text-xs">
-                            {s.suggestedId}
-                          </Badge>
-                          <p className="text-sm text-muted-foreground">{s.behavior}</p>
-                        </div>
-                        {alreadyCreated ? (
-                          <Badge variant="outline" className="gap-1 shrink-0 text-xs">
-                            <Check className="h-3 w-3" />
-                            Created
-                          </Badge>
-                        ) : (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="gap-1 shrink-0"
-                            onClick={() => setActiveSuggestion(s)}
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                            Create
-                          </Button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                <TaskPromptFeatures taskPromptId={taskPromptId} autoExtract />
               </CardContent>
             </Card>
           )}
@@ -631,41 +517,6 @@ export function SubmitRun() {
           </div>
         </form>
       )}
-
-      {/* ─── Sheet: Create Prompt Feature Wizard ───────────────────────── */}
-      <Sheet
-        open={activeSuggestion !== null}
-        onOpenChange={(open) => {
-          if (!open) setActiveSuggestion(null);
-        }}
-      >
-        <SheetContent side="right" className="sm:max-w-xl w-full overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>Create Prompt Feature</SheetTitle>
-            <SheetDescription>
-              Create a new feature suggested by the extraction analysis
-            </SheetDescription>
-          </SheetHeader>
-          {activeSuggestion && (
-            <div className="mt-6">
-              <PromptFeatureWizard
-                key={activeSuggestion.suggestedId}
-                initialBehavior={activeSuggestion.behavior}
-                initialId={activeSuggestion.suggestedId}
-                initialPrompt={activeSuggestion.prompt}
-                onCreated={(feature) => {
-                  setCreatedSuggestionIds((prev) => new Set(prev).add(activeSuggestion.suggestedId));
-                  setActiveSuggestion(null);
-                  toast.success(`Feature "${feature.id}" created`);
-                  // Re-extract with force to pick up the new feature
-                  extractMutation.mutate({ force: true });
-                }}
-                onCancel={() => setActiveSuggestion(null)}
-              />
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

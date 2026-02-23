@@ -6,15 +6,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Trash2, Loader2, Sparkles, Check, X, List } from "lucide-react";
+import { ArrowLeft, Trash2, List } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 
 export function TaskPromptDetail() {
   const { id } = useParams<{ id: string }>();
@@ -32,13 +31,6 @@ export function TaskPromptDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["task-prompts"] });
       navigate("/task-prompts");
-    },
-  });
-
-  const extractMutation = useMutation({
-    mutationFn: (force: boolean) => api.extractTaskPromptFeatures(id!, { force }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["task-prompt", id] });
     },
   });
 
@@ -64,10 +56,6 @@ export function TaskPromptDetail() {
       </div>
     );
   }
-
-  const detected = taskPrompt.features?.filter((f) => f.detected) ?? [];
-  const notDetected = taskPrompt.features?.filter((f) => !f.detected && f.evaluated) ?? [];
-  const skipped = taskPrompt.features?.filter((f) => !f.evaluated) ?? [];
 
   return (
     <div className="space-y-6">
@@ -144,93 +132,14 @@ export function TaskPromptDetail() {
         </CardContent>
       </Card>
 
-      {/* Features card */}
+      {/* Features */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-lg">Prompt Features</CardTitle>
-              <CardDescription>
-                {taskPrompt.featuresExtractedAt
-                  ? `Last extracted ${formatDate(taskPrompt.featuresExtractedAt)}`
-                  : "Features have not been extracted yet"}
-              </CardDescription>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => extractMutation.mutate(!!taskPrompt.features)}
-              disabled={extractMutation.isPending}
-            >
-              {extractMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Sparkles className="h-4 w-4" />
-              )}
-              {taskPrompt.features ? "Re-extract" : "Extract Features"}
-            </Button>
-          </div>
+          <CardTitle className="text-lg">Prompt Features</CardTitle>
         </CardHeader>
-        {taskPrompt.features && taskPrompt.features.length > 0 && (
-          <CardContent className="space-y-4">
-            {detected.length > 0 && (
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium flex items-center gap-1.5">
-                  <Check className="h-4 w-4 text-green-600" /> Detected ({detected.length})
-                </h4>
-                <div className="flex flex-wrap gap-1.5">
-                  {detected.map((f) => (
-                    <Link key={f.featureId} to={`/prompt-features/${f.featureId}`}>
-                      <Badge variant="default" className="cursor-pointer hover:bg-primary/80">
-                        {f.featureId}
-                      </Badge>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {detected.length > 0 && (notDetected.length > 0 || skipped.length > 0) && (
-              <Separator />
-            )}
-
-            {notDetected.length > 0 && (
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium flex items-center gap-1.5">
-                  <X className="h-4 w-4 text-muted-foreground" /> Not Detected ({notDetected.length})
-                </h4>
-                <div className="flex flex-wrap gap-1.5">
-                  {notDetected.map((f) => (
-                    <Link key={f.featureId} to={`/prompt-features/${f.featureId}`}>
-                      <Badge variant="outline" className="text-muted-foreground cursor-pointer hover:bg-accent">
-                        {f.featureId}
-                      </Badge>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {skipped.length > 0 && (
-              <>
-                {notDetected.length > 0 && <Separator />}
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-muted-foreground">
-                    Skipped ({skipped.length})
-                  </h4>
-                  <div className="flex flex-wrap gap-1.5">
-                    {skipped.map((f) => (
-                      <Badge key={f.featureId} variant="secondary" className="text-muted-foreground">
-                        {f.featureId}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-          </CardContent>
-        )}
+        <CardContent>
+          <TaskPromptFeatures taskPromptId={taskPrompt._id} autoExtract={false} />
+        </CardContent>
       </Card>
     </div>
   );

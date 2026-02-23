@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,12 +23,17 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Trash2, Eye, Search, RefreshCw, Plus, List } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
+import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
+import type { TaskPrompt } from "@/types";
 
 export function TaskPromptList() {
   const [search, setSearch] = useState("");
-  const [registerOpen, setRegisterOpen] = useState(false);
-  const [registerText, setRegisterText] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogStep, setDialogStep] = useState<1 | 2>(1);
+  const [newText, setNewText] = useState("");
+  const [createdPrompt, setCreatedPrompt] = useState<TaskPrompt | null>(null);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const { data, isLoading, isRefetching } = useQuery({
     queryKey: ["task-prompts", search],
@@ -45,12 +50,19 @@ export function TaskPromptList() {
 
   const createMutation = useMutation({
     mutationFn: (text: string) => api.createTaskPrompt(text),
-    onSuccess: () => {
+    onSuccess: (prompt) => {
       queryClient.invalidateQueries({ queryKey: ["task-prompts"] });
-      setRegisterOpen(false);
-      setRegisterText("");
+      setCreatedPrompt(prompt);
+      setDialogStep(2);
     },
   });
+
+  const resetDialog = () => {
+    setDialogOpen(false);
+    setDialogStep(1);
+    setNewText("");
+    setCreatedPrompt(null);
+  };
 
   return (
     <div className="space-y-6">
@@ -62,35 +74,60 @@ export function TaskPromptList() {
             Browse and manage content-addressed task prompt entities
           </p>
         </div>
-        <Dialog open={registerOpen} onOpenChange={setRegisterOpen}>
+        <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetDialog(); else setDialogOpen(true); }}>
           <DialogTrigger asChild>
             <Button className="gap-1.5">
-              <Plus className="h-4 w-4" /> Register
+              <Plus className="h-4 w-4" /> New Task Prompt
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Register Task Prompt</DialogTitle>
-              <DialogDescription>
-                Paste the task text below. If a task prompt with the same text already exists,
-                the existing one is returned (content-addressed).
-              </DialogDescription>
-            </DialogHeader>
-            <Textarea
-              placeholder="Enter task prompt text…"
-              value={registerText}
-              onChange={(e) => setRegisterText(e.target.value)}
-              rows={8}
-              className="font-mono text-sm"
-            />
-            <DialogFooter>
-              <Button
-                onClick={() => createMutation.mutate(registerText)}
-                disabled={!registerText.trim() || createMutation.isPending}
-              >
-                {createMutation.isPending ? "Registering…" : "Register"}
-              </Button>
-            </DialogFooter>
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+            {dialogStep === 1 ? (
+              <>
+                <DialogHeader>
+                  <DialogTitle>New Task Prompt</DialogTitle>
+                  <DialogDescription>
+                    Enter the task text below. If a task prompt with the same text already exists,
+                    the existing one is returned (content-addressed).
+                  </DialogDescription>
+                </DialogHeader>
+                <Textarea
+                  placeholder="Enter task prompt text…"
+                  value={newText}
+                  onChange={(e) => setNewText(e.target.value)}
+                  rows={8}
+                  className="font-mono text-sm"
+                />
+                <DialogFooter>
+                  <Button
+                    onClick={() => createMutation.mutate(newText)}
+                    disabled={!newText.trim() || createMutation.isPending}
+                  >
+                    {createMutation.isPending ? "Creating…" : "Create"}
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : createdPrompt ? (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Task Prompt Created</DialogTitle>
+                  <DialogDescription>
+                    <span className="font-mono text-xs select-all">{createdPrompt._id}</span>
+                  </DialogDescription>
+                </DialogHeader>
+                <pre className="whitespace-pre-wrap text-sm bg-muted p-3 rounded-md font-mono leading-relaxed max-h-[150px] overflow-y-auto">
+                  {createdPrompt.text}
+                </pre>
+                <TaskPromptFeatures taskPromptId={createdPrompt._id} autoExtract />
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button variant="outline" onClick={resetDialog}>
+                    Done
+                  </Button>
+                  <Button onClick={() => { resetDialog(); navigate(`/task-prompts/${createdPrompt._id}`); }}>
+                    View Details
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : null}
           </DialogContent>
         </Dialog>
       </div>
