@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, QueueProcessorConfig, LogEvent, TokenManagerClient, detectCliVersion } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls, detectCliVersion } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -22,7 +22,7 @@ class CopilotProcessor implements WorkerProcessor {
     message: string,
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
     options?: WorkerProcessorOptions
-  ): Promise<string> {
+  ): Promise<WorkerResult> {
     const mcpConfigs = options?.mcpServerConfigs ?? [];
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
@@ -31,6 +31,25 @@ class CopilotProcessor implements WorkerProcessor {
       mcpServers: mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
     });
     
+    // DevProxy integration — start recording if enabled
+    let devProxy: DevProxyClient | null = null;
+    if (DevProxyClient.isEnabled()) {
+      devProxy = new DevProxyClient();
+      try {
+        await log("info", "DevProxy enabled — waiting for sidecar to be ready...");
+        await devProxy.waitForReady();
+        // Download CA cert if needed (for NODE_EXTRA_CA_CERTS)
+        const certPath = process.env.NODE_EXTRA_CA_CERTS || "/certs/dev-proxy-ca.crt";
+        await devProxy.downloadCertificate(certPath);
+        await devProxy.startRecording();
+        await log("info", "DevProxy recording started");
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        await log("warn", `DevProxy setup failed, continuing without HAR capture: ${msg}`);
+        devProxy = null;
+      }
+    }
+
     try {
       // Acquire token dynamically (env var fallback or Token Manager)
       const githubToken = await tokenClient.acquireToken("copilot-sdk");
@@ -60,8 +79,34 @@ class CopilotProcessor implements WorkerProcessor {
         stopReason: result.stopReason,
         responseLength: result.response.length 
       });
-      
-      return result.response || `[${this.workerName}] No response from Copilot`;
+
+      const response = result.response || `[${this.workerName}] No response from Copilot`;
+
+      // DevProxy integration — stop recording and extract tool calls
+      if (devProxy) {
+        try {
+          await devProxy.stopRecording();
+          await log("info", "DevProxy recording stopped");
+
+          const harFilePath = await devProxy.getLatestHarFile();
+          if (harFilePath) {
+            const har = await parseHarFile(harFilePath);
+            const toolCalls = extractToolCalls(har);
+            await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
+              toolCallCount: toolCalls.length,
+              toolNames: toolCalls.map((tc) => tc.name),
+            });
+            return { response, toolCalls, harFilePath };
+          } else {
+            await log("warn", "No HAR file found after DevProxy recording");
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          await log("warn", `DevProxy post-processing failed: ${msg}`);
+        }
+      }
+
+      return { response };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await log("error", `Copilot processing failed: ${errorMessage}`);
