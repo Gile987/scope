@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import type { McpServerConfig } from './mcp.js';
+import type { SkillConfig } from './skill.js';
 import type { ToolCall } from '../har/types.js';
 
 // Re-export ToolCall so consumers can import from types
@@ -101,6 +102,7 @@ export interface RequestDocument {
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → TaskPromptDocument._id)
   promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
   mcpServers?: string[];          // MCP server slugs selected for this run
+  skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
   agentVersion?: string;          // Coding agent binary version (e.g. "@github/copilot@0.0.415")
   toolCalls?: ToolCall[];          // Tool calls extracted from DevProxy HAR (one-shot)
   harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
@@ -124,6 +126,7 @@ export interface QueueMessagePayload {
 export interface WorkerProcessorOptions {
   model?: string;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
+  skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
 }
 
 // Result returned by a worker processor
