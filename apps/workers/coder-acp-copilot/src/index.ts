@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, QueueProcessorConfig, LogEvent, TokenManagerClient, detectCliVersion } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls, detectCliVersion } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -22,7 +22,7 @@ class CopilotProcessor implements WorkerProcessor {
     message: string,
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
     options?: WorkerProcessorOptions
-  ): Promise<string> {
+  ): Promise<WorkerResult> {
     const mcpConfigs = options?.mcpServerConfigs ?? [];
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
@@ -31,6 +31,31 @@ class CopilotProcessor implements WorkerProcessor {
       mcpServers: mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
     });
     
+    // DevProxy integration — start recording if enabled
+    let devProxy: DevProxyClient | null = null;
+    let sslCertFile: string | undefined;
+    if (DevProxyClient.isEnabled()) {
+      devProxy = new DevProxyClient();
+      try {
+        await log("info", "DevProxy enabled — waiting for sidecar to be ready...");
+        await devProxy.waitForReady();
+        // Download CA cert if needed (for NODE_EXTRA_CA_CERTS)
+        const certPath = process.env.NODE_EXTRA_CA_CERTS || "/certs/dev-proxy-ca.crt";
+        await devProxy.downloadCertificate(certPath);
+        // Create combined CA bundle for native binaries (SSL_CERT_FILE)
+        // The copilot binary is a native executable that doesn't use NODE_EXTRA_CA_CERTS
+        const bundlePath = "/certs/ca-bundle-combined.crt";
+        sslCertFile = await devProxy.createCombinedCaBundle(certPath, bundlePath);
+        await log("info", "DevProxy CA cert installed for native binaries", { sslCertFile });
+        await devProxy.startRecording();
+        await log("info", "DevProxy recording started");
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        await log("warn", `DevProxy setup failed, continuing without HAR capture: ${msg}`);
+        devProxy = null;
+      }
+    }
+
     try {
       // Acquire token dynamically (env var fallback or Token Manager)
       const githubToken = await tokenClient.acquireToken("copilot-sdk");
@@ -39,7 +64,7 @@ class CopilotProcessor implements WorkerProcessor {
       });
 
       // Run ACP session with GitHub Copilot
-      const args = ["--acp"];
+      const args = ["--acp", "--yolo"];
       if (options?.model) {
         args.push("--model", options.model);
       }
@@ -48,6 +73,24 @@ class CopilotProcessor implements WorkerProcessor {
         args,
         env: {
           GITHUB_TOKEN: githubToken,
+          ...(devProxy ? {
+            // The copilot binary is a Node.js 22 SEA. By default, Node.js ignores
+            // HTTP_PROXY/HTTPS_PROXY env vars — undici only reads them when
+            // --use-env-proxy is set. NODE_OPTIONS ensures the flag is processed
+            // at startup even in SEA binaries.
+            NODE_OPTIONS: [process.env.NODE_OPTIONS, "--use-env-proxy"].filter(Boolean).join(" "),
+            // DevProxy's MITM leaf certs have RSA signatures that OpenSSL 3.x rejects
+            // ("invalid padding"). Disable TLS verification for the proxied subprocess
+            // only — acceptable because DevProxy is our own sidecar.
+            NODE_TLS_REJECT_UNAUTHORIZED: "0",
+          } : {
+            // When DevProxy is disabled, strip proxy env vars from subprocess
+            // to prevent routing through proxy without cert trust setup
+            HTTP_PROXY: "",
+            HTTPS_PROXY: "",
+            http_proxy: "",
+            https_proxy: "",
+          }),
         },
         cwd: "/workspace",
         onLog: async (msg) => {
@@ -60,8 +103,34 @@ class CopilotProcessor implements WorkerProcessor {
         stopReason: result.stopReason,
         responseLength: result.response.length 
       });
-      
-      return result.response || `[${this.workerName}] No response from Copilot`;
+
+      const response = result.response || `[${this.workerName}] No response from Copilot`;
+
+      // DevProxy integration — stop recording and extract tool calls
+      if (devProxy) {
+        try {
+          await devProxy.stopRecording();
+          await log("info", "DevProxy recording stopped");
+
+          const harFilePath = await devProxy.getLatestHarFile();
+          if (harFilePath) {
+            const har = await parseHarFile(harFilePath);
+            const toolCalls = extractToolCalls(har);
+            await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
+              toolCallCount: toolCalls.length,
+              toolNames: toolCalls.map((tc) => tc.name),
+            });
+            return { response, toolCalls, harFilePath };
+          } else {
+            await log("warn", "No HAR file found after DevProxy recording");
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          await log("warn", `DevProxy post-processing failed: ${msg}`);
+        }
+      }
+
+      return { response };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await log("error", `Copilot processing failed: ${errorMessage}`);

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import type { WorkerProcessor, WorkerProcessorOptions, LogEvent, CodingAgentDocument, InsightDocument, InsightReference } from "./types.js";
+import type { WorkerProcessor, WorkerProcessorOptions, WorkerResult, LogEvent, CodingAgentDocument, InsightDocument, InsightReference } from "./types.js";
 
 describe("WorkerProcessorOptions", () => {
   it("passes model through processMessage", async () => {
@@ -14,9 +14,9 @@ describe("WorkerProcessorOptions", () => {
         _message: string,
         _log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
         options?: WorkerProcessorOptions
-      ): Promise<string> {
+      ): Promise<WorkerResult> {
         if (options) receivedOptions.push(options);
-        return "done";
+        return { response: "done" };
       },
     };
 
@@ -30,14 +30,14 @@ describe("WorkerProcessorOptions", () => {
   it("allows processMessage without options", async () => {
     const processor: WorkerProcessor = {
       workerName: "test-worker",
-      async processMessage(): Promise<string> {
-        return "done";
+      async processMessage(): Promise<WorkerResult> {
+        return { response: "done" };
       },
     };
 
     const log = vi.fn();
     const result = await processor.processMessage("task", log);
-    expect(result).toBe("done");
+    expect(result).toEqual({ response: "done" });
   });
 
   it("allows processMessage with undefined model", async () => {
@@ -49,9 +49,9 @@ describe("WorkerProcessorOptions", () => {
         _message: string,
         _log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
         options?: WorkerProcessorOptions
-      ): Promise<string> {
+      ): Promise<WorkerResult> {
         receivedModel = options?.model;
-        return "done";
+        return { response: "done" };
       },
     };
 

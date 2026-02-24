@@ -175,3 +175,35 @@ How often the Token Manager's scheduler validates all active tokens against thei
 **Type:** integer (Docker Compose only)
 
 Host port mapping for the token-manager service in Docker Compose.
+
+## DevProxy Configuration (HAR Capture)
+
+### DEV_PROXY_ENABLED
+**Default:** `false`
+**Type:** boolean (`true` | `false`)
+
+Enables DevProxy integration for capturing HTTP traffic as HAR files. When `true`, the worker starts/stops DevProxy recording around each coding agent session, extracts tool calls from the HAR, and uploads the HAR to blob storage.
+
+- **Docker Compose:** Set via `DEV_PROXY_ENABLED=true` in `.env` or inline
+- **Kubernetes:** Set in the deployment manifest env vars (auto-set when sidecar is present)
+
+### DEV_PROXY_API_URL
+**Default:** `http://localhost:18897`
+**Type:** URL string
+
+URL of the DevProxy REST API. The `DevProxyClient` uses this to start/stop recording, check status, and download the CA certificate.
+
+- **Docker Compose:** `http://devproxy-copilot:18897` (separate service)
+- **Kubernetes:** `http://localhost:18897` (sidecar in same pod)
+
+### DEV_PROXY_HAR_DIR
+**Default:** `/har-output`
+**Type:** path
+
+Directory where DevProxy writes HAR files. Shared between the DevProxy process and the worker via a volume mount.
+
+### DEVPROXY_API_PORT
+**Default:** `18897`
+**Type:** integer (Docker Compose only)
+
+Host port mapping for the DevProxy REST API in Docker Compose.

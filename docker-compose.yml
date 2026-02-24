@@ -312,7 +312,41 @@ services:
       WORKER_NAME: coder-acp-copilot
       QUEUE_NAME: queue-coder-acp-copilot
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-    depends_on: *worker-deps
+      # DevProxy integration (enabled by default when using copilot profile)
+      DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
+      DEV_PROXY_API_URL: http://devproxy-copilot:18897
+      DEV_PROXY_HAR_DIR: /har-output
+      HTTP_PROXY: http://devproxy-copilot:18000
+      HTTPS_PROXY: http://devproxy-copilot:18000
+      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-copilot"
+      NODE_EXTRA_CA_CERTS: /certs/dev-proxy-ca.crt
+    volumes:
+      - copilot_har_output:/har-output
+      - copilot_devproxy_cert:/certs
+    depends_on:
+      <<: *worker-deps
+      devproxy-copilot:
+        condition: service_healthy
+
+  # DevProxy sidecar for Copilot worker (HAR capture)
+  devproxy-copilot:
+    image: ghcr.io/dotnet/dev-proxy:2.1.0
+    profiles: [copilot]
+    user: "0:0"
+    working_dir: /har-output
+    command: ["--config-file", "/config/devproxyrc.json", "--record"]
+    volumes:
+      - ./apps/workers/coder-acp-copilot/devproxy-config.json:/config/devproxyrc.json:ro
+      - copilot_har_output:/har-output
+      - copilot_devproxy_cert:/certs
+    ports:
+      - "${DEVPROXY_API_PORT:-18897}:18897"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:18897/proxy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   # Report Generator worker (LLM-powered run reports via Copilot SDK)
   report-generator:
@@ -343,6 +377,8 @@ volumes:
   mongodb_data:
   azurite_data:
   lowkey_vault_data:
+  copilot_har_output:
+  copilot_devproxy_cert:
 
 networks:
   default:

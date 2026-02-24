@@ -1,0 +1,456 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import { Download, Search, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+// ---------------------------------------------------------------------------
+// Types (inline HAR 1.2 subset — no shared dep needed for the portal)
+// ---------------------------------------------------------------------------
+interface HarNameValue { name: string; value: string }
+interface HarRequest {
+  method: string;
+  url: string;
+  headers: HarNameValue[];
+  postData?: { mimeType: string; text?: string };
+}
+interface HarResponse {
+  status: number;
+  statusText: string;
+  headers: HarNameValue[];
+  content: { size: number; mimeType: string; text?: string; encoding?: string };
+}
+interface HarEntry {
+  startedDateTime: string;
+  time: number;
+  request: HarRequest;
+  response: HarResponse;
+}
+interface HarFile {
+  log: { entries: HarEntry[] };
+}
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+interface HarNetworkViewerProps {
+  runId: string;
+  /** If provided, fetches HAR for a specific iteration */
+  iteration?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(2)} s`;
+}
+
+function methodColor(method: string): string {
+  switch (method.toUpperCase()) {
+    case "GET": return "text-emerald-600 bg-emerald-500/10";
+    case "POST": return "text-blue-600 bg-blue-500/10";
+    case "PUT": return "text-amber-600 bg-amber-500/10";
+    case "PATCH": return "text-orange-600 bg-orange-500/10";
+    case "DELETE": return "text-red-600 bg-red-500/10";
+    default: return "text-muted-foreground bg-muted";
+  }
+}
+
+function statusColor(status: number): string {
+  if (status < 300) return "text-emerald-600";
+  if (status < 400) return "text-amber-600";
+  return "text-red-600";
+}
+
+/** Extract a short path from a full URL for display. */
+function shortUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.pathname + u.search;
+  } catch {
+    return url;
+  }
+}
+
+/** Extract the host from a URL. */
+function hostFromUrl(url: string): string {
+  try { return new URL(url).host; } catch { return ""; }
+}
+
+/** Get content type category for the "Type" column. */
+function contentCategory(entry: HarEntry): string {
+  const ct = entry.response.content.mimeType || "";
+  if (ct.includes("json")) return "json";
+  if (ct.includes("html")) return "html";
+  if (ct.includes("xml")) return "xml";
+  if (ct.includes("javascript") || ct.includes("ecmascript")) return "js";
+  if (ct.includes("css")) return "css";
+  if (ct.includes("image")) return "img";
+  if (ct.includes("font")) return "font";
+  if (ct.includes("text/event-stream")) return "sse";
+  if (ct.includes("text")) return "text";
+  return ct.split("/").pop()?.split(";")[0] ?? "other";
+}
+
+/** Decode response body text (handle base64). */
+function decodeBody(content: HarResponse["content"]): string | null {
+  if (!content.text) return null;
+  if (content.encoding === "base64") {
+    try { return atob(content.text); } catch { return null; }
+  }
+  return content.text;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
+  const [filter, setFilter] = useState("");
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+
+  const { data: har, isLoading, error } = useQuery<HarFile>({
+    queryKey: ["har", runId, iteration],
+    queryFn: async () => {
+      const url = api.harUrl(runId, iteration);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+  });
+
+  const entries = useMemo(() => {
+    if (!har) return [];
+    const all = har.log.entries;
+    if (!filter) return all;
+    const lf = filter.toLowerCase();
+    return all.filter(
+      (e) =>
+        e.request.url.toLowerCase().includes(lf) ||
+        e.request.method.toLowerCase().includes(lf) ||
+        String(e.response.status).includes(lf),
+    );
+  }, [har, filter]);
+
+  // Summary stats
+  const totalTime = useMemo(
+    () => entries.reduce((sum, e) => sum + (e.time || 0), 0),
+    [entries],
+  );
+  const totalSize = useMemo(
+    () => entries.reduce((sum, e) => sum + (e.response.content.size || 0), 0),
+    [entries],
+  );
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-[400px] w-full" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        Failed to load HAR data: {error instanceof Error ? error.message : String(error)}
+      </div>
+    );
+  }
+
+  if (!har || entries.length === 0) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        No network requests captured.
+      </div>
+    );
+  }
+
+  const selected = selectedIdx !== null ? entries[selectedIdx] : null;
+
+  return (
+    <div className="space-y-3">
+      {/* Summary bar */}
+      <div className="flex items-center gap-4 text-sm">
+        <span className="font-medium">{entries.length} requests</span>
+        <span className="text-muted-foreground">{formatBytes(totalSize)} transferred</span>
+        <span className="text-muted-foreground">{formatMs(totalTime)} total</span>
+        <div className="flex-1" />
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => window.open(api.harUrl(runId, iteration), "_blank")}
+        >
+          <Download className="h-3 w-3" />
+          Download HAR
+        </Button>
+      </div>
+
+      {/* Filter bar */}
+      <div className="relative">
+        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <input
+          type="text"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter by URL, method, or status…"
+          className="w-full rounded-md border border-input bg-background px-9 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+        {filter && (
+          <button
+            onClick={() => setFilter("")}
+            className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Request table + detail panel */}
+      <Card>
+        <CardContent className="p-0">
+          <div className={cn("flex", selected && "divide-x")}>
+            {/* Request list (left side) */}
+            <div className={cn("overflow-x-auto", selected ? "w-1/2" : "w-full")}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50 text-left">
+                    <th className="p-2 pl-3 font-medium w-[60px]">Method</th>
+                    <th className="p-2 font-medium">URL</th>
+                    <th className="p-2 font-medium w-[60px]">Status</th>
+                    <th className="p-2 font-medium w-[60px]">Type</th>
+                    <th className="p-2 font-medium w-[70px] text-right">Size</th>
+                    <th className="p-2 pr-3 font-medium w-[70px] text-right">Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((entry, idx) => (
+                    <tr
+                      key={idx}
+                      onClick={() => setSelectedIdx(selectedIdx === idx ? null : idx)}
+                      className={cn(
+                        "border-b last:border-0 cursor-pointer hover:bg-muted/30 transition-colors",
+                        selectedIdx === idx && "bg-primary/5",
+                      )}
+                    >
+                      <td className="p-2 pl-3">
+                        <span className={cn("font-mono text-xs font-semibold px-1.5 py-0.5 rounded", methodColor(entry.request.method))}>
+                          {entry.request.method}
+                        </span>
+                      </td>
+                      <td className="p-2 truncate max-w-[400px]">
+                        <span className="font-mono text-xs" title={entry.request.url}>
+                          {shortUrl(entry.request.url)}
+                        </span>
+                      </td>
+                      <td className={cn("p-2 font-mono text-xs font-medium", statusColor(entry.response.status))}>
+                        {entry.response.status}
+                      </td>
+                      <td className="p-2 text-xs text-muted-foreground">
+                        {contentCategory(entry)}
+                      </td>
+                      <td className="p-2 text-xs text-muted-foreground text-right tabular-nums">
+                        {formatBytes(entry.response.content.size)}
+                      </td>
+                      <td className="p-2 pr-3 text-xs text-muted-foreground text-right tabular-nums">
+                        {formatMs(entry.time)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Detail panel (right side) */}
+            {selected && (
+              <DetailPanel entry={selected} onClose={() => setSelectedIdx(null)} />
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Detail Panel
+// ---------------------------------------------------------------------------
+
+function DetailPanel({ entry, onClose }: { entry: HarEntry; onClose: () => void }) {
+  const [tab, setTab] = useState<"headers" | "request" | "response">("headers");
+
+  const requestBody = entry.request.postData?.text ?? null;
+  const responseBody = decodeBody(entry.response.content);
+
+  return (
+    <div className="w-1/2 flex flex-col max-h-[600px]">
+      {/* Panel header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/30">
+        <div className="flex items-center gap-2">
+          <span className={cn("font-mono text-xs font-semibold px-1.5 py-0.5 rounded", methodColor(entry.request.method))}>
+            {entry.request.method}
+          </span>
+          <span className={cn("font-mono text-xs font-medium", statusColor(entry.response.status))}>
+            {entry.response.status} {entry.response.statusText}
+          </span>
+        </div>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* URL */}
+      <div className="px-3 py-1.5 border-b text-xs font-mono text-muted-foreground truncate" title={entry.request.url}>
+        {hostFromUrl(entry.request.url)}{shortUrl(entry.request.url)}
+      </div>
+
+      {/* Sub-tabs */}
+      <div className="flex border-b text-xs">
+        {(["headers", "request", "response"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={cn(
+              "px-3 py-1.5 capitalize transition-colors",
+              tab === t
+                ? "border-b-2 border-primary text-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t === "request" ? "Request Body" : t === "response" ? "Response Body" : "Headers"}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-y-auto p-3 text-xs">
+        {tab === "headers" && <HeadersTab entry={entry} />}
+        {tab === "request" && <BodyTab body={requestBody} mimeType={entry.request.postData?.mimeType} />}
+        {tab === "response" && <BodyTab body={responseBody} mimeType={entry.response.content.mimeType} />}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Headers sub-tab
+// ---------------------------------------------------------------------------
+
+function HeadersTab({ entry }: { entry: HarEntry }) {
+  return (
+    <div className="space-y-4">
+      <HeaderSection title="Request Headers" headers={entry.request.headers} />
+      <HeaderSection title="Response Headers" headers={entry.response.headers} />
+      <div>
+        <h5 className="font-medium text-muted-foreground mb-1">General</h5>
+        <div className="space-y-0.5">
+          <HeaderRow name="Request URL" value={entry.request.url} />
+          <HeaderRow name="Request Method" value={entry.request.method} />
+          <HeaderRow name="Status Code" value={`${entry.response.status} ${entry.response.statusText}`} />
+          <HeaderRow name="Time" value={formatMs(entry.time)} />
+          <HeaderRow name="Started" value={entry.startedDateTime} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HeaderSection({ title, headers }: { title: string; headers: HarNameValue[] }) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (headers.length === 0) return null;
+
+  return (
+    <div>
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="flex items-center gap-1 font-medium text-muted-foreground mb-1 hover:text-foreground transition-colors"
+      >
+        {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        {title} ({headers.length})
+      </button>
+      {!collapsed && (
+        <div className="space-y-0.5 ml-4">
+          {headers.map((h, i) => (
+            <HeaderRow key={`${h.name}-${i}`} name={h.name} value={h.value} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HeaderRow({ name, value }: { name: string; value: string }) {
+  return (
+    <div className="flex gap-2">
+      <span className="font-medium text-foreground shrink-0">{name}:</span>
+      <span className="text-muted-foreground break-all">{value}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Body sub-tab
+// ---------------------------------------------------------------------------
+
+function BodyTab({ body, mimeType }: { body: string | null; mimeType?: string }) {
+  if (!body) {
+    return <div className="text-muted-foreground italic">No body</div>;
+  }
+
+  // Try to pretty-print JSON
+  if (mimeType?.includes("json") || mimeType?.includes("text/event-stream")) {
+    // Handle SSE: try to pretty-print each data line
+    if (body.includes("data: ")) {
+      return (
+        <pre className="whitespace-pre-wrap break-all font-mono bg-muted/30 rounded p-2 max-h-[400px] overflow-y-auto">
+          {body.split("\n").map((line) => {
+            if (line.startsWith("data: ") && line !== "data: [DONE]") {
+              try {
+                const parsed = JSON.parse(line.slice(6));
+                return `data: ${JSON.stringify(parsed, null, 2)}`;
+              } catch {
+                return line;
+              }
+            }
+            return line;
+          }).join("\n")}
+        </pre>
+      );
+    }
+
+    try {
+      const parsed = JSON.parse(body);
+      return (
+        <pre className="whitespace-pre-wrap break-all font-mono bg-muted/30 rounded p-2 max-h-[400px] overflow-y-auto">
+          {JSON.stringify(parsed, null, 2)}
+        </pre>
+      );
+    } catch {
+      // fall through to raw display
+    }
+  }
+
+  return (
+    <pre className="whitespace-pre-wrap break-all font-mono bg-muted/30 rounded p-2 max-h-[400px] overflow-y-auto">
+      {body}
+    </pre>
+  );
+}

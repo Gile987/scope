@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, QueueProcessorConfig, LogEvent, TokenManagerClient, detectCliVersion } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, detectCliVersion } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -22,7 +22,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     message: string,
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
     options?: WorkerProcessorOptions
-  ): Promise<string> {
+  ): Promise<WorkerResult> {
     const mcpConfigs = options?.mcpServerConfigs ?? [];
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
@@ -61,7 +61,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         responseLength: result.response.length 
       });
       
-      return result.response || `[${this.workerName}] No response from Claude Code`;
+      return { response: result.response || `[${this.workerName}] No response from Claude Code` };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await log("error", `Claude Code processing failed: ${errorMessage}`);

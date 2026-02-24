@@ -157,6 +157,27 @@ export class BlobStorage {
   }
 
   /**
+   * Uploads a single file (e.g. HAR capture) to blob storage.
+   * Returns the blob URL.
+   */
+  async uploadFile(
+    filePath: string,
+    blobName: string,
+    contentType: string = "application/json"
+  ): Promise<string> {
+    await this.ensureContainer();
+
+    const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
+    await blockBlobClient.uploadFile(filePath, {
+      blobHTTPHeaders: {
+        blobContentType: contentType,
+      },
+    });
+
+    return blockBlobClient.url;
+  }
+
+  /**
    * Downloads a snapshot from blob storage and extracts it to the target directory.
    */
   async downloadAndExtractSnapshot(

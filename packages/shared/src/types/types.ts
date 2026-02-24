@@ -2,6 +2,10 @@
 // Licensed under the MIT License.
 
 import type { McpServerConfig } from './mcp.js';
+import type { ToolCall } from '../har/types.js';
+
+// Re-export ToolCall so consumers can import from types
+export type { ToolCall } from '../har/types.js';
 
 // Multi-turn conversation turn (one coding + judge iteration)
 export interface ConversationTurn {
@@ -12,6 +16,8 @@ export interface ConversationTurn {
   passed: boolean;
   timestamp: Date;
   criteriaResults?: CriterionResult[];  // Per-criterion breakdown from DAG evaluation
+  toolCalls?: ToolCall[];  // Tool calls extracted from DevProxy HAR for this turn
+  harUrl?: string;         // Blob storage URL to the HAR file for this turn
 }
 
 // Multi-turn configuration constants
@@ -96,6 +102,8 @@ export interface RequestDocument {
   promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
   mcpServers?: string[];          // MCP server slugs selected for this run
   agentVersion?: string;          // Coding agent binary version (e.g. "@github/copilot@0.0.415")
+  toolCalls?: ToolCall[];          // Tool calls extracted from DevProxy HAR (one-shot)
+  harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
 }
 
 // Log event for real-time streaming and persistence
@@ -118,10 +126,20 @@ export interface WorkerProcessorOptions {
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
 }
 
+// Result returned by a worker processor
+export interface WorkerResult {
+  /** The coding agent's text response */
+  response: string;
+  /** Tool calls extracted from DevProxy HAR capture (if available) */
+  toolCalls?: ToolCall[];
+  /** Path to the HAR file on disk (for upload to blob storage) */
+  harFilePath?: string;
+}
+
 // Worker processor interface - each worker implements this
 export interface WorkerProcessor {
   readonly workerName: string;
-  processMessage(message: string, log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>, options?: WorkerProcessorOptions): Promise<string>;
+  processMessage(message: string, log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>, options?: WorkerProcessorOptions): Promise<WorkerResult>;
   /** Return the coding agent binary version string (e.g. "@github/copilot@0.0.415"). */
   getAgentVersion?(): string;
 }

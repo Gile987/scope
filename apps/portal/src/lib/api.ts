@@ -77,6 +77,12 @@ export const api = {
     return `${BASE}/requests/${id}/snapshots/${iteration}`;
   },
 
+  /** Get HAR file download URL for a request (optionally per-iteration) */
+  harUrl: (id: string, iteration?: number): string => {
+    const qs = iteration ? `?iteration=${iteration}` : "";
+    return `${BASE}/requests/${id}/har${qs}`;
+  },
+
   /** SSE endpoint URL for log streaming */
   logsUrl: (id: string, fromStart = true): string => {
     return `${BASE}/requests/${id}/logs?fromStart=${fromStart}`;

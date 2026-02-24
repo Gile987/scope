@@ -13,3 +13,5 @@ export * from "./task-prompts/index.js";
 export * from "./token-manager/index.js";
 export * from "./mcp/index.js";
 export * from "./agent-version.js";
+export * from "./devproxy/index.js";
+export * from "./har/index.js";

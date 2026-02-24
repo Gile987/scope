@@ -13,6 +13,7 @@ import {
 import type { McpServerConfig } from "../types/mcp.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
 import { BlobStorage } from "../storage/blob-storage.js";
+import { sanitizeHarFile } from "../har/har-parser.js";
 import { JudgeClient } from "../judge/judge-client.js";
 import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
 import { McpServerClient } from "../mcp/mcp-server-client.js";
@@ -104,14 +105,43 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     await log("info", `Starting processing with ${this.processor.workerName}`);
 
     // Process the task using the worker-specific processor
-    const result = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs });
+    const workerResult = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs });
 
-    await log("info", "Processing completed", { result, final: true });
+    await log("info", "Processing completed", { responseLength: workerResult.response.length, final: true });
 
-    // Update request with result
+    // Upload HAR file to blob storage if available (sanitized to strip credentials)
+    let harUrl: string | undefined;
+    if (workerResult.harFilePath) {
+      try {
+        await sanitizeHarFile(workerResult.harFilePath, workerResult.harFilePath);
+        const blobStorage = new BlobStorage({
+          storageAccountName: this.config.storageAccountName,
+          storageConnectionString: this.config.storageConnectionString,
+        });
+        harUrl = await blobStorage.uploadFile(
+          workerResult.harFilePath,
+          `${requestId}/devproxy.har`,
+          "application/json"
+        );
+        await log("info", "HAR file uploaded to blob storage", { harUrl });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        await log("warn", `Failed to upload HAR file: ${msg}`);
+      }
+    }
+
+    // Update request with result, tool calls, and HAR URL
     await this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "completed", result, updatedAt: new Date() } }
+      {
+        $set: {
+          status: "completed",
+          result: workerResult.response,
+          ...(workerResult.toolCalls && workerResult.toolCalls.length > 0 && { toolCalls: workerResult.toolCalls }),
+          ...(harUrl && { harUrl }),
+          updatedAt: new Date(),
+        },
+      }
     );
 
     console.log(`[${this.workerName}] Completed request ${requestId}`);

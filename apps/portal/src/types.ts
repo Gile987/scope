@@ -12,6 +12,14 @@ export interface CriterionResult {
   evaluated: boolean;
 }
 
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  response?: string;
+  timestamp?: string;
+}
+
 export interface ConversationTurn {
   iteration: number;
   codingAgentResponse: string;
@@ -20,6 +28,8 @@ export interface ConversationTurn {
   passed: boolean;
   timestamp: string;
   criteriaResults?: CriterionResult[];
+  toolCalls?: ToolCall[];
+  harUrl?: string;
 }
 
 export interface Scenario {
@@ -65,6 +75,8 @@ export interface Run {
   /** @deprecated — use taskPromptId instead */
   promptFeatureExtractionId?: string;
   mcpServers?: string[];
+  toolCalls?: ToolCall[];
+  harUrl?: string;
 }
 
 export const WORKER_TYPES = [
