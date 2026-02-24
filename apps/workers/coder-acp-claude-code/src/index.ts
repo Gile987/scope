@@ -42,7 +42,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       }
       const result = await runACPSession(message, {
         command: "claude-code-acp",
-        args: ["--dangerously-skip-permissions"],
+        args: [],
         env,
         cwd: "/workspace",
         onLog: async (msg) => {
