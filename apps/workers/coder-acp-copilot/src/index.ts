@@ -73,8 +73,24 @@ class CopilotProcessor implements WorkerProcessor {
         args,
         env: {
           GITHUB_TOKEN: githubToken,
-          // Native binaries (Go/Rust) don't use NODE_EXTRA_CA_CERTS - they use SSL_CERT_FILE
-          ...(sslCertFile ? { SSL_CERT_FILE: sslCertFile } : {}),
+          ...(devProxy ? {
+            // The copilot binary is a Node.js 22 SEA. By default, Node.js ignores
+            // HTTP_PROXY/HTTPS_PROXY env vars — undici only reads them when
+            // --use-env-proxy is set. NODE_OPTIONS ensures the flag is processed
+            // at startup even in SEA binaries.
+            NODE_OPTIONS: [process.env.NODE_OPTIONS, "--use-env-proxy"].filter(Boolean).join(" "),
+            // DevProxy's MITM leaf certs have RSA signatures that OpenSSL 3.x rejects
+            // ("invalid padding"). Disable TLS verification for the proxied subprocess
+            // only — acceptable because DevProxy is our own sidecar.
+            NODE_TLS_REJECT_UNAUTHORIZED: "0",
+          } : {
+            // When DevProxy is disabled, strip proxy env vars from subprocess
+            // to prevent routing through proxy without cert trust setup
+            HTTP_PROXY: "",
+            HTTPS_PROXY: "",
+            http_proxy: "",
+            https_proxy: "",
+          }),
         },
         cwd: "/workspace",
         onLog: async (msg) => {

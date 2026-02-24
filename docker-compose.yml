@@ -312,8 +312,8 @@ services:
       WORKER_NAME: coder-acp-copilot
       QUEUE_NAME: queue-coder-acp-copilot
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      # DevProxy integration
-      DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-false}"
+      # DevProxy integration (enabled by default when using copilot profile)
+      DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
       DEV_PROXY_API_URL: http://devproxy-copilot:18897
       DEV_PROXY_HAR_DIR: /har-output
       HTTP_PROXY: http://devproxy-copilot:18000
