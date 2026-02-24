@@ -15,6 +15,8 @@ import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { LogViewer } from "@/components/LogViewer";
 import { TurnTimeline } from "@/components/TurnTimeline";
 import { CriteriaGraphView } from "@/components/CriteriaGraphView";
+import { HarNetworkViewer } from "@/components/HarNetworkViewer";
+import { ConversationView } from "@/components/ConversationView";
 import { useLogStream } from "@/hooks/use-log-stream";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download } from "lucide-react";
 import { formatDate, formatId } from "@/lib/utils";
@@ -182,18 +184,41 @@ export function RunDetail() {
           <TabsTrigger value="turns">
             Turns {run.turns ? `(${run.turns.length})` : ""}
           </TabsTrigger>
+          {run.turns && run.turns.length > 0 && (
+            <TabsTrigger value="conversation">Conversation</TabsTrigger>
+          )}
+          {hasHarData && <TabsTrigger value="network">Network</TabsTrigger>}
+          {hasHarData && <TabsTrigger value="tool-calls">Tool Calls</TabsTrigger>}
           <TabsTrigger value="logs">Logs</TabsTrigger>
           <TabsTrigger value="reports">
             Reports {reports && reports.length > 0 ? `(${reports.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
-          {hasHarData && <TabsTrigger value="network">Network</TabsTrigger>}
         </TabsList>
 
         {/* Turns tab */}
         <TabsContent value="turns" className="mt-4">
           <TurnTimeline turns={run.turns ?? []} runId={run._id} />
         </TabsContent>
+
+        {/* Conversation tab — chat-style view of agent/judge exchanges */}
+        {run.turns && run.turns.length > 0 && (
+          <TabsContent value="conversation" className="mt-4">
+            <ConversationView turns={run.turns} task={run.scenario?.task} />
+          </TabsContent>
+        )}
+
+        {/* Network tab — Chrome DevTools-style HAR viewer */}
+        {hasHarData && (
+          <TabsContent value="network" className="mt-4">
+            {/* If multi-turn, show per-iteration selector; otherwise one viewer */}
+            {run.turns && run.turns.some(t => t.harUrl) ? (
+              <HarIterationTabs runId={run._id} turns={run.turns} />
+            ) : (
+              <HarNetworkViewer runId={run._id} />
+            )}
+          </TabsContent>
+        )}
 
         {/* Logs tab */}
         <TabsContent value="logs" className="mt-4 space-y-4">
@@ -429,9 +454,9 @@ export function RunDetail() {
           </div>
         </TabsContent>
 
-        {/* Network tab — HAR captures & tool calls summary */}
+        {/* Tool Calls tab — HAR captures & tool calls summary */}
         {hasHarData && (
-          <TabsContent value="network" className="mt-4 space-y-4">
+          <TabsContent value="tool-calls" className="mt-4 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">Network Captures</h3>
               {run.harUrl && (
@@ -540,6 +565,43 @@ export function RunDetail() {
           </TabsContent>
         )}
       </Tabs>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helper: per-iteration HAR viewer tabs for multi-turn runs
+// ---------------------------------------------------------------------------
+
+function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration: number; harUrl?: string }[] }) {
+  const turnsWithHar = turns.filter(t => t.harUrl);
+  const [activeIteration, setActiveIteration] = useState(turnsWithHar[0]?.iteration);
+
+  if (turnsWithHar.length === 0) return null;
+
+  // Single iteration — no sub-tabs needed
+  if (turnsWithHar.length === 1) {
+    return <HarNetworkViewer runId={runId} iteration={turnsWithHar[0].iteration} />;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-1.5 flex-wrap">
+        {turnsWithHar.map(t => (
+          <Button
+            key={t.iteration}
+            variant={activeIteration === t.iteration ? "default" : "outline"}
+            size="sm"
+            className="font-mono text-xs"
+            onClick={() => setActiveIteration(t.iteration)}
+          >
+            Iteration {t.iteration}
+          </Button>
+        ))}
+      </div>
+      {activeIteration !== undefined && (
+        <HarNetworkViewer runId={runId} iteration={activeIteration} />
+      )}
     </div>
   );
 }

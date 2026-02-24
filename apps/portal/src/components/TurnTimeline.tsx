@@ -65,6 +65,11 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                       <AlertCircle className="h-3 w-3" /> Incomplete
                     </Badge>
                   )}
+                  {turn.toolCalls && turn.toolCalls.length > 0 && (
+                    <Badge variant="outline" className="text-xs font-mono">
+                      {turn.toolCalls.length} tool call{turn.toolCalls.length !== 1 ? "s" : ""}
+                    </Badge>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   {new Date(turn.timestamp).toLocaleString()}
@@ -135,57 +140,6 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                 )}
 
                 <Separator />
-
-                {/* Tool calls */}
-                {turn.toolCalls && turn.toolCalls.length > 0 && (
-                  <>
-                    <div>
-                      <h4 className="text-sm font-medium mb-2">
-                        Tool Calls ({turn.toolCalls.length})
-                      </h4>
-                      <div className="space-y-2">
-                        {turn.toolCalls.map((tc, idx) => (
-                          <div
-                            key={tc.id || idx}
-                            className="text-sm border rounded-md p-2 bg-muted/30"
-                          >
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-mono text-xs font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                                {tc.name}
-                              </span>
-                              {tc.timestamp && (
-                                <span className="text-xs text-muted-foreground">
-                                  {new Date(tc.timestamp).toLocaleTimeString()}
-                                </span>
-                              )}
-                            </div>
-                            {Object.keys(tc.arguments).length > 0 && (
-                              <details className="mt-1">
-                                <summary className="text-xs text-muted-foreground cursor-pointer">
-                                  Arguments
-                                </summary>
-                                <pre className="text-xs mt-1 bg-muted rounded p-2 overflow-x-auto max-h-32 overflow-y-auto">
-                                  {JSON.stringify(tc.arguments, null, 2)}
-                                </pre>
-                              </details>
-                            )}
-                            {tc.response && (
-                              <details className="mt-1">
-                                <summary className="text-xs text-muted-foreground cursor-pointer">
-                                  Response
-                                </summary>
-                                <pre className="text-xs mt-1 bg-muted rounded p-2 overflow-x-auto max-h-32 overflow-y-auto">
-                                  {tc.response}
-                                </pre>
-                              </details>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <Separator />
-                  </>
-                )}
 
                 {/* Coding agent response */}
                 <div>
