@@ -164,15 +164,10 @@ export function Layout() {
             <span className="hidden font-bold sm:inline-block">Scope MT</span>
           </Link>
 
-          {/* Priority+ nav container */}
+          {/* Priority+ nav: measured container (overflow-hidden) + separate More button */}
           <div ref={navContainerRef} className="hidden sm:flex flex-1 items-center min-w-0 overflow-hidden">
-            {/*
-              On first render, show all items (unstyled) so we can measure their natural widths.
-              The container has overflow:hidden so nothing visually spills out.
-              After measurement, visibleCount is set and we render the correct split.
-            */}
             {visibleCount === null ? (
-              // Measurement pass — render all items at natural width
+              // Measurement pass — render all items at natural width (clipped by overflow-hidden)
               <nav className="flex items-center space-x-5 text-sm font-medium whitespace-nowrap">
                 {visibleNavItems.map((item) => (
                   <span key={item.to} data-nav-item className="flex items-center gap-1.5">
@@ -182,7 +177,7 @@ export function Layout() {
                 ))}
               </nav>
             ) : (
-              // Normal render: shown items + optional More button
+              // Normal render: only the items that fit
               <nav className="flex items-center space-x-5 text-sm font-medium whitespace-nowrap">
                 {shownItems.map((item) => {
                   const isActive = location.pathname.startsWith(item.to);
@@ -201,43 +196,45 @@ export function Layout() {
                     </Link>
                   );
                 })}
-                {overflowItems.length > 0 && (
-                  <div className="relative" data-overflow-menu>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setOverflowOpen((v) => !v); }}
-                      className={cn(
-                        "flex items-center gap-1 transition-colors hover:text-foreground/80 text-foreground/60",
-                        overflowItems.some((item) => location.pathname.startsWith(item.to)) && "text-foreground"
-                      )}
-                      aria-label="More navigation items"
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </button>
-                    {overflowOpen && (
-                      <div className="absolute top-full right-0 mt-2 w-48 rounded-md border bg-background shadow-lg py-1 z-50">
-                        {overflowItems.map((item) => {
-                          const isActive = location.pathname.startsWith(item.to);
-                          return (
-                            <Link
-                              key={item.to}
-                              to={item.to}
-                              className={cn(
-                                "flex items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground",
-                                isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground"
-                              )}
-                            >
-                              <item.icon className="h-4 w-4" />
-                              {item.label}
-                            </Link>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
               </nav>
             )}
           </div>
+
+          {/* "More" overflow button — sits OUTSIDE the overflow-hidden container so its dropdown is not clipped */}
+          {visibleCount !== null && overflowItems.length > 0 && (
+            <div className="relative hidden sm:block shrink-0 ml-5" data-overflow-menu>
+              <button
+                onClick={(e) => { e.stopPropagation(); setOverflowOpen((v) => !v); }}
+                className={cn(
+                  "flex items-center gap-1 text-sm font-medium transition-colors hover:text-foreground/80 text-foreground/60",
+                  overflowItems.some((item) => location.pathname.startsWith(item.to)) && "text-foreground"
+                )}
+                aria-label="More navigation items"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+              {overflowOpen && (
+                <div className="absolute top-full right-0 mt-2 w-48 rounded-md border bg-background shadow-lg py-1 z-50">
+                  {overflowItems.map((item) => {
+                    const isActive = location.pathname.startsWith(item.to);
+                    return (
+                      <Link
+                        key={item.to}
+                        to={item.to}
+                        className={cn(
+                          "flex items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground",
+                          isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground"
+                        )}
+                      >
+                        <item.icon className="h-4 w-4" />
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Spacer on very small screens */}
           <div className="flex-1 sm:hidden" />
