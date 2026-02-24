@@ -213,7 +213,7 @@ export function ReportTemplateDetail() {
             <Separator />
             <div className="space-y-2">
               <Label htmlFor="userPrompt">User Prompt</Label>
-              <Textarea id="userPrompt" value={editUserPrompt} onChange={(e) => setEditUserPrompt(e.target.value)} rows={6} className="font-mono text-sm" />
+              <Textarea id="userPrompt" value={editUserPrompt} onChange={(e) => setEditUserPrompt(e.target.value)} rows={12} className="font-mono text-sm" />
               <p className="text-xs text-muted-foreground">Use {"{{requestId}}"} as a placeholder for the run ID</p>
             </div>
             <Separator />
