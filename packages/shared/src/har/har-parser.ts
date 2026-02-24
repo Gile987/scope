@@ -13,8 +13,70 @@
  * - Produces an array of ToolCall objects
  */
 
-import { readFile } from "node:fs/promises";
-import type { HarFile, HarEntry, ToolCall } from "./types.js";
+import { readFile, writeFile } from "node:fs/promises";
+import type { HarFile, HarEntry, HarNameValue, ToolCall } from "./types.js";
+
+/**
+ * Header names whose values must be redacted before HAR files are
+ * persisted or served to clients.  Matching is case-insensitive.
+ */
+const SENSITIVE_HEADERS: ReadonlySet<string> = new Set([
+  "authorization",
+  "x-github-token",
+  "x-api-key",
+  "api-key",
+  "x-oauth-scopes",
+  "x-accepted-oauth-scopes",
+  "cookie",
+  "set-cookie",
+]);
+
+const REDACTED = "[REDACTED]";
+
+/**
+ * Return a deep-copy of the HAR with sensitive header values replaced by
+ * `[REDACTED]`.  The original object is never mutated.
+ */
+export function sanitizeHar(har: HarFile): HarFile {
+  return {
+    log: {
+      ...har.log,
+      entries: har.log.entries.map((entry) => ({
+        ...entry,
+        request: {
+          ...entry.request,
+          headers: redactHeaders(entry.request.headers),
+        },
+        response: {
+          ...entry.response,
+          headers: redactHeaders(entry.response.headers),
+        },
+      })),
+    },
+  };
+}
+
+function redactHeaders(headers: HarNameValue[]): HarNameValue[] {
+  return headers.map((h) =>
+    SENSITIVE_HEADERS.has(h.name.toLowerCase())
+      ? { name: h.name, value: REDACTED }
+      : h,
+  );
+}
+
+/**
+ * Read a HAR file, sanitize it, write it to `outPath`, and return
+ * the sanitised HAR object.
+ */
+export async function sanitizeHarFile(
+  inPath: string,
+  outPath: string,
+): Promise<HarFile> {
+  const har = await parseHarFile(inPath);
+  const sanitized = sanitizeHar(har);
+  await writeFile(outPath, JSON.stringify(sanitized), "utf-8");
+  return sanitized;
+}
 
 /**
  * Parse a HAR file from disk.

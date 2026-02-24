@@ -13,6 +13,7 @@ import {
 import type { McpServerConfig } from "../types/mcp.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
 import { BlobStorage } from "../storage/blob-storage.js";
+import { sanitizeHarFile } from "../har/har-parser.js";
 import { JudgeClient } from "../judge/judge-client.js";
 import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
 import { McpServerClient } from "../mcp/mcp-server-client.js";
@@ -108,10 +109,11 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     await log("info", "Processing completed", { responseLength: workerResult.response.length, final: true });
 
-    // Upload HAR file to blob storage if available
+    // Upload HAR file to blob storage if available (sanitized to strip credentials)
     let harUrl: string | undefined;
     if (workerResult.harFilePath) {
       try {
+        await sanitizeHarFile(workerResult.harFilePath, workerResult.harFilePath);
         const blobStorage = new BlobStorage({
           storageAccountName: this.config.storageAccountName,
           storageConnectionString: this.config.storageConnectionString,

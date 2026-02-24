@@ -2,12 +2,13 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseHarFile, extractToolCalls } from "./har-parser.js";
+import { parseHarFile, extractToolCalls, sanitizeHar } from "./har-parser.js";
 import type { HarFile, ToolCall } from "./types.js";
 
 // Mock fs/promises for parseHarFile tests
 vi.mock("node:fs/promises", () => ({
   readFile: vi.fn(),
+  writeFile: vi.fn(),
 }));
 
 import { readFile } from "node:fs/promises";
@@ -387,5 +388,178 @@ describe("extractToolCalls", () => {
 
       expect(extractToolCalls(har)).toEqual([]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sanitizeHar
+// ---------------------------------------------------------------------------
+
+/** Helper to build a HAR entry with explicit headers. */
+function makeEntryWithHeaders(opts: {
+  requestHeaders?: { name: string; value: string }[];
+  responseHeaders?: { name: string; value: string }[];
+}): HarFile["log"]["entries"][0] {
+  const base = makeEntry({});
+  return {
+    ...base,
+    request: {
+      ...base.request,
+      headers: opts.requestHeaders ?? [],
+    },
+    response: {
+      ...base.response,
+      headers: opts.responseHeaders ?? [],
+    },
+  };
+}
+
+describe("sanitizeHar", () => {
+  it("redacts Authorization header", () => {
+    const har = makeHar([
+      makeEntryWithHeaders({
+        requestHeaders: [
+          { name: "Authorization", value: "Bearer ghp_secret123" },
+          { name: "Content-Type", value: "application/json" },
+        ],
+      }),
+    ]);
+
+    const sanitized = sanitizeHar(har);
+
+    expect(sanitized.log.entries[0].request.headers).toEqual([
+      { name: "Authorization", value: "[REDACTED]" },
+      { name: "Content-Type", value: "application/json" },
+    ]);
+  });
+
+  it("redacts headers case-insensitively", () => {
+    const har = makeHar([
+      makeEntryWithHeaders({
+        requestHeaders: [
+          { name: "authorization", value: "Bearer token" },
+          { name: "AUTHORIZATION", value: "Bearer TOKEN" },
+        ],
+      }),
+    ]);
+
+    const sanitized = sanitizeHar(har);
+
+    for (const h of sanitized.log.entries[0].request.headers) {
+      expect(h.value).toBe("[REDACTED]");
+    }
+  });
+
+  it("redacts X-GitHub-Token header", () => {
+    const har = makeHar([
+      makeEntryWithHeaders({
+        requestHeaders: [
+          { name: "X-GitHub-Token", value: "ghu_token456" },
+        ],
+      }),
+    ]);
+
+    const sanitized = sanitizeHar(har);
+    expect(sanitized.log.entries[0].request.headers[0].value).toBe("[REDACTED]");
+  });
+
+  it("redacts api-key and X-Api-Key headers", () => {
+    const har = makeHar([
+      makeEntryWithHeaders({
+        requestHeaders: [
+          { name: "api-key", value: "sk-12345" },
+          { name: "X-Api-Key", value: "key-67890" },
+        ],
+      }),
+    ]);
+
+    const sanitized = sanitizeHar(har);
+    expect(sanitized.log.entries[0].request.headers).toEqual([
+      { name: "api-key", value: "[REDACTED]" },
+      { name: "X-Api-Key", value: "[REDACTED]" },
+    ]);
+  });
+
+  it("redacts response OAuth scope headers", () => {
+    const har = makeHar([
+      makeEntryWithHeaders({
+        responseHeaders: [
+          { name: "X-OAuth-Scopes", value: "repo, user" },
+          { name: "X-Accepted-OAuth-Scopes", value: "repo" },
+          { name: "X-RateLimit-Remaining", value: "42" },
+        ],
+      }),
+    ]);
+
+    const sanitized = sanitizeHar(har);
+    expect(sanitized.log.entries[0].response.headers).toEqual([
+      { name: "X-OAuth-Scopes", value: "[REDACTED]" },
+      { name: "X-Accepted-OAuth-Scopes", value: "[REDACTED]" },
+      { name: "X-RateLimit-Remaining", value: "42" },
+    ]);
+  });
+
+  it("redacts Cookie and Set-Cookie headers", () => {
+    const har = makeHar([
+      makeEntryWithHeaders({
+        requestHeaders: [{ name: "Cookie", value: "session=abc" }],
+        responseHeaders: [{ name: "Set-Cookie", value: "session=xyz; path=/" }],
+      }),
+    ]);
+
+    const sanitized = sanitizeHar(har);
+    expect(sanitized.log.entries[0].request.headers[0].value).toBe("[REDACTED]");
+    expect(sanitized.log.entries[0].response.headers[0].value).toBe("[REDACTED]");
+  });
+
+  it("does not mutate the original HAR object", () => {
+    const har = makeHar([
+      makeEntryWithHeaders({
+        requestHeaders: [{ name: "Authorization", value: "Bearer secret" }],
+      }),
+    ]);
+
+    const originalValue = har.log.entries[0].request.headers[0].value;
+    sanitizeHar(har);
+    expect(har.log.entries[0].request.headers[0].value).toBe(originalValue);
+  });
+
+  it("preserves non-sensitive headers", () => {
+    const har = makeHar([
+      makeEntryWithHeaders({
+        requestHeaders: [
+          { name: "Content-Type", value: "application/json" },
+          { name: "Accept", value: "*/*" },
+          { name: "User-Agent", value: "test/1.0" },
+        ],
+      }),
+    ]);
+
+    const sanitized = sanitizeHar(har);
+    expect(sanitized.log.entries[0].request.headers).toEqual(
+      har.log.entries[0].request.headers,
+    );
+  });
+
+  it("handles HAR with no entries", () => {
+    const har = makeHar([]);
+    const sanitized = sanitizeHar(har);
+    expect(sanitized.log.entries).toEqual([]);
+  });
+
+  it("sanitizes multiple entries independently", () => {
+    const har = makeHar([
+      makeEntryWithHeaders({
+        requestHeaders: [{ name: "Authorization", value: "Bearer token1" }],
+      }),
+      makeEntryWithHeaders({
+        requestHeaders: [{ name: "Authorization", value: "Bearer token2" }],
+      }),
+    ]);
+
+    const sanitized = sanitizeHar(har);
+    expect(sanitized.log.entries).toHaveLength(2);
+    expect(sanitized.log.entries[0].request.headers[0].value).toBe("[REDACTED]");
+    expect(sanitized.log.entries[1].request.headers[0].value).toBe("[REDACTED]");
   });
 });

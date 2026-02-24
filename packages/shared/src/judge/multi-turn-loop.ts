@@ -11,6 +11,7 @@ import {
 } from "../types/types.js";
 import type { McpServerConfig } from "../types/mcp.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
+import { sanitizeHarFile } from "../har/har-parser.js";
 import { JudgeClient } from "./judge-client.js";
 
 export interface MultiTurnConfig {
@@ -129,9 +130,10 @@ export async function runMultiTurnLoop(
       codingResponse = workerResult.response;
       turnToolCalls = workerResult.toolCalls;
 
-      // Upload HAR file to blob storage if available
+      // Upload HAR file to blob storage if available (sanitized to strip credentials)
       if (workerResult.harFilePath) {
         try {
+          await sanitizeHarFile(workerResult.harFilePath, workerResult.harFilePath);
           const harBlobName = `${requestId}/iteration-${iteration}/devproxy.har`;
           turnHarUrl = await blobStorage.uploadFile(
             workerResult.harFilePath,
