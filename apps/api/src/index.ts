@@ -25,7 +25,7 @@ import {
   extractPromptFeatures,
 } from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
-import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument } from "shared";
+import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult } from "shared";
 import { evaluateTrigger } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 
@@ -80,6 +80,10 @@ let taskPromptCollection: Collection<TaskPromptDocument>;
 let taskPromptStore: TaskPromptStore;
 let featureFlagCollection: Collection<FeatureFlagDocument>;
 let reportTemplateCollection: Collection<ReportTemplateDocument>;
+let skillCollection: Collection<SkillDocument>;
+let skillRevisionCollection: Collection<SkillRevisionDocument>;
+let skillRevisionStore: SkillRevisionStore;
+let skillResolver: SkillResolver;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
@@ -221,6 +225,7 @@ interface RequestDocument {
   deletedAt?: Date;
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → task-prompts._id)
   mcpServers?: string[];          // MCP server slugs selected for this run
+  skillRevisions?: string[];      // Human-readable skill revision refs (source/skillName@commitHash)
   toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown>; response?: string; timestamp?: string }>;
   harUrl?: string;
 }
@@ -404,6 +409,12 @@ async function initializeClients(): Promise<void> {
   taskPromptStore = new TaskPromptStore(taskPromptCollection);
   featureFlagCollection = db.collection<FeatureFlagDocument>("feature-flags");
   reportTemplateCollection = db.collection<ReportTemplateDocument>("report-templates");
+  skillCollection = db.collection<SkillDocument>("skills");
+  skillRevisionCollection = db.collection<SkillRevisionDocument>("skill-revisions");
+  skillRevisionStore = new SkillRevisionStore(skillRevisionCollection);
+  skillResolver = new SkillResolver({
+    githubToken: process.env.GITHUB_TOKEN,
+  });
 
   // Note: Collection indexes are managed by db-migrations (see 002-create-indexes.ts).
   // Run `pnpm migrate:up` to apply pending migrations.
@@ -422,6 +433,9 @@ async function initializeClients(): Promise<void> {
 
   const mcpServerCount = await mcpServerCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`MCP servers collection has ${mcpServerCount} documents`);
+
+  const skillCount = await skillCollection.countDocuments({ deletedAt: { $exists: false } });
+  console.log(`Skills collection has ${skillCount} documents`);
 
   // Seed default feature flags (upsert — won't overwrite existing enabled state)
   const defaultFlags: Array<{ key: string; label: string }> = [
@@ -516,7 +530,7 @@ app.get("/api/v1/version", (_req: Request, res: Response) => {
 // Submit a request
 app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs } = req.body;
     const worker = req.query.worker as string;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
@@ -602,6 +616,71 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       }
     }
 
+    // Validate and resolve skill slugs if provided
+    let resolvedSkillRevisions: string[] | undefined;
+    if (skillSlugs !== undefined) {
+      if (!Array.isArray(skillSlugs) || !skillSlugs.every((s: unknown) => typeof s === "string")) {
+        res.status(400).json({ error: "skills must be an array of strings (skill slugs)" });
+        return;
+      }
+      if (skillSlugs.length > 0) {
+        // Validate skill slugs exist in our DB
+        const existingSkills = await skillCollection
+          .find({ _id: { $in: skillSlugs }, deletedAt: { $exists: false } })
+          .toArray();
+        const existingSkillSlugs = new Set(existingSkills.map((s: SkillDocument) => s._id));
+        const missingSkillSlugs = skillSlugs.filter((slug: string) => !existingSkillSlugs.has(slug));
+        if (missingSkillSlugs.length > 0) {
+          res.status(400).json({ error: `Skill(s) not found: ${missingSkillSlugs.join(", ")}` });
+          return;
+        }
+
+        // Resolve each skill to a SkillRevisionDocument
+        const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
+          if (!storageConnectionString && !storageAccountName) {
+            throw new Error("Blob storage not configured — cannot store skill archives");
+          }
+          let blobServiceClient: BlobServiceClient;
+          if (storageConnectionString) {
+            blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+          } else {
+            const credential = new DefaultAzureCredential();
+            blobServiceClient = new BlobServiceClient(
+              `https://${storageAccountName}.blob.core.windows.net`,
+              credential
+            );
+          }
+          const containerClient = blobServiceClient.getContainerClient("skill-archives");
+          await containerClient.createIfNotExists();
+          const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
+          await blockBlobClient.upload(data, data.length, {
+            blobHTTPHeaders: { blobContentType: "application/gzip" },
+          });
+          return blockBlobClient.url;
+        };
+
+        const revisionRefs: string[] = [];
+        for (const skill of existingSkills) {
+          try {
+            const revision = await skillResolver.resolve(
+              skill.source,
+              skill.skillName,
+              skillRevisionStore,
+              uploadArchive
+            );
+            revisionRefs.push(revision.ref);
+          } catch (resolveError) {
+            console.error(`Failed to resolve skill "${skill._id}":`, resolveError);
+            res.status(422).json({
+              error: `Failed to resolve skill "${skill._id}": ${resolveError instanceof Error ? resolveError.message : String(resolveError)}`,
+            });
+            return;
+          }
+        }
+        resolvedSkillRevisions = revisionRefs;
+      }
+    }
+
     // Normalize scenario: ensure criteria is always an array, preserve version
     const scenario: RequestDocument['scenario'] = {
       task: scenarioObj.task as string,
@@ -639,6 +718,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
           ...(personaObj ? { persona: personaObj } : {}),
           ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
+          ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
         };
         newDocs.push(requestDoc);
 
@@ -689,6 +769,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       ...(personaObj ? { persona: personaObj } : {}),
       ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
+      ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
     };
 
     // Store in MongoDB
@@ -3467,6 +3548,293 @@ app.delete("/api/v1/mcp/servers/:id", async (req: Request, res: Response, next: 
     );
 
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// =====================================================================
+// Skills API
+// =====================================================================
+
+// List all skills (with optional ?q= text search)
+app.get("/api/v1/skills", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const skills = await skillCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+    skills.sort((a, b) => a._id.localeCompare(b._id));
+    res.json(skills.map((s) => ({ ...s, id: s._id })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Unified skill search — merges internal DB + skills.sh results
+// MUST be defined before /:id(*) to avoid being caught by the wildcard
+app.get("/api/v1/skills/search", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { q, limit: limitStr } = req.query;
+
+    if (!q || typeof q !== "string" || !q.trim()) {
+      res.status(400).json({ error: "Query parameter 'q' is required" });
+      return;
+    }
+
+    const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
+    const query = q.trim();
+
+    // Search internal DB (case-insensitive regex)
+    const regex = { $regex: query, $options: "i" };
+    const internalSkills = await skillCollection
+      .find({
+        deletedAt: { $exists: false },
+        $or: [
+          { name: regex },
+          { skillName: regex },
+          { description: regex },
+        ],
+      })
+      .limit(limit)
+      .toArray();
+
+    const internalResults: SkillSearchResult[] = internalSkills.map((s) => ({
+      id: s._id,
+      name: s.name,
+      source: s.source,
+      description: s.description,
+      internal: true,
+    }));
+
+    // Also track internal slugs to deduplicate
+    const internalSlugs = new Set(internalSkills.map((s) => s._id));
+
+    // Search skills.sh (external registry)
+    let externalResults: SkillSearchResult[] = [];
+    try {
+      const skillsShUrl = `https://skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+      const externalRes = await fetch(skillsShUrl, {
+        headers: { "User-Agent": "scope-mt-api" },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (externalRes.ok) {
+        const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string }> };
+        if (data.skills && Array.isArray(data.skills)) {
+          externalResults = data.skills
+            .filter((s) => !internalSlugs.has(s.id))
+            .map((s) => ({
+              id: s.id,
+              name: s.name,
+              source: s.source ?? s.id.split("/").slice(0, 2).join("/"),
+              internal: false,
+              installs: s.installs,
+            }));
+        }
+      }
+    } catch {
+      // skills.sh is optional — don't fail the request if it's down
+      console.warn("skills.sh search failed, returning only internal results");
+    }
+
+    // Merge: internal first, then external
+    const results = [...internalResults, ...externalResults].slice(0, limit);
+    res.json(results);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get skill by slug (must be after /search to avoid wildcard matching)
+app.get("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id ?? req.params[0];
+    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!skill) {
+      res.status(404).json({ error: "Skill not found" });
+      return;
+    }
+    res.json({ ...skill, id: skill._id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create / import a skill
+app.post("/api/v1/skills", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { source, skillName, name, description, origin } = req.body;
+
+    if (!source || typeof source !== "string") {
+      res.status(400).json({ error: "source is required and must be a string (GitHub repo, e.g. 'vercel-labs/agent-skills')" });
+      return;
+    }
+    if (!skillName || typeof skillName !== "string") {
+      res.status(400).json({ error: "skillName is required and must be a string" });
+      return;
+    }
+    if (!name || typeof name !== "string") {
+      res.status(400).json({ error: "name is required and must be a string" });
+      return;
+    }
+    if (origin !== undefined && origin !== "skills-sh" && origin !== "manual") {
+      res.status(400).json({ error: "origin must be 'skills-sh' or 'manual'" });
+      return;
+    }
+
+    const _id = `${source}/${skillName}`;
+    const now = new Date();
+    const existing = await skillCollection.findOne({ _id });
+
+    if (existing) {
+      // Upsert: un-delete if soft-deleted, update fields
+      await skillCollection.updateOne(
+        { _id },
+        {
+          $set: {
+            name,
+            source,
+            skillName,
+            ...(description !== undefined ? { description } : {}),
+            ...(origin ? { origin } : {}),
+            updatedAt: now,
+          },
+          $unset: { deletedAt: "" },
+        }
+      );
+      const updated = await skillCollection.findOne({ _id });
+      res.json({ ...updated, id: updated!._id });
+    } else {
+      const skillDoc: SkillDocument = {
+        _id,
+        source,
+        skillName,
+        name,
+        ...(description ? { description } : {}),
+        origin: origin || "manual",
+        createdAt: now,
+      };
+      await skillCollection.insertOne(skillDoc as any);
+      res.status(201).json({ ...skillDoc, id: skillDoc._id });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete skill (soft-delete)
+app.delete("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id ?? req.params[0];
+
+    const existing = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: "Skill not found" });
+      return;
+    }
+
+    await skillCollection.updateOne(
+      { _id: id },
+      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+    );
+
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// =====================================================================
+// Skill Revisions API
+// =====================================================================
+
+// Get skill revision by human-readable ref
+app.get("/api/v1/skill-revisions/by-ref/:ref(*)", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ref = req.params.ref ?? req.params[0];
+    const revision = await skillRevisionStore.getByRef(ref);
+    if (!revision) {
+      res.status(404).json({ error: "Skill revision not found" });
+      return;
+    }
+    res.json(revision);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get skill revision by ID (UUIDv5)
+app.get("/api/v1/skill-revisions/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const revision = await skillRevisionStore.get(id);
+    if (!revision) {
+      res.status(404).json({ error: "Skill revision not found" });
+      return;
+    }
+    res.json(revision);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// List skill revisions for a given skill slug (source/skillName)
+app.get("/api/v1/skills/:id(*)/revisions", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id ?? req.params[0];
+    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!skill) {
+      res.status(404).json({ error: "Skill not found" });
+      return;
+    }
+
+    const limitStr = req.query.limit as string | undefined;
+    const limit = Math.min(Math.max(parseInt(limitStr ?? "20", 10), 1), 100);
+
+    const revisions = await skillRevisionStore.listBySkill(skill.source, skill.skillName, { limit });
+    res.json(revisions);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Resolve a skill — trigger resolution from GitHub and create a revision
+app.post("/api/v1/skills/:id(*)/resolve", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id ?? req.params[0];
+    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!skill) {
+      res.status(404).json({ error: "Skill not found" });
+      return;
+    }
+
+    // Upload archive to blob storage
+    const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
+      if (!storageConnectionString && !storageAccountName) {
+        throw new Error("Blob storage not configured — cannot store skill archives");
+      }
+
+      let blobServiceClient: BlobServiceClient;
+      if (storageConnectionString) {
+        blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+      } else {
+        const credential = new DefaultAzureCredential();
+        blobServiceClient = new BlobServiceClient(
+          `https://${storageAccountName}.blob.core.windows.net`,
+          credential
+        );
+      }
+
+      const containerClient = blobServiceClient.getContainerClient("skill-archives");
+      await containerClient.createIfNotExists();
+      const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
+      await blockBlobClient.upload(data, data.length, {
+        blobHTTPHeaders: { blobContentType: "application/gzip" },
+      });
+      return blockBlobClient.url;
+    };
+
+    const revision = await skillResolver.resolve(skill.source, skill.skillName, skillRevisionStore, uploadArchive);
+    res.json(revision);
   } catch (error) {
     next(error);
   }
