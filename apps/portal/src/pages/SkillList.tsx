@@ -1,0 +1,125 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import type { SkillDocument } from "@/types";
+import { Button } from "@/components/ui/button";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Trash2, BookOpen } from "lucide-react";
+import { formatDate } from "@/lib/utils";
+import { toast } from "sonner";
+
+export function SkillList() {
+  const queryClient = useQueryClient();
+
+  const { data: skills = [], isLoading } = useQuery({
+    queryKey: ["skills"],
+    queryFn: () => api.listSkills(),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: api.deleteSkill,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["skills"] });
+      toast.success("Skill deleted");
+    },
+  });
+
+  const activeSkills = skills.filter((s: SkillDocument) => !s.deletedAt);
+
+  return (
+    <div className="space-y-6">
+      {/* Page header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Skills</h1>
+          <p className="text-muted-foreground">Manage agent skills injected into coding agent prompts</p>
+        </div>
+      </div>
+
+      {/* Table */}
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      ) : activeSkills.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          No skills imported yet. Use the CLI to import skills from GitHub repositories.
+        </div>
+      ) : (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Slug</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Origin</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {activeSkills.map((skill: SkillDocument) => (
+                <TableRow key={skill._id}>
+                  <TableCell className="font-mono text-xs">
+                    <span className="flex items-center gap-1.5">
+                      <BookOpen className="h-3.5 w-3.5" />
+                      {skill._id}
+                    </span>
+                  </TableCell>
+                  <TableCell>{skill.name}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {skill.source}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs">
+                      {skill.origin}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {formatDate(skill.createdAt)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete skill?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This soft-deletes the skill &quot;{skill.name}&quot;. It will no longer be available for new runs.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => deleteMutation.mutate(skill._id)}>
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}

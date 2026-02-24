@@ -13,8 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info } from "lucide-react";
-import { WORKER_TYPES, type CodingAgent, type McpServerDocument } from "@/types";
+import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen } from "lucide-react";
+import { WORKER_TYPES, type CodingAgent, type McpServerDocument, type SkillDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { Stepper } from "@/components/Stepper";
@@ -40,6 +40,9 @@ export function SubmitRun() {
   // MCP servers
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
 
+  // Skills
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+
   // Fetch agents from the API
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
@@ -52,7 +55,14 @@ export function SubmitRun() {
     queryFn: () => api.listMcpServers(),
   });
 
+  // Fetch skills
+  const { data: skills = [] } = useQuery({
+    queryKey: ["skills"],
+    queryFn: () => api.listSkills(),
+  });
+
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
+  const activeSkills = skills.filter((s: SkillDocument) => !s.deletedAt);
 
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
   const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
@@ -137,6 +147,7 @@ export function SubmitRun() {
           }
         : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
+      ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
     });
   };
 
@@ -337,6 +348,52 @@ export function SubmitRun() {
             </Card>
           )}
 
+          {/* Skills (optional) */}
+          {activeSkills.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BookOpen className="h-5 w-5" />
+                  Skills <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+                </CardTitle>
+                <CardDescription>Select agent skills to inject into the coding agent prompt</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {activeSkills.map((s: SkillDocument) => (
+                    <label
+                      key={s._id}
+                      className="flex items-center gap-3 rounded-md border p-3 cursor-pointer hover:bg-accent/50 transition-colors"
+                    >
+                      <Checkbox
+                        checked={selectedSkills.includes(s._id)}
+                        onCheckedChange={(checked) => {
+                          setSelectedSkills(prev =>
+                            checked
+                              ? [...prev, s._id]
+                              : prev.filter(id => id !== s._id)
+                          );
+                        }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm">{s._id}</span>
+                          <Badge variant="outline" className="text-xs">{s.origin}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">{s.name}{s.description ? ` — ${s.description}` : ""}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                {selectedSkills.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {selectedSkills.length} skill{selectedSkills.length !== 1 ? "s" : ""} selected
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Persona (optional) */}
           <Card>
             <CardHeader>
@@ -446,6 +503,18 @@ export function SubmitRun() {
                     <span className="text-muted-foreground">MCP Servers</span>
                     <div className="flex flex-wrap gap-1">
                       {selectedMcpServers.map((s) => (
+                        <Badge key={s} variant="secondary" className="font-mono text-xs">
+                          {s}
+                        </Badge>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {selectedSkills.length > 0 && (
+                  <>
+                    <span className="text-muted-foreground">Skills</span>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedSkills.map((s) => (
                         <Badge key={s} variant="secondary" className="font-mono text-xs">
                           {s}
                         </Badge>
