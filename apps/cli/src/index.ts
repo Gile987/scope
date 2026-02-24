@@ -18,6 +18,13 @@ import { DemoApp } from "./components/DemoApp.js";
 import { resolveScenarioAndPersona } from "./config-loader.js";
 import { configureHelp } from "./utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "./utils/style.js";
+import {
+  readBenchmarkIndex,
+  deduplicateByScenario,
+  parseBenchmarkDir,
+  listBenchmarkDirs,
+  generateImport,
+} from "./scope-import/index.js";
 
 dotenv.config();
 
@@ -1027,6 +1034,152 @@ function mapYamlCriterion(
     ...(dependsOn && dependsOn.length > 0 ? { dependsOn } : {}),
   };
 }
+
+// ─── scope-import command ────────────────────────────────────────────────────
+
+program
+  .command("scope-import")
+  .description("Import SCOPE benchmarks into SCOPE-MT format (task prompts + criteria YAML files)")
+  .argument("<benchmarks-dir>", "Path to SCOPE benchmarks directory (containing index.json)")
+  .option("-o, --output <dir>", "Output directory for generated files", "work/scope-import")
+  .option("--dry-run", "Preview what would be generated without writing files")
+  .option("--scenarios <ids>", "Comma-separated scenarioId values to import (default: all unique scenarios)")
+  .action(async (benchmarksDir: string, options: { output: string; dryRun?: boolean; scenarios?: string }) => {
+    try {
+      const absInput = resolve(benchmarksDir);
+      if (!existsSync(absInput)) {
+        console.error(errorText(`Benchmarks directory not found: ${absInput}`));
+        process.exit(1);
+      }
+
+      console.log(`${label('Input:')} ${value(absInput)}`);
+      console.log(`${label('Output:')} ${value(resolve(options.output))}`);
+
+      // Read index and deduplicate by scenario
+      const index = readBenchmarkIndex(absInput);
+      console.log(`${label('Total benchmarks:')} ${value(String(index.length))}`);
+
+      const uniqueByScenario = deduplicateByScenario(index);
+      console.log(`${label('Unique scenarios:')} ${value(String(uniqueByScenario.length))}`);
+
+      // Filter by --scenarios if provided
+      let selected = uniqueByScenario;
+      if (options.scenarios) {
+        const wantedIds = new Set(options.scenarios.split(',').map(s => s.trim()));
+        selected = uniqueByScenario.filter(b => wantedIds.has(b.scenarioId));
+        if (selected.length === 0) {
+          console.error(errorText('No matching scenarios found for the provided IDs.'));
+          console.log(`${dimTimestamp('Available scenario IDs:')}`);
+          for (const b of uniqueByScenario) {
+            console.log(`  ${value(b.scenarioId)} ${dimTimestamp('—')} ${b.scenarioName}`);
+          }
+          process.exit(1);
+        }
+      }
+
+      console.log(`${label('Selected:')} ${value(String(selected.length))} scenarios\n`);
+
+      // Process each scenario
+      const allResults = [];
+      for (const entry of selected) {
+        const benchDir = join(absInput, entry.id);
+        if (!existsSync(benchDir)) {
+          console.log(`  ${errorText('⚠')} ${dimTimestamp(`Benchmark dir not found: ${entry.id}`)} — skipping`);
+          continue;
+        }
+
+        console.log(`${label('━━━')} ${value(entry.scenarioName)}`);
+        console.log(`  ${dimTimestamp('scenarioId:')} ${entry.scenarioId}`);
+        console.log(`  ${dimTimestamp('benchmarkId:')} ${entry.id}`);
+
+        const parsed = parseBenchmarkDir(benchDir);
+        const result = generateImport(parsed);
+
+        console.log(`  ${dimTimestamp('slug:')} ${value(result.scenarioSlug)}`);
+        console.log(`  ${dimTimestamp('task:')} ${result.scenario.task.slice(0, 80)}...`);
+        console.log(`  ${dimTimestamp('level delta criteria:')} ${value(String(result.levelDeltaCriteria.length))}`);
+        for (const c of result.levelDeltaCriteria) {
+          const deps = (c.depends_on ?? []).length;
+          const depsStr = deps > 0 ? ` ${dimTimestamp(`(${deps} dep${deps > 1 ? 's' : ''})`)}` : '';
+          console.log(`    ${value(c.id)}${depsStr}`);
+        }
+        console.log(`  ${dimTimestamp('SCOPE criteria converted:')} ${value(String(result.scopeCriteria.length))}`);
+        for (const c of result.scopeCriteria) {
+          const deps = (c.depends_on ?? []).length;
+          const depsStr = deps > 0 ? ` ${dimTimestamp(`(${deps} dep${deps > 1 ? 's' : ''})`)}` : '';
+          console.log(`    ${value(c.id)}${depsStr}`);
+        }
+        console.log(`  ${dimTimestamp('total criteria:')} ${value(String(result.criteria.length))}`);
+        console.log();
+
+        allResults.push(result);
+      }
+
+      if (options.dryRun) {
+        console.log(`${warnBanner('Dry run — no files written.')}`);
+        return;
+      }
+
+      // Write output files
+      const absOutput = resolve(options.output);
+      const criteriaDir = join(absOutput, 'criteria');
+      const scenariosDir = join(absOutput, 'scenarios');
+      mkdirSync(criteriaDir, { recursive: true });
+      mkdirSync(scenariosDir, { recursive: true });
+
+      let totalCriteria = 0;
+      let totalScenarios = 0;
+
+      for (const result of allResults) {
+        // Write criteria YAML files — one per criterion
+        for (const criterion of result.criteria) {
+          const filename = `${criterion.id}.yaml`;
+          const filePath = join(criteriaDir, filename);
+
+          let yamlContent = `id: ${criterion.id}\n`;
+          yamlContent += `prompt: |\n`;
+          // Indent prompt text for YAML block scalar
+          const promptLines = criterion.prompt.split('\n');
+          for (const line of promptLines) {
+            yamlContent += line.length > 0 ? `  ${line}\n` : `\n`;
+          }
+          if (criterion.depends_on && criterion.depends_on.length > 0) {
+            yamlContent += `depends_on:\n`;
+            for (const dep of criterion.depends_on) {
+              yamlContent += `  - ${dep}\n`;
+            }
+          }
+
+          writeFileSync(filePath, yamlContent, 'utf-8');
+          totalCriteria++;
+        }
+
+        // Write scenario YAML
+        const scenarioFilename = `${result.scenarioSlug}.yaml`;
+        const scenarioPath = join(scenariosDir, scenarioFilename);
+
+        let scenarioYaml = `version: v2\n`;
+        scenarioYaml += `task: |\n`;
+        const taskLines = result.scenario.task.split('\n');
+        for (const line of taskLines) {
+          scenarioYaml += line.length > 0 ? `  ${line}\n` : `\n`;
+        }
+        scenarioYaml += `criteria:\n`;
+        for (const id of result.scenario.criteria) {
+          scenarioYaml += `  - ${id}\n`;
+        }
+
+        writeFileSync(scenarioPath, scenarioYaml, 'utf-8');
+        totalScenarios++;
+      }
+
+      console.log(`${successText('Written:')} ${value(String(totalCriteria))} criteria files to ${value(criteriaDir)}`);
+      console.log(`${successText('Written:')} ${value(String(totalScenarios))} scenario files to ${value(scenariosDir)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
 
 program.parse();
 
