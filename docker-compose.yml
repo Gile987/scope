@@ -332,6 +332,7 @@ services:
   devproxy-copilot:
     image: ghcr.io/dotnet/dev-proxy:2.1.0
     profiles: [copilot]
+    user: "0:0"
     working_dir: /har-output
     command: ["--config-file", "/config/devproxyrc.json", "--record"]
     volumes:
