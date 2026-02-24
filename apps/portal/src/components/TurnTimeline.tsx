@@ -6,6 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Download, CheckCircle2, XCircle, AlertCircle, MinusCircle, ChevronDown, ChevronRight, FileText } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { ConversationTurn } from "@/types";
@@ -144,8 +147,8 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                 {/* Coding agent response */}
                 <div>
                   <h4 className="text-sm font-medium mb-1">Coding Agent Response</h4>
-                  <div className="text-sm text-muted-foreground whitespace-pre-wrap bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto">
-                    {turn.codingAgentResponse}
+                  <div className="prose prose-sm dark:prose-invert max-w-none bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{turn.codingAgentResponse}</ReactMarkdown>
                   </div>
                 </div>
 
@@ -154,8 +157,8 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                 {/* Judge feedback */}
                 <div>
                   <h4 className="text-sm font-medium mb-1">Judge Feedback</h4>
-                  <div className="text-sm text-muted-foreground whitespace-pre-wrap bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto">
-                    {turn.judgeFeedback}
+                  <div className="prose prose-sm dark:prose-invert max-w-none bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{turn.judgeFeedback}</ReactMarkdown>
                   </div>
                 </div>
               </CardContent>
