@@ -8,6 +8,8 @@ import type {
 } from './types.js';
 import type { LevelDelta } from './level-diff.js';
 import { extractAllDeltas } from './level-diff.js';
+import { parseChecklist, hasChecklistFormat } from './checklist-parser.js';
+import type { ChecklistItem } from './checklist-parser.js';
 
 /**
  * Slugify a string for use as a SCOPE-MT criterion ID.
@@ -32,6 +34,7 @@ export function slugify(text: string): string {
 
 /**
  * Create a scenario-namespaced criterion ID.
+ * @deprecated Use intrinsic IDs (slugify(itemTitle)) instead for new code.
  */
 export function namespacedId(scenarioSlug: string, criterionSlug: string): string {
   return `${scenarioSlug}_${criterionSlug}`;
@@ -54,36 +57,30 @@ function importanceLabel(importance: number): string {
 }
 
 /**
- * Convert a SCOPE criterion from a criteria-*.json file into a SCOPE-MT criterion.
- *
- * The SCOPE `instructions` field (which contains the detailed rubric with
- * pass/fail/skip conditions) becomes the SCOPE-MT `prompt`.
+ * Build a boolean SCOPE-MT criterion prompt from a parsed checklist item.
+ * The prompt is self-contained and intrinsic (no scenario context).
  */
-export function convertScopeCriterion(
-  criterion: ScopeCriterion,
-  scenarioSlug: string,
+export function buildChecklistPrompt(item: ChecklistItem): string {
+  let prompt = `Evaluate whether the solution: ${item.title}\n`;
+  if (item.passes) {
+    prompt += `\nPASSES when: ${item.passes}`;
+  }
+  if (item.fails) {
+    prompt += `\nFAILS when: ${item.fails}`;
+  }
+  return prompt;
+}
+
+/**
+ * Convert a single SCOPE checklist item into a SCOPE-MT criterion
+ * with an intrinsic ID (derived from the item title, not the scenario).
+ */
+export function convertChecklistItem(
+  item: ChecklistItem,
   dependsOn?: string[]
 ): ScopeMtCriterion {
-  // Simplify the name for the ID: strip "Propensity N:" / "Efficacy - X N:" prefixes
-  // Examples:
-  //   "Propensity 1: Application uses Azure AI services" → "Application uses Azure AI services"
-  //   "Efficacy - Service Selection 1: Correct Service Selection" → "Correct Service Selection"
-  const simplifiedName = criterion.name
-    .replace(/^(Propensity|Efficacy)\s*[-–—]?\s*/i, '')
-    .replace(/^[^:]*:\s*/, '')
-    .trim();
-
-  const criterionSlug = slugify(simplifiedName);
-  const id = namespacedId(scenarioSlug, criterionSlug);
-
-  // Build prompt from instructions, prepending weight context
-  const weight = importanceLabel(criterion.importance);
-  const typeLabel = criterion.metadata.type;
-  const levelLabel = criterion.metadata.level
-    ? ` (${criterion.metadata.level})`
-    : '';
-
-  let prompt = `[${typeLabel}${levelLabel}, ${weight}]\n\n${criterion.instructions.trim()}`;
+  const id = slugify(item.title);
+  const prompt = buildChecklistPrompt(item);
 
   const result: ScopeMtCriterion = { id, prompt };
   if (dependsOn && dependsOn.length > 0) {
@@ -93,10 +90,98 @@ export function convertScopeCriterion(
 }
 
 /**
- * Convert all SCOPE criteria from criteria-*.json files for a given scenario.
+ * Decompose a SCOPE criterion into individual boolean SCOPE-MT criteria.
  *
- * Criteria are grouped by type (Propensity vs Efficacy) and level.
- * Efficacy L5 criteria depend on efficacy L4 criteria.
+ * If the criterion has a parseable checklist format, each checklist item
+ * becomes a separate boolean criterion with an intrinsic ID.
+ *
+ * If the criterion uses a procedural format (no checklist), the entire
+ * instructions field is emitted as a single criterion (fallback).
+ */
+export function decomposeScopeCriterion(
+  criterion: ScopeCriterion,
+  dependsOn?: string[]
+): ScopeMtCriterion[] {
+  const items = parseChecklist(criterion.instructions);
+
+  if (items.length > 0) {
+    // Checklist format: one criterion per item
+    return items.map((item) => convertChecklistItem(item, dependsOn));
+  }
+
+  // Fallback: procedural format — emit entire instructions as one criterion
+  const simplifiedName = criterion.name
+    .replace(/^(Propensity|Efficacy)\s*[-–—]?\s*/i, '')
+    .replace(/^[^:]*:\s*/, '')
+    .trim();
+
+  const id = slugify(simplifiedName);
+  const result: ScopeMtCriterion = {
+    id,
+    prompt: criterion.instructions.trim(),
+  };
+  if (dependsOn && dependsOn.length > 0) {
+    result.depends_on = dependsOn;
+  }
+  return [result];
+}
+
+/**
+ * Convert a SCOPE criterion from a criteria-*.json file into a SCOPE-MT criterion.
+ * @deprecated Use decomposeScopeCriterion() for new code — it extracts
+ * individual boolean criteria from checklist items.
+ */
+export function convertScopeCriterion(
+  criterion: ScopeCriterion,
+  scenarioSlug: string,
+  dependsOn?: string[]
+): ScopeMtCriterion {
+  const simplifiedName = criterion.name
+    .replace(/^(Propensity|Efficacy)\s*[-–—]?\s*/i, '')
+    .replace(/^[^:]*:\s*/, '')
+    .trim();
+
+  const criterionSlug = slugify(simplifiedName);
+  const id = namespacedId(scenarioSlug, criterionSlug);
+
+  const weight = importanceLabel(criterion.importance);
+  const typeLabel = criterion.metadata.type;
+  const levelLabel = criterion.metadata.level
+    ? ` (${criterion.metadata.level})`
+    : '';
+
+  const prompt = `[${typeLabel}${levelLabel}, ${weight}]\n\n${criterion.instructions.trim()}`;
+
+  const result: ScopeMtCriterion = { id, prompt };
+  if (dependsOn && dependsOn.length > 0) {
+    result.depends_on = dependsOn;
+  }
+  return result;
+}
+
+/**
+ * Decompose all SCOPE criteria from criteria-*.json files for a scenario
+ * into individual boolean SCOPE-MT criteria with intrinsic IDs.
+ *
+ * Each checklist item becomes its own criterion. Criteria without checklist
+ * format are emitted as-is (fallback).
+ *
+ * No dependency chaining between propensity/efficacy groups — that's a
+ * scenario-level concern in SCOPE-MT.
+ */
+export function decomposeAllScopeCriteria(
+  criteria: ScopeCriterion[]
+): ScopeMtCriterion[] {
+  const results: ScopeMtCriterion[] = [];
+  for (const c of criteria) {
+    results.push(...decomposeScopeCriterion(c));
+  }
+  return results;
+}
+
+/**
+ * Convert all SCOPE criteria from criteria-*.json files for a given scenario.
+ * @deprecated Use decomposeAllScopeCriteria() for new code.
  */
 export function convertAllScopeCriteria(
   criteria: ScopeCriterion[],
@@ -104,7 +189,6 @@ export function convertAllScopeCriteria(
 ): ScopeMtCriterion[] {
   const results: ScopeMtCriterion[] = [];
 
-  // Separate by type
   const propensity = criteria.filter((c) => c.metadata.type === 'Propensity');
   const efficacyL4 = criteria.filter(
     (c) => c.metadata.type === 'Efficacy' && c.metadata.level === 'L4'
@@ -112,7 +196,6 @@ export function convertAllScopeCriteria(
   const efficacyL5 = criteria.filter(
     (c) => c.metadata.type === 'Efficacy' && c.metadata.level === 'L5'
   );
-  // Efficacy criteria without a specific level
   const efficacyOther = criteria.filter(
     (c) =>
       c.metadata.type === 'Efficacy' &&
@@ -120,12 +203,10 @@ export function convertAllScopeCriteria(
       c.metadata.level !== 'L5'
   );
 
-  // Convert propensity — no dependencies
   for (const c of propensity) {
     results.push(convertScopeCriterion(c, scenarioSlug));
   }
 
-  // Convert efficacy L4 — no dependencies
   const l4Ids: string[] = [];
   for (const c of efficacyL4) {
     const converted = convertScopeCriterion(c, scenarioSlug);
@@ -133,14 +214,12 @@ export function convertAllScopeCriteria(
     results.push(converted);
   }
 
-  // Convert efficacy L5 — depend on L4 criteria
   for (const c of efficacyL5) {
     results.push(
       convertScopeCriterion(c, scenarioSlug, l4Ids.length > 0 ? l4Ids : undefined)
     );
   }
 
-  // Convert other efficacy criteria
   for (const c of efficacyOther) {
     results.push(convertScopeCriterion(c, scenarioSlug));
   }
@@ -150,10 +229,8 @@ export function convertAllScopeCriteria(
 
 /**
  * Convert level deltas into SCOPE-MT criteria.
- *
- * Each delta (e.g., L0→L1 adds "consider using a cloud provider") becomes
- * a criterion that checks for the presence of that incremental requirement
- * in the agent's output.
+ * @deprecated Level deltas are redundant in SCOPE-MT's multi-turn feedback model.
+ * Kept for backward compatibility.
  */
 export function convertLevelDeltas(
   levels: ScopeLevel[],
@@ -180,7 +257,6 @@ export function convertLevelDeltas(
 
     const criterion: ScopeMtCriterion = { id, prompt };
 
-    // Chain propensity deltas: L2 depends on L1, L3 depends on L2
     if (
       previousId &&
       delta.fromLevel.startsWith('L') &&

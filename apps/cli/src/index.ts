@@ -24,6 +24,8 @@ import {
   parseBenchmarkDir,
   listBenchmarkDirs,
   generateImport,
+  runDedup,
+  buildScenarioCriteriaMap,
 } from "./scope-import/index.js";
 
 dotenv.config();
@@ -1044,7 +1046,19 @@ program
   .option("-o, --output <dir>", "Output directory for generated files", "work/scope-import")
   .option("--dry-run", "Preview what would be generated without writing files")
   .option("--scenarios <ids>", "Comma-separated scenarioId values to import (default: all unique scenarios)")
-  .action(async (benchmarksDir: string, options: { output: string; dryRun?: boolean; scenarios?: string }) => {
+  .option("--analyze", "Run embedding dedup analysis and write a dedup-report.md (does not affect output)")
+  .option("--no-dedup", "Skip embedding-based deduplication (emit raw criteria per scenario)")
+  .option("--clear-cache", "Clear the embedding cache before running")
+  .option("--threshold <number>", "Cosine similarity threshold for clustering (0-1)", "0.92")
+  .action(async (benchmarksDir: string, options: {
+    output: string;
+    dryRun?: boolean;
+    scenarios?: string;
+    analyze?: boolean;
+    dedup?: boolean;
+    clearCache?: boolean;
+    threshold?: string;
+  }) => {
     try {
       const absInput = resolve(benchmarksDir);
       if (!existsSync(absInput)) {
@@ -1079,8 +1093,8 @@ program
 
       console.log(`${label('Selected:')} ${value(String(selected.length))} scenarios\n`);
 
-      // Process each scenario
-      const allResults = [];
+      // Parse all selected benchmarks
+      const allParsed = [];
       for (const entry of selected) {
         const benchDir = join(absInput, entry.id);
         if (!existsSync(benchDir)) {
@@ -1093,52 +1107,69 @@ program
         console.log(`  ${dimTimestamp('benchmarkId:')} ${entry.id}`);
 
         const parsed = parseBenchmarkDir(benchDir);
-        const result = generateImport(parsed);
-
-        console.log(`  ${dimTimestamp('slug:')} ${value(result.scenarioSlug)}`);
-        console.log(`  ${dimTimestamp('task:')} ${result.scenario.task.slice(0, 80)}...`);
-        console.log(`  ${dimTimestamp('level delta criteria:')} ${value(String(result.levelDeltaCriteria.length))}`);
-        for (const c of result.levelDeltaCriteria) {
-          const deps = (c.depends_on ?? []).length;
-          const depsStr = deps > 0 ? ` ${dimTimestamp(`(${deps} dep${deps > 1 ? 's' : ''})`)}` : '';
-          console.log(`    ${value(c.id)}${depsStr}`);
-        }
-        console.log(`  ${dimTimestamp('SCOPE criteria converted:')} ${value(String(result.scopeCriteria.length))}`);
-        for (const c of result.scopeCriteria) {
-          const deps = (c.depends_on ?? []).length;
-          const depsStr = deps > 0 ? ` ${dimTimestamp(`(${deps} dep${deps > 1 ? 's' : ''})`)}` : '';
-          console.log(`    ${value(c.id)}${depsStr}`);
-        }
-        console.log(`  ${dimTimestamp('total criteria:')} ${value(String(result.criteria.length))}`);
-        console.log();
-
-        allResults.push(result);
+        allParsed.push(parsed);
       }
 
-      if (options.dryRun) {
-        console.log(`${warnBanner('Dry run — no files written.')}`);
-        return;
-      }
+      // Decide dedup or per-scenario mode
+      const useDedup = options.dedup !== false && !options.analyze;
 
-      // Write output files
-      const absOutput = resolve(options.output);
-      const criteriaDir = join(absOutput, 'criteria');
-      const scenariosDir = join(absOutput, 'scenarios');
-      mkdirSync(criteriaDir, { recursive: true });
-      mkdirSync(scenariosDir, { recursive: true });
+      if (useDedup || options.analyze) {
+        // ── Dedup path ──
+        const absOutput = resolve(options.output);
+        const cachePath = join(absOutput, '.embedding-cache.json');
+        const threshold = parseFloat(options.threshold ?? '0.92');
 
-      let totalCriteria = 0;
-      let totalScenarios = 0;
+        console.log(`\n${label('Running embedding dedup...')}`);
+        console.log(`  ${dimTimestamp('threshold:')} ${value(String(threshold))}`);
+        console.log(`  ${dimTimestamp('cache:')} ${value(cachePath)}`);
 
-      for (const result of allResults) {
-        // Write criteria YAML files — one per criterion
-        for (const criterion of result.criteria) {
+        const dedupResult = await runDedup(allParsed, {
+          cachePath,
+          clearCache: options.clearCache,
+          threshold,
+          onProgress: (done, total) => {
+            process.stdout.write(`\r  ${dimTimestamp('embeddings:')} ${value(`${done}/${total}`)}`);
+          },
+        });
+        console.log(); // newline after progress
+
+        console.log(`\n${label('Dedup results:')}`);
+        console.log(`  ${dimTimestamp('total items:')} ${value(String(dedupResult.stats.totalItems))}`);
+        console.log(`  ${dimTimestamp('unique criteria:')} ${value(String(dedupResult.stats.uniqueCriteria))}`);
+        console.log(`  ${dimTimestamp('merged items:')} ${value(String(dedupResult.stats.mergedItems))}`);
+        console.log(`  ${dimTimestamp('clusters:')} ${value(String(dedupResult.stats.clusterCount))}`);
+
+        // Write dedup report
+        const reportPath = join(absOutput, 'dedup-report.md');
+        mkdirSync(absOutput, { recursive: true });
+        writeFileSync(reportPath, dedupResult.report, 'utf-8');
+        console.log(`\n${successText('Written:')} dedup report to ${value(reportPath)}`);
+
+        if (options.analyze) {
+          console.log(`\n${warnBanner('Analyze mode — showing report only, no criteria files written.')}`);
+          return;
+        }
+
+        if (options.dryRun) {
+          console.log(`\n${warnBanner('Dry run — no files written.')}`);
+          return;
+        }
+
+        // Write deduplicated output
+        const criteriaDir = join(absOutput, 'criteria');
+        const scenariosDir = join(absOutput, 'scenarios');
+        mkdirSync(criteriaDir, { recursive: true });
+        mkdirSync(scenariosDir, { recursive: true });
+
+        // Write canonical criteria YAML files
+        let totalCriteria = 0;
+        for (const [, dedup] of dedupResult.criteria) {
+          const criterion = dedup.criterion;
           const filename = `${criterion.id}.yaml`;
           const filePath = join(criteriaDir, filename);
 
           let yamlContent = `id: ${criterion.id}\n`;
           yamlContent += `prompt: |\n`;
-          // Indent prompt text for YAML block scalar
           const promptLines = criterion.prompt.split('\n');
           for (const line of promptLines) {
             yamlContent += line.length > 0 ? `  ${line}\n` : `\n`;
@@ -1154,27 +1185,111 @@ program
           totalCriteria++;
         }
 
-        // Write scenario YAML
-        const scenarioFilename = `${result.scenarioSlug}.yaml`;
-        const scenarioPath = join(scenariosDir, scenarioFilename);
+        // Build scenario → criteria mapping from dedup
+        const scenarioCriteriaMap = buildScenarioCriteriaMap(allParsed, dedupResult);
 
-        let scenarioYaml = `version: v2\n`;
-        scenarioYaml += `task: |\n`;
-        const taskLines = result.scenario.task.split('\n');
-        for (const line of taskLines) {
-          scenarioYaml += line.length > 0 ? `  ${line}\n` : `\n`;
-        }
-        scenarioYaml += `criteria:\n`;
-        for (const id of result.scenario.criteria) {
-          scenarioYaml += `  - ${id}\n`;
+        // Write scenario YAML files
+        let totalScenarios = 0;
+        for (const parsed of allParsed) {
+          const result = generateImport(parsed);
+          const criteriaIds = scenarioCriteriaMap.get(result.scenarioSlug) ?? result.scenario.criteria;
+
+          const scenarioFilename = `${result.scenarioSlug}.yaml`;
+          const scenarioPath = join(scenariosDir, scenarioFilename);
+
+          let scenarioYaml = `version: v2\n`;
+          scenarioYaml += `task: |\n`;
+          const taskLines = result.scenario.task.split('\n');
+          for (const line of taskLines) {
+            scenarioYaml += line.length > 0 ? `  ${line}\n` : `\n`;
+          }
+          scenarioYaml += `criteria:\n`;
+          for (const id of criteriaIds) {
+            scenarioYaml += `  - ${id}\n`;
+          }
+
+          writeFileSync(scenarioPath, scenarioYaml, 'utf-8');
+          totalScenarios++;
         }
 
-        writeFileSync(scenarioPath, scenarioYaml, 'utf-8');
-        totalScenarios++;
+        console.log(`${successText('Written:')} ${value(String(totalCriteria))} criteria files to ${value(criteriaDir)}`);
+        console.log(`${successText('Written:')} ${value(String(totalScenarios))} scenario files to ${value(scenariosDir)}`);
+
+      } else {
+        // ── No-dedup path (per-scenario, intrinsic IDs but no cross-scenario merge) ──
+        const allResults = [];
+        for (const parsed of allParsed) {
+          const result = generateImport(parsed);
+
+          console.log(`  ${dimTimestamp('slug:')} ${value(result.scenarioSlug)}`);
+          console.log(`  ${dimTimestamp('task:')} ${result.scenario.task.slice(0, 80)}...`);
+          console.log(`  ${dimTimestamp('criteria decomposed:')} ${value(String(result.scopeCriteria.length))}`);
+          for (const c of result.scopeCriteria) {
+            console.log(`    ${value(c.id)}`);
+          }
+          console.log();
+
+          allResults.push(result);
+        }
+
+        if (options.dryRun) {
+          console.log(`${warnBanner('Dry run — no files written.')}`);
+          return;
+        }
+
+        // Write output files
+        const absOutput = resolve(options.output);
+        const criteriaDir = join(absOutput, 'criteria');
+        const scenariosDir = join(absOutput, 'scenarios');
+        mkdirSync(criteriaDir, { recursive: true });
+        mkdirSync(scenariosDir, { recursive: true });
+
+        let totalCriteria = 0;
+        let totalScenarios = 0;
+
+        for (const result of allResults) {
+          for (const criterion of result.criteria) {
+            const filename = `${criterion.id}.yaml`;
+            const filePath = join(criteriaDir, filename);
+
+            let yamlContent = `id: ${criterion.id}\n`;
+            yamlContent += `prompt: |\n`;
+            const promptLines = criterion.prompt.split('\n');
+            for (const line of promptLines) {
+              yamlContent += line.length > 0 ? `  ${line}\n` : `\n`;
+            }
+            if (criterion.depends_on && criterion.depends_on.length > 0) {
+              yamlContent += `depends_on:\n`;
+              for (const dep of criterion.depends_on) {
+                yamlContent += `  - ${dep}\n`;
+              }
+            }
+
+            writeFileSync(filePath, yamlContent, 'utf-8');
+            totalCriteria++;
+          }
+
+          const scenarioFilename = `${result.scenarioSlug}.yaml`;
+          const scenarioPath = join(scenariosDir, scenarioFilename);
+
+          let scenarioYaml = `version: v2\n`;
+          scenarioYaml += `task: |\n`;
+          const taskLines = result.scenario.task.split('\n');
+          for (const line of taskLines) {
+            scenarioYaml += line.length > 0 ? `  ${line}\n` : `\n`;
+          }
+          scenarioYaml += `criteria:\n`;
+          for (const id of result.scenario.criteria) {
+            scenarioYaml += `  - ${id}\n`;
+          }
+
+          writeFileSync(scenarioPath, scenarioYaml, 'utf-8');
+          totalScenarios++;
+        }
+
+        console.log(`${successText('Written:')} ${value(String(totalCriteria))} criteria files to ${value(criteriaDir)}`);
+        console.log(`${successText('Written:')} ${value(String(totalScenarios))} scenario files to ${value(scenariosDir)}`);
       }
-
-      console.log(`${successText('Written:')} ${value(String(totalCriteria))} criteria files to ${value(criteriaDir)}`);
-      console.log(`${successText('Written:')} ${value(String(totalScenarios))} scenario files to ${value(scenariosDir)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

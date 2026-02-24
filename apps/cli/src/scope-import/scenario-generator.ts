@@ -11,6 +11,7 @@ import { slugify } from './criteria-converter.js';
 import {
   convertAllScopeCriteria,
   convertLevelDeltas,
+  decomposeAllScopeCriteria,
 } from './criteria-converter.js';
 
 /**
@@ -34,8 +35,10 @@ export function scenarioSlug(name: string): string {
 /**
  * Generate SCOPE-MT scenario and criteria from a parsed SCOPE benchmark.
  *
- * Takes the L0 instruction as the task prompt, extracts level deltas as
- * criteria, and converts SCOPE criteria JSON files to SCOPE-MT criteria.
+ * In the new model (v2-decomposed), each SCOPE checklist item becomes an
+ * individual boolean criterion with an intrinsic ID. Level deltas are no
+ * longer included — SCOPE-MT's multi-turn feedback loop handles progressive
+ * nudging dynamically.
  */
 export function generateImport(parsed: ParsedBenchmark): ImportResult {
   const slug = scenarioSlug(parsed.scenario.name);
@@ -48,33 +51,29 @@ export function generateImport(parsed: ParsedBenchmark): ImportResult {
   const baseLevel = l0 || parsed.scenario.levels[0];
   const taskPrompt = baseLevel.instruction.trim();
 
-  // Extract level deltas as criteria
+  // Decompose SCOPE criteria into individual boolean criteria
+  // with intrinsic IDs (no scenario prefix)
+  const scopeCriteria = decomposeAllScopeCriteria(parsed.criteria);
+
+  // Level deltas are kept for backward-compat but NOT included in the
+  // main criteria output — SCOPE-MT feedback loop replaces static nudging
   const levelDeltaCriteria = convertLevelDeltas(
     parsed.scenario.levels,
     slug
   );
 
-  // Convert SCOPE criteria files to SCOPE-MT criteria
-  const scopeCriteria = convertAllScopeCriteria(
-    parsed.criteria,
-    slug
-  );
-
-  // Combine all criteria
-  const allCriteria = [...levelDeltaCriteria, ...scopeCriteria];
-
-  // Build the scenario (v2 format, referencing criteria by ID)
+  // Build the scenario (v2 format, referencing criteria by intrinsic ID)
   const scenario: ScopeMtScenario = {
     version: 'v2',
     task: taskPrompt,
-    criteria: allCriteria.map((c) => c.id),
+    criteria: scopeCriteria.map((c) => c.id),
   };
 
   return {
     scenarioSlug: slug,
     scenarioName: parsed.scenario.name,
     scenario,
-    criteria: allCriteria,
+    criteria: scopeCriteria,
     levelDeltaCriteria,
     scopeCriteria,
   };

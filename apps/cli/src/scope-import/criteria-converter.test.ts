@@ -8,6 +8,10 @@ import {
   convertScopeCriterion,
   convertAllScopeCriteria,
   convertLevelDeltas,
+  decomposeScopeCriterion,
+  decomposeAllScopeCriteria,
+  convertChecklistItem,
+  buildChecklistPrompt,
 } from './criteria-converter.js';
 import type { ScopeCriterion, ScopeLevel } from './types.js';
 
@@ -46,7 +50,172 @@ describe('criteria-converter', () => {
     });
   });
 
-  describe('convertScopeCriterion', () => {
+  // ─── New decomposition functions ──────────────────────────────────────────
+
+  describe('buildChecklistPrompt', () => {
+    it('builds prompt from item with passes and fails', () => {
+      const prompt = buildChecklistPrompt({
+        title: 'Uses Azure AI services',
+        skipped: '',
+        passes: 'Azure AI service is configured and called',
+        fails: 'No Azure AI service usage found',
+      });
+      expect(prompt).toContain('Evaluate whether the solution: Uses Azure AI services');
+      expect(prompt).toContain('PASSES when: Azure AI service is configured and called');
+      expect(prompt).toContain('FAILS when: No Azure AI service usage found');
+    });
+
+    it('omits passes/fails when null', () => {
+      const prompt = buildChecklistPrompt({
+        title: 'Simple check',
+        skipped: '',
+        passes: '',
+        fails: '',
+      });
+      expect(prompt).toBe('Evaluate whether the solution: Simple check\n');
+      expect(prompt).not.toContain('PASSES');
+      expect(prompt).not.toContain('FAILS');
+    });
+  });
+
+  describe('convertChecklistItem', () => {
+    it('creates a criterion with intrinsic ID from item title', () => {
+      const result = convertChecklistItem({
+        title: 'Application uses Azure AI services',
+        skipped: '',
+        passes: 'Azure AI is used',
+        fails: 'No Azure AI',
+      });
+      expect(result.id).toBe('application_uses_azure_ai_services');
+      expect(result.prompt).toContain('Evaluate whether the solution:');
+      expect(result.depends_on).toBeUndefined();
+    });
+
+    it('passes through depends_on', () => {
+      const result = convertChecklistItem(
+        { title: 'Test', skipped: '', passes: '', fails: '' },
+        ['dep_a', 'dep_b']
+      );
+      expect(result.depends_on).toEqual(['dep_a', 'dep_b']);
+    });
+
+    it('omits empty depends_on', () => {
+      const result = convertChecklistItem(
+        { title: 'Test', skipped: '', passes: '', fails: '' },
+        []
+      );
+      expect(result.depends_on).toBeUndefined();
+    });
+  });
+
+  describe('decomposeScopeCriterion', () => {
+    it('decomposes checklist-format criterion into multiple criteria', () => {
+      const criterion: ScopeCriterion = {
+        name: 'Propensity 1: Azure Services',
+        importance: 5,
+        instructions: `<criteria>
+- Uses Azure AI
+  - skipped: N/A
+  - passes: Azure AI service is called
+  - fails: No Azure AI usage
+- Deploys to Azure
+  - skipped: N/A
+  - passes: Deployed to Azure
+  - fails: Not deployed
+</criteria>`,
+        metadata: { type: 'Propensity' },
+      };
+
+      const results = decomposeScopeCriterion(criterion);
+      expect(results).toHaveLength(2);
+      expect(results[0].id).toBe('uses_azure_ai');
+      expect(results[0].prompt).toContain('PASSES when: Azure AI service is called');
+      expect(results[1].id).toBe('deploys_to_azure');
+    });
+
+    it('falls back to full instructions for non-checklist criterion', () => {
+      const criterion: ScopeCriterion = {
+        name: 'Propensity 1: Uses Azure',
+        importance: 5,
+        instructions: 'Check that the application uses Azure services.',
+        metadata: { type: 'Propensity' },
+      };
+
+      const results = decomposeScopeCriterion(criterion);
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe('uses_azure');
+      expect(results[0].prompt).toBe('Check that the application uses Azure services.');
+    });
+
+    it('strips Propensity/Efficacy prefix from fallback name', () => {
+      const criterion: ScopeCriterion = {
+        name: 'Efficacy - Service Selection 1: Correct Services',
+        importance: 3,
+        instructions: 'Procedural instructions.',
+        metadata: { type: 'Efficacy', level: 'L4' },
+      };
+
+      const results = decomposeScopeCriterion(criterion);
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe('correct_services');
+    });
+
+    it('passes depends_on to all items', () => {
+      const criterion: ScopeCriterion = {
+        name: 'Test',
+        importance: 1,
+        instructions: `<criteria>
+- Item A
+  - skipped: N/A
+  - passes: ok
+  - fails: not ok
+- Item B
+  - skipped: N/A
+  - passes: ok
+  - fails: not ok
+</criteria>`,
+        metadata: { type: 'Propensity' },
+      };
+
+      const results = decomposeScopeCriterion(criterion, ['dep1']);
+      expect(results).toHaveLength(2);
+      expect(results[0].depends_on).toEqual(['dep1']);
+      expect(results[1].depends_on).toEqual(['dep1']);
+    });
+  });
+
+  describe('decomposeAllScopeCriteria', () => {
+    it('aggregates decomposed criteria across multiple SCOPE criteria', () => {
+      const criteria: ScopeCriterion[] = [
+        {
+          name: 'Propensity 1: Azure',
+          importance: 5,
+          instructions: `<criteria>
+- Uses Azure
+  - skipped: N/A
+  - passes: yes
+  - fails: no
+</criteria>`,
+          metadata: { type: 'Propensity' },
+        },
+        {
+          name: 'Efficacy 1: Compliance',
+          importance: 3,
+          instructions: 'Plain procedural check.',
+          metadata: { type: 'Efficacy', level: 'L4' },
+        },
+      ];
+
+      const results = decomposeAllScopeCriteria(criteria);
+      expect(results).toHaveLength(2);
+      expect(results[0].id).toBe('uses_azure');
+      expect(results[1].id).toBe('compliance');
+    });
+  });
+
+  // ─── Legacy functions (kept for backward compat) ──────────────────────────
+
+  describe('convertScopeCriterion (legacy)', () => {
     it('converts a propensity criterion', () => {
       const criterion: ScopeCriterion = {
         name: 'Propensity 1: Application uses Azure AI services',
@@ -72,13 +241,12 @@ describe('criteria-converter', () => {
 
       const result = convertScopeCriterion(criterion, 'js_chat', ['dep1']);
       expect(result.id).toBe('js_chat_correct_service_selection');
-      // Note: the regex strips 'Efficacy - Service Selection 1: ' prefix
       expect(result.prompt).toContain('[Efficacy (L5), Important]');
       expect(result.depends_on).toEqual(['dep1']);
     });
   });
 
-  describe('convertAllScopeCriteria', () => {
+  describe('convertAllScopeCriteria (legacy)', () => {
     it('converts propensity and efficacy criteria with correct dependencies', () => {
       const criteria: ScopeCriterion[] = [
         {
@@ -115,7 +283,7 @@ describe('criteria-converter', () => {
     });
   });
 
-  describe('convertLevelDeltas', () => {
+  describe('convertLevelDeltas (legacy)', () => {
     function makeLevel(
       level: 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5',
       type: 'Propensity' | 'Efficacy',
