@@ -147,11 +147,13 @@ Git commit hash embedded in reporter metadata. Automatically set during CI/CD bu
 **Default:** (not set)
 **Type:** URL string
 
-Base URL of the Token Manager service. When set, workers, judge, and report-generator use the `TokenManagerClient` to dynamically acquire tokens via `POST /api/v1/tokens/acquire` (round-robin across enabled tokens). When not set, services fall back to static environment variables (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, etc.).
+Base URL of the Token Manager service. Workers, judge, and report-generator use the `TokenManagerClient` to dynamically acquire tokens via `POST /api/v1/tokens/acquire` (round-robin across enabled tokens).
+
+In Kubernetes, no static token secrets (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`) are injected into pods — all tokens are acquired from the Token Manager at runtime. In local dev / Docker Compose, env vars can still be set as a fallback (the `TokenManagerClient` checks env vars first before calling the Token Manager HTTP API).
 
 - **Docker Compose:** `http://token-manager:80`
 - **Kubernetes:** `http://token-manager-service.scoped.svc.cluster.local:80`
-- **Local dev:** Leave unset to use env var fallback
+- **Local dev:** Leave unset to use env var fallback (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, etc.)
 
 ### AZURE_KEYVAULT_URI
 **Type:** URL string (token-manager only) — **Required**

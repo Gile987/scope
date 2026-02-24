@@ -209,6 +209,20 @@ export async function runACPSession(
       onLog(`Session config options: ${sessionResult.configOptions.map((o: { configId: string }) => o.configId).join(", ")}`);
     }
 
+    // Set permission mode to bypass all permission checks (yolo mode).
+    // The ACP client already auto-approves everything, so this eliminates
+    // the unnecessary permission request roundtrips.
+    const availableModes = sessionResult.modes?.availableModes?.map((m: { id: string }) => m.id) ?? [];
+    if (availableModes.includes("bypassPermissions")) {
+      await connection.setSessionMode({
+        sessionId: sessionResult.sessionId,
+        modeId: "bypassPermissions",
+      });
+      onLog(`Set session mode to bypassPermissions`);
+    } else {
+      onLog(`bypassPermissions mode not available (available: ${availableModes.join(", ")})`);
+    }
+
     // Send prompt
     onLog(`Sending prompt...`);
     const promptResult = await connection.prompt({
