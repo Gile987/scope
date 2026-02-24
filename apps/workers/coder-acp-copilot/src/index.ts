@@ -64,7 +64,7 @@ class CopilotProcessor implements WorkerProcessor {
       });
 
       // Run ACP session with GitHub Copilot
-      const args = ["--acp"];
+      const args = ["--acp", "--yolo"];
       if (options?.model) {
         args.push("--model", options.model);
       }
