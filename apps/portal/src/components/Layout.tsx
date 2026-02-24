@@ -243,7 +243,7 @@ export function Layout() {
           <Link
             to="/admin"
             className={cn(
-              "shrink-0 p-2 transition-colors hover:text-foreground/80",
+              "shrink-0 ml-4 p-2 transition-colors hover:text-foreground/80",
               location.pathname === "/admin" ? "text-foreground" : "text-foreground/60"
             )}
             title="Admin"
