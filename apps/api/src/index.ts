@@ -26,6 +26,7 @@ import {
 } from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument } from "shared";
+import { checkMigrations } from "db-migrations/check-migrations";
 
 const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
@@ -439,9 +440,27 @@ async function initializeClients(): Promise<void> {
   console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}, report`);
 }
 
-// Health check endpoint
+// Health check endpoint (liveness probe — always returns 200)
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "healthy", version: GIT_COMMIT });
+});
+
+// Readiness probe — returns 200 only when all required DB migrations have
+// been applied. Kubernetes will withhold traffic until this returns 200.
+app.get("/ready", async (_req: Request, res: Response) => {
+  try {
+    const result = await checkMigrations(db);
+    if (result.ready) {
+      res.json({ status: "ready", migrations: result });
+    } else {
+      res.status(503).json({ status: "not-ready", migrations: result });
+    }
+  } catch (err: any) {
+    res.status(503).json({
+      status: "not-ready",
+      error: err.message ?? String(err),
+    });
+  }
 });
 
 // About endpoint

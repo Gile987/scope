@@ -3,6 +3,16 @@
   "version": "1.0.0",
   "type": "module",
   "private": true,
+  "exports": {
+    "./check-migrations": {
+      "types": "./src/check-migrations.ts",
+      "default": "./dist/check-migrations.js"
+    },
+    "./required-migrations": {
+      "types": "./src/required-migrations.ts",
+      "default": "./dist/required-migrations.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "migrate:up": "npx tsx src/migrate.ts up",

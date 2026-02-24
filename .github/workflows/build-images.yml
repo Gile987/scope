@@ -17,6 +17,7 @@ on:
       - 'apps/**'
       - 'packages/shared/**'
       - 'packages/model-scanning/**'
+      - 'packages/db-migrations/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'tsconfig.base.json'
@@ -26,6 +27,7 @@ on:
       - 'apps/**'
       - 'packages/shared/**'
       - 'packages/model-scanning/**'
+      - 'packages/db-migrations/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'tsconfig.base.json'
@@ -50,6 +52,7 @@ jobs:
       token-manager: ${{ steps.changes.outputs.token-manager }}
       model-scanner-copilot: ${{ steps.changes.outputs.model-scanner-copilot }}
       model-scanner-anthropic: ${{ steps.changes.outputs.model-scanner-anthropic }}
+      db-migrations: ${{ steps.changes.outputs.db-migrations }}
       shared: ${{ steps.changes.outputs.shared }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
     steps:
@@ -82,6 +85,8 @@ jobs:
               - 'apps/model-scanners/copilot/**'
             model-scanner-anthropic:
               - 'apps/model-scanners/anthropic/**'
+            db-migrations:
+              - 'packages/db-migrations/**'
 
   build-on-push:
     if: >-
@@ -94,6 +99,7 @@ jobs:
         needs.detect-changes.outputs.token-manager == 'true' ||
         needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
         needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
+        needs.detect-changes.outputs.db-migrations == 'true' ||
         needs.detect-changes.outputs.shared == 'true' ||
         needs.detect-changes.outputs.model-scanning == 'true'
       )
@@ -128,6 +134,9 @@ jobs:
           - name: model-scanner-anthropic
             dockerfile: apps/model-scanners/anthropic/Dockerfile
             changed: ${{ (needs.detect-changes.outputs.model-scanner-anthropic == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
+          - name: db-migrations
+            dockerfile: packages/db-migrations/Dockerfile
+            changed: ${{ (needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: 'false'
@@ -181,6 +190,7 @@ jobs:
         needs.detect-changes.outputs.token-manager == 'true' ||
         needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
         needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
+        needs.detect-changes.outputs.db-migrations == 'true' ||
         needs.detect-changes.outputs.shared == 'true' ||
         needs.detect-changes.outputs.model-scanning == 'true'
       )
@@ -215,6 +225,9 @@ jobs:
           - name: model-scanner-anthropic
             dockerfile: apps/model-scanners/anthropic/Dockerfile
             changed: ${{ (needs.detect-changes.outputs.model-scanner-anthropic == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
+          - name: db-migrations
+            dockerfile: packages/db-migrations/Dockerfile
+            changed: ${{ (needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: 'false'
@@ -270,6 +283,7 @@ jobs:
             coder-*) DOCKERFILE="apps/workers/${{ matrix.image }}/Dockerfile" ;;
             model-scanner-copilot) DOCKERFILE="apps/model-scanners/copilot/Dockerfile" ;;
             model-scanner-anthropic) DOCKERFILE="apps/model-scanners/anthropic/Dockerfile" ;;
+            db-migrations) DOCKERFILE="packages/db-migrations/Dockerfile" ;;
             *) DOCKERFILE="apps/${{ matrix.image }}/Dockerfile" ;;
           esac
           echo "path=$DOCKERFILE" >> "$GITHUB_OUTPUT"
