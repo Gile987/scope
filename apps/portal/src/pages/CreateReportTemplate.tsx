@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { CriteriaPicker } from "@/components/CriteriaPicker";
 
 /** Convert a name to a slug */
 function slugify(text: string): string {
@@ -40,6 +41,7 @@ export function CreateReportTemplate() {
   const [sysContent, setSysContent] = useState("");
   const [triggerType, setTriggerType] = useState<"always" | "criteria" | "taskPrompt" | "promptFeature">("always");
   const [triggerIds, setTriggerIds] = useState("");
+  const [triggerCriteriaIds, setTriggerCriteriaIds] = useState<string[]>([]);
   const [triggerMatch, setTriggerMatch] = useState<"any" | "all">("all");
 
   const idValid = useMemo(() => /^[a-z][a-z0-9-]*$/.test(id), [id]);
@@ -79,7 +81,7 @@ export function CreateReportTemplate() {
     if (triggerType !== "always") {
       const idsArray = triggerIds.split(",").map(s => s.trim()).filter(Boolean);
       if (triggerType === "criteria") {
-        body.trigger = { type: "criteria", criteriaIds: idsArray, match: triggerMatch };
+        body.trigger = { type: "criteria", criteriaIds: triggerCriteriaIds, match: triggerMatch };
       } else if (triggerType === "taskPrompt") {
         body.trigger = { type: "taskPrompt", taskPromptIds: idsArray };
       } else if (triggerType === "promptFeature") {
@@ -208,14 +210,16 @@ export function CreateReportTemplate() {
                 <SelectItem value="promptFeature">Prompt Feature match</SelectItem>
               </SelectContent>
             </Select>
-            {triggerType !== "always" && (
+            {triggerType === "criteria" && (
+              <CriteriaPicker selected={triggerCriteriaIds} onChange={setTriggerCriteriaIds} />
+            )}
+            {triggerType !== "always" && triggerType !== "criteria" && (
               <>
                 <Input
                   value={triggerIds}
                   onChange={(e) => setTriggerIds(e.target.value)}
                   placeholder={
-                    triggerType === "criteria" ? "has_azure, has_cloud"
-                    : triggerType === "taskPrompt" ? "task-prompt-id-1, task-prompt-id-2"
+                    triggerType === "taskPrompt" ? "task-prompt-id-1, task-prompt-id-2"
                     : "feature_1, feature_2"
                   }
                   className="font-mono text-sm"
