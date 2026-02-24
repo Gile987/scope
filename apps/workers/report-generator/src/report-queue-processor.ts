@@ -117,8 +117,8 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         const template = await this.fetchReportTemplate(doc.templateId);
         if (template) {
           await log("info", `Using report template '${template.id}' (${template.name})`);
-          // Resolve user prompt — substitute {requestId} placeholder
-          resolvedUserPrompt = template.userPrompt.replace(/\{requestId\}/g, requestId);
+          // Resolve user prompt — substitute {{requestId}} or {requestId} placeholder
+          resolvedUserPrompt = template.userPrompt.replace(/\{\{requestId\}\}|\{requestId\}/g, requestId);
 
           // Resolve system prompt
           if (template.systemPrompt) {

@@ -17,7 +17,9 @@ You have access to tools that let you:
 
 ## Report Structure
 
-Produce a markdown report with these sections:
+**If the user prompt provides specific instructions about what to focus on, what structure to use, or what kind of report to produce, follow those instructions instead of (or in addition to) the default structure below.** The user prompt takes precedence over the default template.
+
+Default structure (use when the user prompt does not specify a different one):
 
 ### 1. Executive Summary
 - Scenario task description
