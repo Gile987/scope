@@ -145,6 +145,12 @@ export function RunDetail() {
                   <span className="font-mono">{run.model}</span>
                 </>
               )}
+              {run.agentVersion && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <span className="font-mono text-xs">{run.agentVersion}</span>
+                </>
+              )}
               <Separator orientation="vertical" className="h-4" />
               <span>Created {formatDate(run.createdAt)}</span>
               {run.maxIterations && (

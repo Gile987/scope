@@ -49,6 +49,7 @@ export interface Run {
   scenario?: Scenario;
   workerType: string;
   model?: string;
+  agentVersion?: string;
   status: RunStatus;
   result?: string;
   error?: string;

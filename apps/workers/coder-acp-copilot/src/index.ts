@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, QueueProcessorConfig, LogEvent, TokenManagerClient } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, QueueProcessorConfig, LogEvent, TokenManagerClient, detectCliVersion } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -9,9 +9,14 @@ dotenv.config();
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-copilot";
 const tokenClient = new TokenManagerClient();
+const AGENT_VERSION = detectCliVersion("copilot", "@github/copilot");
 
 class CopilotProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
+
+  getAgentVersion(): string {
+    return AGENT_VERSION;
+  }
 
   async processMessage(
     message: string,
