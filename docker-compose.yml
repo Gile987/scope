@@ -330,7 +330,7 @@ services:
 
   # DevProxy sidecar for Copilot worker (HAR capture)
   devproxy-copilot:
-    image: ghcr.io/dotnet/dev-proxy:0.26.0
+    image: ghcr.io/dotnet/dev-proxy:2.1.0
     profiles: [copilot]
     working_dir: /har-output
     command: ["--config-file", "/config/devproxyrc.json", "--record"]
