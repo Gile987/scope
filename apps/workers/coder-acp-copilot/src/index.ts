@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls, detectCliVersion } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls, detectCliVersion, prependSkillsToMessage } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -24,11 +24,15 @@ class CopilotProcessor implements WorkerProcessor {
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
     const mcpConfigs = options?.mcpServerConfigs ?? [];
+    const skillConfigs = options?.skillConfigs ?? [];
+    const effectiveMessage = prependSkillsToMessage(message, skillConfigs);
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
       model: options?.model,
       mcpServerCount: mcpConfigs.length,
       mcpServers: mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
+      skillCount: skillConfigs.length,
+      skills: skillConfigs.map((s) => s.name),
     });
     
     // DevProxy integration — start recording if enabled
@@ -68,7 +72,7 @@ class CopilotProcessor implements WorkerProcessor {
       if (options?.model) {
         args.push("--model", options.model);
       }
-      const result = await runACPSession(message, {
+      const result = await runACPSession(effectiveMessage, {
         command: "copilot",
         args,
         env: {

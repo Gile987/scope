@@ -11,12 +11,14 @@ import {
   ConversationTurn,
 } from "../types/types.js";
 import type { McpServerConfig } from "../types/mcp.js";
+import type { SkillConfig } from "../types/skill.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
 import { JudgeClient } from "../judge/judge-client.js";
 import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
 import { McpServerClient } from "../mcp/mcp-server-client.js";
+import { SkillClient } from "../skills/skill-client.js";
 
 /**
  * Queue processor for coding agent workers.
@@ -50,13 +52,26 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolved MCP servers: ${mcpServerConfigs.map(s => s.name).join(", ")}`);
     }
 
+    // Resolve skill revision refs to configs via API
+    let skillConfigs: SkillConfig[] | undefined;
+    if (requestDoc.skillRevisions && requestDoc.skillRevisions.length > 0) {
+      const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+      if (!apiBaseUrl) {
+        throw new Error("Skill revisions requested but SCOPE_MT_API_URL is not configured");
+      }
+      const skillClient = new SkillClient(apiBaseUrl);
+      await log("info", `Resolving ${requestDoc.skillRevisions.length} skill revision(s)`, { skillRevisions: requestDoc.skillRevisions });
+      skillConfigs = await skillClient.resolveSkills(requestDoc.skillRevisions);
+      await log("info", `Resolved skills: ${skillConfigs.map(s => s.name).join(", ")}`);
+    }
+
     // Determine if this is a multi-turn request (criteria present in scenario)
     const isMultiTurn = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
 
     if (isMultiTurn) {
-      await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs);
+      await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs);
     } else {
-      await this.processOneShot(requestDoc, message, currentPopReceipt, log, mcpServerConfigs);
+      await this.processOneShot(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs);
     }
   }
 
@@ -94,7 +109,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     message: DequeuedMessageItem,
     currentPopReceipt: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
-    mcpServerConfigs?: McpServerConfig[]
+    mcpServerConfigs?: McpServerConfig[],
+    skillConfigs?: SkillConfig[]
   ): Promise<void> {
     const requestId = requestDoc._id;
 
@@ -107,7 +123,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     await log("info", `Starting processing with ${this.processor.workerName}`);
 
     // Process the task using the worker-specific processor
-    const workerResult = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs });
+    const workerResult = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
 
     await log("info", "Processing completed", { responseLength: workerResult.response.length, final: true });
 
@@ -162,7 +178,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     message: DequeuedMessageItem,
     currentPopReceipt: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
-    mcpServerConfigs?: McpServerConfig[]
+    mcpServerConfigs?: McpServerConfig[],
+    skillConfigs?: SkillConfig[]
   ): Promise<void> {
     const requestId = requestDoc._id;
     const judgeServiceUrl = process.env.JUDGE_SERVICE_URL;
@@ -220,6 +237,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       personaInstructions: requestDoc.personaInstructions,
       model: requestDoc.model,
       mcpServerConfigs,
+      skillConfigs,
       onTurnComplete: async (turn: ConversationTurn) => {
         // Persist each turn incrementally to MongoDB
         await this.collection.updateOne(

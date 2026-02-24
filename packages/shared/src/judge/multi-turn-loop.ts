@@ -10,6 +10,7 @@ import {
   MULTI_TURN_DEFAULTS,
 } from "../types/types.js";
 import type { McpServerConfig } from "../types/mcp.js";
+import type { SkillConfig } from "../types/skill.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
 import { JudgeClient } from "./judge-client.js";
@@ -47,6 +48,8 @@ export interface MultiTurnConfig {
   model?: string;
   /** Resolved MCP server configurations to pass to the coding agent */
   mcpServerConfigs?: McpServerConfig[];
+  /** Resolved skill configurations to inject into the agent prompt */
+  skillConfigs?: SkillConfig[];
 }
 
 export interface MultiTurnResult {
@@ -85,6 +88,7 @@ export async function runMultiTurnLoop(
     personaInstructions,
     model,
     mcpServerConfigs,
+    skillConfigs,
   } = config;
 
   const turns: ConversationTurn[] = [];
@@ -96,6 +100,8 @@ export async function runMultiTurnLoop(
     maxIterations,
     mcpServerCount: mcpServerConfigs?.length ?? 0,
     mcpServers: mcpServerConfigs?.map((s) => s.name) ?? [],
+    skillCount: skillConfigs?.length ?? 0,
+    skills: skillConfigs?.map((s) => s.name) ?? [],
   });
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
@@ -126,7 +132,7 @@ export async function runMultiTurnLoop(
     let turnToolCalls: import("../har/types.js").ToolCall[] | undefined;
     let turnHarUrl: string | undefined;
     try {
-      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs });
+      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs });
       codingResponse = workerResult.response;
       turnToolCalls = workerResult.toolCalls;
 

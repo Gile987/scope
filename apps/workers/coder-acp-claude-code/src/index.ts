@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, detectCliVersion } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, detectCliVersion, prependSkillsToMessage } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -24,11 +24,15 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
     const mcpConfigs = options?.mcpServerConfigs ?? [];
+    const skillConfigs = options?.skillConfigs ?? [];
+    const effectiveMessage = prependSkillsToMessage(message, skillConfigs);
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
       model: options?.model,
       mcpServerCount: mcpConfigs.length,
       mcpServers: mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
+      skillCount: skillConfigs.length,
+      skills: skillConfigs.map((s) => s.name),
     });
     
     try {
@@ -45,7 +49,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       if (options?.model) {
         env.ANTHROPIC_MODEL = options.model;
       }
-      const result = await runACPSession(message, {
+      const result = await runACPSession(effectiveMessage, {
         command: "claude-code-acp",
         args: [],
         env,
