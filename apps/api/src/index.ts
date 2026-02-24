@@ -2592,6 +2592,88 @@ app.post("/api/v1/reports/trigger", async (req: Request, res: Response, next: Ne
   }
 });
 
+// POST /api/v1/reports/bulk-trigger — evaluate report templates for multiple runs at once
+app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { requestIds } = req.body as { requestIds?: string[] };
+
+    if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+      res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+      return;
+    }
+
+    // Fetch runs
+    const runs = await collection.find({ _id: { $in: requestIds } as any }).toArray();
+    const foundIds = new Set(runs.map(r => r._id));
+    const notFound = requestIds.filter(id => !foundIds.has(id));
+
+    // Load all active templates
+    const templates = await reportTemplateCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+
+    const created: Array<{ reportId: string; requestId: string; templateId?: string }> = [];
+
+    for (const run of runs) {
+      if (templates.length === 0) {
+        // No templates — legacy single report per run
+        const reportId = uuidv4();
+        const reportDoc: ReportDocument = {
+          _id: reportId,
+          requestId: run._id,
+          status: "pending",
+          logs: [],
+          createdAt: new Date(),
+        };
+        await reportCollection.insertOne(reportDoc);
+        const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
+        await reportQueueClient.sendMessage(messageContent);
+        created.push({ reportId, requestId: run._id });
+      } else {
+        // Fetch task prompt for trigger evaluation
+        let taskPrompt: TaskPromptDocument | null = null;
+        if (run.taskPromptId) {
+          taskPrompt = await taskPromptCollection.findOne({ _id: run.taskPromptId });
+        }
+
+        for (const template of templates) {
+          const triggerResult = evaluateTrigger(
+            template.trigger as any,
+            run as any,
+            taskPrompt as any
+          );
+
+          if (triggerResult) {
+            const reportId = uuidv4();
+            const reportDoc: ReportDocument = {
+              _id: reportId,
+              requestId: run._id,
+              templateId: template.id,
+              status: "pending",
+              logs: [],
+              createdAt: new Date(),
+            };
+            await reportCollection.insertOne(reportDoc);
+            const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
+            await reportQueueClient.sendMessage(messageContent);
+            created.push({ reportId, requestId: run._id, templateId: template.id });
+          }
+        }
+      }
+    }
+
+    console.log(`Bulk trigger: created ${created.length} reports for ${runs.length} runs`);
+
+    res.status(201).json({
+      created: created.length,
+      reports: created,
+      notFound,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ============================================================
 // Report Template CRUD routes (/api/v1/report-templates)
 // ============================================================

@@ -76,9 +76,9 @@ export function RunDetail() {
   });
 
   const generateReport = useMutation({
-    mutationFn: () => api.createReport(id!),
-    onSuccess: () => {
-      toast.success("Report generation queued");
+    mutationFn: () => api.triggerReports(id!),
+    onSuccess: (data) => {
+      toast.success(`${data.triggered} report(s) queued`);
       refetchReports();
     },
     onError: (err) => {

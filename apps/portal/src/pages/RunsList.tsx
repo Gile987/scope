@@ -142,7 +142,7 @@ export function RunsList() {
   });
 
   const bulkReportMutation = useMutation({
-    mutationFn: (ids: string[]) => api.bulkCreateReports(ids),
+    mutationFn: (ids: string[]) => api.bulkTriggerReports(ids),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["report-statuses"] });
       setSelectedIds(new Set());

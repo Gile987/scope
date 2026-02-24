@@ -313,15 +313,31 @@ export const api = {
 
   // ─── Reports ──────────────────────────────────────────────────────────────
 
-  /** Create a report for a run */
-  createReport: (requestId: string): Promise<{ id: string; requestId: string; status: string }> => {
-    return request("/reports", {
+  /** Trigger report generation for a run — evaluates all templates and creates one report per match */
+  triggerReports: (requestId: string): Promise<{ triggered: number; reports: { id: string; requestId: string; templateId?: string; status: string }[] }> => {
+    return request("/reports/trigger", {
       method: "POST",
       body: JSON.stringify({ requestId }),
     });
   },
 
-  /** Bulk create reports for multiple runs */
+  /** Create a single report for a run (optionally with a specific template) */
+  createReport: (requestId: string, templateId?: string): Promise<{ id: string; requestId: string; status: string }> => {
+    return request("/reports", {
+      method: "POST",
+      body: JSON.stringify({ requestId, ...(templateId ? { templateId } : {}) }),
+    });
+  },
+
+  /** Bulk trigger reports for multiple runs (evaluates all templates per run) */
+  bulkTriggerReports: (requestIds: string[]): Promise<{ created: number; reports: { reportId: string; requestId: string; templateId?: string }[]; notFound: string[] }> => {
+    return request("/reports/bulk-trigger", {
+      method: "POST",
+      body: JSON.stringify({ requestIds }),
+    });
+  },
+
+  /** Bulk create reports for multiple runs (legacy, no template evaluation) */
   bulkCreateReports: (requestIds: string[]): Promise<{ created: number; reports: { reportId: string; requestId: string }[]; notFound: string[] }> => {
     return request("/reports/bulk-create", {
       method: "POST",
