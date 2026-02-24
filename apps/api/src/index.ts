@@ -372,77 +372,10 @@ async function initializeClients(): Promise<void> {
   taskPromptCollection = db.collection<TaskPromptDocument>("task-prompts");
   taskPromptStore = new TaskPromptStore(taskPromptCollection);
   featureFlagCollection = db.collection<FeatureFlagDocument>("feature-flags");
-  
-  // Create index for createdAt (required for sorting in CosmosDB MongoDB API)
-  try {
-    await collection.createIndex({ createdAt: -1 });
-    console.log("Created index on createdAt");
-  } catch (err) {
-    // Index may already exist
-    console.log("Index on createdAt already exists or couldn't be created");
-  }
 
-  // Create unique index for criteria ID
-  try {
-    await criteriaCollection.createIndex({ id: 1 }, { unique: true });
-    console.log("Created unique index on criteria.id");
-  } catch (err) {
-    console.log("Index on criteria.id already exists or couldn't be created");
-  }
+  // Note: Collection indexes are managed by db-migrations (see 002-create-indexes.ts).
+  // Run `pnpm migrate:up` to apply pending migrations.
 
-  // Create unique index for prompt feature ID
-  try {
-    await promptFeatureCollection.createIndex({ id: 1 }, { unique: true });
-    console.log("Created unique index on prompt-features.id");
-  } catch (err) {
-    console.log("Index on prompt-features.id already exists or couldn't be created");
-  }
-
-  // Create unique index for prompt feature extraction task text hash (dedup)
-  try {
-    await promptFeatureExtractionCollection.createIndex({ taskTextHash: 1 }, { unique: true });
-    console.log("Created unique index on prompt-feature-extractions.taskTextHash");
-  } catch (err) {
-    console.log("Index on prompt-feature-extractions.taskTextHash already exists or couldn't be created");
-  }
-
-  // Create indexes for reports collection
-  try {
-    await reportCollection.createIndex({ createdAt: -1 });
-    await reportCollection.createIndex({ requestId: 1 });
-    console.log("Created indexes on reports collection");
-  } catch (err) {
-    console.log("Indexes on reports collection already exist or couldn't be created");
-  }
-
-  // Create index for agents collection
-  try {
-    await agentCollection.createIndex({ createdAt: -1 });
-    console.log("Created index on agents collection");
-  } catch (err) {
-    console.log("Index on agents collection already exists or couldn't be created");
-  }
-
-  // Create indexes for models collection
-  try {
-    await modelCollection.createIndex({ agentId: 1 });
-    await modelCollection.createIndex({ provider: 1 });
-    await modelCollection.createIndex({ agentId: 1, provider: 1 });
-    await modelCollection.createIndex({ modelId: 1 });
-    console.log("Created indexes on models collection");
-  } catch (err) {
-    console.log("Indexes on models collection already exist or couldn't be created");
-  }
-
-  // Create indexes for insights collection
-  try {
-    await insightsCollection.createIndex({ createdAt: -1 });
-    console.log("Created indexes on insights collection");
-  } catch (err) {
-    console.log("Indexes on insights collection already exist or couldn't be created");
-  }
-
-  // Seed criteria from YAML files on first boot (skipped — use POST /api/v1/criteria/seed)
   const criteriaCount = await criteriaCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Criteria collection has ${criteriaCount} documents`);
 
@@ -455,24 +388,8 @@ async function initializeClients(): Promise<void> {
   const modelCount = await modelCollection.countDocuments();
   console.log(`Models collection has ${modelCount} documents`);
 
-  // Create index for MCP servers collection
-  try {
-    await mcpServerCollection.createIndex({ createdAt: -1 });
-    console.log("Created index on mcp-servers collection");
-  } catch (err) {
-    console.log("Index on mcp-servers collection already exists or couldn't be created");
-  }
-
   const mcpServerCount = await mcpServerCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`MCP servers collection has ${mcpServerCount} documents`);
-
-  // Create unique index and seed default feature flags
-  try {
-    await featureFlagCollection.createIndex({ key: 1 }, { unique: true });
-    console.log("Created unique index on feature-flags.key");
-  } catch (err) {
-    console.log("Index on feature-flags.key already exists or couldn't be created");
-  }
 
   // Seed default feature flags (upsert — won't overwrite existing enabled state)
   const defaultFlags: Array<{ key: string; label: string }> = [
