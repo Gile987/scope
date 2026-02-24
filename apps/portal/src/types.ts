@@ -254,6 +254,7 @@ export interface Report {
   error?: string;
   logs: LogEvent[];
   insightReferences?: InsightReference[];
+  templateId?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -267,6 +268,57 @@ export const REPORT_STATUS_LIST: ReportStatus[] = [
 
 export interface BulkReportStatus {
   [requestId: string]: { reportId: string; status: ReportStatus };
+}
+
+// =============================================================================
+// Report Template types
+// =============================================================================
+
+export type ReportTriggerType = "always" | "criteria" | "taskPrompt" | "promptFeature";
+
+export interface AlwaysTrigger {
+  type: "always";
+}
+
+export interface CriteriaTrigger {
+  type: "criteria";
+  criteriaIds: string[];
+  match?: "any" | "all";
+}
+
+export interface TaskPromptTrigger {
+  type: "taskPrompt";
+  taskPromptIds: string[];
+}
+
+export interface PromptFeatureTrigger {
+  type: "promptFeature";
+  featureIds: string[];
+  match?: "any" | "all";
+}
+
+export type ReportTrigger =
+  | AlwaysTrigger
+  | CriteriaTrigger
+  | TaskPromptTrigger
+  | PromptFeatureTrigger;
+
+export interface ReportTemplateSystemPrompt {
+  mode: "append" | "override";
+  content: string;
+}
+
+export interface ReportTemplate {
+  _id: string;
+  id: string;
+  name: string;
+  description?: string;
+  userPrompt: string;
+  systemPrompt?: ReportTemplateSystemPrompt;
+  trigger?: ReportTrigger;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
 }
 
 // =============================================================================

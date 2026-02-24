@@ -133,6 +133,16 @@ export function ReportDetail() {
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <ReportStatusBadge status={report.status} />
+              {report.templateId && (
+                <Link
+                  to={`/report-templates/${report.templateId}`}
+                  className="hover:text-foreground transition-colors"
+                >
+                  <Badge variant="outline" className="text-xs font-mono hover:bg-accent">
+                    {report.templateId}
+                  </Badge>
+                </Link>
+              )}
               <Link
                 to={`/runs/${report.requestId}`}
                 className="flex items-center gap-1 hover:text-foreground transition-colors"

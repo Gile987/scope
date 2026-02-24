@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -358,6 +358,52 @@ export const api = {
   /** SSE endpoint URL for report log streaming */
   reportLogsUrl: (id: string, fromStart = true): string => {
     return `${BASE}/reports/${id}/logs?fromStart=${fromStart}`;
+  },
+
+  // ─── Report Templates ─────────────────────────────────────────────────────
+
+  /** List all report templates */
+  listReportTemplates: (): Promise<ReportTemplate[]> => {
+    return request("/report-templates");
+  },
+
+  /** Get a single report template by slug ID */
+  getReportTemplate: (id: string): Promise<ReportTemplate> => {
+    return request(`/report-templates/${id}`);
+  },
+
+  /** Create a new report template */
+  createReportTemplate: (body: {
+    id: string;
+    name: string;
+    userPrompt: string;
+    description?: string;
+    systemPrompt?: ReportTemplateSystemPrompt;
+    trigger?: ReportTrigger;
+  }): Promise<ReportTemplate> => {
+    return request("/report-templates", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update an existing report template */
+  updateReportTemplate: (id: string, body: {
+    name?: string;
+    description?: string;
+    userPrompt?: string;
+    systemPrompt?: ReportTemplateSystemPrompt | null;
+    trigger?: ReportTrigger | null;
+  }): Promise<ReportTemplate> => {
+    return request(`/report-templates/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Delete a report template (soft-delete) */
+  deleteReportTemplate: (id: string): Promise<void> => {
+    return request(`/report-templates/${id}`, { method: "DELETE" });
   },
 
   // ─── Version ───────────────────────────────────────────────────────────────
