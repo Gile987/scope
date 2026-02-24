@@ -95,6 +95,7 @@ export interface RequestDocument {
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → TaskPromptDocument._id)
   promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
   mcpServers?: string[];          // MCP server slugs selected for this run
+  agentVersion?: string;          // Coding agent binary version (e.g. "@github/copilot@0.0.415")
 }
 
 // Log event for real-time streaming and persistence
@@ -121,6 +122,8 @@ export interface WorkerProcessorOptions {
 export interface WorkerProcessor {
   readonly workerName: string;
   processMessage(message: string, log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>, options?: WorkerProcessorOptions): Promise<string>;
+  /** Return the coding agent binary version string (e.g. "@github/copilot@0.0.415"). */
+  getAgentVersion?(): string;
 }
 
 // Base configuration for queue processors

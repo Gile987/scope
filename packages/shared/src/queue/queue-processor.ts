@@ -98,7 +98,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // Update status to processing
     await this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "processing", logs: [], updatedAt: new Date() } }
+      { $set: { status: "processing", logs: [], updatedAt: new Date(), ...(this.processor.getAgentVersion ? { agentVersion: this.processor.getAgentVersion() } : {}) } }
     );
 
     await log("info", `Starting processing with ${this.processor.workerName}`);
@@ -142,7 +142,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // Update status to iterating
     await this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "iterating", logs: [], turns: [], updatedAt: new Date() } }
+      { $set: { status: "iterating", logs: [], turns: [], updatedAt: new Date(), ...(this.processor.getAgentVersion ? { agentVersion: this.processor.getAgentVersion() } : {}) } }
     );
 
     // Extend queue message visibility for long-running multi-turn.
