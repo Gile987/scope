@@ -20,11 +20,19 @@ import { REPORT_SYSTEM_PROMPT } from "./prompt.js";
 
 /** Default user prompt used when no report template is configured */
 const DEFAULT_USER_PROMPT = (requestId: string) =>
-  `Generate a comprehensive report for benchmark run ${requestId}. ` +
-  `Start by fetching the run summary, then examine the criteria trajectory, ` +
-  `and inspect individual turns for detailed analysis. ` +
-  `If snapshots are available, extract and inspect key files to understand ` +
-  `what the coding agent produced.`;
+  `Generate a comprehensive benchmark report for run ${requestId}.
+
+Start by fetching the run summary, then examine the criteria trajectory, and inspect individual turns for detailed analysis. If snapshots are available, extract and inspect key files to understand what the coding agent produced.
+
+Structure the report as follows:
+
+1. **Executive Summary** — Scenario task, worker type & persona, final outcome (completed/exhausted/failed), total iterations, overall pass rate.
+2. **Criteria Trajectory** — A table of criterion pass/fail per turn. Highlight regressions, flip-flops, and never-passed criteria.
+3. **Agent Behavior Analysis** — Did the agent follow judge feedback? Was the approach infrastructure-first or application-first? Signs of stubbornness? How did strategy evolve?
+4. **Per-Turn Breakdown** — For each turn: what the agent did, what the judge said, what improved or regressed.
+5. **Key Observations & Recommendations** — What went well, what the agent struggled with, suggestions for improving the scenario/criteria/agent.
+
+Compare snapshots across iterations when relevant to show progression. Use concrete code references.`;
 
 export interface ReportQueueProcessorConfig extends BaseQueueProcessorConfig {
   /** The LLM model to use for report generation, e.g. "gpt-4.1" */
