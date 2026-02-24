@@ -31,9 +31,8 @@ RUN apt-get update && apt-get install -y \
 ENV PATH="/root/.local/bin:$PATH"
 RUN npm install -g @zed-industries/claude-code-acp@0.16.0
 
-# Create non-root user so claude-code-acp allows bypassPermissions mode
-RUN groupadd --gid 1000 worker && useradd --uid 1000 --gid worker --create-home worker
-RUN mkdir -p /workspace && chown worker:worker /workspace
+# Use existing node user (UID 1000) so claude-code-acp allows bypassPermissions mode
+RUN mkdir -p /workspace && chown node:node /workspace
 # Copy uv to a shared location accessible by non-root user
 RUN cp -r /root/.local/bin/* /usr/local/bin/ 2>/dev/null || true
 
@@ -42,7 +41,7 @@ ENV SERVICE_DIR=workers/coder-acp-claude-code
 ENV WORKER_NAME=coder-acp-claude-code
 COPY scripts/dev-entrypoint.sh /app/scripts/dev-entrypoint.sh
 COPY config /app/config/
-USER worker
+USER node
 CMD ["/app/scripts/dev-entrypoint.sh"]
 
 # --- Production stage ---
@@ -76,9 +75,8 @@ RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/apps/workers/coder-acp-claude-code/dist ./apps/workers/coder-acp-claude-code/dist/
 
-# Create non-root user so claude-code-acp allows bypassPermissions mode
-RUN groupadd --gid 1000 worker && useradd --uid 1000 --gid worker --create-home worker
-RUN mkdir -p /workspace && chown worker:worker /workspace
+# Use existing node user (UID 1000) so claude-code-acp allows bypassPermissions mode
+RUN mkdir -p /workspace && chown node:node /workspace
 # Copy uv to a shared location accessible by non-root user
 RUN cp -r /root/.local/bin/* /usr/local/bin/ 2>/dev/null || true
 
@@ -86,5 +84,5 @@ WORKDIR /app/apps/workers/coder-acp-claude-code
 
 ENV WORKER_NAME=coder-acp-claude-code
 
-USER worker
+USER node
 CMD ["node", "dist/index.js"]
