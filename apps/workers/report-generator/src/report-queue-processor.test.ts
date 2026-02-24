@@ -93,7 +93,7 @@ async function callRunCopilotSession(
   processor: ReportQueueProcessor,
   log: ReturnType<typeof vi.fn>,
 ) {
-  return (processor as any).runCopilotSession([], "req-123", log);
+  return (processor as any).runCopilotSession([], "Generate a report for run req-123", "You are an expert analyst.", log);
 }
 
 function makeBaseEvent(type: string, data: Record<string, unknown> = {}): SessionEvent {

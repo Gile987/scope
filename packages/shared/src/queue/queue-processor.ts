@@ -62,20 +62,22 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
   /**
    * Fire-and-forget report generation trigger via REST API.
-   * Called after a run completes if apiBaseUrl is configured.
+   * Calls the trigger endpoint which evaluates all report templates' triggers
+   * and creates a report for each matching template.
    */
   private async triggerReportGeneration(requestId: string): Promise<void> {
     const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
     if (!apiBaseUrl) return;
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/reports`, {
+      const response = await fetch(`${apiBaseUrl}/api/v1/reports/trigger`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requestId }),
       });
       if (response.ok) {
-        console.log(`[${this.workerName}] Triggered report generation for request ${requestId}`);
+        const result = await response.json() as { triggered: number };
+        console.log(`[${this.workerName}] Triggered report generation for request ${requestId}: ${result.triggered} report(s) created`);
       } else {
         console.warn(`[${this.workerName}] Failed to trigger report generation: ${response.status} ${response.statusText}`);
       }
