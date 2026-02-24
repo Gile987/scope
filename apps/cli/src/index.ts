@@ -1855,6 +1855,457 @@ report
     }
   });
 
+// ─── Report Template management ──────────────────────────────────────────────
+
+const reportTemplate = program
+  .command("report-template")
+  .description("Manage report templates (CRUD, import)")
+  .action(() => {
+    reportTemplate.help();
+  });
+
+configureHelp(reportTemplate);
+
+reportTemplate
+  .command("list")
+  .description("List all report templates")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+  .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const items = await response.json() as Array<{
+        id: string; name: string; description?: string;
+        userPrompt: string; systemPrompt?: { mode: string; content: string };
+        trigger?: { type: string; [k: string]: unknown };
+        createdAt: string;
+      }>;
+
+      if (items.length === 0) {
+        if (!isMachineReadable(format)) console.log(warnBanner("No report templates found."));
+        return;
+      }
+
+      if (!isMachineReadable(format)) {
+        console.log(label(`Found ${items.length} report templates:\n`));
+      }
+
+      const displayFields: DisplayField[] = [
+        { key: 'id', label: 'ID', tableFormatter: (t: any) => value(t.id) },
+        { key: 'name', label: 'Name' },
+        { key: 'trigger', label: 'Trigger', formatter: (t: any) => t.trigger?.type ?? 'always' },
+        { key: 'systemPrompt', label: 'SysPrompt', formatter: (t: any) => t.systemPrompt ? t.systemPrompt.mode : '—' },
+        { key: 'userPrompt', label: 'UserPrompt', formatter: (t: any) => {
+          const p = t.userPrompt.replace(/\n/g, ' ');
+          return p.length > 50 ? p.substring(0, 50) + '…' : p;
+        }, tableFormatter: (t: any) => {
+          const p = t.userPrompt.replace(/\n/g, ' ');
+          const truncated = p.length > 50 ? p.substring(0, 50) + '…' : p;
+          return dimTimestamp(truncated);
+        }},
+      ];
+
+      console.log(formatData(items, displayFields, format));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+reportTemplate
+  .command("get")
+  .description("Get details of a single report template")
+  .requiredOption("-i, --id <id>", "Report template ID (slug)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const t = await response.json() as {
+        id: string; name: string; description?: string;
+        userPrompt: string; systemPrompt?: { mode: string; content: string };
+        trigger?: { type: string; [k: string]: unknown };
+        createdAt: string; updatedAt?: string;
+      };
+
+      console.log(`${label('ID:')}          ${value(t.id)}`);
+      console.log(`${label('Name:')}        ${t.name}`);
+      if (t.description) console.log(`${label('Description:')} ${t.description}`);
+      console.log(`${label('Trigger:')}     ${value(t.trigger?.type ?? 'always')}`);
+      if (t.trigger && t.trigger.type !== 'always') {
+        console.log(`${label('Trigger cfg:')} ${dimTimestamp(JSON.stringify(t.trigger))}`);
+      }
+      console.log(`${label('User prompt:')}`);
+      for (const line of t.userPrompt.trim().split('\n')) {
+        console.log(`  ${line}`);
+      }
+      if (t.systemPrompt) {
+        console.log(`${label('Sys prompt:')}  ${value(t.systemPrompt.mode)}`);
+        for (const line of t.systemPrompt.content.trim().split('\n')) {
+          console.log(`  ${line}`);
+        }
+      }
+      console.log(`${label('Created:')}     ${value(t.createdAt)}`);
+      if (t.updatedAt) console.log(`${label('Updated:')}     ${value(t.updatedAt)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+reportTemplate
+  .command("create")
+  .description("Create a new report template")
+  .requiredOption("--id <id>", "Template ID slug (lowercase, hyphens)")
+  .requiredOption("--name <name>", "Display name for the template")
+  .requiredOption("--user-prompt <prompt>", "User prompt (the instruction for the report agent)")
+  .option("--description <desc>", "Optional description")
+  .option("--system-prompt-mode <mode>", "System prompt mode: append or override")
+  .option("--system-prompt-content <content>", "System prompt content")
+  .option("--trigger-type <type>", "Trigger type: always, criteria, taskPrompt, promptFeature")
+  .option("--trigger-ids <ids...>", "Trigger IDs (criteria IDs, task prompt IDs, or feature IDs)")
+  .option("--trigger-match <match>", "Trigger match mode: any or all (default: all)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {
+        id: options.id,
+        name: options.name,
+        userPrompt: options.userPrompt,
+      };
+      if (options.description) body.description = options.description;
+      if (options.systemPromptMode && options.systemPromptContent) {
+        body.systemPrompt = {
+          mode: options.systemPromptMode,
+          content: options.systemPromptContent,
+        };
+      }
+      if (options.triggerType) {
+        const trigger: Record<string, unknown> = { type: options.triggerType };
+        if (options.triggerType === 'criteria' && options.triggerIds) {
+          trigger.criteriaIds = options.triggerIds;
+          if (options.triggerMatch) trigger.match = options.triggerMatch;
+        } else if (options.triggerType === 'taskPrompt' && options.triggerIds) {
+          trigger.taskPromptIds = options.triggerIds;
+        } else if (options.triggerType === 'promptFeature' && options.triggerIds) {
+          trigger.featureIds = options.triggerIds;
+          if (options.triggerMatch) trigger.match = options.triggerMatch;
+        }
+        body.trigger = trigger;
+      }
+
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const created = await response.json();
+      console.log(`${successText('Created report template')} ${value(created.id)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+reportTemplate
+  .command("update")
+  .description("Update an existing report template")
+  .requiredOption("-i, --id <id>", "Report template ID (slug)")
+  .option("--name <name>", "New display name")
+  .option("--description <desc>", "New description")
+  .option("--user-prompt <prompt>", "New user prompt")
+  .option("--system-prompt-mode <mode>", "System prompt mode: append or override")
+  .option("--system-prompt-content <content>", "System prompt content")
+  .option("--trigger-type <type>", "New trigger type: always, criteria, taskPrompt, promptFeature")
+  .option("--trigger-ids <ids...>", "Trigger IDs")
+  .option("--trigger-match <match>", "Trigger match mode: any or all")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {};
+      if (options.name !== undefined) body.name = options.name;
+      if (options.description !== undefined) body.description = options.description;
+      if (options.userPrompt !== undefined) body.userPrompt = options.userPrompt;
+      if (options.systemPromptMode && options.systemPromptContent) {
+        body.systemPrompt = {
+          mode: options.systemPromptMode,
+          content: options.systemPromptContent,
+        };
+      }
+      if (options.triggerType) {
+        const trigger: Record<string, unknown> = { type: options.triggerType };
+        if (options.triggerType === 'criteria' && options.triggerIds) {
+          trigger.criteriaIds = options.triggerIds;
+          if (options.triggerMatch) trigger.match = options.triggerMatch;
+        } else if (options.triggerType === 'taskPrompt' && options.triggerIds) {
+          trigger.taskPromptIds = options.triggerIds;
+        } else if (options.triggerType === 'promptFeature' && options.triggerIds) {
+          trigger.featureIds = options.triggerIds;
+          if (options.triggerMatch) trigger.match = options.triggerMatch;
+        }
+        body.trigger = trigger;
+      }
+
+      if (Object.keys(body).length === 0) {
+        console.error(errorText("Error: provide at least one field to update"));
+        process.exit(1);
+      }
+
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      console.log(`${successText('Updated report template')} ${value(options.id)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+reportTemplate
+  .command("delete")
+  .description("Delete a report template (soft-delete)")
+  .requiredOption("-i, --id <id>", "Report template ID (slug)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      console.log(`${successText('Deleted report template')} ${value(options.id)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+reportTemplate
+  .command("import")
+  .description("Import report templates from a YAML file (upsert via create/update)")
+  .argument("<path>", "Path to a .yaml file or directory of .yaml files")
+  .option("--dry-run", "Preview what would be imported without sending to API")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (inputPath: string, options) => {
+    try {
+      const absPath = resolve(inputPath);
+      if (!existsSync(absPath)) {
+        console.error(errorText(`Path not found: ${absPath}`));
+        process.exit(1);
+      }
+
+      let yamlFiles: string[];
+      if (statSync(absPath).isDirectory()) {
+        yamlFiles = readdirSync(absPath)
+          .filter(f => extname(f) === '.yaml' || extname(f) === '.yml')
+          .sort()
+          .map(f => join(absPath, f));
+        if (yamlFiles.length === 0) {
+          console.error(errorText(`No .yaml files found in ${absPath}`));
+          process.exit(1);
+        }
+        console.log(`${label('Directory:')} ${value(absPath)} (${yamlFiles.length} files)`);
+      } else {
+        yamlFiles = [absPath];
+        console.log(`${label('File:')} ${value(absPath)}`);
+      }
+
+      const allTemplates: Array<Record<string, unknown>> = [];
+      const parseErrors: string[] = [];
+
+      for (const file of yamlFiles) {
+        const content = readFileSync(file, 'utf-8');
+        const fname = basename(file);
+
+        try {
+          const docs = parseAllDocuments(content);
+          for (let docIdx = 0; docIdx < docs.length; docIdx++) {
+            const doc = docs[docIdx].toJSON();
+            if (!doc || typeof doc !== 'object') continue;
+
+            const template = mapYamlReportTemplate(doc, fname, docIdx);
+            if (template) {
+              allTemplates.push(template);
+            } else {
+              parseErrors.push(`${fname}${docs.length > 1 ? ` (doc ${docIdx + 1})` : ''}: missing id, name, or user_prompt`);
+            }
+          }
+        } catch (e) {
+          parseErrors.push(`${fname}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      if (parseErrors.length > 0) {
+        console.log(`\n${warnBanner('Parse warnings:')}`);
+        for (const err of parseErrors) {
+          console.log(`  ${errorText('⚠')} ${err}`);
+        }
+      }
+
+      if (allTemplates.length === 0) {
+        console.error(errorText('No valid report templates found to import.'));
+        process.exit(1);
+      }
+
+      console.log(`\n${label('Parsed:')} ${value(String(allTemplates.length))} report templates`);
+      for (const t of allTemplates) {
+        const triggerStr = t.trigger ? ` ${dimTimestamp(`(trigger: ${(t.trigger as any).type})`)}` : '';
+        console.log(`  ${value(t.id as string)} — ${t.name}${triggerStr}`);
+      }
+
+      if (options.dryRun) {
+        console.log(`\n${warnBanner('Dry run — no changes made.')}`);
+        return;
+      }
+
+      console.log();
+      let created = 0;
+      let updated = 0;
+      const errors: string[] = [];
+
+      for (const t of allTemplates) {
+        const id = t.id as string;
+        // Try to GET existing
+        const getResp = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${id}`);
+        if (getResp.ok) {
+          // Update
+          const { id: _id, ...updateBody } = t;
+          const resp = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updateBody),
+          });
+          if (resp.ok) {
+            updated++;
+            console.log(`  ${dimTimestamp('updated')} ${value(id)}`);
+          } else {
+            const err = await resp.json();
+            errors.push(`${id}: ${err.error || JSON.stringify(err)}`);
+          }
+        } else if (getResp.status === 404) {
+          // Create
+          const resp = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(t),
+          });
+          if (resp.ok) {
+            created++;
+            console.log(`  ${successText('created')} ${value(id)}`);
+          } else {
+            const err = await resp.json();
+            errors.push(`${id}: ${err.error || JSON.stringify(err)}`);
+          }
+        } else {
+          errors.push(`${id}: failed to check existence (status ${getResp.status})`);
+        }
+      }
+
+      console.log(`\n${successText('Import complete:')} ${value(String(created))} created, ${value(String(updated))} updated`);
+      if (errors.length > 0) {
+        console.log(`\n${warnBanner('Errors:')}`);
+        for (const err of errors) {
+          console.log(`  ${errorText('⚠')} ${err}`);
+        }
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Map a parsed YAML object to a report template API payload.
+ * Handles snake_case → camelCase conversion for YAML convention.
+ */
+function mapYamlReportTemplate(
+  doc: Record<string, unknown>,
+  _filename: string,
+  _docIndex: number
+): Record<string, unknown> | null {
+  const id = doc.id as string | undefined;
+  const name = doc.name as string | undefined;
+  const userPrompt = (doc.user_prompt ?? doc.userPrompt) as string | undefined;
+  if (!id || !name || !userPrompt) return null;
+
+  const result: Record<string, unknown> = {
+    id: id.trim(),
+    name: name.trim(),
+    userPrompt: userPrompt.trim(),
+  };
+
+  const description = doc.description as string | undefined;
+  if (description) result.description = description.trim();
+
+  // System prompt: support snake_case YAML
+  const sysCfg = (doc.system_prompt ?? doc.systemPrompt) as Record<string, unknown> | undefined;
+  if (sysCfg && sysCfg.mode && sysCfg.content) {
+    result.systemPrompt = {
+      mode: String(sysCfg.mode).trim(),
+      content: String(sysCfg.content).trim(),
+    };
+  }
+
+  // Trigger
+  const triggerCfg = doc.trigger as Record<string, unknown> | undefined;
+  if (triggerCfg && triggerCfg.type) {
+    const trigger: Record<string, unknown> = { type: String(triggerCfg.type).trim() };
+    const triggerType = trigger.type as string;
+
+    if (triggerType === 'criteria') {
+      const ids = (triggerCfg.criteria_ids ?? triggerCfg.criteriaIds) as string[] | undefined;
+      if (Array.isArray(ids)) trigger.criteriaIds = ids.map(s => String(s).trim());
+      if (triggerCfg.match) trigger.match = String(triggerCfg.match).trim();
+    } else if (triggerType === 'taskPrompt') {
+      const ids = (triggerCfg.task_prompt_ids ?? triggerCfg.taskPromptIds) as string[] | undefined;
+      if (Array.isArray(ids)) trigger.taskPromptIds = ids.map(s => String(s).trim());
+    } else if (triggerType === 'promptFeature') {
+      const ids = (triggerCfg.feature_ids ?? triggerCfg.featureIds) as string[] | undefined;
+      if (Array.isArray(ids)) trigger.featureIds = ids.map(s => String(s).trim());
+      if (triggerCfg.match) trigger.match = String(triggerCfg.match).trim();
+    }
+
+    result.trigger = trigger;
+  }
+
+  return result;
+}
+
 // ─── Agent management ────────────────────────────────────────────────────────
 
 const agent = program
