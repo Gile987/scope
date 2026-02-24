@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y \
     && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH="/root/.local/bin:$PATH"
-RUN npm install -g @anthropic-ai/claude-code@2.1.37 @github/copilot@0.0.406
+RUN npm install -g @anthropic-ai/claude-code@2.1.37 @github/copilot@0.0.415
 RUN mkdir -p /workspace
 ENV NODE_ENV=development
 ENV SERVICE_DIR=workers/coder-acp-copilot
@@ -56,7 +56,7 @@ RUN apt-get update && apt-get install -y \
 ENV PATH="/root/.local/bin:$PATH"
 
 # Install GitHub Copilot CLI globally
-RUN npm install -g @anthropic-ai/claude-code@2.1.37 @github/copilot@0.0.406
+RUN npm install -g @anthropic-ai/claude-code@2.1.37 @github/copilot@0.0.415
 
 WORKDIR /app
 
