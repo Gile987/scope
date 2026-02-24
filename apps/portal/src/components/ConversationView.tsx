@@ -5,6 +5,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Bot, Scale, CheckCircle2, AlertCircle } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import type { ConversationTurn } from "@/types";
 
 interface ConversationViewProps {
@@ -43,7 +46,9 @@ export function ConversationView({ turns, task }: ConversationViewProps) {
                   Task
                 </Badge>
               </div>
-              <div className="text-sm whitespace-pre-wrap">{task}</div>
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{task}</ReactMarkdown>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -88,8 +93,8 @@ function TurnMessages({ turn }: { turn: ConversationTurn }) {
                 {new Date(turn.timestamp).toLocaleTimeString()}
               </span>
             </div>
-            <div className="text-sm whitespace-pre-wrap max-h-96 overflow-y-auto">
-              {turn.codingAgentResponse}
+            <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{turn.codingAgentResponse}</ReactMarkdown>
             </div>
             {turn.toolCalls && turn.toolCalls.length > 0 && (
               <div className="mt-2 pt-2 border-t border-primary/10">
@@ -119,8 +124,8 @@ function TurnMessages({ turn }: { turn: ConversationTurn }) {
                 </Badge>
               )}
             </div>
-            <div className="text-sm whitespace-pre-wrap max-h-96 overflow-y-auto">
-              {turn.judgeFeedback}
+            <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{turn.judgeFeedback}</ReactMarkdown>
             </div>
 
             {/* Criteria results inline */}

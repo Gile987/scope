@@ -18,6 +18,9 @@ import { CriteriaGraphView } from "@/components/CriteriaGraphView";
 import { HarNetworkViewer } from "@/components/HarNetworkViewer";
 import { ConversationView } from "@/components/ConversationView";
 import { useLogStream } from "@/hooks/use-log-stream";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download } from "lucide-react";
 import { formatDate, formatId } from "@/lib/utils";
 import { useState } from "react";
@@ -446,8 +449,8 @@ export function RunDetail() {
                 <CardHeader>
                   <CardTitle className="text-lg">Result</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm whitespace-pre-wrap">{run.result}</p>
+                <CardContent className="prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{run.result}</ReactMarkdown>
                 </CardContent>
               </Card>
             )}
