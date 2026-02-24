@@ -185,6 +185,8 @@ interface RequestDocument {
     snapshotUrl: string;
     passed: boolean;
     timestamp: Date;
+    toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown>; response?: string; timestamp?: string }>;
+    harUrl?: string;
   }>;
   personaInstructions?: string;
   persona?: { personality: string; experience: string; verbosity: string; type: string };
@@ -193,6 +195,8 @@ interface RequestDocument {
   deletedAt?: Date;
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → task-prompts._id)
   mcpServers?: string[];          // MCP server slugs selected for this run
+  toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown>; response?: string; timestamp?: string }>;
+  harUrl?: string;
 }
 
 // Coding agent document interface
@@ -1133,6 +1137,88 @@ app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: R
 });
 
 // --- Runs upload (import downloaded archives) ---
+
+// Download a HAR (HTTP Archive) file for a specific request or turn
+// For one-shot runs: GET /api/v1/requests/:id/har
+// For multi-turn runs: GET /api/v1/requests/:id/har?iteration=N
+app.get("/api/v1/requests/:id/har", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const iterationParam = req.query.iteration as string | undefined;
+
+    const resource = await collection.findOne({ _id: id });
+    if (!resource) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+
+    // Determine the harUrl — from a specific turn or from the top-level document
+    let harUrl: string | undefined;
+    let label: string;
+
+    if (iterationParam) {
+      const iterNum = parseInt(iterationParam, 10);
+      if (isNaN(iterNum) || iterNum < 1) {
+        res.status(400).json({ error: "Invalid iteration number" });
+        return;
+      }
+      const turn = resource.turns?.find((t: { iteration: number }) => t.iteration === iterNum);
+      harUrl = turn?.harUrl;
+      label = `${id}-iteration-${iterNum}`;
+    } else {
+      // One-shot: harUrl on document root; multi-turn fallback: last turn
+      harUrl = resource.harUrl || resource.turns?.[resource.turns.length - 1]?.harUrl;
+      label = id;
+    }
+
+    if (!harUrl) {
+      res.status(404).json({ error: "No HAR capture available" });
+      return;
+    }
+
+    // Connect to blob storage and proxy the HAR file
+    let blobServiceClient: BlobServiceClient;
+    if (storageConnectionString) {
+      blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+    } else {
+      blobServiceClient = new BlobServiceClient(
+        `https://${storageAccountName}.blob.core.windows.net`,
+        new DefaultAzureCredential()
+      );
+    }
+
+    const parsedUrl = new URL(harUrl);
+    const containerPrefix = "/snapshots/";
+    const containerIndex = parsedUrl.pathname.indexOf(containerPrefix);
+    if (containerIndex === -1) {
+      res.status(500).json({ error: "Invalid HAR URL format" });
+      return;
+    }
+    const blobName = parsedUrl.pathname.substring(containerIndex + containerPrefix.length);
+    const containerClient = blobServiceClient.getContainerClient("snapshots");
+    const blobClient = containerClient.getBlockBlobClient(blobName);
+
+    const downloadResponse = await blobClient.download();
+    if (!downloadResponse.readableStreamBody) {
+      res.status(500).json({ error: "Failed to download HAR file" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="${label}.har"`);
+    if (downloadResponse.contentLength) {
+      res.setHeader("Content-Length", downloadResponse.contentLength);
+    }
+
+    downloadResponse.readableStreamBody.pipe(res);
+  } catch (error) {
+    if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+      res.status(404).json({ error: "HAR file not found — the blob may have been deleted or is no longer available" });
+      return;
+    }
+    next(error);
+  }
+});
 
 // POST /api/v1/runs/upload — Upload a run archive (tar.gz) to import a previously downloaded run
 app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, res: Response, next: NextFunction) => {
