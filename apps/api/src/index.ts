@@ -26,6 +26,7 @@ import {
 } from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument } from "shared";
+import { evaluateTrigger } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 
 const require = createRequire(import.meta.url);
@@ -78,6 +79,7 @@ let insightsCollection: Collection<InsightDocument>;
 let taskPromptCollection: Collection<TaskPromptDocument>;
 let taskPromptStore: TaskPromptStore;
 let featureFlagCollection: Collection<FeatureFlagDocument>;
+let reportTemplateCollection: Collection<ReportTemplateDocument>;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
@@ -122,6 +124,7 @@ interface InsightReference {
 interface ReportDocument {
   _id: string;
   requestId: string;
+  templateId?: string;  // FK → report-templates.id (which template generated this report)
   reporter?: {
     id: string;
     name: string;
@@ -137,6 +140,29 @@ interface ReportDocument {
   insightReferences?: InsightReference[];
   createdAt: Date;
   updatedAt?: Date;
+}
+
+// Report trigger types (discriminated union)
+type ReportTrigger =
+  | { type: "always" }
+  | { type: "criteria"; criteriaIds: string[]; match?: "any" | "all" }
+  | { type: "taskPrompt"; taskPromptIds: string[] }
+  | { type: "promptFeature"; featureIds: string[]; match?: "any" | "all" };
+
+// Report template document interface
+interface ReportTemplateDocument {
+  id: string;                // Human-readable slug (e.g. "default", "failure-analysis")
+  name: string;              // Display name
+  description?: string;
+  userPrompt: string;        // REQUIRED — the agent instruction
+  systemPrompt?: {           // OPTIONAL — customize base system prompt
+    mode: "append" | "override";
+    content: string;
+  };
+  trigger?: ReportTrigger;   // OPTIONAL — omit = "always"
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;
 }
 
 // Insight document interface
@@ -377,6 +403,7 @@ async function initializeClients(): Promise<void> {
   taskPromptCollection = db.collection<TaskPromptDocument>("task-prompts");
   taskPromptStore = new TaskPromptStore(taskPromptCollection);
   featureFlagCollection = db.collection<FeatureFlagDocument>("feature-flags");
+  reportTemplateCollection = db.collection<ReportTemplateDocument>("report-templates");
 
   // Note: Collection indexes are managed by db-migrations (see 002-create-indexes.ts).
   // Run `pnpm migrate:up` to apply pending migrations.
@@ -2160,9 +2187,10 @@ app.delete("/api/v1/prompt-features/:id", async (req: Request, res: Response, ne
 // ==================== Report Endpoints ====================
 
 // Create a report for a run (POST /api/v1/reports)
+// Accepts optional templateId to associate the report with a report template.
 app.post("/api/v1/reports", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { requestId } = req.body;
+    const { requestId, templateId } = req.body;
 
     if (!requestId || typeof requestId !== "string") {
       res.status(400).json({ error: "requestId is required and must be a string" });
@@ -2176,11 +2204,21 @@ app.post("/api/v1/reports", async (req: Request, res: Response, next: NextFuncti
       return;
     }
 
+    // Verify the template exists (if specified)
+    if (templateId) {
+      const template = await reportTemplateCollection.findOne({ id: templateId, deletedAt: { $exists: false } });
+      if (!template) {
+        res.status(404).json({ error: `Report template '${templateId}' not found` });
+        return;
+      }
+    }
+
     const reportId = uuidv4();
 
     const reportDoc: ReportDocument = {
       _id: reportId,
       requestId,
+      ...(templateId ? { templateId } : {}),
       status: "pending",
       logs: [],
       createdAt: new Date(),
@@ -2192,11 +2230,12 @@ app.post("/api/v1/reports", async (req: Request, res: Response, next: NextFuncti
     const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
     await reportQueueClient.sendMessage(messageContent);
 
-    console.log(`Created report ${reportId} for run ${requestId} and queued for processing`);
+    console.log(`Created report ${reportId} for run ${requestId}${templateId ? ` (template: ${templateId})` : ""} and queued for processing`);
 
     res.status(201).json({
       id: reportId,
       requestId,
+      ...(templateId ? { templateId } : {}),
       status: "pending",
       message: "Report generation queued",
     });
@@ -2468,6 +2507,353 @@ app.get("/api/v1/requests/:id/reports", async (req: Request, res: Response, next
     next(error);
   }
 });
+
+// POST /api/v1/reports/trigger — evaluate all report templates' triggers for a completed run
+// Called by coding agent workers after a run completes. Creates a report per matching template.
+app.post("/api/v1/reports/trigger", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { requestId } = req.body;
+
+    if (!requestId || typeof requestId !== "string") {
+      res.status(400).json({ error: "requestId is required and must be a string" });
+      return;
+    }
+
+    // Fetch the completed run
+    const run = await collection.findOne({ _id: requestId });
+    if (!run) {
+      res.status(404).json({ error: `Run ${requestId} not found` });
+      return;
+    }
+
+    // Fetch task prompt document (needed for promptFeature trigger evaluation)
+    let taskPrompt: TaskPromptDocument | null = null;
+    if (run.taskPromptId) {
+      taskPrompt = await taskPromptCollection.findOne({ _id: run.taskPromptId });
+    }
+
+    // Load all active report templates
+    const templates = await reportTemplateCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+
+    if (templates.length === 0) {
+      // No templates defined — fall back to legacy behavior (create a single report without template)
+      const reportId = uuidv4();
+      const reportDoc: ReportDocument = {
+        _id: reportId,
+        requestId,
+        status: "pending",
+        logs: [],
+        createdAt: new Date(),
+      };
+      await reportCollection.insertOne(reportDoc);
+      const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
+      await reportQueueClient.sendMessage(messageContent);
+      console.log(`No templates defined — created legacy report ${reportId} for run ${requestId}`);
+      res.status(201).json({ triggered: 1, reports: [{ id: reportId, requestId, status: "pending" }] });
+      return;
+    }
+
+    // Evaluate each template's trigger against the run
+    const created: Array<{ id: string; requestId: string; templateId: string; status: string }> = [];
+
+    for (const template of templates) {
+      // Cast the run to the shared RequestDocument shape for evaluateTrigger
+      const triggerResult = evaluateTrigger(
+        template.trigger as any,
+        run as any,
+        taskPrompt as any
+      );
+
+      if (triggerResult) {
+        const reportId = uuidv4();
+        const reportDoc: ReportDocument = {
+          _id: reportId,
+          requestId,
+          templateId: template.id,
+          status: "pending",
+          logs: [],
+          createdAt: new Date(),
+        };
+        await reportCollection.insertOne(reportDoc);
+        const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
+        await reportQueueClient.sendMessage(messageContent);
+
+        created.push({ id: reportId, requestId, templateId: template.id, status: "pending" });
+        console.log(`Trigger matched template '${template.id}' — created report ${reportId} for run ${requestId}`);
+      }
+    }
+
+    console.log(`Trigger evaluation for run ${requestId}: ${created.length}/${templates.length} templates matched`);
+    res.status(201).json({ triggered: created.length, reports: created });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================
+// Report Template CRUD routes (/api/v1/report-templates)
+// ============================================================
+
+// List all report templates
+app.get("/api/v1/report-templates", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const q = req.query.q as string | undefined;
+    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    if (q) {
+      filter.$or = [
+        { id: { $regex: q, $options: "i" } },
+        { name: { $regex: q, $options: "i" } },
+        { description: { $regex: q, $options: "i" } },
+      ];
+    }
+    const templates = await reportTemplateCollection.find(filter).toArray();
+    templates.sort((a, b) => a.id.localeCompare(b.id));
+    res.json(templates);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get single report template by ID
+app.get("/api/v1/report-templates/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const template = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (!template) {
+      res.status(404).json({ error: `Report template '${id}' not found` });
+      return;
+    }
+    res.json(template);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create a report template
+app.post("/api/v1/report-templates", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, name, description, userPrompt, systemPrompt, trigger } = req.body;
+
+    if (!id || typeof id !== "string") {
+      res.status(400).json({ error: "id is required and must be a string" });
+      return;
+    }
+    if (!/^[a-z][a-z0-9_-]*$/.test(id)) {
+      res.status(400).json({ error: "id must start with a lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores" });
+      return;
+    }
+    if (!name || typeof name !== "string") {
+      res.status(400).json({ error: "name is required and must be a string" });
+      return;
+    }
+    if (!userPrompt || typeof userPrompt !== "string") {
+      res.status(400).json({ error: "userPrompt is required and must be a string" });
+      return;
+    }
+
+    // Validate systemPrompt if provided
+    if (systemPrompt !== undefined) {
+      if (!systemPrompt || typeof systemPrompt !== "object") {
+        res.status(400).json({ error: "systemPrompt must be an object with 'mode' and 'content'" });
+        return;
+      }
+      if (!["append", "override"].includes(systemPrompt.mode)) {
+        res.status(400).json({ error: "systemPrompt.mode must be 'append' or 'override'" });
+        return;
+      }
+      if (!systemPrompt.content || typeof systemPrompt.content !== "string") {
+        res.status(400).json({ error: "systemPrompt.content is required and must be a string" });
+        return;
+      }
+    }
+
+    // Validate trigger if provided
+    if (trigger !== undefined) {
+      const triggerError = validateTrigger(trigger);
+      if (triggerError) {
+        res.status(400).json({ error: triggerError });
+        return;
+      }
+    }
+
+    // Check for duplicate id
+    const existing = await reportTemplateCollection.findOne({ id });
+    if (existing && !existing.deletedAt) {
+      res.status(409).json({ error: `Report template '${id}' already exists` });
+      return;
+    }
+
+    const now = new Date();
+
+    if (existing && existing.deletedAt) {
+      // Un-delete: update the soft-deleted document
+      await reportTemplateCollection.updateOne(
+        { id },
+        {
+          $set: {
+            name,
+            ...(description !== undefined ? { description } : {}),
+            userPrompt,
+            ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+            ...(trigger !== undefined ? { trigger } : {}),
+            updatedAt: now,
+          },
+          $unset: { deletedAt: "" },
+        }
+      );
+      const updated = await reportTemplateCollection.findOne({ id });
+      res.status(201).json(updated);
+    } else {
+      const templateDoc: ReportTemplateDocument = {
+        id,
+        name,
+        ...(description ? { description } : {}),
+        userPrompt,
+        ...(systemPrompt ? { systemPrompt } : {}),
+        ...(trigger ? { trigger } : {}),
+        createdAt: now,
+      };
+      await reportTemplateCollection.insertOne(templateDoc as any);
+      res.status(201).json(templateDoc);
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update a report template
+app.put("/api/v1/report-templates/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { name, description, userPrompt, systemPrompt, trigger } = req.body;
+
+    const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: `Report template '${id}' not found` });
+      return;
+    }
+
+    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+    if (name !== undefined) updateFields.name = name;
+    if (description !== undefined) updateFields.description = description;
+    if (userPrompt !== undefined) {
+      if (typeof userPrompt !== "string" || !userPrompt.trim()) {
+        res.status(400).json({ error: "userPrompt must be a non-empty string" });
+        return;
+      }
+      updateFields.userPrompt = userPrompt;
+    }
+    if (systemPrompt !== undefined) {
+      if (systemPrompt === null) {
+        // Allow removing systemPrompt by setting to null
+        updateFields.systemPrompt = undefined;
+      } else {
+        if (!["append", "override"].includes(systemPrompt.mode)) {
+          res.status(400).json({ error: "systemPrompt.mode must be 'append' or 'override'" });
+          return;
+        }
+        if (!systemPrompt.content || typeof systemPrompt.content !== "string") {
+          res.status(400).json({ error: "systemPrompt.content is required and must be a string" });
+          return;
+        }
+        updateFields.systemPrompt = systemPrompt;
+      }
+    }
+    if (trigger !== undefined) {
+      if (trigger === null) {
+        // Allow removing trigger (reverts to "always" behavior)
+        updateFields.trigger = undefined;
+      } else {
+        const triggerError = validateTrigger(trigger);
+        if (triggerError) {
+          res.status(400).json({ error: triggerError });
+          return;
+        }
+        updateFields.trigger = trigger;
+      }
+    }
+
+    await reportTemplateCollection.updateOne({ id }, { $set: updateFields });
+    const updated = await reportTemplateCollection.findOne({ id });
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete a report template (soft-delete)
+app.delete("/api/v1/report-templates/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+    if (!existing) {
+      res.status(404).json({ error: `Report template '${id}' not found` });
+      return;
+    }
+
+    await reportTemplateCollection.updateOne(
+      { id },
+      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+    );
+
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Validate a ReportTrigger object shape.
+ * Returns an error message if invalid, or null if valid.
+ */
+function validateTrigger(trigger: unknown): string | null {
+  if (!trigger || typeof trigger !== "object") {
+    return "trigger must be an object";
+  }
+  const t = trigger as Record<string, unknown>;
+  if (!t.type || typeof t.type !== "string") {
+    return "trigger.type is required and must be a string";
+  }
+  switch (t.type) {
+    case "always":
+      return null;
+    case "criteria":
+      if (!Array.isArray(t.criteriaIds) || t.criteriaIds.length === 0) {
+        return "trigger.criteriaIds must be a non-empty array of strings";
+      }
+      if (!t.criteriaIds.every((id: unknown) => typeof id === "string")) {
+        return "trigger.criteriaIds must only contain strings";
+      }
+      if (t.match !== undefined && t.match !== "any" && t.match !== "all") {
+        return "trigger.match must be 'any' or 'all'";
+      }
+      return null;
+    case "taskPrompt":
+      if (!Array.isArray(t.taskPromptIds) || t.taskPromptIds.length === 0) {
+        return "trigger.taskPromptIds must be a non-empty array of strings";
+      }
+      if (!t.taskPromptIds.every((id: unknown) => typeof id === "string")) {
+        return "trigger.taskPromptIds must only contain strings";
+      }
+      return null;
+    case "promptFeature":
+      if (!Array.isArray(t.featureIds) || t.featureIds.length === 0) {
+        return "trigger.featureIds must be a non-empty array of strings";
+      }
+      if (!t.featureIds.every((id: unknown) => typeof id === "string")) {
+        return "trigger.featureIds must only contain strings";
+      }
+      if (t.match !== undefined && t.match !== "any" && t.match !== "all") {
+        return "trigger.match must be 'any' or 'all'";
+      }
+      return null;
+    default:
+      return `Unknown trigger type: '${t.type}'. Valid types: always, criteria, taskPrompt, promptFeature`;
+  }
+}
 
 // =============================================================================
 // Token Manager proxy (admin CRUD - excludes /acquire which is worker-only)
