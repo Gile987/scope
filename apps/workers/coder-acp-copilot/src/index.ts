@@ -33,6 +33,7 @@ class CopilotProcessor implements WorkerProcessor {
     
     // DevProxy integration — start recording if enabled
     let devProxy: DevProxyClient | null = null;
+    let sslCertFile: string | undefined;
     if (DevProxyClient.isEnabled()) {
       devProxy = new DevProxyClient();
       try {
@@ -41,6 +42,11 @@ class CopilotProcessor implements WorkerProcessor {
         // Download CA cert if needed (for NODE_EXTRA_CA_CERTS)
         const certPath = process.env.NODE_EXTRA_CA_CERTS || "/certs/dev-proxy-ca.crt";
         await devProxy.downloadCertificate(certPath);
+        // Create combined CA bundle for native binaries (SSL_CERT_FILE)
+        // The copilot binary is a native executable that doesn't use NODE_EXTRA_CA_CERTS
+        const bundlePath = "/certs/ca-bundle-combined.crt";
+        sslCertFile = await devProxy.createCombinedCaBundle(certPath, bundlePath);
+        await log("info", "DevProxy CA cert installed for native binaries", { sslCertFile });
         await devProxy.startRecording();
         await log("info", "DevProxy recording started");
       } catch (error) {
@@ -67,6 +73,8 @@ class CopilotProcessor implements WorkerProcessor {
         args,
         env: {
           GITHUB_TOKEN: githubToken,
+          // Native binaries (Go/Rust) don't use NODE_EXTRA_CA_CERTS - they use SSL_CERT_FILE
+          ...(sslCertFile ? { SSL_CERT_FILE: sslCertFile } : {}),
         },
         cwd: "/workspace",
         onLog: async (msg) => {

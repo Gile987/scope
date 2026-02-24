@@ -318,7 +318,7 @@ services:
       DEV_PROXY_HAR_DIR: /har-output
       HTTP_PROXY: http://devproxy-copilot:18000
       HTTPS_PROXY: http://devproxy-copilot:18000
-      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager"
+      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-copilot"
       NODE_EXTRA_CA_CERTS: /certs/dev-proxy-ca.crt
     volumes:
       - copilot_har_output:/har-output

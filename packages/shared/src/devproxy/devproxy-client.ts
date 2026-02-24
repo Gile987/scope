@@ -8,7 +8,7 @@
  * Used by workers to start/stop recording and download the CA certificate.
  */
 
-import { writeFile, access, readdir } from "node:fs/promises";
+import { writeFile, readFile, access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 const DEFAULT_API_URL = "http://localhost:18897";
@@ -130,6 +130,57 @@ export class DevProxyClient {
     }
     const certData = await response.text();
     await writeFile(outputPath, certData, "utf-8");
+  }
+
+  /**
+   * Create a combined CA bundle (system certs + DevProxy CA cert) for native binaries.
+   *
+   * Native executables (Go, Rust, etc.) don't use NODE_EXTRA_CA_CERTS. Instead,
+   * they use the system CA bundle or SSL_CERT_FILE. This method appends the DevProxy
+   * CA cert to the system bundle and writes it to a new file that can be referenced
+   * via SSL_CERT_FILE.
+   *
+   * @param devProxyCertPath Path to the DevProxy CA cert (PEM format)
+   * @param outputPath Where to write the combined bundle
+   * @returns The path to the combined bundle
+   */
+  async createCombinedCaBundle(devProxyCertPath: string, outputPath: string): Promise<string> {
+    // Skip if bundle already exists
+    try {
+      await access(outputPath);
+      return outputPath;
+    } catch {
+      // File doesn't exist — create it
+    }
+
+    // Read the DevProxy CA cert
+    const devProxyCert = await readFile(devProxyCertPath, "utf-8");
+
+    // Common system CA bundle locations
+    const systemCaBundlePaths = [
+      "/etc/ssl/certs/ca-certificates.crt",    // Debian/Ubuntu
+      "/etc/pki/tls/certs/ca-bundle.crt",      // RHEL/CentOS
+      "/etc/ssl/ca-bundle.pem",                // OpenSUSE
+      "/etc/ssl/cert.pem",                     // Alpine/macOS
+    ];
+
+    let systemCerts = "";
+    for (const bundlePath of systemCaBundlePaths) {
+      try {
+        systemCerts = await readFile(bundlePath, "utf-8");
+        break;
+      } catch {
+        // Try next path
+      }
+    }
+
+    // Combine system certs with DevProxy cert
+    const combined = systemCerts
+      ? `${systemCerts.trimEnd()}\n${devProxyCert}`
+      : devProxyCert;
+
+    await writeFile(outputPath, combined, "utf-8");
+    return outputPath;
   }
 
   /**

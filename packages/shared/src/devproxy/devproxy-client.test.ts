@@ -7,12 +7,14 @@ import { DevProxyClient } from "./devproxy-client.js";
 // Mock node:fs/promises
 vi.mock("node:fs/promises", () => ({
   writeFile: vi.fn(),
+  readFile: vi.fn(),
   access: vi.fn(),
   readdir: vi.fn(),
 }));
 
-import { writeFile, access, readdir } from "node:fs/promises";
+import { writeFile, readFile, access, readdir } from "node:fs/promises";
 const mockWriteFile = vi.mocked(writeFile);
+const mockReadFile = vi.mocked(readFile);
 const mockAccess = vi.mocked(access);
 const mockReaddir = vi.mocked(readdir);
 
@@ -192,6 +194,59 @@ describe("DevProxyClient", () => {
       await expect(client.downloadCertificate("/certs/ca.crt")).rejects.toThrow(
         "Failed to download certificate"
       );
+    });
+  });
+
+  describe("createCombinedCaBundle", () => {
+    it("skips creation if bundle already exists", async () => {
+      mockAccess.mockResolvedValueOnce(undefined);
+
+      const client = new DevProxyClient("http://test:18897");
+      const result = await client.createCombinedCaBundle("/certs/ca.crt", "/certs/bundle.crt");
+
+      expect(result).toBe("/certs/bundle.crt");
+      expect(mockReadFile).not.toHaveBeenCalled();
+    });
+
+    it("creates combined bundle with system certs + devproxy cert", async () => {
+      mockAccess.mockRejectedValueOnce(new Error("ENOENT"));
+      const devproxyCert = "-----BEGIN CERTIFICATE-----\ndevproxy\n-----END CERTIFICATE-----";
+      const systemCerts = "-----BEGIN CERTIFICATE-----\nsystem\n-----END CERTIFICATE-----";
+      mockReadFile
+        .mockResolvedValueOnce(devproxyCert as any) // devproxy cert
+        .mockResolvedValueOnce(systemCerts as any); // system CA bundle
+
+      const client = new DevProxyClient("http://test:18897");
+      const result = await client.createCombinedCaBundle("/certs/ca.crt", "/certs/bundle.crt");
+
+      expect(result).toBe("/certs/bundle.crt");
+      expect(mockWriteFile).toHaveBeenCalledWith(
+        "/certs/bundle.crt",
+        expect.stringContaining(systemCerts),
+        "utf-8"
+      );
+      expect(mockWriteFile).toHaveBeenCalledWith(
+        "/certs/bundle.crt",
+        expect.stringContaining(devproxyCert),
+        "utf-8"
+      );
+    });
+
+    it("uses only devproxy cert if no system bundle found", async () => {
+      mockAccess.mockRejectedValueOnce(new Error("ENOENT"));
+      const devproxyCert = "-----BEGIN CERTIFICATE-----\ndevproxy\n-----END CERTIFICATE-----";
+      mockReadFile
+        .mockResolvedValueOnce(devproxyCert as any) // devproxy cert
+        .mockRejectedValueOnce(new Error("ENOENT")) // /etc/ssl/certs/ca-certificates.crt
+        .mockRejectedValueOnce(new Error("ENOENT")) // /etc/pki/tls/certs/ca-bundle.crt
+        .mockRejectedValueOnce(new Error("ENOENT")) // /etc/ssl/ca-bundle.pem
+        .mockRejectedValueOnce(new Error("ENOENT")); // /etc/ssl/cert.pem
+
+      const client = new DevProxyClient("http://test:18897");
+      const result = await client.createCombinedCaBundle("/certs/ca.crt", "/certs/bundle.crt");
+
+      expect(result).toBe("/certs/bundle.crt");
+      expect(mockWriteFile).toHaveBeenCalledWith("/certs/bundle.crt", devproxyCert, "utf-8");
     });
   });
 
