@@ -428,6 +428,7 @@ async function initializeClients(): Promise<void> {
     await modelCollection.createIndex({ agentId: 1 });
     await modelCollection.createIndex({ provider: 1 });
     await modelCollection.createIndex({ agentId: 1, provider: 1 });
+    await modelCollection.createIndex({ modelId: 1 });
     console.log("Created indexes on models collection");
   } catch (err) {
     console.log("Indexes on models collection already exist or couldn't be created");
