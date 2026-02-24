@@ -28,13 +28,14 @@ IMAGE_ARGS=("${@:-all}")
 echo "Using ACR: ${ACR_NAME}"
 
 # Image list
-ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal token-manager model-scanner-copilot model-scanner-anthropic"
+ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal token-manager model-scanner-copilot model-scanner-anthropic report-generator"
 
 get_dockerfile() {
   local name=$1
   case "$name" in
     api|judge|portal) echo "apps/${name}/Dockerfile" ;;
     coder-acp-*) echo "apps/workers/${name}/Dockerfile" ;;
+    report-generator) echo "apps/workers/${name}/Dockerfile" ;;
     model-scanner-copilot) echo "apps/model-scanners/copilot/Dockerfile" ;;
     model-scanner-anthropic) echo "apps/model-scanners/anthropic/Dockerfile" ;;
     *) echo "apps/${name}/Dockerfile" ;;
