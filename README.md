@@ -191,20 +191,15 @@ azd up
 
 ### Configure Worker Credentials
 
-After deployment, set the required credentials for each worker:
+Worker credentials (GitHub tokens, Anthropic API keys) are managed centrally via the **Token Manager** service. Workers acquire tokens dynamically at runtime — no static secrets are injected into pods.
 
-```bash
-# Set Anthropic API key for Claude Code worker
-azd env get-values | xargs -I {} sh -c 'export {}' && \
-az containerapp update --name coder-acp-claude-code \
-  --resource-group $(azd env get-values | grep AZURE_RESOURCE_GROUP | cut -d= -f2 | tr -d '"') \
-  --set-env-vars "ANTHROPIC_API_KEY=<your-anthropic-api-key>"
+To register tokens, use the Token Manager admin UI in the portal:
 
-# Set GitHub token for Copilot worker
-az containerapp update --name coder-acp-copilot \
-  --resource-group $(azd env get-values | grep AZURE_RESOURCE_GROUP | cut -d= -f2 | tr -d '"') \
-  --set-env-vars "GITHUB_TOKEN=<your-github-token>"
-```
+1. Navigate to the portal → **Tokens** page
+2. Click **Register Token** and paste your token (e.g., `gho_` from `gh auth token`, or `sk-ant-` Anthropic key)
+3. The token's capabilities are auto-detected and it becomes available to workers immediately
+
+See [Token Manager Architecture](docs/architecture/token-manager.md) for details on token types, capabilities, and the acquisition flow.
 
 #### VS Code Web Auth State
 
