@@ -16,7 +16,7 @@ import { LogViewer } from "@/components/LogViewer";
 import { TurnTimeline } from "@/components/TurnTimeline";
 import { CriteriaGraphView } from "@/components/CriteriaGraphView";
 import { useLogStream } from "@/hooks/use-log-stream";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download } from "lucide-react";
 import { formatDate, formatId } from "@/lib/utils";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -113,6 +113,7 @@ export function RunDetail() {
   }
 
   const isV2 = run.scenario?.version === "v2";
+  const hasHarData = !!(run.harUrl || run.turns?.some(t => t.harUrl || (t.toolCalls && t.toolCalls.length > 0)));
 
   return (
     <div className="space-y-6">
@@ -186,6 +187,7 @@ export function RunDetail() {
             Reports {reports && reports.length > 0 ? `(${reports.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
+          {hasHarData && <TabsTrigger value="network">Network</TabsTrigger>}
         </TabsList>
 
         {/* Turns tab */}
@@ -426,6 +428,117 @@ export function RunDetail() {
             )}
           </div>
         </TabsContent>
+
+        {/* Network tab — HAR captures & tool calls summary */}
+        {hasHarData && (
+          <TabsContent value="network" className="mt-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-medium">Network Captures</h3>
+              {run.harUrl && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => window.open(api.harUrl(run._id), "_blank")}
+                >
+                  <Download className="h-4 w-4" />
+                  Download HAR
+                </Button>
+              )}
+            </div>
+
+            {/* Tool calls summary across all turns */}
+            {(() => {
+              const allToolCalls = [
+                ...(run.toolCalls ?? []),
+                ...(run.turns?.flatMap(t => (t.toolCalls ?? []).map(tc => ({ ...tc, _iteration: t.iteration }))) ?? []),
+              ];
+              if (allToolCalls.length === 0) return (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>No tool calls captured. HAR file may still be available for download.</p>
+                </div>
+              );
+
+              // Group by tool name for summary
+              const byName = new Map<string, number>();
+              for (const tc of allToolCalls) {
+                byName.set(tc.name, (byName.get(tc.name) ?? 0) + 1);
+              }
+
+              return (
+                <div className="space-y-4">
+                  {/* Summary badges */}
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from(byName.entries())
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([name, count]) => (
+                        <Badge key={name} variant="secondary" className="font-mono text-xs gap-1">
+                          {name} <span className="text-muted-foreground">×{count}</span>
+                        </Badge>
+                      ))}
+                  </div>
+
+                  {/* Full tool calls table */}
+                  <Card>
+                    <CardContent className="p-0">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b bg-muted/50">
+                              <th className="text-left p-3 font-medium">Tool</th>
+                              <th className="text-left p-3 font-medium">Arguments</th>
+                              <th className="text-left p-3 font-medium">Time</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {allToolCalls.map((tc, idx) => (
+                              <tr key={tc.id || idx} className="border-b last:border-0">
+                                <td className="p-3">
+                                  <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                                    {tc.name}
+                                  </span>
+                                </td>
+                                <td className="p-3">
+                                  <pre className="text-xs text-muted-foreground max-w-md truncate">
+                                    {JSON.stringify(tc.arguments)}
+                                  </pre>
+                                </td>
+                                <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
+                                  {tc.timestamp ? new Date(tc.timestamp).toLocaleTimeString() : "–"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Per-turn HAR download links */}
+                  {run.turns && run.turns.some(t => t.harUrl) && (
+                    <div>
+                      <h4 className="text-sm font-medium mb-2">Per-Turn HAR Files</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {run.turns.filter(t => t.harUrl).map(t => (
+                          <Button
+                            key={t.iteration}
+                            variant="outline"
+                            size="sm"
+                            className="gap-1 font-mono text-xs"
+                            onClick={() => window.open(api.harUrl(run._id, t.iteration), "_blank")}
+                          >
+                            <Download className="h-3 w-3" />
+                            Iteration {t.iteration}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );
