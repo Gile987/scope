@@ -52,6 +52,7 @@ jobs:
       token-manager: ${{ steps.changes.outputs.token-manager }}
       model-scanner-copilot: ${{ steps.changes.outputs.model-scanner-copilot }}
       model-scanner-anthropic: ${{ steps.changes.outputs.model-scanner-anthropic }}
+      report-generator: ${{ steps.changes.outputs.report-generator }}
       db-migrations: ${{ steps.changes.outputs.db-migrations }}
       shared: ${{ steps.changes.outputs.shared }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
@@ -85,6 +86,8 @@ jobs:
               - 'apps/model-scanners/copilot/**'
             model-scanner-anthropic:
               - 'apps/model-scanners/anthropic/**'
+            report-generator:
+              - 'apps/workers/report-generator/**'
             db-migrations:
               - 'packages/db-migrations/**'
 
@@ -99,6 +102,7 @@ jobs:
         needs.detect-changes.outputs.token-manager == 'true' ||
         needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
         needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
+        needs.detect-changes.outputs.report-generator == 'true' ||
         needs.detect-changes.outputs.db-migrations == 'true' ||
         needs.detect-changes.outputs.shared == 'true' ||
         needs.detect-changes.outputs.model-scanning == 'true'
@@ -134,6 +138,9 @@ jobs:
           - name: model-scanner-anthropic
             dockerfile: apps/model-scanners/anthropic/Dockerfile
             changed: ${{ (needs.detect-changes.outputs.model-scanner-anthropic == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
+          - name: report-generator
+            dockerfile: apps/workers/report-generator/Dockerfile
+            changed: ${{ (needs.detect-changes.outputs.report-generator == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: db-migrations
             dockerfile: packages/db-migrations/Dockerfile
             changed: ${{ (needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
@@ -190,6 +197,7 @@ jobs:
         needs.detect-changes.outputs.token-manager == 'true' ||
         needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
         needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
+        needs.detect-changes.outputs.report-generator == 'true' ||
         needs.detect-changes.outputs.db-migrations == 'true' ||
         needs.detect-changes.outputs.shared == 'true' ||
         needs.detect-changes.outputs.model-scanning == 'true'
@@ -225,6 +233,9 @@ jobs:
           - name: model-scanner-anthropic
             dockerfile: apps/model-scanners/anthropic/Dockerfile
             changed: ${{ (needs.detect-changes.outputs.model-scanner-anthropic == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
+          - name: report-generator
+            dockerfile: apps/workers/report-generator/Dockerfile
+            changed: ${{ (needs.detect-changes.outputs.report-generator == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: db-migrations
             dockerfile: packages/db-migrations/Dockerfile
             changed: ${{ (needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
@@ -281,6 +292,7 @@ jobs:
           case "${{ matrix.image }}" in
             api|judge|portal) DOCKERFILE="apps/${{ matrix.image }}/Dockerfile" ;;
             coder-*) DOCKERFILE="apps/workers/${{ matrix.image }}/Dockerfile" ;;
+            report-generator) DOCKERFILE="apps/workers/${{ matrix.image }}/Dockerfile" ;;
             model-scanner-copilot) DOCKERFILE="apps/model-scanners/copilot/Dockerfile" ;;
             model-scanner-anthropic) DOCKERFILE="apps/model-scanners/anthropic/Dockerfile" ;;
             db-migrations) DOCKERFILE="packages/db-migrations/Dockerfile" ;;
