@@ -84,10 +84,11 @@ run
   .option("--max-iterations <number>", "Max judge iterations for multi-turn mode", parseInt)
   .option("--model <model>", "Model to use for the coding agent")
   .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
+  .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs } = options;
 
     try {
       // Resolve scenario + persona YAML if provided
@@ -140,6 +141,9 @@ run
       }
       if (mcpServerSlugs && mcpServerSlugs.length > 0) {
         body.mcpServers = mcpServerSlugs;
+      }
+      if (skillSlugs && skillSlugs.length > 0) {
+        body.skills = skillSlugs;
       }
 
       const response = await fetch(`${normalizeUrl(url)}/api/v1/requests?worker=${worker}`, {
@@ -2805,6 +2809,246 @@ mcpServer
         process.exit(1);
       }
       console.log(successText(`MCP server "${options.id}" deleted.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// ─── Skill management ────────────────────────────────────────────────────────
+
+const skill = program
+  .command("skill")
+  .description("Manage agent skills (Agent Skills Specification)")
+  .action(() => {
+    skill.help();
+  });
+
+configureHelp(skill);
+
+skill
+  .command("list")
+  .description("List all imported skills")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+  .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const skills = await response.json() as Array<{ _id: string; name: string; source: string; description?: string; origin: string }>;
+      if (skills.length === 0) {
+        if (!isMachineReadable(format)) console.log(warnBanner("No skills found."));
+        return;
+      }
+      if (!isMachineReadable(format)) {
+        console.log(label(`Found ${skills.length} skill(s):\n`));
+      }
+      const displayFields: DisplayField[] = [
+        { key: '_id', label: 'Slug', tableFormatter: (s: any) => value(s._id) },
+        { key: 'name', label: 'Name' },
+        { key: 'source', label: 'Source' },
+        { key: 'origin', label: 'Origin' },
+        { key: 'description', label: 'Description', formatter: (s: any) => s.description || '—' },
+      ];
+      console.log(formatData(skills, displayFields, format));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+skill
+  .command("search")
+  .description("Search skills (internal + skills.sh registry)")
+  .requiredOption("-q, --query <query>", "Search query")
+  .option("--limit <number>", "Maximum results", parseInt)
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+  .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
+    try {
+      const params = new URLSearchParams({ q: options.query });
+      if (options.limit) params.set('limit', String(options.limit));
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/search?${params}`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const results = await response.json() as Array<{ id: string; name: string; source: string; description?: string; internal: boolean; installs?: number }>;
+      if (results.length === 0) {
+        if (!isMachineReadable(format)) console.log(warnBanner("No skills found."));
+        return;
+      }
+      if (!isMachineReadable(format)) {
+        console.log(label(`Found ${results.length} result(s):\n`));
+      }
+      const displayFields: DisplayField[] = [
+        { key: 'id', label: 'Slug', tableFormatter: (s: any) => value(s.id) },
+        { key: 'name', label: 'Name' },
+        { key: 'source', label: 'Source' },
+        { key: 'internal', label: 'Imported', formatter: (s: any) => s.internal ? 'Yes' : 'No' },
+        { key: 'installs', label: 'Installs', formatter: (s: any) => s.installs != null ? String(s.installs) : '—' },
+        { key: 'description', label: 'Description', formatter: (s: any) => s.description || '—' },
+      ];
+      console.log(formatData(results, displayFields, format));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+skill
+  .command("get")
+  .description("Get details of a skill")
+  .requiredOption("-i, --id <id>", "Skill slug (e.g. vercel-labs/agent-skills/my-skill)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const s = await response.json();
+      console.log(`${label('Slug:')} ${value(s._id)}`);
+      console.log(`${label('Name:')} ${value(s.name)}`);
+      console.log(`${label('Source:')} ${value(s.source)}`);
+      console.log(`${label('Skill Name:')} ${value(s.skillName)}`);
+      console.log(`${label('Origin:')} ${value(s.origin)}`);
+      if (s.description) console.log(`${label('Description:')} ${s.description}`);
+      console.log(`${label('Created:')} ${new Date(s.createdAt).toLocaleString()}`);
+      if (s.updatedAt) console.log(`${label('Updated:')} ${new Date(s.updatedAt).toLocaleString()}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+skill
+  .command("import")
+  .description("Import a skill from a GitHub repository")
+  .requiredOption("--source <source>", "GitHub repo (e.g. vercel-labs/agent-skills)")
+  .requiredOption("--skill-name <name>", "Skill name within the repo")
+  .requiredOption("--name <displayName>", "Display name")
+  .option("--description <desc>", "Description")
+  .option("--origin <origin>", "Origin: skills-sh or manual", "manual")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {
+        source: options.source,
+        skillName: options.skillName,
+        name: options.name,
+        origin: options.origin,
+      };
+      if (options.description) body.description = options.description;
+
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const created = await response.json();
+      console.log(successText(`Skill "${created._id}" imported.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+skill
+  .command("delete")
+  .description("Delete a skill (soft-delete)")
+  .requiredOption("-i, --id <id>", "Skill slug")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      console.log(successText(`Skill "${options.id}" deleted.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+skill
+  .command("resolve")
+  .description("Resolve a skill from GitHub (fetch latest version and create a revision)")
+  .requiredOption("-i, --id <id>", "Skill slug")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}/resolve`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const revision = await response.json();
+      console.log(successText(`Skill resolved to revision:`));
+      console.log(`${label('Ref:')} ${value(revision.ref)}`);
+      console.log(`${label('Commit:')} ${value(revision.commitHash)}`);
+      console.log(`${label('Description:')} ${revision.description || '—'}`);
+      if (revision.archiveUrl) console.log(`${label('Archive:')} ${value(revision.archiveUrl)}`);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+skill
+  .command("revisions")
+  .description("List revisions for a skill")
+  .requiredOption("-i, --id <id>", "Skill slug")
+  .option("--limit <number>", "Maximum results", parseInt)
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+  .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
+    try {
+      const params = options.limit ? `?limit=${options.limit}` : '';
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}/revisions${params}`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const revisions = await response.json() as Array<{ ref: string; commitHash: string; name: string; resolvedAt: string }>;
+      if (revisions.length === 0) {
+        if (!isMachineReadable(format)) console.log(warnBanner("No revisions found."));
+        return;
+      }
+      if (!isMachineReadable(format)) {
+        console.log(label(`Found ${revisions.length} revision(s):\n`));
+      }
+      const displayFields: DisplayField[] = [
+        { key: 'ref', label: 'Ref', tableFormatter: (r: any) => value(r.ref) },
+        { key: 'commitHash', label: 'Commit', formatter: (r: any) => r.commitHash.substring(0, 8) },
+        { key: 'name', label: 'Name' },
+        { key: 'resolvedAt', label: 'Resolved', formatter: (r: any) => new Date(r.resolvedAt).toLocaleString() },
+      ];
+      console.log(formatData(revisions, displayFields, format));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
