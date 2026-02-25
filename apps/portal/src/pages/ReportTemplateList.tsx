@@ -122,7 +122,7 @@ export function ReportTemplateList() {
               <TableRow>
                 <TableHead className="w-[180px]">ID</TableHead>
                 <TableHead className="w-[200px]">Name</TableHead>
-                <TableHead className="w-[120px]">Trigger</TableHead>
+                <TableHead className="min-w-[280px]">Trigger</TableHead>
                 <TableHead className="w-[100px]">Sys Prompt</TableHead>
                 <TableHead>User Prompt</TableHead>
                 <TableHead className="w-[80px]" />
