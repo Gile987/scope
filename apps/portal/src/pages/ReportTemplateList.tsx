@@ -1,13 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
+import type { ReportTrigger } from "@/types";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -17,9 +22,23 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Trash2, Eye, RefreshCw } from "lucide-react";
 import { truncate } from "@/lib/utils";
 
-function triggerLabel(trigger?: { type: string }): string {
-  if (!trigger) return "always";
-  return trigger.type;
+function triggerSummary(trigger?: ReportTrigger): string {
+  if (!trigger) return "always (no trigger configured)";
+  switch (trigger.type) {
+    case "always": return "always";
+    case "criteria":
+      return `criteria: ${trigger.criteriaIds.join(", ")} (match: ${trigger.match ?? "all"})`;
+    case "taskPrompt":
+      return `taskPrompt: ${trigger.taskPromptIds.join(", ")}`;
+    case "promptFeature":
+      return `promptFeature: ${trigger.featureIds.join(", ")} (match: ${trigger.match ?? "all"})`;
+    default:
+      return "unknown";
+  }
+}
+
+function triggerType(trigger?: ReportTrigger): string {
+  return trigger?.type ?? "always";
 }
 
 function triggerVariant(type: string): "default" | "secondary" | "outline" | "destructive" {
@@ -34,6 +53,7 @@ function triggerVariant(type: string): "default" | "secondary" | "outline" | "de
 
 export function ReportTemplateList() {
   const queryClient = useQueryClient();
+  const [triggerFilter, setTriggerFilter] = useState<"all" | "always" | "criteria" | "taskPrompt" | "promptFeature">("all");
 
   const { data: templates = [], isLoading, isRefetching } = useQuery({
     queryKey: ["report-templates"],
@@ -43,6 +63,11 @@ export function ReportTemplateList() {
   const deleteMutation = useMutation({
     mutationFn: api.deleteReportTemplate,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["report-templates"] }),
+  });
+
+  const filtered = templates.filter((t) => {
+    if (triggerFilter === "all") return true;
+    return triggerType(t.trigger) === triggerFilter;
   });
 
   return (
@@ -55,6 +80,18 @@ export function ReportTemplateList() {
         </div>
         <div className="flex items-center gap-2">
           {isRefetching && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
+          <Select value={triggerFilter} onValueChange={(v) => setTriggerFilter(v as any)}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="Filter by trigger" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All triggers</SelectItem>
+              <SelectItem value="always">Always</SelectItem>
+              <SelectItem value="criteria">Criteria</SelectItem>
+              <SelectItem value="taskPrompt">Task Prompt</SelectItem>
+              <SelectItem value="promptFeature">Prompt Feature</SelectItem>
+            </SelectContent>
+          </Select>
           <Link to="/report-templates/new">
             <Button className="gap-1.5">
               <Plus className="h-4 w-4" /> New Template
@@ -74,6 +111,10 @@ export function ReportTemplateList() {
         <div className="text-center py-12 text-muted-foreground">
           No report templates defined yet. Reports will use the default prompt.
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          No templates match the selected filter.
+        </div>
       ) : (
         <div className="rounded-md border">
           <Table>
@@ -88,8 +129,8 @@ export function ReportTemplateList() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {templates.map((t) => {
-                const tType = triggerLabel(t.trigger);
+              {filtered.map((t) => {
+                const tType = triggerType(t.trigger);
                 return (
                   <TableRow key={t.id}>
                     <TableCell>
@@ -103,7 +144,7 @@ export function ReportTemplateList() {
                     <TableCell className="text-sm">{t.name}</TableCell>
                     <TableCell>
                       <Badge variant={triggerVariant(tType)} className="text-xs font-mono">
-                        {tType}
+                        {triggerSummary(t.trigger)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
@@ -155,7 +196,10 @@ export function ReportTemplateList() {
 
       {!isLoading && (
         <p className="text-sm text-muted-foreground">
-          {templates.length} {templates.length === 1 ? "template" : "templates"} total
+          {filtered.length === templates.length
+            ? `${templates.length} ${templates.length === 1 ? "template" : "templates"} total`
+            : `${filtered.length} of ${templates.length} ${templates.length === 1 ? "template" : "templates"}`
+          }
         </p>
       )}
     </div>
