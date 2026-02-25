@@ -181,7 +181,7 @@ export function RunDetail() {
                   <Separator orientation="vertical" className="h-4" />
                   <span>Skills:</span>
                   {run.skills.map((slug) => (
-                    <Link key={slug} to={`/skills`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                    <Link key={slug} to={`/skills/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
                       {slug}
                     </Link>
                   ))}

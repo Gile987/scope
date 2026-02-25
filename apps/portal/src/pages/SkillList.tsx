@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { SkillDocument } from "@/types";
@@ -17,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Trash2, BookOpen, Plus } from "lucide-react";
+import { Link } from "react-router-dom";
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 import { SkillPicker } from "@/components/SkillPicker";
@@ -91,10 +91,10 @@ export function SkillList() {
               {activeSkills.map((skill: SkillDocument) => (
                 <TableRow key={skill._id}>
                   <TableCell className="font-mono text-xs">
-                    <span className="flex items-center gap-1.5">
+                    <Link to={`/skills/${skill._id}`} className="flex items-center gap-1.5 hover:underline">
                       <BookOpen className="h-3.5 w-3.5" />
                       {skill._id}
-                    </span>
+                    </Link>
                   </TableCell>
                   <TableCell>{skill.name}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">
