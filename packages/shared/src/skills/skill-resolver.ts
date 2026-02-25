@@ -49,6 +49,19 @@ const SKILL_SEARCH_DIRS = [
 ];
 
 /**
+ * Encode a file path for use in GitHub Contents API URLs.
+ * Encodes each segment individually (handling special chars like spaces, #)
+ * while keeping literal slashes so the API can parse the path correctly.
+ *
+ * Using plain encodeURIComponent on the full path would turn
+ * "skills/azure-ai/SKILL.md" into "skills%2Fazure-ai%2FSKILL.md",
+ * which GitHub returns 404 for.
+ */
+export function encodeGitHubPath(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
+/**
  * Resolves a skill from a GitHub repository and creates/retrieves a SkillRevisionDocument.
  */
 export class SkillResolver {
@@ -151,7 +164,7 @@ export class SkillResolver {
       const skillMdPath = `${candidatePath}/SKILL.md`;
 
       try {
-        const url = `${this.githubApiUrl}/repos/${source}/contents/${encodeURIComponent(skillMdPath)}`;
+        const url = `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(skillMdPath)}`;
         const res = await fetch(url, { headers: this.headers });
         if (res.ok) {
           return candidatePath;
@@ -203,7 +216,7 @@ export class SkillResolver {
     commitSha: string
   ): Promise<SkillFileEntry[]> {
     // Get the directory listing at the specific commit
-    const url = `${this.githubApiUrl}/repos/${source}/contents/${encodeURIComponent(skillPath)}?ref=${commitSha}`;
+    const url = `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(skillPath)}?ref=${commitSha}`;
     const res = await fetch(url, { headers: this.headers });
 
     if (!res.ok) {
