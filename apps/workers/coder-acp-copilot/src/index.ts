@@ -40,11 +40,11 @@ class CopilotProcessor implements WorkerProcessor {
         await log("info", "DevProxy enabled — waiting for sidecar to be ready...");
         await devProxy.waitForReady();
         // Download CA cert if needed (for NODE_EXTRA_CA_CERTS)
-        const certPath = process.env.NODE_EXTRA_CA_CERTS || "/certs/dev-proxy-ca.crt";
+        const certPath = process.env.NODE_EXTRA_CA_CERTS || "/tmp/dev-proxy-ca.crt";
         await devProxy.downloadCertificate(certPath);
         // Create combined CA bundle for native binaries (SSL_CERT_FILE)
         // The copilot binary is a native executable that doesn't use NODE_EXTRA_CA_CERTS
-        const bundlePath = "/certs/ca-bundle-combined.crt";
+        const bundlePath = "/tmp/ca-bundle-combined.crt";
         sslCertFile = await devProxy.createCombinedCaBundle(certPath, bundlePath);
         await log("info", "DevProxy CA cert installed for native binaries", { sslCertFile });
         await devProxy.startRecording();
