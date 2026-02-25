@@ -601,6 +601,13 @@ export const api = {
     return request(`/skills/search?${params}`);
   },
 
+  /** Search external skills registry only */
+  searchExternalSkills: (query: string, limit?: number): Promise<SkillSearchResult[]> => {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    return request(`/skills/search/external?${params}`);
+  },
+
   /** Import a skill */
   createSkill: (body: { source: string; skillName: string; name: string; origin: string; description?: string }): Promise<SkillDocument> => {
     return request("/skills", {

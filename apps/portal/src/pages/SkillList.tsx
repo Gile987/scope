@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { SkillDocument } from "@/types";
@@ -12,11 +13,13 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Trash2, BookOpen } from "lucide-react";
+import { Trash2, BookOpen, Plus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
+import { SkillPicker } from "@/components/SkillPicker";
 
 export function SkillList() {
   const queryClient = useQueryClient();
@@ -39,12 +42,26 @@ export function SkillList() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Skills</h1>
-          <p className="text-muted-foreground">Manage agent skills injected into coding agent prompts</p>
-        </div>
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Skills</h1>
+        <p className="text-muted-foreground">Manage agent skills injected into coding agent prompts</p>
       </div>
+
+      {/* Import skill card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Plus className="h-5 w-5" />
+            Import Skill
+          </CardTitle>
+          <CardDescription>
+            Search the external skills registry or add a skill manually by entering its GitHub repo and skill name.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SkillPicker selected={[]} onChange={() => {}} importOnly />
+        </CardContent>
+      </Card>
 
       {/* Table */}
       {isLoading ? (
@@ -55,7 +72,7 @@ export function SkillList() {
         </div>
       ) : activeSkills.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
-          No skills imported yet. Use the CLI to import skills from GitHub repositories.
+          No skills imported yet. Click <strong>Import Skill</strong> to add one from a GitHub repository.
         </div>
       ) : (
         <div className="rounded-md border">

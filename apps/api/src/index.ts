@@ -3644,6 +3644,55 @@ app.get("/api/v1/skills/search", async (req: Request, res: Response, next: NextF
   }
 });
 
+// Search external skills registry only (skills.sh)
+app.get("/api/v1/skills/search/external", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { q, limit: limitStr } = req.query;
+
+    if (!q || typeof q !== "string" || !q.trim()) {
+      res.status(400).json({ error: "Query parameter 'q' is required" });
+      return;
+    }
+
+    const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
+    const query = q.trim();
+
+    let externalResults: SkillSearchResult[] = [];
+    try {
+      const skillsShUrl = `https://skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+      const externalRes = await fetch(skillsShUrl, {
+        headers: { "User-Agent": "scope-mt-api" },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (externalRes.ok) {
+        const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string; description?: string }> };
+        if (data.skills && Array.isArray(data.skills)) {
+          // Deduplicate against internal skills
+          const internalSlugs = new Set(
+            (await skillCollection.find({ deletedAt: { $exists: false } }, { projection: { _id: 1 } }).toArray()).map((s) => s._id)
+          );
+          externalResults = data.skills
+            .filter((s) => !internalSlugs.has(s.id))
+            .map((s) => ({
+              id: s.id,
+              name: s.name,
+              source: s.source ?? s.id.split("/").slice(0, 2).join("/"),
+              description: s.description,
+              internal: false,
+              installs: s.installs,
+            }));
+        }
+      }
+    } catch {
+      console.warn("skills.sh search failed");
+    }
+
+    res.json(externalResults.slice(0, limit));
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Get skill by slug (must be after /search to avoid wildcard matching)
 app.get("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: NextFunction) => {
   try {
