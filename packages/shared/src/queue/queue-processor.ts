@@ -19,6 +19,7 @@ import { JudgeClient } from "../judge/judge-client.js";
 import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
 import { McpServerClient } from "../mcp/mcp-server-client.js";
 import { SkillClient } from "../skills/skill-client.js";
+import { extractSkillsToWorkspace } from "../skills/skill-extractor.js";
 
 /**
  * Queue processor for coding agent workers.
@@ -63,6 +64,22 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolving ${requestDoc.skillRevisions.length} skill revision(s)`, { skillRevisions: requestDoc.skillRevisions });
       skillConfigs = await skillClient.resolveSkills(requestDoc.skillRevisions);
       await log("info", `Resolved skills: ${skillConfigs.map(s => s.name).join(", ")}`);
+
+      // Extract skill archives to workspace filesystem for agent discovery
+      const workspacePath = process.env.WORKSPACE_PATH || "/workspace";
+      // Derive agent type from workerType for agent-specific skill directories
+      const agentType = requestDoc.workerType.includes("claude") ? "claude-code"
+        : requestDoc.workerType.includes("copilot") ? "copilot"
+        : undefined;
+      const installedPaths = await extractSkillsToWorkspace({
+        refs: requestDoc.skillRevisions,
+        skillConfigs,
+        skillClient,
+        workspacePath,
+        agentType,
+        log: async (msg) => { await log("info", msg); },
+      });
+      await log("info", `Installed ${installedPaths.length} skill path(s) to workspace`, { installedPaths });
     }
 
     // Determine if this is a multi-turn request (criteria present in scenario)
@@ -114,10 +131,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   ): Promise<void> {
     const requestId = requestDoc._id;
 
-    // Update status to processing
+    // Update status to processing (preserve logs from handleRequest — MCP/skill resolution)
     await this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "processing", logs: [], updatedAt: new Date(), ...(this.processor.getAgentVersion ? { agentVersion: this.processor.getAgentVersion() } : {}) } }
+      { $set: { status: "processing", updatedAt: new Date(), ...(this.processor.getAgentVersion ? { agentVersion: this.processor.getAgentVersion() } : {}) } }
     );
 
     await log("info", `Starting processing with ${this.processor.workerName}`);
@@ -188,10 +205,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       throw new Error("JUDGE_SERVICE_URL is not configured but multi-turn request received (criteria present)");
     }
 
-    // Update status to iterating
+    // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution)
     await this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "iterating", logs: [], turns: [], updatedAt: new Date(), ...(this.processor.getAgentVersion ? { agentVersion: this.processor.getAgentVersion() } : {}) } }
+      { $set: { status: "iterating", turns: [], updatedAt: new Date(), ...(this.processor.getAgentVersion ? { agentVersion: this.processor.getAgentVersion() } : {}) } }
     );
 
     // Extend queue message visibility for long-running multi-turn.

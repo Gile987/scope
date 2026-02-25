@@ -224,6 +224,7 @@ export interface BulkResubmitOverrides {
   model?: string | null;
   maxIterations?: number | null;
   mcpServers?: string[] | null;
+  skillRevisions?: string[] | null;
 }
 
 // Bulk re-submit response

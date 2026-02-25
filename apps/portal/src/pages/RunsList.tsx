@@ -83,16 +83,20 @@ export function RunsList() {
     const iterations = [...new Set(selected.map((r) => r.maxIterations ?? 0))];
     const mcpSets = selected.map((r) => (r.mcpServers ?? []).sort().join(","));
     const uniqueMcp = [...new Set(mcpSets)];
+    const skillSets = selected.map((r) => (r.skillRevisions ?? []).sort().join(","));
+    const uniqueSkills = [...new Set(skillSets)];
 
     return {
       worker: workers.length === 1 ? workers[0] : null,
       model: models.length === 1 ? (models[0] || null) : null,
       maxIterations: iterations.length === 1 ? (iterations[0] || null) : null,
       mcpServers: uniqueMcp.length === 1 ? (selected[0].mcpServers ?? []) : null,
+      skillRevisions: uniqueSkills.length === 1 ? (selected[0].skillRevisions ?? []) : null,
       isMultiWorker: workers.length > 1,
       isMultiModel: models.length > 1,
       isMultiIterations: iterations.length > 1,
       isMultiMcp: uniqueMcp.length > 1,
+      isMultiSkills: uniqueSkills.length > 1,
     };
   }, [runs, selectedIds]);
 
@@ -511,6 +515,81 @@ export function RunsList() {
                       )}
                     </div>
                   </div>
+
+                  {/* Skills override */}
+                  <div className="flex items-start gap-4">
+                    <Label className="text-sm w-32 shrink-0 pt-2">Skills</Label>
+                    <div className="flex-1 space-y-1.5">
+                      <Select
+                        value={resubmitOverrides.skillRevisions === null ? "__clear__" : resubmitOverrides.skillRevisions !== undefined ? "__custom__" : "__keep__"}
+                        onValueChange={(v) => setResubmitOverrides((prev) => {
+                          const next = { ...prev };
+                          if (v === "__keep__") { delete next.skillRevisions; }
+                          else if (v === "__clear__") { next.skillRevisions = null; }
+                          else { next.skillRevisions = []; }
+                          return next;
+                        })}
+                      >
+                        <SelectTrigger className="w-56">
+                          <SelectValue>
+                            {resubmitOverrides.skillRevisions === null
+                              ? "Clear (no skills)"
+                              : resubmitOverrides.skillRevisions !== undefined
+                                ? "Choose skills…"
+                                : selectedRunsSummary.skillRevisions && selectedRunsSummary.skillRevisions.length > 0
+                                  ? selectedRunsSummary.skillRevisions.map((r) => r.split("@")[0].split("/").pop()).join(", ")
+                                  : selectedRunsSummary.isMultiSkills ? "Mixed (keep each)" : "None"
+                            }
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__keep__">
+                            {selectedRunsSummary.skillRevisions && selectedRunsSummary.skillRevisions.length > 0
+                              ? selectedRunsSummary.skillRevisions.map((r) => r.split("@")[0].split("/").pop()).join(", ")
+                              : selectedRunsSummary.isMultiSkills ? "Mixed (keep each)" : "None"}
+                          </SelectItem>
+                          <SelectItem value="__clear__">Clear (no skills)</SelectItem>
+                          <SelectItem value="__custom__">Choose skills…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {resubmitOverrides.skillRevisions !== undefined && resubmitOverrides.skillRevisions !== null && (() => {
+                        // Collect all unique skill revision refs from selected runs
+                        const allRefs = [...new Set(
+                          runs
+                            .filter((r) => selectedIds.has(r._id))
+                            .flatMap((r) => r.skillRevisions ?? [])
+                        )];
+                        return (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {allRefs.map((ref) => {
+                              const selected = resubmitOverrides.skillRevisions?.includes(ref) ?? false;
+                              const skillName = ref.split("@")[0].split("/").pop() ?? ref;
+                              return (
+                                <Button
+                                  key={ref}
+                                  type="button"
+                                  variant={selected ? "default" : "outline"}
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  title={ref}
+                                  onClick={() => setResubmitOverrides((prev) => {
+                                    const current = prev.skillRevisions ?? [];
+                                    const next = selected ? current.filter((r) => r !== ref) : [...current, ref];
+                                    return { ...prev, skillRevisions: next };
+                                  })}
+                                >
+                                  {skillName}
+                                </Button>
+                              );
+                            })}
+                            {allRefs.length === 0 && (
+                              <span className="text-xs text-muted-foreground italic">No skills in selected runs</span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
                 </div>
               </div>
               <AlertDialogFooter>
@@ -578,6 +657,7 @@ export function RunsList() {
               <TableHead>Task</TableHead>
               <TableHead className="w-[180px]">Worker</TableHead>
               <TableHead>MCP</TableHead>
+              <TableHead>Skills</TableHead>
               <TableHead className="w-[120px]">Status</TableHead>
               <TableHead className="w-[100px]">Report</TableHead>
               <TableHead className="w-[80px]">Turns</TableHead>
@@ -617,6 +697,23 @@ export function RunsList() {
                           {slug}
                         </Link>
                       ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">–</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {run.skillRevisions && run.skillRevisions.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {run.skillRevisions.map((ref) => {
+                        const skillName = ref.split("@")[0].split("/").pop() ?? ref;
+                        const skillSlug = ref.split("@")[0];
+                        return (
+                          <Link key={ref} to={`/skills/${skillSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={ref}>
+                            {skillName}
+                          </Link>
+                        );
+                      })}
                     </div>
                   ) : (
                     <span className="text-xs text-muted-foreground">–</span>

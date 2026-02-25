@@ -4,18 +4,71 @@
 import type { SkillConfig } from '../types/skill.js';
 
 /**
- * Format skill configs into a prompt preamble that can be prepended to the task message.
+ * Format a lightweight discovery prompt listing available skills.
  *
- * Uses XML-structured format for clear delineation:
+ * Instead of injecting full skill content (which wastes tokens and bypasses
+ * progressive disclosure), this generates a compact `<available_skills>` block
+ * with just the metadata (~100 tokens per skill). The agent discovers the full
+ * content by reading SKILL.md files from the workspace filesystem.
+ *
+ * Example output:
  * ```
- * <skills>
- * <skill name="my-skill">
- * ...skill content (markdown body from SKILL.md)...
+ * <available_skills>
+ * <skill name="azure-functions" location=".agents/skills/azure-functions">
+ * Deploy and manage Azure Functions with best practices for triggers, bindings, and scaling.
  * </skill>
- * </skills>
+ * </available_skills>
  * ```
  *
- * Returns an empty string if no skills are provided.
+ * @param skills - Resolved skill configs (name + description)
+ * @param basePath - Base directory for skills (default: ".agents/skills")
+ * @returns Discovery prompt string, or empty string if no skills
+ */
+export function formatSkillsDiscoveryPrompt(
+  skills: SkillConfig[],
+  basePath: string = '.agents/skills'
+): string {
+  if (!skills || skills.length === 0) {
+    return '';
+  }
+
+  const skillBlocks = skills
+    .map((s) => {
+      const location = `${basePath}/${s.name}`;
+      return `<skill name="${escapeXmlAttr(s.name)}" location="${escapeXmlAttr(location)}">\n${s.description.trim()}\n</skill>`;
+    })
+    .join('\n');
+
+  return `<available_skills>\n${skillBlocks}\n</available_skills>`;
+}
+
+/**
+ * Prepend skill discovery context to a task message.
+ * If no skills are provided, returns the original message unchanged.
+ *
+ * Uses the lightweight discovery format — agents read full content
+ * from the filesystem at `.agents/skills/<name>/SKILL.md`.
+ */
+export function prependSkillsToMessage(
+  message: string,
+  skills?: SkillConfig[],
+  basePath?: string
+): string {
+  if (!skills || skills.length === 0) {
+    return message;
+  }
+
+  const preamble = formatSkillsDiscoveryPrompt(skills, basePath);
+  return `${preamble}\n\n${message}`;
+}
+
+// --- Legacy functions (kept for backward compatibility) ---
+
+/**
+ * Format skill configs into a full-content prompt preamble.
+ *
+ * @deprecated Use `formatSkillsDiscoveryPrompt()` instead — full content is now
+ * delivered via the filesystem, not prompt injection.
  */
 export function formatSkillsPrompt(skills: SkillConfig[]): string {
   if (!skills || skills.length === 0) {
@@ -30,22 +83,6 @@ export function formatSkillsPrompt(skills: SkillConfig[]): string {
     .join('\n');
 
   return `<skills>\n${skillBlocks}\n</skills>`;
-}
-
-/**
- * Prepend skill context to a task message.
- * If no skills are provided, returns the original message unchanged.
- */
-export function prependSkillsToMessage(
-  message: string,
-  skills?: SkillConfig[]
-): string {
-  if (!skills || skills.length === 0) {
-    return message;
-  }
-
-  const preamble = formatSkillsPrompt(skills);
-  return `${preamble}\n\n${message}`;
 }
 
 /** Escape special characters in XML attribute values */

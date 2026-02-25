@@ -113,4 +113,45 @@ describe('SkillClient', () => {
       expect.stringContaining('http://localhost:3100/api/v1/')
     );
   });
+
+  describe('downloadSkillArchive', () => {
+    it('downloads archive and returns Buffer', async () => {
+      const archiveData = new Uint8Array([0x1f, 0x8b, 0x08, 0x00]); // gzip magic bytes
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => archiveData.buffer,
+      });
+
+      const result = await client.downloadSkillArchive('owner/repo/skill@abc1234');
+
+      expect(Buffer.isBuffer(result)).toBe(true);
+      expect(result.length).toBe(4);
+      expect(result[0]).toBe(0x1f);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/api/v1/skill-revisions/by-ref/owner%2Frepo%2Fskill%40abc1234/archive'
+      );
+    });
+
+    it('throws on 404', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+      });
+
+      await expect(client.downloadSkillArchive('missing/ref@abc'))
+        .rejects.toThrow("Skill archive for 'missing/ref@abc' not found via API");
+    });
+
+    it('throws on HTTP error', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+      });
+
+      await expect(client.downloadSkillArchive('some/ref@abc'))
+        .rejects.toThrow('failed: 500 Internal Server Error');
+    });
+  });
 });

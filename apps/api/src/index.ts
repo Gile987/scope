@@ -1028,6 +1028,7 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
         model?: string | null;
         maxIterations?: number | null;
         mcpServers?: string[] | null;
+        skillRevisions?: string[] | null;
       };
     };
 
@@ -1069,6 +1070,7 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
         const effectiveModel = overrides?.model !== undefined ? overrides.model : original.model;
         const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
         const effectiveMcpServers = overrides?.mcpServers !== undefined ? overrides.mcpServers : original.mcpServers;
+        const effectiveSkillRevisions = overrides?.skillRevisions !== undefined ? overrides.skillRevisions : original.skillRevisions;
 
         const newDoc: RequestDocument = {
           _id: requestId,
@@ -1081,6 +1083,7 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
           ...(original.persona ? { persona: original.persona } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
+          ...(effectiveSkillRevisions && effectiveSkillRevisions.length > 0 ? { skillRevisions: effectiveSkillRevisions } : {}),
         };
 
         newDocs.push(newDoc);
@@ -3819,6 +3822,75 @@ app.delete("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: Ne
 // =====================================================================
 // Skill Revisions API
 // =====================================================================
+
+// Download skill revision archive (tar.gz) by ref — used by workers to fetch skill files through the API
+app.get("/api/v1/skill-revisions/by-ref/:ref(*)/archive", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ref = req.params.ref ?? req.params[0];
+    // Strip trailing "/archive" that Express includes in the wildcard match
+    const cleanRef = ref.replace(/\/archive$/, "");
+    const revision = await skillRevisionStore.getByRef(cleanRef);
+    if (!revision) {
+      res.status(404).json({ error: "Skill revision not found" });
+      return;
+    }
+
+    if (!revision.archiveUrl) {
+      res.status(404).json({ error: "Skill revision has no archive" });
+      return;
+    }
+
+    // Parse the blob name from the archiveUrl
+    // archiveUrl format: https://<account>.blob.core.windows.net/skill-archives/<blobName>
+    // or Azurite: http://127.0.0.1:10000/devstoreaccount1/skill-archives/<blobName>
+    const archiveUrlObj = new URL(revision.archiveUrl);
+    const pathParts = archiveUrlObj.pathname.split("/").filter(Boolean);
+    // pathParts: ["skill-archives", "<blobName>"] or ["devstoreaccount1", "skill-archives", "<blobName>"]
+    const containerIdx = pathParts.indexOf("skill-archives");
+    if (containerIdx === -1 || containerIdx >= pathParts.length - 1) {
+      res.status(500).json({ error: "Cannot parse archive blob path" });
+      return;
+    }
+    const blobName = pathParts.slice(containerIdx + 1).join("/");
+
+    let blobServiceClient: BlobServiceClient;
+    if (storageConnectionString) {
+      blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+    } else if (storageAccountName) {
+      const credential = new DefaultAzureCredential();
+      blobServiceClient = new BlobServiceClient(
+        `https://${storageAccountName}.blob.core.windows.net`,
+        credential
+      );
+    } else {
+      res.status(500).json({ error: "Blob storage not configured" });
+      return;
+    }
+
+    const containerClient = blobServiceClient.getContainerClient("skill-archives");
+    const blobClient = containerClient.getBlobClient(blobName);
+
+    const downloadResponse = await blobClient.download();
+    if (!downloadResponse.readableStreamBody) {
+      res.status(500).json({ error: "Failed to download archive from blob storage" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "application/gzip");
+    res.setHeader("Content-Disposition", `attachment; filename="${blobName}"`);
+    if (downloadResponse.contentLength !== undefined) {
+      res.setHeader("Content-Length", downloadResponse.contentLength.toString());
+    }
+
+    downloadResponse.readableStreamBody.pipe(res);
+  } catch (error) {
+    if (error instanceof RestError && error.statusCode === 404) {
+      res.status(404).json({ error: "Archive blob not found in storage" });
+      return;
+    }
+    next(error);
+  }
+});
 
 // Get skill revision by human-readable ref
 app.get("/api/v1/skill-revisions/by-ref/:ref(*)", async (req: Request, res: Response, next: NextFunction) => {
