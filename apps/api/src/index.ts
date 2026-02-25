@@ -3807,6 +3807,9 @@ app.delete("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: Ne
       { $set: { deletedAt: new Date(), updatedAt: new Date() } }
     );
 
+    // Also delete all associated skill revisions
+    await skillRevisionStore.deleteBySkill(existing.source, existing.skillName);
+
     res.status(204).send();
   } catch (error) {
     next(error);

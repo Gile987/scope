@@ -84,4 +84,15 @@ export class SkillRevisionStore {
     const ids = refs.map(computeSkillRevisionId);
     return this.collection.find({ _id: { $in: ids } }).toArray();
   }
+
+  /**
+   * Delete all revisions for a given source + skillName.
+   * Used when a skill is deleted to clean up associated revision data.
+   *
+   * @returns The number of deleted revision documents.
+   */
+  async deleteBySkill(source: string, skillName: string): Promise<number> {
+    const result = await this.collection.deleteMany({ source, skillName });
+    return result.deletedCount;
+  }
 }
