@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/alert";
 import { ArrowLeft, ArrowRight, Loader2, CheckCircle2, XCircle, AlertTriangle, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
+import { useCommandEnter } from "@/hooks/useCommandEnter";
+import { KbdBadge } from "@/components/KbdBadge";
 
 const TOKEN_INSTRUCTIONS: Record<TokenType, { steps: string[]; link?: { label: string; url: string }; note?: string }> = {
   "github-pat-classic": {
@@ -158,8 +160,7 @@ export function CreateToken() {
     },
   });
 
-  const handleValidate = (e: React.FormEvent) => {
-    e.preventDefault();
+  const doValidate = () => {
     if (!value.trim()) {
       toast.error("Token value is required");
       return;
@@ -170,6 +171,11 @@ export function CreateToken() {
       return;
     }
     previewMutation.mutate();
+  };
+
+  const handleValidate = (e: React.FormEvent) => {
+    e.preventDefault();
+    doValidate();
   };
 
   const handleRegister = () => {
@@ -185,6 +191,14 @@ export function CreateToken() {
     setStep("input");
     setPreviewResult(null);
   };
+
+  // Cmd+Enter / Ctrl+Enter shortcut for primary action
+  useCommandEnter(
+    step === "input" ? doValidate : handleRegister,
+    step === "input"
+      ? !previewMutation.isPending && !!value.trim() && !validateTokenPrefix(type, value)
+      : !createMutation.isPending,
+  );
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -329,6 +343,7 @@ export function CreateToken() {
                 {previewMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                 Validate & Preview
                 <ArrowRight className="h-4 w-4" />
+                <KbdBadge />
               </Button>
             </form>
           </CardContent>
@@ -434,6 +449,7 @@ export function CreateToken() {
               <Button onClick={handleRegister} disabled={createMutation.isPending} className="gap-1.5">
                 {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                 Register Token
+                <KbdBadge />
               </Button>
             </div>
           </CardContent>

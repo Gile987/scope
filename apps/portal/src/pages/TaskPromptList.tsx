@@ -26,6 +26,7 @@ import { formatDate, formatId, truncate } from "@/lib/utils";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { Stepper } from "@/components/Stepper";
+import { KbdBadge } from "@/components/KbdBadge";
 
 const DIALOG_STEPS = ["Task Text", "Features"];
 
@@ -113,8 +114,9 @@ export function TaskPromptList() {
                     onClick={() => setDialogStep(2)}
                     disabled={!newText.trim()}
                     className="gap-1.5"
+                    data-command-enter
                   >
-                    Continue <ArrowRight className="h-4 w-4" />
+                    Continue <ArrowRight className="h-4 w-4" /> <KbdBadge />
                   </Button>
                 </DialogFooter>
               </>
@@ -145,12 +147,14 @@ export function TaskPromptList() {
                     onClick={() => createMutation.mutate(newText)}
                     disabled={createMutation.isPending}
                     className="gap-1.5"
+                    data-command-enter
                   >
                     {createMutation.isPending ? (
                       <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
                     ) : (
                       <><Plus className="h-4 w-4" /> Create Task Prompt</>
                     )}
+                    <KbdBadge />
                   </Button>
                 </DialogFooter>
               </>

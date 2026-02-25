@@ -24,6 +24,8 @@ import {
   RefreshCw,
   Pencil,
 } from "lucide-react";
+import { useCommandEnter } from "@/hooks/useCommandEnter";
+import { KbdBadge } from "@/components/KbdBadge";
 
 const STEPS = ["Define Criteria", "Review & Create"];
 
@@ -155,6 +157,12 @@ export function CreateCriterion() {
       dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
     });
   };
+
+  // Cmd+Enter / Ctrl+Enter shortcut for primary action
+  useCommandEnter(
+    step === 1 ? handleContinue : handleCreate,
+    step === 1 ? canContinue : !!prompt.trim() && !createMutation.isPending,
+  );
 
   // Regenerate prompt
   const handleRegenerate = () => {
@@ -302,6 +310,7 @@ export function CreateCriterion() {
             >
               Continue
               <ArrowRight className="h-4 w-4" />
+              <KbdBadge />
             </Button>
           </div>
         </div>
@@ -475,6 +484,7 @@ export function CreateCriterion() {
                 <Sparkles className="h-4 w-4" />
               )}
               Create Criteria
+              <KbdBadge />
             </Button>
           </div>
         </div>

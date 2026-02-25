@@ -24,6 +24,8 @@ import {
   RefreshCw,
   Pencil,
 } from "lucide-react";
+import { useCommandEnter } from "@/hooks/useCommandEnter";
+import { KbdBadge } from "@/components/KbdBadge";
 
 const STEPS = ["Define Feature", "Review & Create"];
 
@@ -167,6 +169,12 @@ export function PromptFeatureWizard({
     });
   };
 
+  // Cmd+Enter / Ctrl+Enter shortcut for primary action
+  useCommandEnter(
+    step === 1 ? handleContinue : handleCreate,
+    step === 1 ? canContinue : !!prompt.trim() && !createMutation.isPending,
+  );
+
   // Regenerate prompt
   const handleRegenerate = () => {
     setSuggestedParents([]);
@@ -307,6 +315,7 @@ export function PromptFeatureWizard({
             >
               Continue
               <ArrowRight className="h-4 w-4" />
+              <KbdBadge />
             </Button>
           </div>
         </>
@@ -472,6 +481,7 @@ export function PromptFeatureWizard({
                 <Sparkles className="h-4 w-4" />
               )}
               Create Feature
+              <KbdBadge />
             </Button>
           </div>
         </>
