@@ -3693,7 +3693,28 @@ app.get("/api/v1/skills/search/external", async (req: Request, res: Response, ne
   }
 });
 
-// Get skill by slug (must be after /search to avoid wildcard matching)
+// List skill revisions for a given skill slug (source/skillName)
+// NOTE: Must be before the generic GET /:id(*) to avoid the greedy wildcard matching "slug/revisions" as the id.
+app.get("/api/v1/skills/:id(*)/revisions", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id ?? req.params[0];
+    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!skill) {
+      res.status(404).json({ error: "Skill not found" });
+      return;
+    }
+
+    const limitStr = req.query.limit as string | undefined;
+    const limit = Math.min(Math.max(parseInt(limitStr ?? "20", 10), 1), 100);
+
+    const revisions = await skillRevisionStore.listBySkill(skill.source, skill.skillName, { limit });
+    res.json(revisions);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get skill by slug (must be after /search and /revisions to avoid wildcard matching)
 app.get("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id ?? req.params[0];
@@ -3821,26 +3842,6 @@ app.get("/api/v1/skill-revisions/:id", async (req: Request, res: Response, next:
       return;
     }
     res.json(revision);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// List skill revisions for a given skill slug (source/skillName)
-app.get("/api/v1/skills/:id(*)/revisions", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = req.params.id ?? req.params[0];
-    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!skill) {
-      res.status(404).json({ error: "Skill not found" });
-      return;
-    }
-
-    const limitStr = req.query.limit as string | undefined;
-    const limit = Math.min(Math.max(parseInt(limitStr ?? "20", 10), 1), 100);
-
-    const revisions = await skillRevisionStore.listBySkill(skill.source, skill.skillName, { limit });
-    res.json(revisions);
   } catch (error) {
     next(error);
   }
