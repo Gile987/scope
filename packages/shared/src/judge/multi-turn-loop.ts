@@ -131,10 +131,12 @@ export async function runMultiTurnLoop(
     let codingResponse: string;
     let turnToolCalls: import("../har/types.js").ToolCall[] | undefined;
     let turnHarUrl: string | undefined;
+    let turnThinkingContent: string | undefined;
     try {
       const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs });
       codingResponse = workerResult.response;
       turnToolCalls = workerResult.toolCalls;
+      turnThinkingContent = workerResult.thinkingContent;
 
       // Upload HAR file to blob storage if available (sanitized to strip credentials)
       if (workerResult.harFilePath) {
@@ -242,6 +244,7 @@ export async function runMultiTurnLoop(
       timestamp: new Date(),
       criteriaResults,
       ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
+      ...(turnThinkingContent && { thinkingContent: turnThinkingContent }),
       ...(turnHarUrl && { harUrl: turnHarUrl }),
     };
     turns.push(turn);

@@ -1,14 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Bot, Scale, CheckCircle2, AlertCircle } from "lucide-react";
+import { Bot, Scale, CheckCircle2, AlertCircle, Brain, Wrench, ChevronRight, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import type { ConversationTurn } from "@/types";
+import type { ConversationTurn, ToolCall } from "@/types";
 
 interface ConversationViewProps {
   turns: ConversationTurn[];
@@ -22,7 +23,9 @@ interface ConversationViewProps {
  * Layout:
  * - Task prompt (top, full-width, neutral)
  * - For each turn:
+ *   - Thinking content (collapsible, muted)
  *   - Agent response (right-aligned, primary tint)
+ *   - Tool calls (inline, collapsible)
  *   - Judge feedback (left-aligned, amber tint)
  */
 export function ConversationView({ turns, task }: ConversationViewProps) {
@@ -62,6 +65,90 @@ export function ConversationView({ turns, task }: ConversationViewProps) {
   );
 }
 
+/** Collapsible section with a toggle header */
+function CollapsibleSection({
+  label,
+  icon: Icon,
+  iconClassName,
+  count,
+  defaultOpen = false,
+  children,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  iconClassName?: string;
+  count?: number;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        type="button"
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-left py-1"
+        onClick={() => setOpen(!open)}
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <Icon className={cn("h-3 w-3", iconClassName)} />
+        <span>{label}</span>
+        {count !== undefined && (
+          <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-1">{count}</Badge>
+        )}
+      </button>
+      {open && <div className="mt-1">{children}</div>}
+    </div>
+  );
+}
+
+/** Inline tool call display */
+function ToolCallInline({ tc }: { tc: ToolCall }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasResponse = !!tc.response;
+  const argsStr = JSON.stringify(tc.arguments, null, 2);
+  const isLargeArgs = argsStr.length > 80;
+
+  return (
+    <div className="rounded border border-border/50 bg-muted/30 text-xs font-mono">
+      <button
+        type="button"
+        className="flex items-center gap-1.5 w-full text-left px-2 py-1.5 hover:bg-muted/50 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <Wrench className="h-3 w-3 text-blue-500 shrink-0" />
+        <span className="font-semibold text-foreground">{tc.name}</span>
+        {!expanded && !isLargeArgs && (
+          <span className="text-muted-foreground truncate ml-1">
+            {argsStr === "{}" ? "" : argsStr}
+          </span>
+        )}
+        {hasResponse && (
+          <Badge variant="outline" className="text-[10px] px-1 py-0 ml-auto shrink-0">
+            has response
+          </Badge>
+        )}
+      </button>
+      {expanded && (
+        <div className="px-2 pb-2 space-y-1.5 border-t border-border/30">
+          {argsStr !== "{}" && (
+            <div className="mt-1.5">
+              <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Arguments</span>
+              <pre className="mt-0.5 p-1.5 rounded bg-muted/50 text-[11px] overflow-x-auto whitespace-pre-wrap break-all">{argsStr}</pre>
+            </div>
+          )}
+          {hasResponse && (
+            <div>
+              <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Response</span>
+              <pre className="mt-0.5 p-1.5 rounded bg-muted/50 text-[11px] overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto">{tc.response}</pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TurnMessages({ turn }: { turn: ConversationTurn }) {
   return (
     <>
@@ -76,6 +163,27 @@ function TurnMessages({ turn }: { turn: ConversationTurn }) {
         </span>
         <div className="flex-1 h-px bg-border" />
       </div>
+
+      {/* Thinking content — collapsible, above agent response */}
+      {turn.thinkingContent && (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] w-full">
+            <CollapsibleSection
+              label="Thinking"
+              icon={Brain}
+              iconClassName="text-violet-500"
+            >
+              <Card className="bg-violet-500/5 border-violet-200 dark:border-violet-800">
+                <CardContent className="p-3">
+                  <div className="prose prose-sm dark:prose-invert max-w-none max-h-64 overflow-y-auto text-muted-foreground italic text-xs">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{turn.thinkingContent}</ReactMarkdown>
+                  </div>
+                </CardContent>
+              </Card>
+            </CollapsibleSection>
+          </div>
+        </div>
+      )}
 
       {/* Agent response — right aligned */}
       <div className="flex justify-end">
@@ -96,16 +204,30 @@ function TurnMessages({ turn }: { turn: ConversationTurn }) {
             <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
               <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{turn.codingAgentResponse}</ReactMarkdown>
             </div>
-            {turn.toolCalls && turn.toolCalls.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-primary/10">
-                <span className="text-xs text-muted-foreground">
-                  {turn.toolCalls.length} tool call{turn.toolCalls.length !== 1 ? "s" : ""}
-                </span>
-              </div>
-            )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Tool calls — inline, collapsible */}
+      {turn.toolCalls && turn.toolCalls.length > 0 && (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] w-full">
+            <CollapsibleSection
+              label="Tool Calls"
+              icon={Wrench}
+              iconClassName="text-blue-500"
+              count={turn.toolCalls.length}
+              defaultOpen={turn.toolCalls.length <= 5}
+            >
+              <div className="space-y-1">
+                {turn.toolCalls.map((tc, idx) => (
+                  <ToolCallInline key={tc.id || idx} tc={tc} />
+                ))}
+              </div>
+            </CollapsibleSection>
+          </div>
+        </div>
+      )}
 
       {/* Judge feedback — left aligned */}
       <div className="flex justify-start">

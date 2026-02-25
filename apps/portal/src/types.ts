@@ -29,6 +29,7 @@ export interface ConversationTurn {
   timestamp: string;
   criteriaResults?: CriterionResult[];
   toolCalls?: ToolCall[];
+  thinkingContent?: string;
   harUrl?: string;
 }
 

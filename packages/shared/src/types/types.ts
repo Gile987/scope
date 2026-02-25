@@ -18,6 +18,7 @@ export interface ConversationTurn {
   timestamp: Date;
   criteriaResults?: CriterionResult[];  // Per-criterion breakdown from DAG evaluation
   toolCalls?: ToolCall[];  // Tool calls extracted from DevProxy HAR for this turn
+  thinkingContent?: string; // Reasoning/thinking text extracted from HAR SSE streams
   harUrl?: string;         // Blob storage URL to the HAR file for this turn
 }
 
@@ -135,6 +136,8 @@ export interface WorkerResult {
   response: string;
   /** Tool calls extracted from DevProxy HAR capture (if available) */
   toolCalls?: ToolCall[];
+  /** Reasoning/thinking text extracted from HAR SSE streams (if available) */
+  thinkingContent?: string;
   /** Path to the HAR file on disk (for upload to blob storage) */
   harFilePath?: string;
 }
