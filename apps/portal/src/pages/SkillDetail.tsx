@@ -134,7 +134,7 @@ export function SkillDetail() {
             <span>{skill.name}</span>
 
             <span className="text-muted-foreground">Source</span>
-            <span className="font-mono text-xs">{skill.source}</span>
+            <a href={`https://github.com/${skill.source}`} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-primary hover:underline">{skill.source}</a>
 
             <span className="text-muted-foreground">Skill Name</span>
             <span className="font-mono text-xs">{skill.skillName}</span>
