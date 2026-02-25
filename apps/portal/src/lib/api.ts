@@ -567,6 +567,11 @@ export const api = {
     return request(`/models/${encodeURIComponent(id)}`);
   },
 
+  /** Set a model as the default for its agent/provider */
+  setModelAsDefault: (id: string): Promise<{ model: string; agentId: string; agent: CodingAgent }> => {
+    return request(`/models/${encodeURIComponent(id)}/set-default`, { method: "POST" });
+  },
+
   // ─── Feature Flags ──────────────────────────────────────────────────────────
 
   /** List all feature flags */

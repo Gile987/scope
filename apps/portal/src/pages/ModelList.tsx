@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import type { Model } from "@/types";
@@ -16,13 +16,40 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Eye, Cpu, Search } from "lucide-react";
+import { Eye, Cpu, Search, Star } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { toast } from "sonner";
 
 export function ModelList() {
+  const queryClient = useQueryClient();
+
   const { data: models = [], isLoading } = useQuery({
     queryKey: ["models"],
     queryFn: () => api.listModels(),
+  });
+
+  // Fetch agents to know which model is the default per agent/provider
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents"],
+    queryFn: () => api.listAgents(),
+  });
+
+  // Build a lookup: agentId → defaultModel
+  const agentDefaultModels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const agent of agents) {
+      if (agent.defaultModel) map.set(agent._id, agent.defaultModel);
+    }
+    return map;
+  }, [agents]);
+
+  const setDefaultMutation = useMutation({
+    mutationFn: (modelCompoundId: string) => api.setModelAsDefault(modelCompoundId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: ["models"] });
+      toast.success("Default model updated");
+    },
   });
 
   // Filter state
@@ -151,6 +178,9 @@ export function ModelList() {
                     <Link to={`/models/${encodeURIComponent(model._id)}`} className="hover:underline flex items-center gap-1.5">
                       <Cpu className="h-3.5 w-3.5" />
                       {model.modelId}
+                      {agentDefaultModels.get(model.agentId) === model.modelId && (
+                        <Star className="h-3 w-3 fill-current text-amber-500" />
+                      )}
                     </Link>
                   </TableCell>
                   <TableCell>
@@ -175,11 +205,25 @@ export function ModelList() {
                       : formatDate(model.lastSeenAt)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Link to={`/models/${encodeURIComponent(model._id)}`}>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                    </Link>
+                    <div className="flex items-center justify-end gap-1">
+                      {!model.disappearedAt && agentDefaultModels.get(model.agentId) !== model.modelId && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="Set as default"
+                          disabled={setDefaultMutation.isPending}
+                          onClick={() => setDefaultMutation.mutate(model._id)}
+                        >
+                          <Star className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <Link to={`/models/${encodeURIComponent(model._id)}`}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </Link>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

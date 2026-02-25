@@ -2,23 +2,43 @@
 // Licensed under the MIT License.
 
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Cpu } from "lucide-react";
+import { ArrowLeft, Cpu, Star, Loader2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { toast } from "sonner";
 
 export function ModelDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { data: model, isLoading, error } = useQuery({
     queryKey: ["model", id],
     queryFn: () => api.getModel(id!),
     enabled: !!id,
+  });
+
+  // Fetch the agent to check if this model is the default
+  const { data: agent } = useQuery({
+    queryKey: ["agent", model?.agentId],
+    queryFn: () => api.getAgent(model!.agentId),
+    enabled: !!model?.agentId,
+  });
+
+  const isDefault = agent?.defaultModel === model?.modelId;
+
+  const setDefaultMutation = useMutation({
+    mutationFn: () => api.setModelAsDefault(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agent", model?.agentId] });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      toast.success("Default model updated");
+    },
   });
 
   if (isLoading) {
@@ -55,6 +75,11 @@ export function ModelDetail() {
         <div className="flex items-center gap-2">
           <Cpu className="h-5 w-5" />
           <h1 className="text-2xl font-bold tracking-tight">{model.modelId}</h1>
+          {isDefault && (
+            <Badge variant="default" className="gap-1">
+              <Star className="h-3 w-3 fill-current" /> Default
+            </Badge>
+          )}
         </div>
         <p className="text-sm text-muted-foreground font-mono mt-1">{model._id}</p>
       </div>
@@ -87,6 +112,31 @@ export function ModelDetail() {
                   <Badge variant="secondary">Disappeared</Badge>
                 ) : (
                   <Badge variant="default">Active</Badge>
+                )}
+              </div>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Default</span>
+              <div className="mt-1">
+                {isDefault ? (
+                  <Badge variant="default" className="gap-1">
+                    <Star className="h-3 w-3 fill-current" /> Yes
+                  </Badge>
+                ) : !model.disappearedAt ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1 h-7"
+                    disabled={setDefaultMutation.isPending}
+                    onClick={() => setDefaultMutation.mutate()}
+                  >
+                    {setDefaultMutation.isPending
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <Star className="h-3 w-3" />}
+                    Set as Default
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">N/A</span>
                 )}
               </div>
             </div>

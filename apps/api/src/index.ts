@@ -3259,6 +3259,52 @@ app.get("/api/v1/models/:id", async (req: Request, res: Response, next: NextFunc
   }
 });
 
+// Set a model as the default for its agent (provider default)
+// POST /api/v1/models/:id/set-default
+app.post("/api/v1/models/:id/set-default", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const model = await modelCollection.findOne({ _id: id });
+    if (!model) {
+      res.status(404).json({ error: "Model not found" });
+      return;
+    }
+
+    // Model must be active (not disappeared)
+    if (model.disappearedAt) {
+      res.status(400).json({ error: "Cannot set a disappeared model as default" });
+      return;
+    }
+
+    // Find the agent this model belongs to
+    const agent = await agentCollection.findOne({ _id: model.agentId, deletedAt: { $exists: false } });
+    if (!agent) {
+      res.status(404).json({ error: `Agent "${model.agentId}" not found` });
+      return;
+    }
+
+    // Validate model is in agent's supportedModels
+    if (agent.supportedModels.length > 0 && !agent.supportedModels.includes(model.modelId)) {
+      res.status(400).json({
+        error: `Model "${model.modelId}" is not in agent's supportedModels`,
+        supportedModels: agent.supportedModels,
+      });
+      return;
+    }
+
+    // Update the agent's defaultModel
+    await agentCollection.updateOne(
+      { _id: model.agentId },
+      { $set: { defaultModel: model.modelId, updatedAt: new Date() } },
+    );
+
+    const updatedAgent = await agentCollection.findOne({ _id: model.agentId });
+    res.json({ model: model.modelId, agentId: model.agentId, agent: updatedAgent });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Sync models from a scanner — bulk upsert with lifecycle reconciliation
 // POST /api/v1/models/sync
 // Body: { agentId, provider, models: [{ id, providerAvailableFrom?, providerEndOfLife?, metadata? }], scannedAt }
