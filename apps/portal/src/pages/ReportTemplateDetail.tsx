@@ -27,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Save, Trash2, Loader2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
+import { TaskPromptIdPicker } from "@/components/TaskPromptIdPicker";
 
 function triggerSummary(trigger?: ReportTrigger): string {
   if (!trigger) return "always (no trigger configured)";
@@ -64,6 +65,7 @@ export function ReportTemplateDetail() {
   const [editTriggerType, setEditTriggerType] = useState<"always" | "criteria" | "taskPrompt" | "promptFeature">("always");
   const [editTriggerIds, setEditTriggerIds] = useState("");
   const [editTriggerCriteriaIds, setEditTriggerCriteriaIds] = useState<string[]>([]);
+  const [editTriggerTaskPromptIds, setEditTriggerTaskPromptIds] = useState<string[]>([]);
   const [editTriggerMatch, setEditTriggerMatch] = useState<"any" | "all">("all");
 
   const startEditing = () => {
@@ -77,6 +79,9 @@ export function ReportTemplateDetail() {
     setEditTriggerIds(getTriggerIds(template.trigger).join(", "));
     setEditTriggerCriteriaIds(
       template.trigger?.type === "criteria" ? (template.trigger as any).criteriaIds ?? [] : []
+    );
+    setEditTriggerTaskPromptIds(
+      template.trigger?.type === "taskPrompt" ? (template.trigger as any).taskPromptIds ?? [] : []
     );
     setEditTriggerMatch(
       (template.trigger?.type === "criteria" || template.trigger?.type === "promptFeature")
@@ -125,7 +130,7 @@ export function ReportTemplateDetail() {
       if (editTriggerType === "criteria") {
         body.trigger = { type: "criteria", criteriaIds: editTriggerCriteriaIds, match: editTriggerMatch };
       } else if (editTriggerType === "taskPrompt") {
-        body.trigger = { type: "taskPrompt", taskPromptIds: idsArray };
+        body.trigger = { type: "taskPrompt", taskPromptIds: editTriggerTaskPromptIds };
       } else if (editTriggerType === "promptFeature") {
         body.trigger = { type: "promptFeature", featureIds: idsArray, match: editTriggerMatch };
       }
@@ -255,12 +260,15 @@ export function ReportTemplateDetail() {
               {editTriggerType === "criteria" && (
                 <CriteriaPicker selected={editTriggerCriteriaIds} onChange={setEditTriggerCriteriaIds} />
               )}
-              {editTriggerType !== "always" && editTriggerType !== "criteria" && (
+              {editTriggerType === "taskPrompt" && (
+                <TaskPromptIdPicker selected={editTriggerTaskPromptIds} onChange={setEditTriggerTaskPromptIds} />
+              )}
+              {editTriggerType === "promptFeature" && (
                 <>
                   <Input
                     value={editTriggerIds}
                     onChange={(e) => setEditTriggerIds(e.target.value)}
-                    placeholder={editTriggerType === "taskPrompt" ? "task-prompt-id-1, task-prompt-id-2" : "feature_id_1, feature_id_2"}
+                    placeholder="feature_id_1, feature_id_2"
                     className="font-mono text-sm"
                   />
                   <p className="text-xs text-muted-foreground">Comma-separated IDs</p>

@@ -18,6 +18,7 @@ import {
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
+import { TaskPromptIdPicker } from "@/components/TaskPromptIdPicker";
 
 /** Convert a name to a slug */
 function slugify(text: string): string {
@@ -42,6 +43,7 @@ export function CreateReportTemplate() {
   const [triggerType, setTriggerType] = useState<"always" | "criteria" | "taskPrompt" | "promptFeature">("always");
   const [triggerIds, setTriggerIds] = useState("");
   const [triggerCriteriaIds, setTriggerCriteriaIds] = useState<string[]>([]);
+  const [triggerTaskPromptIds, setTriggerTaskPromptIds] = useState<string[]>([]);
   const [triggerMatch, setTriggerMatch] = useState<"any" | "all">("all");
 
   const idValid = useMemo(() => /^[a-z][a-z0-9-]*$/.test(id), [id]);
@@ -83,7 +85,7 @@ export function CreateReportTemplate() {
       if (triggerType === "criteria") {
         body.trigger = { type: "criteria", criteriaIds: triggerCriteriaIds, match: triggerMatch };
       } else if (triggerType === "taskPrompt") {
-        body.trigger = { type: "taskPrompt", taskPromptIds: idsArray };
+        body.trigger = { type: "taskPrompt", taskPromptIds: triggerTaskPromptIds };
       } else if (triggerType === "promptFeature") {
         body.trigger = { type: "promptFeature", featureIds: idsArray, match: triggerMatch };
       }
@@ -213,15 +215,15 @@ export function CreateReportTemplate() {
             {triggerType === "criteria" && (
               <CriteriaPicker selected={triggerCriteriaIds} onChange={setTriggerCriteriaIds} />
             )}
-            {triggerType !== "always" && triggerType !== "criteria" && (
+            {triggerType === "taskPrompt" && (
+              <TaskPromptIdPicker selected={triggerTaskPromptIds} onChange={setTriggerTaskPromptIds} />
+            )}
+            {triggerType === "promptFeature" && (
               <>
                 <Input
                   value={triggerIds}
                   onChange={(e) => setTriggerIds(e.target.value)}
-                  placeholder={
-                    triggerType === "taskPrompt" ? "task-prompt-id-1, task-prompt-id-2"
-                    : "feature_1, feature_2"
-                  }
+                  placeholder="feature_1, feature_2"
                   className="font-mono text-sm"
                 />
                 <p className="text-xs text-muted-foreground">Comma-separated IDs</p>
