@@ -18,6 +18,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Trash2, RefreshCw, Loader2, BookOpen, ChevronDown, ChevronUp } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -245,9 +248,9 @@ export function SkillDetail() {
                       {expandedRevision === rev._id && (
                         <TableRow key={`${rev._id}-content`}>
                           <TableCell colSpan={3} className="p-0">
-                            <pre className="whitespace-pre-wrap text-xs bg-muted p-4 font-mono leading-relaxed max-h-96 overflow-y-auto">
-                              {rev.content}
-                            </pre>
+                            <div className="prose prose-sm dark:prose-invert max-w-none p-4 max-h-96 overflow-y-auto">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{rev.content}</ReactMarkdown>
+                            </div>
                           </TableCell>
                         </TableRow>
                       )}
