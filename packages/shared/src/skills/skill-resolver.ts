@@ -147,7 +147,7 @@ export class SkillResolver {
       compatibility: parsed.frontmatter.compatibility,
       allowedTools: parsed.frontmatter.allowedTools,
       metadata: parsed.frontmatter.metadata,
-      content: parsed.content,
+      content: skillMdFile.content,
       archiveUrl,
       resolvedAt: now,
     });
