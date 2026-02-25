@@ -21,6 +21,8 @@ import { SkillPicker } from "@/components/SkillPicker";
 import { Stepper } from "@/components/Stepper";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
+import { useCommandEnter } from "@/hooks/useCommandEnter";
+import { KbdBadge } from "@/components/KbdBadge";
 
 const STEPS = ["Configure", "Review & Submit"];
 
@@ -106,8 +108,7 @@ export function SubmitRun() {
     createTaskPromptMutation.mutate();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const doSubmit = () => {
     if (!task.trim()) return;
 
     const criteria =
@@ -144,6 +145,17 @@ export function SubmitRun() {
       ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
     });
   };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    doSubmit();
+  };
+
+  // Cmd+Enter / Ctrl+Enter shortcut for primary action
+  useCommandEnter(
+    step === 1 ? handleContinue : doSubmit,
+    step === 1 ? !!task.trim() : !!task.trim() && !submitMutation.isPending,
+  );
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -424,7 +436,7 @@ export function SubmitRun() {
           {/* Continue */}
           <div className="flex justify-end">
             <Button type="button" onClick={handleContinue} disabled={!task.trim()} className="gap-1.5">
-              Continue <ArrowRight className="h-4 w-4" />
+              Continue <ArrowRight className="h-4 w-4" /> <KbdBadge />
             </Button>
           </div>
         </div>
@@ -543,6 +555,7 @@ export function SubmitRun() {
                   <Send className="h-4 w-4" />
                 )}
                 Submit {occurrences > 1 ? `${occurrences} Runs` : "Run"}
+                <KbdBadge />
               </Button>
             </div>
           </div>
