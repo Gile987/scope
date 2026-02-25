@@ -319,10 +319,9 @@ services:
       HTTP_PROXY: http://devproxy-copilot:18000
       HTTPS_PROXY: http://devproxy-copilot:18000
       NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-copilot"
-      NODE_EXTRA_CA_CERTS: /certs/dev-proxy-ca.crt
+      NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
     volumes:
       - copilot_har_output:/har-output
-      - copilot_devproxy_cert:/certs
     depends_on:
       <<: *worker-deps
       devproxy-copilot:
@@ -332,7 +331,7 @@ services:
   devproxy-copilot:
     image: ghcr.io/dotnet/dev-proxy:2.1.0
     profiles: [copilot]
-    user: "0:0"
+    user: "1000:1000"
     working_dir: /har-output
     command: ["--config-file", "/config/devproxyrc.json", "--record"]
     volumes:

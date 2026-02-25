@@ -226,6 +226,7 @@ export interface Reporter {
 export interface ReportDocument {
   _id: string;           // UUID
   requestId: string;     // FK → RequestDocument._id
+  templateId?: string;   // FK → ReportTemplateDocument.id (slug of template that generated this report)
   reporter?: Reporter;   // Set by the worker when it picks up the job
   content?: string;      // Generated markdown report
   status: ReportStatus;
@@ -239,6 +240,60 @@ export interface ReportDocument {
 /** Queue message payload for report generation */
 export interface ReportQueueMessagePayload {
   reportId: string;
+}
+
+// --- Report Template System types ---
+
+/** Trigger that fires on every completed run */
+export interface AlwaysTrigger {
+  type: "always";
+}
+
+/** Trigger that matches against scenario criteria IDs */
+export interface CriteriaTrigger {
+  type: "criteria";
+  criteriaIds: string[];
+  match?: "any" | "all";  // Default: "any"
+}
+
+/** Trigger that matches against exact task prompt IDs (UUIDv5 content-addressed) */
+export interface TaskPromptTrigger {
+  type: "taskPrompt";
+  taskPromptIds: string[];
+}
+
+/** Trigger that matches against detected prompt features */
+export interface PromptFeatureTrigger {
+  type: "promptFeature";
+  featureIds: string[];
+  match?: "any" | "all";  // Default: "any"
+}
+
+/** Discriminated union of all report trigger types */
+export type ReportTrigger =
+  | AlwaysTrigger
+  | CriteriaTrigger
+  | TaskPromptTrigger
+  | PromptFeatureTrigger;
+
+/** System prompt customization for a report template */
+export interface ReportTemplateSystemPrompt {
+  mode: "append" | "override";
+  content: string;
+}
+
+/** Report template document stored in MongoDB */
+export interface ReportTemplateDocument {
+  _id: string;                           // Auto-generated UUID
+  id: string;                            // Human-readable slug (e.g. "default", "failure-analysis")
+  name: string;                          // Display name
+  description?: string;
+  userPrompt: string;                    // REQUIRED — the instruction sent to the agent
+  systemPrompt?: ReportTemplateSystemPrompt;  // OPTIONAL — customize base system prompt
+  trigger?: ReportTrigger;               // OPTIONAL — omit = always trigger
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;                      // Soft-delete timestamp
 }
 
 // --- Insights System types ---

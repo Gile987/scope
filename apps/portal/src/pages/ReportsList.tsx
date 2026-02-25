@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
+import { Badge } from "@/components/ui/badge";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { FileText } from "lucide-react";
 
@@ -66,6 +67,7 @@ export function ReportsList() {
               <TableHead>Task</TableHead>
               <TableHead className="w-[120px]">Run ID</TableHead>
               <TableHead className="w-[120px]">Status</TableHead>
+              <TableHead className="w-[100px]">Template</TableHead>
               <TableHead className="w-[100px]">Model</TableHead>
               <TableHead className="w-[180px]">Created</TableHead>
             </TableRow>
@@ -94,6 +96,17 @@ export function ReportsList() {
                 </TableCell>
                 <TableCell>
                   <ReportStatusBadge status={report.status} />
+                </TableCell>
+                <TableCell>
+                  {report.templateId ? (
+                    <Link to={`/report-templates/${report.templateId}`}>
+                      <Badge variant="outline" className="text-xs font-mono hover:bg-accent">
+                        {report.templateId}
+                      </Badge>
+                    </Link>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">default</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">
                   {report.reporter?.model ?? "–"}

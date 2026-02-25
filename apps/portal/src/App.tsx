@@ -17,6 +17,9 @@ import { CreatePromptFeature } from "@/pages/CreatePromptFeature";
 import { PromptFeatureGraphView } from "@/pages/PromptFeatureGraphView";
 import { ReportsList } from "@/pages/ReportsList";
 import { ReportDetail } from "@/pages/ReportDetail";
+import { ReportTemplateList } from "@/pages/ReportTemplateList";
+import { ReportTemplateDetail } from "@/pages/ReportTemplateDetail";
+import { CreateReportTemplate } from "@/pages/CreateReportTemplate";
 import { TokenList } from "@/pages/TokenList";
 import { CreateToken } from "@/pages/CreateToken";
 import { TokenDetail } from "@/pages/TokenDetail";
@@ -44,6 +47,9 @@ export function App() {
         <Route path="/runs/:id" element={<RunDetail />} />
         <Route path="/reports" element={<ReportsList />} />
         <Route path="/reports/:id" element={<ReportDetail />} />
+        <Route path="/report-templates" element={<ReportTemplateList />} />
+        <Route path="/report-templates/new" element={<CreateReportTemplate />} />
+        <Route path="/report-templates/:id" element={<ReportTemplateDetail />} />
         <Route path="/insights" element={<InsightsList />} />
         <Route path="/insights/:id" element={<InsightDetail />} />
         <Route path="/criteria" element={<CriteriaList />} />
