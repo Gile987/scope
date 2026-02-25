@@ -7,10 +7,10 @@
  */
 
 /** Supported output formats for list commands */
-export type OutputFormat = 'table' | 'tsv' | 'json';
+export type OutputFormat = 'table' | 'tsv' | 'json' | 'yaml';
 
 /** All valid output format values */
-export const OUTPUT_FORMAT_VALUES: OutputFormat[] = ['table', 'tsv', 'json'];
+export const OUTPUT_FORMAT_VALUES: OutputFormat[] = ['table', 'tsv', 'json', 'yaml'];
 
 /** Display field descriptor — unified across all output formats */
 export interface DisplayField<T = any> {

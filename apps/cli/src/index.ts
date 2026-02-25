@@ -50,7 +50,19 @@ const OUTPUT_FORMATS = {
   table: { section: 'Human-readable formats', description: 'Formatted table with borders (default for lists)' },
   tsv:   { section: 'Machine-readable formats', description: 'Tab-separated values for Unix tools (cut, awk, grep, xargs)' },
   json:  { section: 'Machine-readable formats', description: 'JSON format for programmatic access and AI agents' },
+  yaml:  { section: 'Machine-readable formats', description: 'YAML format for human-friendly structured data' },
 } as const;
+
+/**
+ * Add the standard `-o, --output <format>` option to a command.
+ * @param cmd - The Commander command to add the option to.
+ * @param extra - Additional format names beyond the defaults (table, tsv, json, yaml).
+ * @returns The command (for chaining).
+ */
+function withOutputOption(cmd: Command, extra?: string[]): Command {
+  const formats = ['table', 'tsv', 'json', 'yaml', ...(extra ?? [])];
+  return cmd.option("-o, --output <format>", `Output format: ${formats.join(', ')}`, "table");
+}
 
 program
   .name("scope-mt")
@@ -281,12 +293,13 @@ run
     }
   });
 
+withOutputOption(
 run
   .command("get")
   .description("Get full details of a run")
   .requiredOption("-i, --id <id>", "Run ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     await runGetAction({ id: options.id, url: options.url, output: options.output });
   });
@@ -350,13 +363,14 @@ run
     });
   });
 
+withOutputOption(
 run
   .command("list")
   .description("List all requests")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
   .option("--include-deleted", "Include soft-deleted runs")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -682,12 +696,13 @@ const criteria = program
 
 configureHelp(criteria);
 
+withOutputOption(
 criteria
   .command("list")
   .description("List all criteria")
   .option("-q, --query <search>", "Filter by ID or prompt text")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -734,12 +749,15 @@ criteria
     }
   });
 
+withOutputOption(
 criteria
   .command("get")
   .description("Get details of a single criterion")
   .requiredOption("-i, --id <id>", "Criterion ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`);
 
@@ -753,6 +771,19 @@ criteria
         id: string; prompt: string; dependsOn?: string[];
         dependents: string[]; createdAt: string; updatedAt?: string;
       };
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: 'id', label: 'ID' },
+          { key: 'prompt', label: 'Prompt' },
+          { key: 'dependsOn', label: 'Depends On', formatter: (item: any) => (item.dependsOn ?? []).join(', ') || '(none)' },
+          { key: 'dependents', label: 'Dependents', formatter: (item: any) => (item.dependents ?? []).join(', ') || '(none)' },
+          { key: 'createdAt', label: 'Created' },
+          { key: 'updatedAt', label: 'Updated' },
+        ];
+        console.log(formatData([c], fields, format));
+        return;
+      }
 
       console.log(`${label('ID:')}        ${value(c.id)}`);
       console.log(`${label('Prompt:')}`);
@@ -1100,12 +1131,13 @@ const promptFeature = program
 
 configureHelp(promptFeature);
 
+withOutputOption(
 promptFeature
   .command("list")
   .description("List all prompt features")
   .option("-q, --query <search>", "Filter by ID or prompt text")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -1152,12 +1184,15 @@ promptFeature
     }
   });
 
+withOutputOption(
 promptFeature
   .command("get")
   .description("Get details of a single prompt feature")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/${options.id}`);
 
@@ -1171,6 +1206,19 @@ promptFeature
         id: string; prompt: string; dependsOn?: string[];
         dependents: string[]; createdAt: string; updatedAt?: string;
       };
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: 'id', label: 'ID' },
+          { key: 'prompt', label: 'Prompt' },
+          { key: 'dependsOn', label: 'Depends On', formatter: (item: any) => (item.dependsOn ?? []).join(', ') || '(none)' },
+          { key: 'dependents', label: 'Dependents', formatter: (item: any) => (item.dependents ?? []).join(', ') || '(none)' },
+          { key: 'createdAt', label: 'Created' },
+          { key: 'updatedAt', label: 'Updated' },
+        ];
+        console.log(formatData([f], fields, format));
+        return;
+      }
 
       console.log(`${label('ID:')}        ${value(f.id)}`);
       console.log(`${label('Prompt:')}`);
@@ -1674,13 +1722,15 @@ report
     }
   });
 
+withOutputOption(
 report
   .command("get")
   .description("Get a report by ID")
   .requiredOption("-i, --id <reportId>", "Report ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("--raw", "Output raw markdown without formatting")
+, ['markdown'])
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/reports/${options.id}`);
 
@@ -1701,8 +1751,24 @@ report
         error?: string;
       };
 
-      if (options.raw && report.content) {
-        console.log(report.content);
+      if (format === 'markdown') {
+        console.log(report.content ?? '');
+        return;
+      }
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: 'id', label: 'ID' },
+          { key: 'requestId', label: 'Run' },
+          { key: 'status', label: 'Status' },
+          { key: 'reporter', label: 'Reporter', formatter: (r: any) => r.reporter ? `${r.reporter.name} (${r.reporter.agentId}@${r.reporter.agentVersion})` : '' },
+          { key: 'model', label: 'Model', formatter: (r: any) => r.reporter?.model || '' },
+          { key: 'content', label: 'Content', formatter: (r: any) => r.content || '' },
+          { key: 'error', label: 'Error', formatter: (r: any) => r.error || '' },
+          { key: 'createdAt', label: 'Created' },
+          { key: 'updatedAt', label: 'Updated' },
+        ];
+        console.log(formatData([report], fields, format));
         return;
       }
 
@@ -1733,12 +1799,13 @@ report
     }
   });
 
+withOutputOption(
 report
   .command("list")
   .description("List all reports (optionally filter by run)")
   .option("-r, --run <requestId>", "Filter by run ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -1870,11 +1937,12 @@ const reportTemplate = program
 
 configureHelp(reportTemplate);
 
+withOutputOption(
 reportTemplate
   .command("list")
   .description("List all report templates")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -1924,12 +1992,15 @@ reportTemplate
     }
   });
 
+withOutputOption(
 reportTemplate
   .command("get")
   .description("Get details of a single report template")
   .requiredOption("-i, --id <id>", "Report template ID (slug)")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`);
 
@@ -1945,6 +2016,21 @@ reportTemplate
         trigger?: { type: string; [k: string]: unknown };
         createdAt: string; updatedAt?: string;
       };
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: 'id', label: 'ID' },
+          { key: 'name', label: 'Name' },
+          { key: 'description', label: 'Description', formatter: (item: any) => item.description || '' },
+          { key: 'trigger', label: 'Trigger', formatter: (item: any) => item.trigger?.type ?? 'always' },
+          { key: 'userPrompt', label: 'User Prompt' },
+          { key: 'systemPrompt', label: 'System Prompt', formatter: (item: any) => item.systemPrompt ? `${item.systemPrompt.mode}: ${item.systemPrompt.content}` : '' },
+          { key: 'createdAt', label: 'Created' },
+          { key: 'updatedAt', label: 'Updated' },
+        ];
+        console.log(formatData([t], fields, format));
+        return;
+      }
 
       console.log(`${label('ID:')}          ${value(t.id)}`);
       console.log(`${label('Name:')}        ${t.name}`);
@@ -2321,11 +2407,12 @@ const agent = program
 
 configureHelp(agent);
 
+withOutputOption(
 agent
   .command("list")
   .description("List all coding agents")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -2356,12 +2443,15 @@ agent
     }
   });
 
+withOutputOption(
 agent
   .command("get")
   .description("Get details of a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`);
       if (!response.ok) {
@@ -2370,6 +2460,21 @@ agent
         process.exit(1);
       }
       const agentDoc = await response.json();
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: '_id', label: 'ID' },
+          { key: 'name', label: 'Name' },
+          { key: 'description', label: 'Description', formatter: (a: any) => a.description || '' },
+          { key: 'supportedModels', label: 'Supported Models', formatter: (a: any) => (a.supportedModels || []).join(', ') },
+          { key: 'defaultModel', label: 'Default Model', formatter: (a: any) => a.defaultModel || '' },
+          { key: 'createdAt', label: 'Created' },
+          { key: 'updatedAt', label: 'Updated' },
+        ];
+        console.log(formatData([agentDoc], fields, format));
+        return;
+      }
+
       console.log(`${label('ID:')} ${value(agentDoc._id)}`);
       console.log(`${label('Name:')} ${value(agentDoc.name)}`);
       if (agentDoc.description) console.log(`${label('Description:')} ${agentDoc.description}`);
@@ -2450,12 +2555,13 @@ const agentModel = agent
 
 configureHelp(agentModel);
 
+withOutputOption(
 agentModel
   .command("list")
   .description("List supported models for a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -2627,11 +2733,12 @@ const mcpServer = mcp
 
 configureHelp(mcpServer);
 
+withOutputOption(
 mcpServer
   .command("list")
   .description("List all MCP servers")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -2663,12 +2770,15 @@ mcpServer
     }
   });
 
+withOutputOption(
 mcpServer
   .command("get")
   .description("Get details of an MCP server")
   .requiredOption("-i, --id <id>", "MCP server slug")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/mcp/servers/${encodeURIComponent(options.id)}`);
       if (!response.ok) {
@@ -2677,6 +2787,21 @@ mcpServer
         process.exit(1);
       }
       const server = await response.json();
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: '_id', label: 'Slug' },
+          { key: 'name', label: 'Name' },
+          { key: 'type', label: 'Type' },
+          { key: 'url', label: 'URL' },
+          { key: 'description', label: 'Description', formatter: (s: any) => s.description || '' },
+          { key: 'createdAt', label: 'Created' },
+          { key: 'updatedAt', label: 'Updated' },
+        ];
+        console.log(formatData([server], fields, format));
+        return;
+      }
+
       console.log(`${label('Slug:')} ${value(server._id)}`);
       console.log(`${label('Name:')} ${value(server.name)}`);
       console.log(`${label('Type:')} ${value(server.type)}`);
@@ -2826,11 +2951,12 @@ const skill = program
 
 configureHelp(skill);
 
+withOutputOption(
 skill
   .command("list")
   .description("List all imported skills")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -2862,13 +2988,14 @@ skill
     }
   });
 
+withOutputOption(
 skill
   .command("search")
   .description("Search skills (internal + skills.sh registry)")
   .requiredOption("-q, --query <query>", "Search query")
   .option("--limit <number>", "Maximum results", parseInt)
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -2903,12 +3030,15 @@ skill
     }
   });
 
+withOutputOption(
 skill
   .command("get")
   .description("Get details of a skill")
   .requiredOption("-i, --id <id>", "Skill slug (e.g. vercel-labs/agent-skills/my-skill)")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}`);
       if (!response.ok) {
@@ -2917,6 +3047,22 @@ skill
         process.exit(1);
       }
       const s = await response.json();
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: '_id', label: 'Slug' },
+          { key: 'name', label: 'Name' },
+          { key: 'source', label: 'Source' },
+          { key: 'skillName', label: 'Skill Name' },
+          { key: 'origin', label: 'Origin' },
+          { key: 'description', label: 'Description', formatter: (sk: any) => sk.description || '' },
+          { key: 'createdAt', label: 'Created' },
+          { key: 'updatedAt', label: 'Updated' },
+        ];
+        console.log(formatData([s], fields, format));
+        return;
+      }
+
       console.log(`${label('Slug:')} ${value(s._id)}`);
       console.log(`${label('Name:')} ${value(s.name)}`);
       console.log(`${label('Source:')} ${value(s.source)}`);
@@ -3017,13 +3163,14 @@ skill
     }
   });
 
+withOutputOption(
 skill
   .command("revisions")
   .description("List revisions for a skill")
   .requiredOption("-i, --id <id>", "Skill slug")
   .option("--limit <number>", "Maximum results", parseInt)
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -3066,13 +3213,14 @@ const insight = program
 
 configureHelp(insight);
 
+withOutputOption(
 insight
   .command("list")
   .description("List all insights")
   .option("-q, --query <query>", "Search by keyword")
   .option("--blocked", "Show only blocked insights")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -3107,13 +3255,15 @@ insight
     }
   });
 
+withOutputOption(
 insight
   .command("get")
   .description("Get details of an insight (renders markdown description)")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("--raw", "Print raw markdown without formatting")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+, ['markdown'])
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}`);
       if (!response.ok) {
@@ -3123,8 +3273,26 @@ insight
       }
       const insightDoc = await response.json();
 
-      if (options.raw) {
+      if (format === 'markdown') {
         console.log(insightDoc.description);
+        return;
+      }
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: '_id', label: 'ID' },
+          { key: 'title', label: 'Title' },
+          { key: 'category', label: 'Category', formatter: (r: any) => r.category || '' },
+          { key: 'tags', label: 'Tags', formatter: (r: any) => (r.tags ?? []).join(', ') },
+          { key: 'votes', label: 'Votes', formatter: (r: any) => String(r.upvotes - r.downvotes) },
+          { key: 'referenceCount', label: 'References', formatter: (r: any) => String(r.referenceCount) },
+          { key: 'blocked', label: 'Blocked', formatter: (r: any) => r.blocked ? 'Yes' : 'No' },
+          { key: 'createdBy', label: 'Created By' },
+          { key: 'description', label: 'Description' },
+          { key: 'createdAt', label: 'Created' },
+          { key: 'updatedAt', label: 'Updated' },
+        ];
+        console.log(formatData([insightDoc], fields, format));
         return;
       }
 
@@ -3342,6 +3510,7 @@ const taskPrompt = program
 
 configureHelp(taskPrompt);
 
+withOutputOption(
 taskPrompt
   .command("list")
   .description("List all task prompts")
@@ -3349,7 +3518,7 @@ taskPrompt
   .option("-l, --limit <n>", "Maximum number of results", "50")
   .option("--offset <n>", "Number of results to skip", "0")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
-  .option("-o, --output <format>", "Output format: table, tsv, or json", "table")
+)
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
@@ -3404,12 +3573,15 @@ taskPrompt
     }
   });
 
+withOutputOption(
 taskPrompt
   .command("get")
   .description("Get details of a single task prompt")
   .requiredOption("-i, --id <id>", "Task prompt ID (UUID)")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}`);
 
@@ -3425,6 +3597,23 @@ taskPrompt
         featuresExtractedAt?: string;
         createdAt: string; deletedAt?: string;
       };
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: '_id', label: 'ID' },
+          { key: 'text', label: 'Text' },
+          { key: 'features', label: 'Features', formatter: (item: any) => {
+            if (!item.features) return '(not extracted)';
+            const detected = item.features.filter((f: any) => f.detected).length;
+            return `${detected}/${item.features.length} detected`;
+          }},
+          { key: 'featuresExtractedAt', label: 'Extracted At' },
+          { key: 'createdAt', label: 'Created' },
+          { key: 'deletedAt', label: 'Deleted' },
+        ];
+        console.log(formatData([tp], fields, format));
+        return;
+      }
 
       console.log(`${label('ID:')}        ${value(tp._id)}`);
       console.log(`${label('Created:')}   ${value(tp.createdAt)}`);
