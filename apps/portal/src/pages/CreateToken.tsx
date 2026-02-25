@@ -178,14 +178,6 @@ export function CreateToken() {
     doValidate();
   };
 
-  // Cmd+Enter / Ctrl+Enter shortcut for primary action
-  useCommandEnter(
-    step === "input" ? doValidate : handleRegister,
-    step === "input"
-      ? !previewMutation.isPending && !!value.trim() && !validateTokenPrefix(type, value)
-      : !createMutation.isPending,
-  );
-
   const handleRegister = () => {
     createMutation.mutate({
       type,
@@ -199,6 +191,14 @@ export function CreateToken() {
     setStep("input");
     setPreviewResult(null);
   };
+
+  // Cmd+Enter / Ctrl+Enter shortcut for primary action
+  useCommandEnter(
+    step === "input" ? doValidate : handleRegister,
+    step === "input"
+      ? !previewMutation.isPending && !!value.trim() && !validateTokenPrefix(type, value)
+      : !createMutation.isPending,
+  );
 
   return (
     <div className="space-y-6 max-w-2xl">
