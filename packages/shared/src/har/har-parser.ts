@@ -170,6 +170,11 @@ function extractToolCallsFromBody(
   const lines = body.split("\n");
   // Accumulate partial tool call data for streaming
   const partialCalls: Map<string, { name: string; arguments: string }> = new Map();
+  // Map SSE index → tool call id so continuation chunks (which only
+  // carry `index`, not `id`) can find the right partial entry.
+  const indexToId: Map<number, string> = new Map();
+  // Auto-incrementing counter for initial chunks that lack an explicit index.
+  let nextAutoIndex = 0;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -186,18 +191,22 @@ function extractToolCallsFromBody(
 
         for (const tc of delta.tool_calls) {
           if (tc.id) {
-            // New tool call chunk with id
+            // New tool call chunk with id — register both maps
             partialCalls.set(tc.id, {
               name: tc.function?.name || "",
               arguments: tc.function?.arguments || "",
             });
+            // Use the explicit index if provided, otherwise assign
+            // the next auto-index so continuation chunks can match.
+            const idx = tc.index ?? nextAutoIndex;
+            indexToId.set(idx, tc.id);
+            nextAutoIndex = idx + 1;
           } else if (tc.index !== undefined) {
-            // Continuation chunk — find by index
-            // In streaming, tool_calls use index to accumulate
-            const entries = Array.from(partialCalls.entries());
-            if (tc.index < entries.length) {
-              const [, partial] = entries[tc.index];
-              if (tc.function?.arguments) {
+            // Continuation chunk — look up by SSE index
+            const id = indexToId.get(tc.index);
+            if (id) {
+              const partial = partialCalls.get(id);
+              if (partial && tc.function?.arguments) {
                 partial.arguments += tc.function.arguments;
               }
             }

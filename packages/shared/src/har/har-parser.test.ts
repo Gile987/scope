@@ -244,6 +244,43 @@ describe("extractToolCalls", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0].name).toBe("foo");
     });
+
+    it("accumulates arguments for tool calls with non-zero SSE index", () => {
+      // Reproduces the bug where a tool call arrives at SSE index=1
+      // (e.g. the second parallel tool call in the batch) and the
+      // first SSE chunk has no arguments field.
+      const sseBody = [
+        'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_skill","index":1,"function":{"name":"skill"}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\\"skill\\""}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":": \\"flask-python\\"}"}}]}}]}',
+        "data: [DONE]",
+      ].join("\n");
+
+      const har = makeHar([makeEntry({ responseBody: sseBody })]);
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].name).toBe("skill");
+      expect(calls[0].arguments).toEqual({ skill: "flask-python" });
+    });
+
+    it("accumulates multiple parallel streaming tool calls with different indices", () => {
+      // Two tool calls streamed in parallel: report_intent at index 1, update_todo at index 2
+      const sseBody = [
+        'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_report","index":1,"function":{"name":"report_intent"}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_todo","index":2,"function":{"name":"update_todo"}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\\"intent\\": \\"Creating Flask REST API\\"}"}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":2,"function":{"arguments":"{\\"todos\\": \\"- [ ] Setup\\"}"}}]}}]}',
+        "data: [DONE]",
+      ].join("\n");
+
+      const har = makeHar([makeEntry({ responseBody: sseBody })]);
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(2);
+      expect(calls[0].name).toBe("report_intent");
+      expect(calls[0].arguments).toEqual({ intent: "Creating Flask REST API" });
+      expect(calls[1].name).toBe("update_todo");
+      expect(calls[1].arguments).toEqual({ todos: "- [ ] Setup" });
+    });
   });
 
   describe("tool responses", () => {
