@@ -22,7 +22,7 @@ import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2 } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive } from "lucide-react";
 import { formatDate, formatId } from "@/lib/utils";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -190,6 +190,17 @@ export function RunDetail() {
               )}
             </div>
           </div>
+          {run.turns && run.turns.some(t => t.snapshotUrl) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => window.open(api.archiveUrl(run._id), "_blank")}
+            >
+              <Archive className="h-4 w-4" />
+              Download Archive
+            </Button>
+          )}
         </div>
       </div>
 

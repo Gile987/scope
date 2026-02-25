@@ -85,6 +85,11 @@ export const api = {
     return `${BASE}/requests/${id}/har${qs}`;
   },
 
+  /** Get full run archive download URL (.tar.gz with run.yaml + iteration snapshots) */
+  archiveUrl: (id: string): string => {
+    return `${BASE}/requests/${id}/archive`;
+  },
+
   /** SSE endpoint URL for log streaming */
   logsUrl: (id: string, fromStart = true): string => {
     return `${BASE}/requests/${id}/logs?fromStart=${fromStart}`;
