@@ -6,6 +6,19 @@ import { SkillRevisionStore } from './skill-revision-store.js';
 import { computeSkillRevisionId } from './skill-revision-id.js';
 import type { SkillRevisionDocument } from '../types/skill.js';
 
+/** Build a full SkillRevisionDocument with required defaults */
+function makeRevDoc(overrides: Partial<SkillRevisionDocument> & Pick<SkillRevisionDocument, '_id' | 'ref' | 'source' | 'skillName' | 'commitHash' | 'name' | 'content'>): SkillRevisionDocument {
+  return {
+    skillPath: `skills/${overrides.skillName}`,
+    commitTimestamp: new Date(),
+    description: 'test description',
+    archiveUrl: 'https://blob.test/archive.tar.gz',
+    resolvedAt: new Date(),
+    createdAt: new Date(),
+    ...overrides,
+  };
+}
+
 /** Create a mock MongoDB collection with chainable find/sort/limit/toArray */
 function makeMockCollection() {
   const store = new Map<string, SkillRevisionDocument>();
@@ -49,7 +62,7 @@ describe('SkillRevisionStore', () => {
     });
 
     it('returns document when found', async () => {
-      const doc: SkillRevisionDocument = {
+      const doc = makeRevDoc({
         _id: 'test-id',
         ref: 'owner/repo/skill@abc123',
         source: 'owner/repo',
@@ -57,8 +70,7 @@ describe('SkillRevisionStore', () => {
         commitHash: 'abc123',
         name: 'Test',
         content: '# SKILL.md',
-        resolvedAt: new Date(),
-      };
+      });
       mockCol._store.set('test-id', doc);
       const result = await revStore.get('test-id');
       expect(result).toEqual(doc);
@@ -69,7 +81,7 @@ describe('SkillRevisionStore', () => {
     it('computes ID from ref and looks up', async () => {
       const ref = 'owner/repo/skill@abc123';
       const id = computeSkillRevisionId(ref);
-      const doc: SkillRevisionDocument = {
+      const doc = makeRevDoc({
         _id: id,
         ref,
         source: 'owner/repo',
@@ -77,8 +89,7 @@ describe('SkillRevisionStore', () => {
         commitHash: 'abc123',
         name: 'Test',
         content: '# content',
-        resolvedAt: new Date(),
-      };
+      });
       mockCol._store.set(id, doc);
       const result = await revStore.getByRef(ref);
       expect(result).toEqual(doc);
@@ -90,9 +101,13 @@ describe('SkillRevisionStore', () => {
       ref: 'owner/repo/skill@abc123',
       source: 'owner/repo',
       skillName: 'skill',
+      skillPath: 'skills/skill',
       commitHash: 'abc123',
+      commitTimestamp: new Date(),
       name: 'Test Skill',
+      description: 'test',
       content: '# content',
+      archiveUrl: 'https://blob.test/archive.tar.gz',
       resolvedAt: new Date(),
     };
 
@@ -107,7 +122,7 @@ describe('SkillRevisionStore', () => {
 
     it('returns existing document without inserting', async () => {
       const id = computeSkillRevisionId(inputDoc.ref);
-      const existing: SkillRevisionDocument = { ...inputDoc, _id: id, createdAt: new Date() };
+      const existing = makeRevDoc({ ...inputDoc, _id: id });
       mockCol._store.set(id, existing);
 
       const result = await revStore.findOrCreate(inputDoc);
