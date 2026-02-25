@@ -3,3 +3,4 @@
 
 export * from "./types.js";
 export * from "./mcp.js";
+export * from "./skill.js";

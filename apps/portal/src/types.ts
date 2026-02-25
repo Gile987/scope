@@ -75,6 +75,8 @@ export interface Run {
   /** @deprecated — use taskPromptId instead */
   promptFeatureExtractionId?: string;
   mcpServers?: string[];
+  skills?: string[];
+  skillRevisions?: string[];
   toolCalls?: ToolCall[];
   harUrl?: string;
 }
@@ -222,6 +224,7 @@ export interface BulkResubmitOverrides {
   model?: string | null;
   maxIterations?: number | null;
   mcpServers?: string[] | null;
+  skillRevisions?: string[] | null;
 }
 
 // Bulk re-submit response
@@ -515,6 +518,54 @@ export interface Model {
   providerAvailableFrom?: string;
   providerEndOfLife?: string;
   metadata?: Record<string, unknown>;
+}
+
+// =============================================================================
+// Skill types
+// =============================================================================
+
+/** Origin of a skill */
+export type SkillOrigin = "skills-sh" | "manual";
+
+/** An imported skill */
+export interface SkillDocument {
+  _id: string;
+  source: string;
+  skillName: string;
+  name: string;
+  origin: SkillOrigin;
+  description?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** A resolved skill revision (immutable) */
+export interface SkillRevisionDocument {
+  _id: string;
+  ref: string;
+  source: string;
+  skillName: string;
+  commitHash: string;
+  name: string;
+  description?: string;
+  license?: string;
+  compatibility?: string;
+  allowedTools?: string;
+  metadata?: Record<string, string>;
+  content: string;
+  archiveUrl?: string;
+  resolvedAt: string;
+}
+
+/** Unified search result */
+export interface SkillSearchResult {
+  id: string;
+  name: string;
+  source: string;
+  description?: string;
+  internal: boolean;
+  installs?: number;
 }
 
 // =============================================================================

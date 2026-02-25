@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -43,6 +43,7 @@ export const api = {
     persona?: { personality: string; experience: string; verbosity: string; type: string };
     count?: number;
     mcpServers?: string[];
+    skills?: string[];
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     return request(`/requests?worker=${encodeURIComponent(worker)}`, {
@@ -579,5 +580,54 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ enabled }),
     });
+  },
+
+  // ─── Skills ───────────────────────────────────────────────────────────────
+
+  /** List all imported skills */
+  listSkills: (): Promise<SkillDocument[]> => {
+    return request("/skills");
+  },
+
+  /** Get a single skill by slug */
+  getSkill: (slug: string): Promise<SkillDocument> => {
+    return request(`/skills/${slug}`);
+  },
+
+  /** Search skills (internal + skills.sh) */
+  searchSkills: (query: string, limit?: number): Promise<SkillSearchResult[]> => {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    return request(`/skills/search?${params}`);
+  },
+
+  /** Search external skills registry only */
+  searchExternalSkills: (query: string, limit?: number): Promise<SkillSearchResult[]> => {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    return request(`/skills/search/external?${params}`);
+  },
+
+  /** Import a skill */
+  createSkill: (body: { source: string; skillName: string; name: string; origin: string; description?: string }): Promise<SkillDocument> => {
+    return request("/skills", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a skill */
+  deleteSkill: (slug: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/skills/${slug}`, { method: "DELETE" });
+  },
+
+  /** Resolve a skill (create/update revision from GitHub) */
+  resolveSkill: (slug: string): Promise<SkillRevisionDocument> => {
+    return request(`/skills/${slug}/resolve`, { method: "POST" });
+  },
+
+  /** List revisions for a skill */
+  listSkillRevisions: (slug: string): Promise<SkillRevisionDocument[]> => {
+    return request(`/skills/${slug}/revisions`);
   },
 };

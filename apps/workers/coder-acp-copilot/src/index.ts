@@ -24,11 +24,14 @@ class CopilotProcessor implements WorkerProcessor {
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
     const mcpConfigs = options?.mcpServerConfigs ?? [];
+    const skillConfigs = options?.skillConfigs ?? [];
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
       model: options?.model,
       mcpServerCount: mcpConfigs.length,
       mcpServers: mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
+      skillCount: skillConfigs.length,
+      skills: skillConfigs.map((s) => s.name),
     });
     
     // DevProxy integration — start recording if enabled

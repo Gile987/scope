@@ -28,6 +28,8 @@ import { AgentDetail } from "@/pages/AgentDetail";
 import { McpServerList } from "@/pages/McpServerList";
 import { CreateMcpServer } from "@/pages/CreateMcpServer";
 import { McpServerDetail } from "@/pages/McpServerDetail";
+import { SkillList } from "@/pages/SkillList";
+import { SkillDetail } from "@/pages/SkillDetail";
 import { InsightsList } from "@/pages/InsightsList";
 import { InsightDetail } from "@/pages/InsightDetail";
 import { ModelList } from "@/pages/ModelList";
@@ -73,6 +75,8 @@ export function App() {
         <Route path="/mcp-servers" element={<FeatureRoute featureKey="mcp"><McpServerList /></FeatureRoute>} />
         <Route path="/mcp-servers/new" element={<FeatureRoute featureKey="mcp"><CreateMcpServer /></FeatureRoute>} />
         <Route path="/mcp-servers/:slug" element={<FeatureRoute featureKey="mcp"><McpServerDetail /></FeatureRoute>} />
+        <Route path="/skills" element={<FeatureRoute featureKey="skills"><SkillList /></FeatureRoute>} />
+        <Route path="/skills/*" element={<FeatureRoute featureKey="skills"><SkillDetail /></FeatureRoute>} />
         <Route path="/admin" element={<Admin />} />
       </Route>
     </Routes>
