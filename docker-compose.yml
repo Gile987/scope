@@ -337,7 +337,7 @@ services:
     volumes:
       - ./apps/workers/coder-acp-copilot/devproxy-config.json:/config/devproxyrc.json:ro
       - copilot_har_output:/har-output
-      - copilot_devproxy_cert:/certs
+      - copilot_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
     ports:
       - "${DEVPROXY_API_PORT:-18897}:18897"
     healthcheck:

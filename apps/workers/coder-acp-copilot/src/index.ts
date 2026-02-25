@@ -7,6 +7,34 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+/**
+ * Build the environment variables for the copilot subprocess.
+ *
+ * When DevProxy is active, configures proxy-related env vars so the subprocess
+ * routes traffic through the DevProxy MITM proxy.
+ * When DevProxy is disabled (or setup failed), strips proxy env vars and clears
+ * NODE_EXTRA_CA_CERTS to prevent the subprocess from loading a non-existent cert.
+ */
+export function buildSubprocessEnv(
+  githubToken: string,
+  devProxyEnabled: boolean,
+  currentNodeOptions?: string,
+): Record<string, string> {
+  return {
+    GITHUB_TOKEN: githubToken,
+    ...(devProxyEnabled ? {
+      NODE_OPTIONS: [currentNodeOptions, "--use-env-proxy"].filter(Boolean).join(" "),
+      NODE_TLS_REJECT_UNAUTHORIZED: "0",
+    } : {
+      HTTP_PROXY: "",
+      HTTPS_PROXY: "",
+      http_proxy: "",
+      https_proxy: "",
+      NODE_EXTRA_CA_CERTS: "",
+    }),
+  };
+}
+
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-copilot";
 const tokenClient = new TokenManagerClient();
 const AGENT_VERSION = detectCliVersion("copilot", "@github/copilot");
@@ -74,27 +102,7 @@ class CopilotProcessor implements WorkerProcessor {
       const result = await runACPSession(message, {
         command: "copilot",
         args,
-        env: {
-          GITHUB_TOKEN: githubToken,
-          ...(devProxy ? {
-            // The copilot binary is a Node.js 22 SEA. By default, Node.js ignores
-            // HTTP_PROXY/HTTPS_PROXY env vars — undici only reads them when
-            // --use-env-proxy is set. NODE_OPTIONS ensures the flag is processed
-            // at startup even in SEA binaries.
-            NODE_OPTIONS: [process.env.NODE_OPTIONS, "--use-env-proxy"].filter(Boolean).join(" "),
-            // DevProxy's MITM leaf certs have RSA signatures that OpenSSL 3.x rejects
-            // ("invalid padding"). Disable TLS verification for the proxied subprocess
-            // only — acceptable because DevProxy is our own sidecar.
-            NODE_TLS_REJECT_UNAUTHORIZED: "0",
-          } : {
-            // When DevProxy is disabled, strip proxy env vars from subprocess
-            // to prevent routing through proxy without cert trust setup
-            HTTP_PROXY: "",
-            HTTPS_PROXY: "",
-            http_proxy: "",
-            https_proxy: "",
-          }),
-        },
+        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS),
         cwd: "/workspace",
         onLog: async (msg) => {
           await log("debug", msg);
