@@ -197,10 +197,41 @@ export function SkillDetail() {
                 <span className="text-muted-foreground text-xs">Skill</span>
                 <div className="font-mono text-xs">{skill.skillName}</div>
               </div>
-              {skill.description && (
+              {(latestRevision?.description || skill.description) && (
                 <div>
                   <span className="text-muted-foreground text-xs">Description</span>
-                  <div className="text-xs">{skill.description}</div>
+                  <div className="text-xs">{latestRevision?.description || skill.description}</div>
+                </div>
+              )}
+              {latestRevision?.license && (
+                <div>
+                  <span className="text-muted-foreground text-xs">License</span>
+                  <div className="text-xs">{latestRevision.license}</div>
+                </div>
+              )}
+              {latestRevision?.compatibility && (
+                <div>
+                  <span className="text-muted-foreground text-xs">Compatibility</span>
+                  <div className="text-xs">{latestRevision.compatibility}</div>
+                </div>
+              )}
+              {latestRevision?.allowedTools && (
+                <div>
+                  <span className="text-muted-foreground text-xs">Allowed Tools</span>
+                  <div className="text-xs font-mono">{latestRevision.allowedTools}</div>
+                </div>
+              )}
+              {latestRevision?.metadata && Object.keys(latestRevision.metadata).length > 0 && (
+                <div>
+                  <span className="text-muted-foreground text-xs">Metadata</span>
+                  <div className="text-xs space-y-0.5">
+                    {Object.entries(latestRevision.metadata).map(([k, v]) => (
+                      <div key={k} className="flex gap-1">
+                        <span className="font-mono text-muted-foreground">{k}:</span>
+                        <span>{v}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               <div>
