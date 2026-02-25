@@ -6,6 +6,7 @@ import {
   formatAsTable,
   formatAsTSV,
   formatAsJSON,
+  formatAsYAML,
   formatData,
   isMachineReadable,
   getValueOrNA,
@@ -14,7 +15,7 @@ import {
 } from './formatters.js';
 import type { DisplayField, TableColumn } from './types.js';
 
-// ── Helper data ──────────────────────────────────────────────────────────────
+// ── Helper data ─────────────────────────────────────────────────────────────
 
 const sampleItems = [
   { id: 'abc-123', name: 'First', status: 'completed' },
@@ -28,7 +29,7 @@ const displayFields: DisplayField[] = [
   { key: 'status', label: 'Status' },
 ];
 
-// ── getValueOrNA ─────────────────────────────────────────────────────────────
+// ── getValueOrNA ────────────────────────────────────────────────────────────
 
 describe('getValueOrNA', () => {
   it('returns string value for non-null input', () => {
@@ -44,7 +45,7 @@ describe('getValueOrNA', () => {
   });
 });
 
-// ── formatDate ───────────────────────────────────────────────────────────────
+// ── formatDate ──────────────────────────────────────────────────────────────
 
 describe('formatDate', () => {
   it('formats a valid ISO date string', () => {
@@ -62,7 +63,7 @@ describe('formatDate', () => {
   });
 });
 
-// ── maxColumnWidth ───────────────────────────────────────────────────────────
+// ── maxColumnWidth ──────────────────────────────────────────────────────────
 
 describe('maxColumnWidth', () => {
   it('calculates width from data', () => {
@@ -82,7 +83,7 @@ describe('maxColumnWidth', () => {
   });
 });
 
-// ── formatAsTable ────────────────────────────────────────────────────────────
+// ── formatAsTable ───────────────────────────────────────────────────────────
 
 describe('formatAsTable', () => {
   it('produces bordered table output', () => {
@@ -155,7 +156,7 @@ describe('formatAsTable', () => {
   });
 });
 
-// ── formatAsTSV ──────────────────────────────────────────────────────────────
+// ── formatAsTSV ─────────────────────────────────────────────────────────────
 
 describe('formatAsTSV', () => {
   it('produces tab-separated output without headers', () => {
@@ -198,7 +199,7 @@ describe('formatAsTSV', () => {
   });
 });
 
-// ── formatAsJSON ─────────────────────────────────────────────────────────────
+// ── formatAsJSON ────────────────────────────────────────────────────────────
 
 describe('formatAsJSON', () => {
   it('produces valid JSON array', () => {
@@ -233,7 +234,53 @@ describe('formatAsJSON', () => {
   });
 });
 
-// ── formatData (dispatcher) ──────────────────────────────────────────────────
+// ── formatAsYAML ────────────────────────────────────────────────────────────
+
+describe('formatAsYAML', () => {
+  it('produces valid YAML output', () => {
+    const result = formatAsYAML(sampleItems, displayFields);
+
+    // Should contain keys from displayFields
+    expect(result).toContain('id: abc-123');
+    expect(result).toContain('name: First');
+    expect(result).toContain('status: completed');
+  });
+
+  it('produces a YAML sequence (list) with one entry per item', () => {
+    const result = formatAsYAML(sampleItems, displayFields);
+
+    // YAML list items start with "- "
+    const listEntries = result.split('\n').filter((l: string) => l.startsWith('- '));
+    expect(listEntries).toHaveLength(3);
+  });
+
+  it('applies custom formatters', () => {
+    const fields: DisplayField[] = [
+      { key: 'id', label: 'ID', formatter: (item) => `prefix:${item.id}` },
+    ];
+
+    const result = formatAsYAML(sampleItems, fields);
+    expect(result).toContain('prefix:abc-123');
+  });
+
+  it('handles empty array', () => {
+    const result = formatAsYAML([], displayFields);
+    expect(result).toBe('[]');
+  });
+
+  it('no trailing newline for clean piping', () => {
+    const result = formatAsYAML(sampleItems, displayFields);
+    expect(result.endsWith('\n')).toBe(false);
+  });
+
+  it('handles null/undefined values', () => {
+    const items = [{ id: 'test', name: null, status: undefined }];
+    const result = formatAsYAML(items as any, displayFields);
+    expect(result).toContain('N/A');
+  });
+});
+
+// ── formatData (dispatcher) ─────────────────────────────────────────────────
 
 describe('formatData', () => {
   it('dispatches to table format', () => {
@@ -257,13 +304,19 @@ describe('formatData', () => {
     expect(parsed[0].id).toBe('abc-123');
   });
 
+  it('dispatches to yaml format', () => {
+    const result = formatData(sampleItems, displayFields, 'yaml');
+    expect(result).toContain('id: abc-123');
+    expect(result).toContain('name: First');
+  });
+
   it('throws on unsupported format', () => {
-    expect(() => formatData(sampleItems, displayFields, 'yaml' as any)).toThrow(
-      'Unsupported output format: yaml',
+    expect(() => formatData(sampleItems, displayFields, 'csv' as any)).toThrow(
+      'Unsupported output format: csv',
     );
   });
 
-  it('uses tableFormatter for table format, plain formatter for tsv/json', () => {
+  it('uses tableFormatter for table format, plain formatter for tsv/json/yaml', () => {
     const fields: DisplayField[] = [
       {
         key: 'id',
@@ -283,15 +336,20 @@ describe('formatData', () => {
     const jsonResult = formatData(sampleItems, fields, 'json');
     expect(jsonResult).toContain('abc-123');
     expect(jsonResult).not.toContain('STYLED:');
+
+    const yamlResult = formatData(sampleItems, fields, 'yaml');
+    expect(yamlResult).toContain('abc-123');
+    expect(yamlResult).not.toContain('STYLED:');
   });
 });
 
-// ── isMachineReadable ────────────────────────────────────────────────────────
+// ── isMachineReadable ───────────────────────────────────────────────────────
 
 describe('isMachineReadable', () => {
-  it('returns true for tsv and json', () => {
+  it('returns true for tsv, json, and yaml', () => {
     expect(isMachineReadable('tsv')).toBe(true);
     expect(isMachineReadable('json')).toBe(true);
+    expect(isMachineReadable('yaml')).toBe(true);
   });
 
   it('returns false for table', () => {

@@ -3,12 +3,13 @@
 
 /**
  * Central formatting engine for CLI output.
- * Supports table, TSV, and JSON output formats.
- * Ported from ca-geo/packages/cli reference implementation, with JSON added.
+ * Supports table, TSV, JSON, and YAML output formats.
+ * Ported from ca-geo/packages/cli reference implementation, with JSON and YAML added.
  */
 
 import Table from 'cli-table3';
 import { stringify } from 'csv-stringify/sync';
+import { stringify as yamlStringify } from 'yaml';
 import type { TableColumn, ListItem, OutputFormat, DisplayField } from './types.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -143,11 +144,33 @@ export function formatAsJSON<T extends ListItem>(
   return JSON.stringify(rows, null, 2);
 }
 
+// ── Format: YAML ─────────────────────────────────────────────────────────────
+
+/**
+ * Format items as YAML.
+ * Uses the display fields' formatters to transform values, keyed by field key.
+ */
+export function formatAsYAML<T extends ListItem>(
+  items: T[],
+  fields: DisplayField<T>[],
+): string {
+  const rows = items.map((item) => {
+    const obj: Record<string, string> = {};
+    for (const field of fields) {
+      obj[field.key] = field.formatter
+        ? field.formatter(item)
+        : getValueOrNA(item[field.key]);
+    }
+    return obj;
+  });
+  return yamlStringify(rows).trimEnd();
+}
+
 // ── Dispatcher ───────────────────────────────────────────────────────────────
 
 /**
  * Format data based on output format.
- * Routes to the appropriate formatter (table, tsv, or json).
+ * Routes to the appropriate formatter (table, tsv, json, or yaml).
  */
 export function formatData<T extends ListItem>(
   items: T[],
@@ -169,15 +192,17 @@ export function formatData<T extends ListItem>(
       return formatAsTSV(items, fields);
     case 'json':
       return formatAsJSON(items, fields);
+    case 'yaml':
+      return formatAsYAML(items, fields);
     default:
       throw new Error(`Unsupported output format: ${format}`);
   }
 }
 
 /**
- * Check if the given format is machine-readable (tsv or json).
+ * Check if the given format is machine-readable (tsv, json, or yaml).
  * Used to suppress decorative output (banners, styled headers) for piping.
  */
 export function isMachineReadable(format: OutputFormat): boolean {
-  return format === 'tsv' || format === 'json';
+  return format === 'tsv' || format === 'json' || format === 'yaml';
 }
