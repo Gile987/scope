@@ -6,23 +6,10 @@ import type { SkillConfig } from '../types/skill.js';
 /**
  * Format a lightweight discovery prompt listing available skills.
  *
- * Instead of injecting full skill content (which wastes tokens and bypasses
- * progressive disclosure), this generates a compact `<available_skills>` block
- * with just the metadata (~100 tokens per skill). The agent discovers the full
- * content by reading SKILL.md files from the workspace filesystem.
- *
- * Example output:
- * ```
- * <available_skills>
- * <skill name="azure-functions" location=".agents/skills/azure-functions">
- * Deploy and manage Azure Functions with best practices for triggers, bindings, and scaling.
- * </skill>
- * </available_skills>
- * ```
- *
- * @param skills - Resolved skill configs (name + description)
- * @param basePath - Base directory for skills (default: ".agents/skills")
- * @returns Discovery prompt string, or empty string if no skills
+ * @deprecated Agents (Copilot, Claude Code) automatically discover skills from
+ * `.agents/skills/`, `.copilot/skills/`, `.claude/skills/` on the filesystem.
+ * No prompt injection is needed — the skill extractor places files on disk and
+ * agents discover them at startup. This function is kept for backward compatibility.
  */
 export function formatSkillsDiscoveryPrompt(
   skills: SkillConfig[],
@@ -44,10 +31,9 @@ export function formatSkillsDiscoveryPrompt(
 
 /**
  * Prepend skill discovery context to a task message.
- * If no skills are provided, returns the original message unchanged.
  *
- * Uses the lightweight discovery format — agents read full content
- * from the filesystem at `.agents/skills/<name>/SKILL.md`.
+ * @deprecated Agents discover skills from the filesystem automatically.
+ * No prompt injection is needed. Kept for backward compatibility.
  */
 export function prependSkillsToMessage(
   message: string,

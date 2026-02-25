@@ -95,7 +95,8 @@ When a worker picks up a queued run, the queue processor:
 1. **Resolves** skill revision refs to `SkillConfig` objects via the API
 2. **Downloads** each skill's tar.gz archive via `SkillClient.downloadSkillArchive(ref)`
 3. **Extracts** to the workspace filesystem using `extractSkillsToWorkspace()`
-4. **Generates** a lightweight discovery prompt (`<available_skills>` XML, ~100 tokens/skill)
+
+The agent then discovers skills natively from the filesystem at startup.
 
 ```mermaid
 sequenceDiagram
@@ -114,9 +115,8 @@ sequenceDiagram
         QP->>FS: Extract to .agents/skills/<name>/
         QP->>FS: Extract to .<agent>/skills/<name>/
     end
-    Note over QP: Generate discovery prompt
-    QP->>Agent: Start with skills on disk
-    Agent->>FS: Discover SKILL.md files
+    QP->>Agent: Start agent
+    Agent->>FS: Discover SKILL.md files at startup
 ```
 
 ### Filesystem Layout
@@ -138,19 +138,14 @@ Skills are extracted to well-known directories per the Agent Skills spec:
 
 Agent-specific directories are populated based on the worker type. The universal `.agents/skills/` directory is always populated.
 
-## Discovery Prompt
+## Agent Discovery
 
-Instead of injecting full skill content into the system prompt (which wastes tokens), a lightweight discovery prompt is prepended:
+Coding agents automatically discover skills from well-known filesystem directories at startup:
 
-```xml
-<available_skills>
-<skill name="cosmosdb-best-practices" description="Best practices for Azure CosmosDB">
-  Location: /workspace/.agents/skills/cosmosdb-best-practices/SKILL.md
-</skill>
-</available_skills>
-```
+- **GitHub Copilot** scans `.copilot/skills/` and `.agents/skills/`
+- **Claude Code** scans `.claude/skills/` and `.agents/skills/`
 
-This gives the agent enough context to know which skills exist and where to find them, while relying on the agent's native filesystem discovery for progressive disclosure of full skill content.
+No prompt injection or discovery hints are needed — the skill extractor places files on disk and agents find them natively per the [Agent Skills specification](https://agentskills.io/specification).
 
 ## Resubmit Behavior
 
