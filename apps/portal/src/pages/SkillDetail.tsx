@@ -170,7 +170,7 @@ export function SkillDetail() {
             ) : latestRevision ? (
               <div className="prose prose-sm dark:prose-invert max-w-none">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-                  {latestRevision.content}
+                  {latestRevision.content.replace(/^---\n[\s\S]*?\n---\n*/, "")}
                 </ReactMarkdown>
               </div>
             ) : (
