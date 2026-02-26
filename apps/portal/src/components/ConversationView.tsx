@@ -156,9 +156,9 @@ function TurnMessages({ turn, runId }: { turn: ConversationTurn; runId: string }
   const hasHar = !!turn.harUrl;
   const { data: harData, isLoading: harLoading } = useHarExtraction(runId, turn.iteration, hasHar);
 
-  // Use HAR-extracted data when available, fall back to DB-stored data
+  // Thinking and tool calls are extracted client-side from HAR (not stored in DB)
   const thinkingContent = harData?.thinkingContent || undefined;
-  const toolCalls = harData?.toolCalls ?? turn.toolCalls ?? [];
+  const toolCalls = harData?.toolCalls ?? [];
 
   return (
     <>

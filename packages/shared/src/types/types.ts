@@ -17,7 +17,6 @@ export interface ConversationTurn {
   passed: boolean;
   timestamp: Date;
   criteriaResults?: CriterionResult[];  // Per-criterion breakdown from DAG evaluation
-  toolCalls?: ToolCall[];  // Tool calls extracted from DevProxy HAR for this turn
   harUrl?: string;         // Blob storage URL to the HAR file for this turn
 }
 
@@ -104,7 +103,6 @@ export interface RequestDocument {
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
   agentVersion?: string;          // Coding agent binary version (e.g. "@github/copilot@0.0.415")
-  toolCalls?: ToolCall[];          // Tool calls extracted from DevProxy HAR (one-shot)
   harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
 }
 
@@ -133,8 +131,6 @@ export interface WorkerProcessorOptions {
 export interface WorkerResult {
   /** The coding agent's text response */
   response: string;
-  /** Tool calls extracted from DevProxy HAR capture (if available) */
-  toolCalls?: ToolCall[];
   /** Path to the HAR file on disk (for upload to blob storage) */
   harFilePath?: string;
 }

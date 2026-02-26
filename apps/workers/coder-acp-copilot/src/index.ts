@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls, detectCliVersion } from "shared";
+// NOTE: extractToolCalls is used for server-side logging only; tool calls are NOT stored in the DB
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -131,7 +132,7 @@ class CopilotProcessor implements WorkerProcessor {
               toolCallCount: toolCalls.length,
               toolNames: toolCalls.map((tc) => tc.name),
             });
-            return { response, toolCalls, harFilePath };
+            return { response, harFilePath };
           } else {
             await log("warn", "No HAR file found after DevProxy recording");
           }
