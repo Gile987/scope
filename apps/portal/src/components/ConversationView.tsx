@@ -134,9 +134,9 @@ function ToolCallInline({ tc }: { tc: ToolCall }) {
           </span>
         )}
         <span className="flex items-center gap-1.5 ml-auto shrink-0">
-          {hasResponse && (
-            <Badge variant="outline" className="text-[10px] px-1 py-0">
-              has response
+          {!hasResponse && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0 text-amber-600 border-amber-300">
+              no response
             </Badge>
           )}
           {tc.timestamp && (
