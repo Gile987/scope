@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useHarData } from "@/hooks/useHarExtraction";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -124,15 +124,7 @@ export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
   const [filter, setFilter] = useState("");
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
 
-  const { data: har, isLoading, error } = useQuery<HarFile>({
-    queryKey: ["har", runId, iteration],
-    queryFn: async () => {
-      const url = api.harUrl(runId, iteration);
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    },
-  });
+  const { data: har, isLoading, error } = useHarData<HarFile>(runId, iteration);
 
   const entries = useMemo(() => {
     if (!har) return [];
