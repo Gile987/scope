@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -310,6 +310,21 @@ export const api = {
       params.set("criteria", criteria.join(","));
     }
     return request(`/analysis?${params.toString()}`);
+  },
+
+  // ─── MDP ────────────────────────────────────────────────────────────────────
+
+  /** Get MDP state-transition graph (optionally incremental via since) */
+  getMdp: (criteria?: string[], since?: string): Promise<MdpResponse> => {
+    const params = new URLSearchParams();
+    if (criteria && criteria.length > 0) {
+      params.set("criteria", criteria.join(","));
+    }
+    if (since) {
+      params.set("since", since);
+    }
+    const qs = params.toString();
+    return request(`/criteria/mdp${qs ? `?${qs}` : ""}`);
   },
 
   // ─── Reports ──────────────────────────────────────────────────────────────

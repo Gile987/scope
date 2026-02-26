@@ -216,6 +216,52 @@ export interface AnalysisResponse {
   selectedCriteria: string[];
 }
 
+// MDP state-transition graph types
+
+/** Per-criterion state within a composite state vector */
+export interface MdpCriterionState {
+  id: string;
+  passed: boolean;
+}
+
+/** A node in the MDP graph — a unique composite state vector */
+export interface MdpStateNode {
+  /** Canonical string key (e.g. "has_azure:0|has_cloud:1|has_iac:0") */
+  id: string;
+  /** Sorted criteria states */
+  criteria: MdpCriterionState[];
+  /** How many times any episode visited this state */
+  visits: number;
+  /** True for the synthetic all-failed initial state */
+  isInitial?: boolean;
+  /** True if no outgoing transitions exist (final state of some episodes) */
+  isTerminal?: boolean;
+}
+
+/** An edge in the MDP graph — a transition between two states */
+export interface MdpTransitionEdge {
+  source: string;
+  target: string;
+  /** How many times this specific transition was observed */
+  count: number;
+  /** Probability: count / total outgoing from source */
+  probability: number;
+}
+
+/** Full MDP response */
+export interface MdpResponse {
+  nodes: MdpStateNode[];
+  edges: MdpTransitionEdge[];
+  /** Total number of episodes (runs) that contributed */
+  episodeCount: number;
+  /** All criteria IDs found across all runs (before filtering) */
+  availableCriteria: string[];
+  /** Criteria IDs used for projection (empty = all) */
+  selectedCriteria: string[];
+  /** ISO timestamp of when this was computed — used for incremental polling */
+  computedAt: string;
+}
+
 // Bulk re-submit overrides
 export interface BulkResubmitOverrides {
   workerType?: string;
