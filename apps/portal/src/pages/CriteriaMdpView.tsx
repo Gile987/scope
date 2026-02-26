@@ -511,7 +511,7 @@ export function CriteriaMdpView() {
           No completed runs with criteria data found.
         </div>
       ) : (
-        <div className="h-[600px] rounded-md border bg-slate-950 overflow-hidden">
+        <div className="h-[600px] rounded-md border bg-slate-950 overflow-hidden relative">
           <ReactFlow
             nodes={flowNodes}
             edges={flowEdges}
@@ -539,7 +539,7 @@ export function CriteriaMdpView() {
           </ReactFlow>
 
           {/* Legend */}
-          <div className="absolute bottom-2 left-2 flex items-center gap-3 text-[10px] text-slate-400 bg-slate-950/80 rounded px-2 py-1">
+          <div className="absolute bottom-2 left-14 flex items-center gap-3 text-[10px] text-slate-400 bg-slate-950/80 rounded px-2 py-1 z-10">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-400" /> Passed
             </span>
