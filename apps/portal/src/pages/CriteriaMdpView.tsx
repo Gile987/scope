@@ -184,6 +184,22 @@ function MdpStateNodeComponent({ data }: NodeProps<Node<MdpNodeData>>) {
         position={Position.Bottom}
         className="!bg-slate-500 !w-2 !h-2 !border-0"
       />
+
+      {/* Self-loop handles on the right side */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="self-source"
+        className="!bg-slate-500 !w-2 !h-2 !border-0"
+        style={{ top: "35%" }}
+      />
+      <Handle
+        type="target"
+        position={Position.Right}
+        id="self-target"
+        className="!bg-slate-500 !w-2 !h-2 !border-0"
+        style={{ top: "65%" }}
+      />
     </div>
   );
 }
@@ -206,17 +222,35 @@ function MdpEdge({
   targetY,
   sourcePosition,
   targetPosition,
+  source,
+  target,
   data,
   style,
 }: EdgeProps<Edge<MdpEdgeData>>) {
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-  });
+  const isSelfLoop = source === target;
+
+  // For self-loops, draw a custom arc looping out to the right
+  const loopOffset = 50;
+  const selfLoopPath = isSelfLoop
+    ? `M ${sourceX} ${sourceY} C ${sourceX + loopOffset * 2} ${sourceY}, ${targetX + loopOffset * 2} ${targetY}, ${targetX} ${targetY}`
+    : undefined;
+  const selfLoopLabelX = isSelfLoop ? sourceX + loopOffset * 1.5 : 0;
+  const selfLoopLabelY = isSelfLoop ? (sourceY + targetY) / 2 : 0;
+
+  const [bezierPath, bezierLabelX, bezierLabelY] = isSelfLoop
+    ? ["" /* unused */, 0, 0]
+    : getBezierPath({
+        sourceX,
+        sourceY,
+        targetX,
+        targetY,
+        sourcePosition,
+        targetPosition,
+      });
+
+  const edgePath = isSelfLoop ? selfLoopPath! : bezierPath;
+  const labelX = isSelfLoop ? selfLoopLabelX : bezierLabelX;
+  const labelY = isSelfLoop ? selfLoopLabelY : bezierLabelY;
 
   const probability = data?.probability ?? 0;
   const count = data?.count ?? 0;
@@ -356,18 +390,23 @@ export function CriteriaMdpView() {
     const maxCount = Math.max(...mdpData.edges.map((e) => e.count), 1);
     const rawEdges: Edge<MdpEdgeData>[] = mdpData.edges.map((edge) => {
       const thickness = Math.max(1, (edge.count / maxCount) * 4);
+      const isSelfLoop = edge.source === edge.target;
       return {
         id: `${edge.source}->${edge.target}`,
         source: edge.source,
         target: edge.target,
         type: "mdpEdge",
         animated: edge.probability >= 0.8,
+        ...(isSelfLoop && {
+          sourceHandle: "self-source",
+          targetHandle: "self-target",
+        }),
         data: {
           probability: edge.probability,
           count: edge.count,
         },
         style: {
-          stroke: "#64748b",
+          stroke: isSelfLoop ? "#94a3b8" : "#64748b",
           strokeWidth: thickness,
         },
       };
