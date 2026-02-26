@@ -74,6 +74,7 @@ function CollapsibleSection({
   icon: Icon,
   iconClassName,
   count,
+  timestamp,
   defaultOpen = false,
   children,
 }: {
@@ -81,6 +82,7 @@ function CollapsibleSection({
   icon: React.ComponentType<{ className?: string }>;
   iconClassName?: string;
   count?: number;
+  timestamp?: string;
   defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
@@ -97,6 +99,11 @@ function CollapsibleSection({
         <span>{label}</span>
         {count !== undefined && (
           <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-1">{count}</Badge>
+        )}
+        {timestamp && (
+          <span className="text-[10px] text-muted-foreground ml-auto">
+            {new Date(timestamp).toLocaleTimeString()}
+          </span>
         )}
       </button>
       {open && <div className="mt-1">{children}</div>}
@@ -126,11 +133,18 @@ function ToolCallInline({ tc }: { tc: ToolCall }) {
             {argsStr === "{}" ? "" : argsStr}
           </span>
         )}
-        {hasResponse && (
-          <Badge variant="outline" className="text-[10px] px-1 py-0 ml-auto shrink-0">
-            has response
-          </Badge>
-        )}
+        <span className="flex items-center gap-1.5 ml-auto shrink-0">
+          {hasResponse && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0">
+              has response
+            </Badge>
+          )}
+          {tc.timestamp && (
+            <span className="text-[10px] text-muted-foreground">
+              {new Date(tc.timestamp).toLocaleTimeString()}
+            </span>
+          )}
+        </span>
       </button>
       {expanded && (
         <div className="px-2 pb-2 space-y-1.5 border-t border-border/30">
@@ -272,6 +286,7 @@ function SegmentBlock({ segment, turn }: { segment: ConversationSegment; turn: C
               icon={Wrench}
               iconClassName="text-blue-500"
               count={segment.toolCalls.length}
+              timestamp={segment.toolCalls[0]?.timestamp}
               defaultOpen={segment.toolCalls.length <= 5}
             >
               <div className="space-y-1">
