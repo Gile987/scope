@@ -118,7 +118,7 @@ export function RunDetail() {
   }
 
   const isV2 = run.scenario?.version === "v2";
-  const hasHarData = !!(run.harUrl || run.turns?.some(t => t.harUrl || (t.toolCalls && t.toolCalls.length > 0)));
+  const hasHarData = !!(run.harUrl || run.turns?.some(t => t.harUrl));
 
   return (
     <div className="space-y-6">
@@ -488,10 +488,7 @@ export function RunDetail() {
 
             {/* Tool calls summary across all turns */}
             {(() => {
-              const allToolCalls = [
-                ...(run.toolCalls ?? []),
-                ...(run.turns?.flatMap(t => (t.toolCalls ?? []).map(tc => ({ ...tc, _iteration: t.iteration }))) ?? []),
-              ];
+              const allToolCalls: { id: string; name: string; arguments: Record<string, unknown>; response?: string; timestamp?: string; _iteration?: number }[] = [];
               if (allToolCalls.length === 0) return (
                 <div className="text-center py-8 text-muted-foreground">
                   <p>No tool calls captured. HAR file may still be available for download.</p>

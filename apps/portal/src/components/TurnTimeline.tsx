@@ -68,11 +68,7 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                       <AlertCircle className="h-3 w-3" /> Incomplete
                     </Badge>
                   )}
-                  {turn.toolCalls && turn.toolCalls.length > 0 && (
-                    <Badge variant="outline" className="text-xs font-mono">
-                      {turn.toolCalls.length} tool call{turn.toolCalls.length !== 1 ? "s" : ""}
-                    </Badge>
-                  )}
+
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   {new Date(turn.timestamp).toLocaleString()}
