@@ -177,20 +177,20 @@ export function computeMdp(
   }));
   const initialKey = stateKey(initialCriteria);
 
-  // Ensure initial state node exists
-  if (!nodesMap.has(initialKey)) {
-    nodesMap.set(initialKey, {
-      id: initialKey,
-      criteria: initialCriteria,
-      visits: 0,
-      isInitial: true,
-    });
-  }
-
   let episodeCount = 0;
 
   for (const run of filteredRuns) {
     if (!run.turns || run.turns.length === 0) continue;
+
+    // Ensure initial state node exists (created lazily on first episode)
+    if (!nodesMap.has(initialKey)) {
+      nodesMap.set(initialKey, {
+        id: initialKey,
+        criteria: initialCriteria,
+        visits: 0,
+        isInitial: true,
+      });
+    }
 
     // Sort turns by iteration
     const sortedTurns = run.turns.slice().sort((a, b) => a.iteration - b.iteration);
