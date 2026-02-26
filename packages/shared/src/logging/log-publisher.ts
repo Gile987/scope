@@ -27,7 +27,9 @@ export class LogPublisher {
 
   constructor(config: LogPublisherConfig, collection: Collection<RequestDocument>, source: string = "coder") {
     // Support both local Redis (no TLS) and Azure Redis (TLS)
-    const useTls = config.redisPassword && config.redisPort !== 6379;
+    // Use REDIS_TLS env var if set, otherwise infer from password + non-localhost host
+    const useTls = process.env.REDIS_TLS === "true" ||
+      (config.redisPassword && config.redisHost !== "localhost" && config.redisHost !== "127.0.0.1" && config.redisHost !== "redis");
     this.redis = new Redis({
       host: config.redisHost,
       port: config.redisPort,

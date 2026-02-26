@@ -25,7 +25,7 @@ const uri =
   process.env.MONGODB_URI ??
   process.env.MONGO_CONNECTION_STRING ??
   process.env.COSMOSDB_CONNECTION_STRING ??
-  "mongodb://localhost:27117";
+  "mongodb://localhost:27000";
 
 const database =
   process.env.MONGODB_DATABASE ??

@@ -28,7 +28,7 @@ const blobStorage = new BlobStorage({
 
 // Redis-only log publisher for real-time criterion progress (optional — no-op if Redis not configured)
 const redisHost = process.env.REDIS_HOST || "";
-const redisPort = parseInt(process.env.REDIS_PORT || "6379", 10);
+const redisPort = parseInt(process.env.REDIS_PORT || "6300", 10);
 const redisPassword = process.env.REDIS_PASSWORD || "";
 
 let logPublisher: RedisLogPublisher | null = null;

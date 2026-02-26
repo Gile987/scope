@@ -43,7 +43,7 @@ const upload = multer({ dest: tmpdir() });
 
 // Configuration from environment
 // K8s: MONGO_CONNECTION_STRING from secret, STORAGE_CONNECTION_STRING from secret
-const mongoUri = process.env.MONGO_CONNECTION_STRING || process.env.MONGO_URI || "mongodb://localhost:27017";
+const mongoUri = process.env.MONGO_CONNECTION_STRING || process.env.MONGO_URI || "mongodb://localhost:27000";
 const mongoDatabase = process.env.MONGO_DATABASE || "requests-db";
 const mongoCollection = process.env.MONGO_COLLECTION || "requests";
 const storageAccountName = process.env.AZURE_STORAGE_ACCOUNT_NAME || "";
@@ -52,7 +52,7 @@ const queueWorker1 = process.env.AZURE_STORAGE_QUEUE_WORKER_1 || "queue-coder-ac
 const queueWorker2 = process.env.AZURE_STORAGE_QUEUE_WORKER_2 || "queue-coder-acp-copilot";
 const queueReport = process.env.AZURE_STORAGE_QUEUE_REPORT || "report-queue";
 const redisHost = process.env.REDIS_HOST || "";
-const redisPort = parseInt(process.env.REDIS_PORT || "6379", 10);
+const redisPort = parseInt(process.env.REDIS_PORT || "6300", 10);
 const redisPassword = process.env.REDIS_PASSWORD || "";
 const port = parseInt(process.env.PORT || "3000", 10);
 
