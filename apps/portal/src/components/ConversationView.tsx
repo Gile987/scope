@@ -116,21 +116,21 @@ function ToolCallInline({ tc }: { tc: ToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const hasResponse = !!tc.response;
   const argsStr = JSON.stringify(tc.arguments, null, 2);
-  const isLargeArgs = argsStr.length > 80;
+  const argsOneLine = JSON.stringify(tc.arguments);
 
   return (
     <div className="rounded border border-border/50 bg-muted/30 text-xs font-mono">
       <button
         type="button"
-        className="flex items-center gap-1.5 w-full text-left px-2 py-1.5 hover:bg-muted/50 transition-colors"
+        className="flex items-center gap-1.5 w-full text-left px-2 py-1.5 hover:bg-muted/50 transition-colors min-w-0"
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
         <Wrench className="h-3 w-3 text-blue-500 shrink-0" />
-        <span className="font-semibold text-foreground">{tc.name}</span>
-        {!expanded && !isLargeArgs && (
-          <span className="text-muted-foreground truncate ml-1">
-            {argsStr === "{}" ? "" : argsStr}
+        <span className="font-semibold text-foreground shrink-0">{tc.name}</span>
+        {!expanded && argsOneLine !== "{}" && (
+          <span className="text-muted-foreground truncate ml-1 min-w-0">
+            {argsOneLine}
           </span>
         )}
         <span className="flex items-center gap-1.5 ml-auto shrink-0">
