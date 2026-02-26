@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState, useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -43,7 +43,11 @@ function slugify(text: string): string {
 
 export function CreateCriterion() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+
+  // Pre-populate parent dependency from ?parent= query param
+  const parentParam = searchParams.get("parent");
 
   // Wizard step (1 or 2)
   const [step, setStep] = useState(1);
@@ -53,7 +57,7 @@ export function CreateCriterion() {
   const [id, setId] = useState("");
   const [idManuallyEdited, setIdManuallyEdited] = useState(false);
   const [idEditMode, setIdEditMode] = useState(false);
-  const [dependsOn, setDependsOn] = useState<string[]>([]);
+  const [dependsOn, setDependsOn] = useState<string[]>(parentParam ? [parentParam] : []);
 
   // Step 2 fields
   const [prompt, setPrompt] = useState("");

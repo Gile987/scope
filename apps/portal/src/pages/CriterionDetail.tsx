@@ -17,14 +17,19 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X, Plus } from "lucide-react";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { formatDate } from "@/lib/utils";
+import { useCommandEnter } from "@/hooks/useCommandEnter";
+import { KbdBadge } from "@/components/KbdBadge";
 
 export function CriterionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // Cmd+Enter navigates to create new criterion
+  useCommandEnter(() => navigate("/criteria/new"), true);
 
   const { data: criterion, isLoading, error } = useQuery({
     queryKey: ["criterion", id],
@@ -173,9 +178,18 @@ export function CriterionDetail() {
         </div>
         <div className="flex items-center gap-2">
           {!editing && (
-            <Button variant="outline" onClick={startEditing}>
-              Edit
-            </Button>
+            <>
+              <Button variant="outline" asChild>
+                <Link to="/criteria/new">
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  New Criterion
+                  <KbdBadge />
+                </Link>
+              </Button>
+              <Button variant="outline" onClick={startEditing}>
+                Edit
+              </Button>
+            </>
           )}
           <AlertDialog>
             <AlertDialogTrigger asChild>

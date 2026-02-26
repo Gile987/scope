@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -19,11 +19,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  /** List all runs, optionally filtered by worker and/or task prompt */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string }): Promise<Run[]> => {
+  /** List all runs, optionally filtered by worker, task prompt, and/or MDP criteria state */
+  listRuns: (opts?: { worker?: string; taskPromptId?: string; criteria?: string }): Promise<Run[]> => {
     const params = new URLSearchParams();
     if (opts?.worker) params.set("worker", opts.worker);
     if (opts?.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
+    if (opts?.criteria) params.set("criteria", opts.criteria);
     const qs = params.toString();
     return request(`/requests${qs ? `?${qs}` : ""}`);
   },
@@ -310,6 +311,24 @@ export const api = {
       params.set("criteria", criteria.join(","));
     }
     return request(`/analysis?${params.toString()}`);
+  },
+
+  // ─── MDP ────────────────────────────────────────────────────────────────────
+
+  /** Get MDP state-transition graph (optionally incremental via since) */
+  getMdp: (criteria?: string[], since?: string, features?: string[]): Promise<MdpResponse> => {
+    const params = new URLSearchParams();
+    if (criteria && criteria.length > 0) {
+      params.set("criteria", criteria.join(","));
+    }
+    if (features && features.length > 0) {
+      params.set("features", features.join(","));
+    }
+    if (since) {
+      params.set("since", since);
+    }
+    const qs = params.toString();
+    return request(`/criteria/mdp${qs ? `?${qs}` : ""}`);
   },
 
   // ─── Reports ──────────────────────────────────────────────────────────────

@@ -25,6 +25,7 @@ import {
   extractPromptFeatures,
 } from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
+import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult } from "shared";
 import { evaluateTrigger } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
@@ -948,6 +949,7 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
   try {
     const workerFilter = req.query.worker as string;
     const taskPromptIdFilter = req.query.taskPromptId as string;
+    const criteriaFilter = req.query.criteria as string;
     const includeDeleted = req.query.includeDeleted === "true";
     
     const filter: Record<string, unknown> = {};
@@ -959,6 +961,27 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
     }
     if (!includeDeleted) {
       filter.deletedAt = { $exists: false };
+    }
+
+    // Filter by MDP criteria state vector (e.g. "has_azure:0|has_cloud:1")
+    // Matches runs whose LAST turn contains criteria results matching every
+    // criterion in the state vector.
+    if (criteriaFilter) {
+      const criteriaStates = parseStateKey(criteriaFilter);
+      if (criteriaStates.length > 0) {
+        filter.$and = criteriaStates.map((cs) => ({
+          "turns": {
+            $elemMatch: {
+              "criteriaResults": {
+                $elemMatch: {
+                  criterionId: cs.id,
+                  passed: cs.passed,
+                },
+              },
+            },
+          },
+        }));
+      }
     }
 
     const resources = await collection
@@ -1610,6 +1633,86 @@ app.get("/api/v1/criteria", async (_req: Request, res: Response, next: NextFunct
     // Sort in JS (CosmosDB doesn't support sort on non-_id fields without explicit indexing policy)
     criteria.sort((a, b) => a.id.localeCompare(b.id));
     res.json(criteria);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// MDP state-transition graph across all runs
+app.get("/api/v1/criteria/mdp", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Parse optional criteria projection
+    const criteriaParam = req.query.criteria as string | undefined;
+    const selectedCriteria = criteriaParam
+      ? criteriaParam.split(",").map(c => c.trim()).filter(Boolean)
+      : undefined;
+
+    // Parse optional prompt-feature filter
+    const featuresParam = req.query.features as string | undefined;
+    const selectedFeatures = featuresParam
+      ? featuresParam.split(",").map(f => f.trim()).filter(Boolean)
+      : undefined;
+
+    // Parse optional ?since= for incremental polling
+    const sinceParam = req.query.since as string | undefined;
+    const sinceDate = sinceParam ? new Date(sinceParam) : undefined;
+
+    // Build MongoDB filter
+    const mdpFilter: Record<string, unknown> = {
+      status: { $in: ["completed", "failed", "exhausted"] },
+      deletedAt: { $exists: false },
+    };
+
+    // Optional worker/taskPromptId filters
+    if (req.query.worker) {
+      mdpFilter.workerType = req.query.worker;
+    }
+    if (req.query.taskPromptId) {
+      mdpFilter.taskPromptId = req.query.taskPromptId;
+    }
+
+    // Incremental: only runs updated after ?since=
+    if (sinceDate && !isNaN(sinceDate.getTime())) {
+      mdpFilter.updatedAt = { $gt: sinceDate };
+    }
+
+    const runs = await collection
+      .find(mdpFilter)
+      .project({
+        _id: 1,
+        scenario: 1,
+        status: 1,
+        turns: 1,
+        updatedAt: 1,
+        taskPromptId: 1,
+      })
+      .toArray();
+
+    // Batch-lookup task prompts for their features
+    const taskPromptIds = [...new Set(runs.map(r => r.taskPromptId).filter(Boolean))] as string[];
+    const taskPromptFeatures = new Map<string, Array<{ featureId: string; detected: boolean; evaluated: boolean }>>();
+    if (taskPromptIds.length > 0) {
+      const taskPrompts = await taskPromptCollection
+        .find({ _id: { $in: taskPromptIds } })
+        .project({ _id: 1, features: 1 })
+        .toArray();
+      for (const tp of taskPrompts) {
+        if (tp.features && tp.features.length > 0) {
+          taskPromptFeatures.set(tp._id, tp.features);
+        }
+      }
+    }
+
+    const mdpRuns: MdpAnalyzableRun[] = runs.map(r => ({
+      scenario: r.scenario,
+      status: r.status,
+      turns: r.turns,
+      updatedAt: r.updatedAt,
+      promptFeatures: r.taskPromptId ? taskPromptFeatures.get(r.taskPromptId) : undefined,
+    }));
+
+    const mdpResult = computeMdp(mdpRuns, selectedCriteria, selectedFeatures);
+    res.json(mdpResult);
   } catch (error) {
     next(error);
   }

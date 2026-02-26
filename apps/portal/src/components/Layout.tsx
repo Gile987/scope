@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, FileCode, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen } from "lucide-react";
+import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, FileCode, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet, SheetContent, SheetTrigger, SheetTitle,
@@ -22,6 +22,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { to: "/statistics", label: "Statistics", icon: BarChart3 },
+  { to: "/criteria/mdp", label: "MDP", icon: GitBranch },
   { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
   { to: "/runs", label: "Runs", icon: List },
   { to: "/runs/new", label: "New Run", icon: Plus },

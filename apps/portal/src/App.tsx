@@ -32,6 +32,7 @@ import { SkillList } from "@/pages/SkillList";
 import { SkillDetail } from "@/pages/SkillDetail";
 import { InsightsList } from "@/pages/InsightsList";
 import { InsightDetail } from "@/pages/InsightDetail";
+import { CriteriaMdpView } from "@/pages/CriteriaMdpView";
 import { ModelList } from "@/pages/ModelList";
 import { ModelDetail } from "@/pages/ModelDetail";
 import { TaskPromptList } from "@/pages/TaskPromptList";
@@ -57,6 +58,7 @@ export function App() {
         <Route path="/criteria" element={<CriteriaList />} />
         <Route path="/criteria/new" element={<CreateCriterion />} />
         <Route path="/criteria/graph" element={<CriteriaGraphView />} />
+        <Route path="/criteria/mdp" element={<CriteriaMdpView />} />
         <Route path="/criteria/:id" element={<CriterionDetail />} />
         <Route path="/prompt-features" element={<PromptFeatureList />} />
         <Route path="/prompt-features/new" element={<CreatePromptFeature />} />
