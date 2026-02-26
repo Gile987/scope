@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseHarFile, extractToolCalls, sanitizeHar } from "./har-parser.js";
+import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent } from "./har-parser.js";
 import type { HarFile, ToolCall } from "./types.js";
 
 // Mock fs/promises for parseHarFile tests
@@ -598,5 +598,87 @@ describe("sanitizeHar", () => {
     expect(sanitized.log.entries).toHaveLength(2);
     expect(sanitized.log.entries[0].request.headers[0].value).toBe("[REDACTED]");
     expect(sanitized.log.entries[1].request.headers[0].value).toBe("[REDACTED]");
+  });
+});
+
+describe("extractThinkingContent", () => {
+  it("extracts reasoning_text from SSE streaming responses", () => {
+    const sseBody = [
+      'data: {"choices":[{"delta":{"role":"assistant"}}]}',
+      'data: {"choices":[{"delta":{"reasoning_text":"Let me think"}}]}',
+      'data: {"choices":[{"delta":{"reasoning_text":" about this."}}]}',
+      'data: {"choices":[{"delta":{"content":"Here is the answer."}}]}',
+      "data: [DONE]",
+    ].join("\n");
+
+    const har = makeHar([makeEntry({ responseBody: sseBody })]);
+    const thinking = extractThinkingContent(har);
+    expect(thinking).toBe("Let me think about this.");
+  });
+
+  it("extracts thinking field from SSE streaming responses", () => {
+    const sseBody = [
+      'data: {"choices":[{"delta":{"role":"assistant"}}]}',
+      'data: {"choices":[{"delta":{"thinking":"Analyzing the request"}}]}',
+      'data: {"choices":[{"delta":{"thinking":" carefully."}}]}',
+      "data: [DONE]",
+    ].join("\n");
+
+    const har = makeHar([makeEntry({ responseBody: sseBody })]);
+    const thinking = extractThinkingContent(har);
+    expect(thinking).toBe("Analyzing the request carefully.");
+  });
+
+  it("concatenates thinking from multiple entries", () => {
+    const entry1Body = [
+      'data: {"choices":[{"delta":{"reasoning_text":"First thought."}}]}',
+      "data: [DONE]",
+    ].join("\n");
+    const entry2Body = [
+      'data: {"choices":[{"delta":{"reasoning_text":"Second thought."}}]}',
+      "data: [DONE]",
+    ].join("\n");
+
+    const har = makeHar([
+      makeEntry({ responseBody: entry1Body }),
+      makeEntry({ responseBody: entry2Body }),
+    ]);
+    const thinking = extractThinkingContent(har);
+    expect(thinking).toBe("First thought.Second thought.");
+  });
+
+  it("returns empty string when no thinking content present", () => {
+    const sseBody = [
+      'data: {"choices":[{"delta":{"content":"Just content."}}]}',
+      "data: [DONE]",
+    ].join("\n");
+
+    const har = makeHar([makeEntry({ responseBody: sseBody })]);
+    const thinking = extractThinkingContent(har);
+    expect(thinking).toBe("");
+  });
+
+  it("skips empty reasoning_text values", () => {
+    const sseBody = [
+      'data: {"choices":[{"delta":{"reasoning_text":""}}]}',
+      'data: {"choices":[{"delta":{"reasoning_text":"Actual thought."}}]}',
+      "data: [DONE]",
+    ].join("\n");
+
+    const har = makeHar([makeEntry({ responseBody: sseBody })]);
+    const thinking = extractThinkingContent(har);
+    expect(thinking).toBe("Actual thought.");
+  });
+
+  it("handles non-streaming JSON responses gracefully", () => {
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          choices: [{ message: { role: "assistant", content: "No thinking here" } }],
+        },
+      }),
+    ]);
+    const thinking = extractThinkingContent(har);
+    expect(thinking).toBe("");
   });
 });

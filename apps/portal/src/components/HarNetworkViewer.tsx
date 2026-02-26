@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useHarData } from "@/hooks/useHarExtraction";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -108,13 +108,31 @@ function contentCategory(entry: HarEntry): string {
   return ct.split("/").pop()?.split(";")[0] ?? "other";
 }
 
-/** Decode response body text (handle base64). */
+/**
+ * Re-encode a string from Latin-1 code points back to UTF-8.
+ * Fixes "mojibake" where UTF-8 bytes were stored as Latin-1 characters.
+ */
+function repairMojibake(text: string): string {
+  if (!/\xc2[\x80-\xbf]|\xc3[\x80-\xbf]|\xe2[\x80-\xbf]/.test(text)) return text;
+  try {
+    const bytes = Uint8Array.from(text, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return text;
+  }
+}
+
+/** Decode response body text (handle base64 and mojibake). */
 function decodeBody(content: HarResponse["content"]): string | null {
   if (!content.text) return null;
   if (content.encoding === "base64") {
-    try { return atob(content.text); } catch { return null; }
+    try {
+      const binary = atob(content.text);
+      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+      return new TextDecoder("utf-8").decode(bytes);
+    } catch { return null; }
   }
-  return content.text;
+  return repairMojibake(content.text);
 }
 
 // ---------------------------------------------------------------------------
@@ -124,15 +142,7 @@ export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
   const [filter, setFilter] = useState("");
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
 
-  const { data: har, isLoading, error } = useQuery<HarFile>({
-    queryKey: ["har", runId, iteration],
-    queryFn: async () => {
-      const url = api.harUrl(runId, iteration);
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    },
-  });
+  const { data: har, isLoading, error } = useHarData<HarFile>(runId, iteration);
 
   const entries = useMemo(() => {
     if (!har) return [];

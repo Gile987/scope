@@ -28,7 +28,6 @@ export interface ConversationTurn {
   passed: boolean;
   timestamp: string;
   criteriaResults?: CriterionResult[];
-  toolCalls?: ToolCall[];
   harUrl?: string;
 }
 
@@ -77,7 +76,6 @@ export interface Run {
   mcpServers?: string[];
   skills?: string[];
   skillRevisions?: string[];
-  toolCalls?: ToolCall[];
   harUrl?: string;
 }
 

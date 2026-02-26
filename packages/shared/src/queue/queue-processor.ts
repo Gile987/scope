@@ -165,14 +165,13 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
     }
 
-    // Update request with result, tool calls, and HAR URL
+    // Update request with result and HAR URL
     await this.collection.updateOne(
       { _id: requestId },
       {
         $set: {
           status: "completed",
           result: workerResult.response,
-          ...(workerResult.toolCalls && workerResult.toolCalls.length > 0 && { toolCalls: workerResult.toolCalls }),
           ...(harUrl && { harUrl }),
           updatedAt: new Date(),
         },

@@ -129,12 +129,10 @@ export async function runMultiTurnLoop(
     // Step 1: Call the coding agent
     await iterLog("info", "Calling coding agent...");
     let codingResponse: string;
-    let turnToolCalls: import("../har/types.js").ToolCall[] | undefined;
     let turnHarUrl: string | undefined;
     try {
       const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs });
       codingResponse = workerResult.response;
-      turnToolCalls = workerResult.toolCalls;
 
       // Upload HAR file to blob storage if available (sanitized to strip credentials)
       if (workerResult.harFilePath) {
@@ -164,7 +162,6 @@ export async function runMultiTurnLoop(
 
     await iterLog("info", "Coding agent completed", {
       responseLength: codingResponse.length,
-      toolCallCount: turnToolCalls?.length ?? 0,
     });
 
     // Step 2: Snapshot workspace to blob storage
@@ -241,7 +238,6 @@ export async function runMultiTurnLoop(
       passed: judgePassed,
       timestamp: new Date(),
       criteriaResults,
-      ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
       ...(turnHarUrl && { harUrl: turnHarUrl }),
     };
     turns.push(turn);

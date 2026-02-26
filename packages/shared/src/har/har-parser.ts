@@ -130,7 +130,13 @@ function getResponseBody(entry: HarEntry): string | null {
 
   if (content.encoding === "base64") {
     try {
-      return Buffer.from(content.text, "base64").toString("utf-8");
+      // Use globalThis.atob for browser+Node 16+ compatibility
+      // (avoids Node-only Buffer dependency)
+      return decodeURIComponent(
+        Array.from(globalThis.atob(content.text), (c) =>
+          "%" + c.charCodeAt(0).toString(16).padStart(2, "0")
+        ).join("")
+      );
     } catch {
       return null;
     }
@@ -305,4 +311,51 @@ function extractToolResponsesFromBody(
   } catch {
     // Not a valid JSON body — skip
   }
+}
+
+/**
+ * Extract thinking/reasoning content from a parsed HAR file.
+ *
+ * Scans SSE streaming responses for `reasoning_text` fields in
+ * `choices[].delta` and concatenates them into a single string.
+ * These fields contain the model's chain-of-thought reasoning
+ * (e.g. Copilot extended thinking).
+ */
+export function extractThinkingContent(har: HarFile): string {
+  const parts: string[] = [];
+
+  for (const entry of har.log.entries) {
+    const body = getResponseBody(entry);
+    if (!body) continue;
+
+    const lines = body.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data: ") || trimmed === "data: [DONE]") continue;
+
+      try {
+        const json = JSON.parse(trimmed.slice(6));
+        const choices = json.choices;
+        if (!Array.isArray(choices)) continue;
+
+        for (const choice of choices) {
+          const delta = choice.delta;
+          if (!delta) continue;
+
+          // OpenAI-style reasoning_text field (used by Copilot)
+          if (typeof delta.reasoning_text === "string" && delta.reasoning_text) {
+            parts.push(delta.reasoning_text);
+          }
+          // Also check for 'thinking' field (Anthropic-style, via proxy)
+          if (typeof delta.thinking === "string" && delta.thinking) {
+            parts.push(delta.thinking);
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return parts.join("");
 }

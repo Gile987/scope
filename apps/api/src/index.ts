@@ -215,7 +215,6 @@ interface RequestDocument {
     snapshotUrl: string;
     passed: boolean;
     timestamp: Date;
-    toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown>; response?: string; timestamp?: string }>;
     harUrl?: string;
   }>;
   personaInstructions?: string;
@@ -226,7 +225,6 @@ interface RequestDocument {
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → task-prompts._id)
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Human-readable skill revision refs (source/skillName@commitHash)
-  toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown>; response?: string; timestamp?: string }>;
   harUrl?: string;
 }
 
