@@ -29,6 +29,14 @@ interface HarFile {
 }
 
 // ---------------------------------------------------------------------------
+// Chronological segment types
+// ---------------------------------------------------------------------------
+export type ConversationSegment =
+  | { type: "thinking"; content: string }
+  | { type: "content"; content: string }
+  | { type: "tool_calls"; toolCalls: ToolCall[] };
+
+// ---------------------------------------------------------------------------
 // HAR body helpers
 // ---------------------------------------------------------------------------
 function getResponseBody(entry: HarEntry): string | null {
@@ -45,135 +53,8 @@ function getResponseBody(entry: HarEntry): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Extraction: thinking / reasoning content
+// Collect tool responses from request bodies (global across all entries)
 // ---------------------------------------------------------------------------
-function extractThinkingFromHar(har: HarFile): string {
-  const parts: string[] = [];
-
-  for (const entry of har.log.entries) {
-    const body = getResponseBody(entry);
-    if (!body) continue;
-
-    for (const line of body.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data: ") || trimmed === "data: [DONE]") continue;
-
-      try {
-        const json = JSON.parse(trimmed.slice(6));
-        const choices = json.choices;
-        if (!Array.isArray(choices)) continue;
-
-        for (const choice of choices) {
-          const delta = choice.delta;
-          if (!delta) continue;
-          if (typeof delta.reasoning_text === "string" && delta.reasoning_text) {
-            parts.push(delta.reasoning_text);
-          }
-          if (typeof delta.thinking === "string" && delta.thinking) {
-            parts.push(delta.thinking);
-          }
-        }
-      } catch {
-        continue;
-      }
-    }
-  }
-
-  return parts.join("");
-}
-
-// ---------------------------------------------------------------------------
-// Extraction: tool calls (mirrors shared/har-parser extractToolCalls logic)
-// ---------------------------------------------------------------------------
-function extractToolCallsFromHar(har: HarFile): ToolCall[] {
-  const toolCalls: Map<string, ToolCall> = new Map();
-  const toolResponses: Map<string, string> = new Map();
-
-  for (const entry of har.log.entries) {
-    const responseBody = getResponseBody(entry);
-    if (responseBody) {
-      extractFromResponseBody(responseBody, entry.startedDateTime, toolCalls);
-    }
-
-    const requestBody = entry.request?.postData?.text;
-    if (requestBody) {
-      extractToolResponses(requestBody, toolResponses);
-    }
-  }
-
-  for (const [id, response] of toolResponses) {
-    const tc = toolCalls.get(id);
-    if (tc) tc.response = response;
-  }
-
-  return Array.from(toolCalls.values());
-}
-
-function extractFromResponseBody(
-  body: string,
-  timestamp: string,
-  toolCalls: Map<string, ToolCall>,
-): void {
-  // Try non-streaming first
-  try {
-    const json = JSON.parse(body);
-    const choices = json.choices;
-    if (Array.isArray(choices)) {
-      for (const choice of choices) {
-        const msg = choice.message;
-        if (!msg?.tool_calls) continue;
-        for (const tc of msg.tool_calls) {
-          if (!tc.id || toolCalls.has(tc.id)) continue;
-          let args: Record<string, unknown> = {};
-          try { args = JSON.parse(tc.function?.arguments ?? "{}"); } catch { args = { _raw: tc.function?.arguments }; }
-          toolCalls.set(tc.id, { id: tc.id, name: tc.function?.name || "unknown", arguments: args, timestamp });
-        }
-      }
-      return;
-    }
-  } catch { /* streaming */ }
-
-  // SSE streaming
-  const partialCalls: Map<string, { name: string; arguments: string }> = new Map();
-  const indexToId: Map<number, string> = new Map();
-  let nextAutoIndex = 0;
-
-  for (const line of body.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data: ") || trimmed === "data: [DONE]") continue;
-    try {
-      const json = JSON.parse(trimmed.slice(6));
-      const choices = json.choices;
-      if (!Array.isArray(choices)) continue;
-      for (const choice of choices) {
-        const delta = choice.delta;
-        if (!delta?.tool_calls) continue;
-        for (const tc of delta.tool_calls) {
-          if (tc.id) {
-            partialCalls.set(tc.id, { name: tc.function?.name || "", arguments: tc.function?.arguments || "" });
-            const idx = tc.index ?? nextAutoIndex;
-            indexToId.set(idx, tc.id);
-            nextAutoIndex = idx + 1;
-          } else if (tc.index !== undefined) {
-            const id = indexToId.get(tc.index);
-            if (id) {
-              const partial = partialCalls.get(id);
-              if (partial && tc.function?.arguments) partial.arguments += tc.function.arguments;
-            }
-          }
-        }
-      }
-    } catch { continue; }
-  }
-
-  for (const [id, partial] of partialCalls) {
-    if (toolCalls.has(id)) continue;
-    let args: Record<string, unknown> = {};
-    try { args = JSON.parse(partial.arguments); } catch { args = { _raw: partial.arguments }; }
-    toolCalls.set(id, { id, name: partial.name, arguments: args, timestamp });
-  }
-}
-
 function extractToolResponses(body: string, responses: Map<string, string>): void {
   try {
     const json = JSON.parse(body);
@@ -187,11 +68,148 @@ function extractToolResponses(body: string, responses: Map<string, string>): voi
 }
 
 // ---------------------------------------------------------------------------
+// Extract segments from a single HAR entry's response body.
+// Each entry = one LLM roundtrip.  Within an entry, the order is:
+//   thinking → content → tool_calls
+// ---------------------------------------------------------------------------
+function extractEntrySegments(
+  body: string,
+  timestamp: string,
+  toolResponses: Map<string, string>,
+): ConversationSegment[] {
+  const segments: ConversationSegment[] = [];
+  const thinkingParts: string[] = [];
+  const contentParts: string[] = [];
+
+  // --- Try non-streaming (single JSON response) first ---
+  try {
+    const json = JSON.parse(body);
+    const choices = json.choices;
+    if (Array.isArray(choices)) {
+      for (const choice of choices) {
+        const msg = choice.message;
+        if (!msg) continue;
+        if (typeof msg.content === "string" && msg.content) {
+          contentParts.push(msg.content);
+        }
+        if (Array.isArray(msg.tool_calls)) {
+          const tcs: ToolCall[] = [];
+          for (const tc of msg.tool_calls) {
+            if (!tc.id) continue;
+            let args: Record<string, unknown> = {};
+            try { args = JSON.parse(tc.function?.arguments ?? "{}"); } catch { args = { _raw: tc.function?.arguments }; }
+            const response = toolResponses.get(tc.id);
+            tcs.push({ id: tc.id, name: tc.function?.name || "unknown", arguments: args, timestamp, ...(response && { response }) });
+          }
+          if (contentParts.length > 0) segments.push({ type: "content", content: contentParts.join("") });
+          if (tcs.length > 0) segments.push({ type: "tool_calls", toolCalls: tcs });
+        } else if (contentParts.length > 0) {
+          segments.push({ type: "content", content: contentParts.join("") });
+        }
+      }
+      return segments;
+    }
+  } catch { /* streaming — fall through */ }
+
+  // --- SSE streaming ---
+  const partialToolCalls: Map<string, { name: string; arguments: string }> = new Map();
+  const indexToId: Map<number, string> = new Map();
+  let nextAutoIndex = 0;
+
+  for (const line of body.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data: ") || trimmed === "data: [DONE]") continue;
+    try {
+      const json = JSON.parse(trimmed.slice(6));
+      const choices = json.choices;
+      if (!Array.isArray(choices)) continue;
+      for (const choice of choices) {
+        const delta = choice.delta;
+        if (!delta) continue;
+
+        // Thinking
+        if (typeof delta.reasoning_text === "string" && delta.reasoning_text) thinkingParts.push(delta.reasoning_text);
+        if (typeof delta.thinking === "string" && delta.thinking) thinkingParts.push(delta.thinking);
+
+        // Content
+        if (typeof delta.content === "string" && delta.content) contentParts.push(delta.content);
+
+        // Tool calls
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            if (tc.id) {
+              partialToolCalls.set(tc.id, { name: tc.function?.name || "", arguments: tc.function?.arguments || "" });
+              const idx = tc.index ?? nextAutoIndex;
+              indexToId.set(idx, tc.id);
+              nextAutoIndex = idx + 1;
+            } else if (tc.index !== undefined) {
+              const id = indexToId.get(tc.index);
+              if (id) {
+                const partial = partialToolCalls.get(id);
+                if (partial && tc.function?.arguments) partial.arguments += tc.function.arguments;
+              }
+            }
+          }
+        }
+      }
+    } catch { continue; }
+  }
+
+  // Build segments in chronological order: thinking → content → tool_calls
+  if (thinkingParts.length > 0) {
+    segments.push({ type: "thinking", content: thinkingParts.join("") });
+  }
+  if (contentParts.length > 0) {
+    segments.push({ type: "content", content: contentParts.join("") });
+  }
+  if (partialToolCalls.size > 0) {
+    const tcs: ToolCall[] = [];
+    for (const [id, partial] of partialToolCalls) {
+      let args: Record<string, unknown> = {};
+      try { args = JSON.parse(partial.arguments); } catch { args = { _raw: partial.arguments }; }
+      const response = toolResponses.get(id);
+      tcs.push({ id, name: partial.name, arguments: args, timestamp, ...(response && { response }) });
+    }
+    segments.push({ type: "tool_calls", toolCalls: tcs });
+  }
+
+  return segments;
+}
+
+// ---------------------------------------------------------------------------
+// Main extraction: chronological segments across all HAR entries
+// ---------------------------------------------------------------------------
+function extractChronologicalSegments(har: HarFile): ConversationSegment[] {
+  // First pass: collect all tool responses from request bodies
+  const toolResponses = new Map<string, string>();
+  for (const entry of har.log.entries) {
+    const requestBody = entry.request?.postData?.text;
+    if (requestBody) {
+      extractToolResponses(requestBody, toolResponses);
+    }
+  }
+
+  // Second pass: extract segments per entry in chronological order
+  const segments: ConversationSegment[] = [];
+  for (const entry of har.log.entries) {
+    const body = getResponseBody(entry);
+    if (!body) continue;
+    segments.push(...extractEntrySegments(body, entry.startedDateTime, toolResponses));
+  }
+
+  return segments;
+}
+
+// ---------------------------------------------------------------------------
 // Extracted data shape
 // ---------------------------------------------------------------------------
 export interface HarExtractedData {
+  /** All thinking content concatenated (backward compat) */
   thinkingContent: string;
+  /** All tool calls aggregated (backward compat for Tool Calls tab) */
   toolCalls: ToolCall[];
+  /** Chronological segments — interleaved thinking, content, and tool calls */
+  segments: ConversationSegment[];
 }
 
 // ---------------------------------------------------------------------------
@@ -224,10 +242,16 @@ export function useHarExtraction(runId: string, iteration?: number, hasHar?: boo
 
   const data = useMemo(() => {
     if (!har) return undefined;
-    return {
-      thinkingContent: extractThinkingFromHar(har),
-      toolCalls: extractToolCallsFromHar(har),
-    };
+    const segments = extractChronologicalSegments(har);
+    // Derive flat aggregates from segments for backward compat
+    const thinkingContent = segments
+      .filter((s): s is ConversationSegment & { type: "thinking" } => s.type === "thinking")
+      .map((s) => s.content)
+      .join("");
+    const toolCalls = segments
+      .filter((s): s is ConversationSegment & { type: "tool_calls" } => s.type === "tool_calls")
+      .flatMap((s) => s.toolCalls);
+    return { thinkingContent, toolCalls, segments };
   }, [har]);
 
   return { data, isLoading };
@@ -285,7 +309,10 @@ export function useAllTurnsToolCalls(
     for (let i = 0; i < results.length; i++) {
       const har = results[i].data;
       if (!har) continue;
-      const tcs = extractToolCallsFromHar(har);
+      const segments = extractChronologicalSegments(har);
+      const tcs = segments
+        .filter((s): s is ConversationSegment & { type: "tool_calls" } => s.type === "tool_calls")
+        .flatMap((s) => s.toolCalls);
       const iteration = queries[i].iteration;
       for (const tc of tcs) {
         out.push({ ...tc, _iteration: iteration });

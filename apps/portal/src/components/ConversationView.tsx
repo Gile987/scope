@@ -10,7 +10,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import type { ConversationTurn, ToolCall } from "@/types";
-import { useHarExtraction } from "@/hooks/useHarExtraction";
+import { useHarExtraction, type ConversationSegment } from "@/hooks/useHarExtraction";
 
 interface ConversationViewProps {
   turns: ConversationTurn[];
@@ -156,9 +156,8 @@ function TurnMessages({ turn, runId }: { turn: ConversationTurn; runId: string }
   const hasHar = !!turn.harUrl;
   const { data: harData, isLoading: harLoading } = useHarExtraction(runId, turn.iteration, hasHar);
 
-  // Thinking and tool calls are extracted client-side from HAR (not stored in DB)
-  const thinkingContent = harData?.thinkingContent || undefined;
-  const toolCalls = harData?.toolCalls ?? [];
+  const segments = harData?.segments ?? [];
+  const hasContentSegment = segments.some((s) => s.type === "content");
 
   return (
     <>
@@ -174,77 +173,24 @@ function TurnMessages({ turn, runId }: { turn: ConversationTurn; runId: string }
         <div className="flex-1 h-px bg-border" />
       </div>
 
-      {/* Thinking content — collapsible, above agent response */}
-      {thinkingContent && (
-        <div className="flex justify-end">
-          <div className="max-w-[85%] w-full">
-            <CollapsibleSection
-              label="Thinking"
-              icon={Brain}
-              iconClassName="text-violet-500"
-            >
-              <Card className="bg-violet-500/5 border-violet-200 dark:border-violet-800">
-                <CardContent className="p-3">
-                  <div className="prose prose-sm dark:prose-invert max-w-none max-h-64 overflow-y-auto text-muted-foreground italic text-xs">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{thinkingContent}</ReactMarkdown>
-                  </div>
-                </CardContent>
-              </Card>
-            </CollapsibleSection>
-          </div>
-        </div>
-      )}
-
-      {/* Agent response — right aligned */}
-      <div className="flex justify-end">
-        <Card className={cn(
-          "max-w-[85%] border",
-          turn.passed
-            ? "bg-emerald-500/5 border-emerald-200 dark:border-emerald-800"
-            : "bg-primary/5 border-primary/20",
-        )}>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Bot className="h-4 w-4 text-primary" />
-              <span className="text-xs font-medium text-primary">Coding Agent</span>
-              <span className="text-xs text-muted-foreground ml-auto">
-                {new Date(turn.timestamp).toLocaleTimeString()}
-              </span>
-            </div>
-            <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{turn.codingAgentResponse}</ReactMarkdown>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Tool calls — inline, collapsible */}
+      {/* Loading indicator */}
       {harLoading && hasHar && (
         <div className="flex justify-end">
           <div className="max-w-[85%] flex items-center gap-1.5 text-xs text-muted-foreground py-1">
             <Loader2 className="h-3 w-3 animate-spin" />
-            <span>Loading tool calls…</span>
+            <span>Loading HAR data…</span>
           </div>
         </div>
       )}
-      {toolCalls.length > 0 && (
-        <div className="flex justify-end">
-          <div className="max-w-[85%] w-full">
-            <CollapsibleSection
-              label="Tool Calls"
-              icon={Wrench}
-              iconClassName="text-blue-500"
-              count={toolCalls.length}
-              defaultOpen={toolCalls.length <= 5}
-            >
-              <div className="space-y-1">
-                {toolCalls.map((tc, idx) => (
-                  <ToolCallInline key={tc.id || idx} tc={tc} />
-                ))}
-              </div>
-            </CollapsibleSection>
-          </div>
-        </div>
+
+      {/* Chronological segments from HAR */}
+      {segments.map((segment, idx) => (
+        <SegmentBlock key={`seg-${idx}`} segment={segment} turn={turn} />
+      ))}
+
+      {/* Fallback: show DB agent response if no content segments from HAR */}
+      {!hasContentSegment && !harLoading && (
+        <AgentResponseBlock content={turn.codingAgentResponse} turn={turn} />
       )}
 
       {/* Judge feedback — left aligned */}
@@ -287,5 +233,82 @@ function TurnMessages({ turn, runId }: { turn: ConversationTurn; runId: string }
         </Card>
       </div>
     </>
+  );
+}
+
+/** Render a single chronological segment */
+function SegmentBlock({ segment, turn }: { segment: ConversationSegment; turn: ConversationTurn }) {
+  switch (segment.type) {
+    case "thinking":
+      return (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] w-full">
+            <CollapsibleSection
+              label="Thinking"
+              icon={Brain}
+              iconClassName="text-violet-500"
+            >
+              <Card className="bg-violet-500/5 border-violet-200 dark:border-violet-800">
+                <CardContent className="p-3">
+                  <div className="prose prose-sm dark:prose-invert max-w-none max-h-64 overflow-y-auto text-muted-foreground italic text-xs">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{segment.content}</ReactMarkdown>
+                  </div>
+                </CardContent>
+              </Card>
+            </CollapsibleSection>
+          </div>
+        </div>
+      );
+
+    case "content":
+      return <AgentResponseBlock content={segment.content} turn={turn} />;
+
+    case "tool_calls":
+      return (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] w-full">
+            <CollapsibleSection
+              label="Tool Calls"
+              icon={Wrench}
+              iconClassName="text-blue-500"
+              count={segment.toolCalls.length}
+              defaultOpen={segment.toolCalls.length <= 5}
+            >
+              <div className="space-y-1">
+                {segment.toolCalls.map((tc, idx) => (
+                  <ToolCallInline key={tc.id || idx} tc={tc} />
+                ))}
+              </div>
+            </CollapsibleSection>
+          </div>
+        </div>
+      );
+  }
+}
+
+/** Agent response card — right aligned */
+function AgentResponseBlock({ content, turn }: { content: string; turn: ConversationTurn }) {
+  return (
+    <div className="flex justify-end">
+      <Card className={cn(
+        "max-w-[85%] border",
+        turn.passed
+          ? "bg-emerald-500/5 border-emerald-200 dark:border-emerald-800"
+          : "bg-primary/5 border-primary/20",
+      )}>
+        <CardContent className="p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Bot className="h-4 w-4 text-primary" />
+            <span className="text-xs font-medium text-primary">Coding Agent</span>
+            <span className="text-xs text-muted-foreground ml-auto">
+              {new Date(turn.timestamp).toLocaleTimeString()}
+            </span>
+          </div>
+          <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{content}</ReactMarkdown>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
