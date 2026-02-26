@@ -16,6 +16,7 @@
  */
 
 import { mongoMigrateCli } from "mongo-migrate-ts";
+import { MongoClient } from "mongodb";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,10 +33,42 @@ const database =
   process.env.MONGO_DATABASE ??
   "requests-db";
 
+const MIGRATIONS_COLLECTION = "_migrations";
+
+/**
+ * Bootstrap required indexes on the _migrations collection BEFORE
+ * mongo-migrate-ts runs.
+ *
+ * Cosmos DB (MongoDB API) rejects sort operations on unindexed fields.
+ * mongo-migrate-ts internally does `.sort({ timestamp: -1 })` to list and
+ * find the last applied migration, so this index must exist before the
+ * framework even checks migration status.
+ *
+ * This is a chicken-and-egg issue — we can't use a migration to create
+ * the index because the framework can't read the migrations collection
+ * without it.
+ */
+async function ensureMigrationsCollectionIndexes(): Promise<void> {
+  const client = await MongoClient.connect(uri);
+  try {
+    const db = client.db(database);
+    const col = db.collection(MIGRATIONS_COLLECTION);
+    await col.createIndex({ timestamp: -1 }).catch(() => {});
+    await col.createIndex({ className: 1 }).catch(() => {});
+    console.log(
+      `Ensured indexes on ${MIGRATIONS_COLLECTION} collection`,
+    );
+  } finally {
+    await client.close();
+  }
+}
+
+await ensureMigrationsCollectionIndexes();
+
 mongoMigrateCli({
   uri,
   database,
   migrationsDir: join(__dirname, "migrations"),
-  migrationsCollection: "_migrations",
+  migrationsCollection: MIGRATIONS_COLLECTION,
   globPattern: "**/*.ts",
 });
