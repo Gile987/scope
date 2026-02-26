@@ -44,7 +44,10 @@ function getResponseBody(entry: HarEntry): string | null {
   if (!content?.text) return null;
   if (content.encoding === "base64") {
     try {
-      return atob(content.text);
+      // atob returns Latin-1; must re-decode as UTF-8 for multi-byte chars
+      const binary = atob(content.text);
+      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+      return new TextDecoder("utf-8").decode(bytes);
     } catch {
       return null;
     }

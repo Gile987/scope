@@ -108,11 +108,15 @@ function contentCategory(entry: HarEntry): string {
   return ct.split("/").pop()?.split(";")[0] ?? "other";
 }
 
-/** Decode response body text (handle base64). */
+/** Decode response body text (handle base64 with proper UTF-8 decoding). */
 function decodeBody(content: HarResponse["content"]): string | null {
   if (!content.text) return null;
   if (content.encoding === "base64") {
-    try { return atob(content.text); } catch { return null; }
+    try {
+      const binary = atob(content.text);
+      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+      return new TextDecoder("utf-8").decode(bytes);
+    } catch { return null; }
   }
   return content.text;
 }
