@@ -39,12 +39,29 @@ export type ConversationSegment =
 // ---------------------------------------------------------------------------
 // HAR body helpers
 // ---------------------------------------------------------------------------
+/**
+ * Re-encode a string from Latin-1 code points back to UTF-8.
+ * Fixes "mojibake" where UTF-8 bytes were stored as Latin-1 characters
+ * (e.g. ├ → â\x94\x9c). Only applied when the text contains telltale
+ * mojibake patterns.
+ */
+function repairMojibake(text: string): string {
+  // Quick check: â (U+00E2) followed by control-range chars is a strong
+  // signal that UTF-8 bytes were interpreted as Latin-1.
+  if (!/\xc2[\x80-\xbf]|\xc3[\x80-\xbf]|\xe2[\x80-\xbf]/.test(text)) return text;
+  try {
+    const bytes = Uint8Array.from(text, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return text;
+  }
+}
+
 function getResponseBody(entry: HarEntry): string | null {
   const content = entry.response?.content;
   if (!content?.text) return null;
   if (content.encoding === "base64") {
     try {
-      // atob returns Latin-1; must re-decode as UTF-8 for multi-byte chars
       const binary = atob(content.text);
       const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
       return new TextDecoder("utf-8").decode(bytes);
@@ -52,7 +69,7 @@ function getResponseBody(entry: HarEntry): string | null {
       return null;
     }
   }
-  return content.text;
+  return repairMojibake(content.text);
 }
 
 // ---------------------------------------------------------------------------

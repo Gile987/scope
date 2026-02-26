@@ -108,7 +108,21 @@ function contentCategory(entry: HarEntry): string {
   return ct.split("/").pop()?.split(";")[0] ?? "other";
 }
 
-/** Decode response body text (handle base64 with proper UTF-8 decoding). */
+/**
+ * Re-encode a string from Latin-1 code points back to UTF-8.
+ * Fixes "mojibake" where UTF-8 bytes were stored as Latin-1 characters.
+ */
+function repairMojibake(text: string): string {
+  if (!/\xc2[\x80-\xbf]|\xc3[\x80-\xbf]|\xe2[\x80-\xbf]/.test(text)) return text;
+  try {
+    const bytes = Uint8Array.from(text, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return text;
+  }
+}
+
+/** Decode response body text (handle base64 and mojibake). */
 function decodeBody(content: HarResponse["content"]): string | null {
   if (!content.text) return null;
   if (content.encoding === "base64") {
@@ -118,7 +132,7 @@ function decodeBody(content: HarResponse["content"]): string | null {
       return new TextDecoder("utf-8").decode(bytes);
     } catch { return null; }
   }
-  return content.text;
+  return repairMojibake(content.text);
 }
 
 // ---------------------------------------------------------------------------
