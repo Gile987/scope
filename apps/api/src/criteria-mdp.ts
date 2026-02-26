@@ -146,7 +146,7 @@ export function computeMdp(
       : availableCriteria;
 
   // Filter runs: if selectedCriteria is provided, only include runs that have
-  // at least one of the selected criteria (so the state vector is meaningful)
+  // all of the selected criteria (so the state vector is complete and meaningful)
   const filteredRuns =
     selectedCriteria && selectedCriteria.length > 0
       ? runs.filter((run) => {
@@ -161,7 +161,7 @@ export function computeMdp(
               }
             }
           }
-          return selectedCriteria.some((c) => runCriteria.has(c));
+          return selectedCriteria.every((c) => runCriteria.has(c));
         })
       : runs;
 
