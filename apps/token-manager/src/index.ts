@@ -14,7 +14,7 @@ import { validateToken } from "./token-validators.js";
 dotenv.config();
 
 const port = parseInt(process.env.PORT || "3000", 10);
-const mongoUri = process.env.MONGO_CONNECTION_STRING || "mongodb://localhost:27017";
+const mongoUri = process.env.MONGO_CONNECTION_STRING || "mongodb://localhost:27000";
 const dbName = process.env.MONGO_DATABASE || "scoped";
 const keyvaultUri = process.env.AZURE_KEYVAULT_URI;
 const validationIntervalMs = parseInt(
