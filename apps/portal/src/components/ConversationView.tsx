@@ -75,6 +75,7 @@ function CollapsibleSection({
   iconClassName,
   count,
   timestamp,
+  preview,
   defaultOpen = false,
   children,
 }: {
@@ -83,6 +84,8 @@ function CollapsibleSection({
   iconClassName?: string;
   count?: number;
   timestamp?: string;
+  /** One-line preview shown when collapsed */
+  preview?: string;
   defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
@@ -91,17 +94,22 @@ function CollapsibleSection({
     <div>
       <button
         type="button"
-        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-left py-1"
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-left py-1 min-w-0"
         onClick={() => setOpen(!open)}
       >
-        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <Icon className={cn("h-3 w-3", iconClassName)} />
-        <span>{label}</span>
+        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <Icon className={cn("h-3 w-3 shrink-0", iconClassName)} />
+        <span className="shrink-0">{label}</span>
         {count !== undefined && (
-          <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-1">{count}</Badge>
+          <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-1 shrink-0">{count}</Badge>
+        )}
+        {!open && preview && (
+          <span className="text-muted-foreground/70 italic truncate ml-1 min-w-0">
+            {preview}
+          </span>
         )}
         {timestamp && (
-          <span className="text-[10px] text-muted-foreground ml-auto">
+          <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
             {new Date(timestamp).toLocaleTimeString()}
           </span>
         )}
@@ -261,6 +269,7 @@ function SegmentBlock({ segment, turn }: { segment: ConversationSegment; turn: C
               label="Thinking"
               icon={Brain}
               iconClassName="text-violet-500"
+              preview={segment.content}
             >
               <Card className="bg-violet-500/5 border-violet-200 dark:border-violet-800">
                 <CardContent className="p-3">
