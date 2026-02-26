@@ -14,6 +14,8 @@ function makeMdpResponse(overrides: Partial<MdpResponse> = {}): MdpResponse {
     episodeCount: 0,
     availableCriteria: [],
     selectedCriteria: [],
+    availablePromptFeatures: [],
+    selectedFeatures: [],
     computedAt: new Date().toISOString(),
     ...overrides,
   };
