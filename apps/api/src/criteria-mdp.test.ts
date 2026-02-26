@@ -29,6 +29,18 @@ function makeRun(
   };
 }
 
+function makeRunWithFeatures(
+  criteria: string[],
+  turns: Array<Record<string, boolean>>,
+  features: Array<{ featureId: string; detected: boolean }>,
+  status = "completed"
+): MdpAnalyzableRun {
+  return {
+    ...makeRun(criteria, turns, status),
+    promptFeatures: features.map((f) => ({ ...f, evaluated: true })),
+  };
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("computeMdp", () => {
@@ -352,5 +364,191 @@ describe("mergeMdpResponses", () => {
     const merged = mergeMdpResponses(base, delta);
     expect(merged.availableCriteria).toContain("a");
     expect(merged.availableCriteria).toContain("b");
+  });
+
+  it("merges availablePromptFeatures from both", () => {
+    const base = computeMdp([
+      makeRunWithFeatures(["a"], [{ a: true }], [{ featureId: "f1", detected: true }]),
+    ]);
+    const delta = computeMdp([
+      makeRunWithFeatures(["a"], [{ a: false }], [{ featureId: "f2", detected: false }]),
+    ]);
+
+    const merged = mergeMdpResponses(base, delta);
+    expect(merged.availablePromptFeatures).toContain("f1");
+    expect(merged.availablePromptFeatures).toContain("f2");
+  });
+});
+
+// ─── Prompt Feature Start Nodes ──────────────────────────────────────────────
+
+describe("computeMdp with prompt features", () => {
+  it("uses prompt features as start nodes instead of synthetic initial", () => {
+    const run = makeRunWithFeatures(
+      ["a", "b"],
+      [{ a: true, b: false }, { a: true, b: true }],
+      [{ featureId: "azure", detected: true }, { featureId: "docker", detected: false }]
+    );
+
+    const result = computeMdp([run]);
+
+    // Start node should be a prompt-features node
+    const startNode = result.nodes.find((n) => n.isInitial);
+    expect(startNode).toBeDefined();
+    expect(startNode!.type).toBe("prompt-features");
+    expect(startNode!.features).toBeDefined();
+    expect(startNode!.features!.length).toBe(2);
+    expect(startNode!.features!.find((f) => f.id === "azure")?.detected).toBe(true);
+    expect(startNode!.features!.find((f) => f.id === "docker")?.detected).toBe(false);
+    // Criteria should be empty on feature nodes
+    expect(startNode!.criteria.length).toBe(0);
+
+    // Criteria state nodes should have type "criteria"
+    const criteriaNodes = result.nodes.filter((n) => n.type === "criteria");
+    expect(criteriaNodes.length).toBe(2); // turn1 + turn2 states
+  });
+
+  it("groups runs with same feature vector into same start node", () => {
+    const run1 = makeRunWithFeatures(
+      ["a"],
+      [{ a: true }],
+      [{ featureId: "azure", detected: true }]
+    );
+    const run2 = makeRunWithFeatures(
+      ["a"],
+      [{ a: false }],
+      [{ featureId: "azure", detected: true }]
+    );
+
+    const result = computeMdp([run1, run2]);
+
+    // Both runs share the same feature start node
+    const startNodes = result.nodes.filter((n) => n.isInitial);
+    expect(startNodes.length).toBe(1);
+    expect(startNodes[0].visits).toBe(2);
+    expect(startNodes[0].type).toBe("prompt-features");
+  });
+
+  it("creates separate start nodes for different feature vectors", () => {
+    const run1 = makeRunWithFeatures(
+      ["a"],
+      [{ a: true }],
+      [{ featureId: "azure", detected: true }]
+    );
+    const run2 = makeRunWithFeatures(
+      ["a"],
+      [{ a: false }],
+      [{ featureId: "azure", detected: false }]
+    );
+
+    const result = computeMdp([run1, run2]);
+
+    const startNodes = result.nodes.filter((n) => n.isInitial);
+    expect(startNodes.length).toBe(2);
+    expect(startNodes.every((n) => n.type === "prompt-features")).toBe(true);
+  });
+
+  it("creates 'Unknown' start node for runs without features", () => {
+    const runWithFeatures = makeRunWithFeatures(
+      ["a"],
+      [{ a: true }],
+      [{ featureId: "azure", detected: true }]
+    );
+    const runWithoutFeatures = makeRun(["a"], [{ a: false }]);
+
+    const result = computeMdp([runWithFeatures, runWithoutFeatures]);
+
+    const startNodes = result.nodes.filter((n) => n.isInitial);
+    expect(startNodes.length).toBe(2);
+
+    // One known, one unknown
+    const unknownNode = startNodes.find((n) => n.id === "F||unknown");
+    expect(unknownNode).toBeDefined();
+    expect(unknownNode!.features).toEqual([]);
+    expect(unknownNode!.visits).toBe(1);
+  });
+
+  it("includes availablePromptFeatures in response", () => {
+    const run = makeRunWithFeatures(
+      ["a"],
+      [{ a: true }],
+      [{ featureId: "azure", detected: true }, { featureId: "docker", detected: false }]
+    );
+
+    const result = computeMdp([run]);
+    expect(result.availablePromptFeatures).toEqual(["azure", "docker"]);
+  });
+
+  it("filters runs by selectedFeatures (AND logic)", () => {
+    const run1 = makeRunWithFeatures(
+      ["a"],
+      [{ a: true }],
+      [{ featureId: "azure", detected: true }, { featureId: "docker", detected: true }]
+    );
+    const run2 = makeRunWithFeatures(
+      ["a"],
+      [{ a: false }],
+      [{ featureId: "azure", detected: true }] // missing docker
+    );
+
+    const result = computeMdp([run1, run2], undefined, ["azure", "docker"]);
+
+    // Only run1 should be included (run2 doesn't have docker feature evaluated)
+    expect(result.episodeCount).toBe(1);
+    expect(result.selectedFeatures).toEqual(["azure", "docker"]);
+  });
+
+  it("projects feature start nodes to selected features only", () => {
+    const run = makeRunWithFeatures(
+      ["a"],
+      [{ a: true }],
+      [
+        { featureId: "azure", detected: true },
+        { featureId: "docker", detected: false },
+        { featureId: "k8s", detected: true },
+      ]
+    );
+
+    const result = computeMdp([run], undefined, ["azure", "docker"]);
+
+    const startNode = result.nodes.find((n) => n.isInitial);
+    expect(startNode!.features!.length).toBe(2);
+    const featureIds = startNode!.features!.map((f) => f.id);
+    expect(featureIds).toContain("azure");
+    expect(featureIds).toContain("docker");
+    expect(featureIds).not.toContain("k8s");
+  });
+
+  it("applies both criteria AND features filters", () => {
+    // Run1: has criteria a,b and feature azure
+    const run1 = makeRunWithFeatures(
+      ["a", "b"],
+      [{ a: true, b: true }],
+      [{ featureId: "azure", detected: true }]
+    );
+    // Run2: has criteria a (missing b) and feature azure
+    const run2 = makeRunWithFeatures(
+      ["a"],
+      [{ a: true }],
+      [{ featureId: "azure", detected: true }]
+    );
+    // Run3: has criteria a,b but no features
+    const run3 = makeRun(["a", "b"], [{ a: true, b: false }]);
+
+    const result = computeMdp([run1, run2, run3], ["a", "b"], ["azure"]);
+
+    // Only run1 passes both filters
+    expect(result.episodeCount).toBe(1);
+  });
+
+  it("falls back to synthetic initial when no runs have features", () => {
+    const run = makeRun(["a"], [{ a: true }]);
+    const result = computeMdp([run]);
+
+    const startNode = result.nodes.find((n) => n.isInitial);
+    expect(startNode).toBeDefined();
+    // No type set (backward compat) or undefined
+    expect(startNode!.criteria.length).toBeGreaterThan(0);
+    expect(result.availablePromptFeatures).toEqual([]);
   });
 });

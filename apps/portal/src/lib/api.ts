@@ -315,10 +315,13 @@ export const api = {
   // ─── MDP ────────────────────────────────────────────────────────────────────
 
   /** Get MDP state-transition graph (optionally incremental via since) */
-  getMdp: (criteria?: string[], since?: string): Promise<MdpResponse> => {
+  getMdp: (criteria?: string[], since?: string, features?: string[]): Promise<MdpResponse> => {
     const params = new URLSearchParams();
     if (criteria && criteria.length > 0) {
       params.set("criteria", criteria.join(","));
+    }
+    if (features && features.length > 0) {
+      params.set("features", features.join(","));
     }
     if (since) {
       params.set("since", since);

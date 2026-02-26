@@ -19,15 +19,28 @@ export interface CriterionState {
   passed: boolean;
 }
 
+/** Per-feature state within a prompt-feature start node */
+export interface FeatureState {
+  id: string;
+  detected: boolean;
+}
+
+/** Node type discriminator */
+export type MdpNodeType = "prompt-features" | "criteria";
+
 /** A node in the MDP graph — a unique composite state vector */
 export interface MdpStateNode {
   /** Canonical string key (e.g. "has_azure:0|has_cloud:1|has_iac:0") */
   id: string;
-  /** Sorted criteria states */
+  /** Sorted criteria states (present on criteria nodes) */
   criteria: CriterionState[];
+  /** Sorted feature states (present on prompt-feature start nodes) */
+  features?: FeatureState[];
+  /** Node type: "prompt-features" for start nodes, "criteria" for state nodes */
+  type?: MdpNodeType;
   /** How many times any episode visited this state */
   visits: number;
-  /** True for the synthetic all-failed initial state */
+  /** True for the start state (prompt-features node) */
   isInitial?: boolean;
   /** True if no outgoing transitions exist (final state of some episodes) */
   isTerminal?: boolean;
@@ -53,6 +66,10 @@ export interface MdpResponse {
   availableCriteria: string[];
   /** Criteria IDs used for projection (empty = all) */
   selectedCriteria: string[];
+  /** All prompt feature IDs found across all runs */
+  availablePromptFeatures: string[];
+  /** Prompt feature IDs used for filtering (empty = all) */
+  selectedFeatures: string[];
   /** ISO timestamp of when this was computed — used for incremental polling */
   computedAt: string;
 }
@@ -62,6 +79,12 @@ export interface MdpAnalyzableRun {
   scenario: { criteria?: string[] };
   status: string;
   updatedAt?: Date | string;
+  /** Prompt features from the associated task prompt */
+  promptFeatures?: Array<{
+    featureId: string;
+    detected: boolean;
+    evaluated: boolean;
+  }>;
   turns?: Array<{
     iteration: number;
     criteriaResults?: Array<{
@@ -84,6 +107,31 @@ function stateKey(criteria: CriterionState[]): string {
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((c) => `${c.id}:${c.passed ? 1 : 0}`)
     .join("|");
+}
+
+/**
+ * Build a canonical key for a prompt-feature start node.
+ * Prefixed with "F||" to avoid collision with criteria state keys.
+ */
+function featureNodeKey(features: FeatureState[]): string {
+  const sorted = features.slice().sort((a, b) => a.id.localeCompare(b.id));
+  return "F||" + sorted.map((f) => `${f.id}:${f.detected ? 1 : 0}`).join("|");
+}
+
+/**
+ * Build a FeatureState[] from a run's prompt features, projected to selectedFeatures.
+ * If the run has no prompt features, returns null (for the "Unknown" start node).
+ */
+function buildFeatureVector(
+  run: MdpAnalyzableRun,
+  featureIds: string[]
+): FeatureState[] | null {
+  if (!run.promptFeatures || run.promptFeatures.length === 0) return null;
+  const map = new Map(run.promptFeatures.map((f) => [f.featureId, f]));
+  return featureIds.map((id) => {
+    const f = map.get(id);
+    return { id, detected: f ? f.detected : false };
+  });
 }
 
 /**
@@ -113,10 +161,14 @@ function buildStateVector(
  * @param selectedCriteria  Optional subset of criteria to project to. If provided,
  *   only these criteria are included in the state vectors (producing a sub-MDP where
  *   states that only differed in excluded criteria are merged).
+ * @param selectedFeatures  Optional subset of prompt features to filter by. If provided,
+ *   only runs whose task prompt has ALL selected features evaluated are included,
+ *   and start nodes are built from these features.
  */
 export function computeMdp(
   runs: MdpAnalyzableRun[],
-  selectedCriteria?: string[]
+  selectedCriteria?: string[],
+  selectedFeatures?: string[]
 ): MdpResponse {
   // Collect all criteria IDs across all runs
   const allCriteriaSet = new Set<string>();
@@ -139,77 +191,139 @@ export function computeMdp(
   }
   const availableCriteria = Array.from(allCriteriaSet).sort();
 
+  // Collect all prompt feature IDs across all runs
+  const allFeaturesSet = new Set<string>();
+  for (const run of runs) {
+    if (run.promptFeatures) {
+      for (const f of run.promptFeatures) {
+        allFeaturesSet.add(f.featureId);
+      }
+    }
+  }
+  const availablePromptFeatures = Array.from(allFeaturesSet).sort();
+
   // Determine which criteria to include in state vectors
   const projectionCriteria =
     selectedCriteria && selectedCriteria.length > 0
       ? selectedCriteria.slice().sort()
       : availableCriteria;
 
+  // Determine which features to include in start nodes
+  const projectionFeatures =
+    selectedFeatures && selectedFeatures.length > 0
+      ? selectedFeatures.slice().sort()
+      : availablePromptFeatures;
+
   // Filter runs: if selectedCriteria is provided, only include runs that have
   // all of the selected criteria (so the state vector is complete and meaningful)
-  const filteredRuns =
-    selectedCriteria && selectedCriteria.length > 0
-      ? runs.filter((run) => {
-          const runCriteria = new Set<string>();
-          if (run.scenario?.criteria) {
-            for (const c of run.scenario.criteria) runCriteria.add(c);
+  let filteredRuns = runs;
+  if (selectedCriteria && selectedCriteria.length > 0) {
+    filteredRuns = filteredRuns.filter((run) => {
+      const runCriteria = new Set<string>();
+      if (run.scenario?.criteria) {
+        for (const c of run.scenario.criteria) runCriteria.add(c);
+      }
+      if (run.turns) {
+        for (const turn of run.turns) {
+          if (turn.criteriaResults) {
+            for (const r of turn.criteriaResults) runCriteria.add(r.criterionId);
           }
-          if (run.turns) {
-            for (const turn of run.turns) {
-              if (turn.criteriaResults) {
-                for (const r of turn.criteriaResults) runCriteria.add(r.criterionId);
-              }
-            }
-          }
-          return selectedCriteria.every((c) => runCriteria.has(c));
-        })
-      : runs;
+        }
+      }
+      return selectedCriteria.every((c) => runCriteria.has(c));
+    });
+  }
+
+  // Filter runs: if selectedFeatures is provided, only include runs that have
+  // all of the selected features evaluated in their prompt features
+  if (selectedFeatures && selectedFeatures.length > 0) {
+    filteredRuns = filteredRuns.filter((run) => {
+      if (!run.promptFeatures) return false;
+      const runFeatures = new Set(run.promptFeatures.map((f) => f.featureId));
+      return selectedFeatures.every((f) => runFeatures.has(f));
+    });
+  }
+
+  // The "Unknown" start node key — for runs without prompt features
+  const UNKNOWN_KEY = "F||unknown";
 
   // Accumulators
   const nodesMap = new Map<string, MdpStateNode>();
   const edgesMap = new Map<string, { source: string; target: string; count: number }>();
   const outgoingCounts = new Map<string, number>(); // source -> total outgoing transitions
 
-  // Build synthetic initial state (all criteria failed)
+  // Build synthetic initial state (all criteria failed) — fallback when no features exist
   const initialCriteria: CriterionState[] = projectionCriteria.map((id) => ({
     id,
     passed: false,
   }));
-  const initialKey = stateKey(initialCriteria);
+  const syntheticInitialKey = stateKey(initialCriteria);
 
   let episodeCount = 0;
 
   for (const run of filteredRuns) {
     if (!run.turns || run.turns.length === 0) continue;
 
-    // Ensure initial state node exists (created lazily on first episode)
-    if (!nodesMap.has(initialKey)) {
-      nodesMap.set(initialKey, {
-        id: initialKey,
-        criteria: initialCriteria,
-        visits: 0,
-        isInitial: true,
-      });
+    // Determine start node: prompt-features if available, else synthetic all-failed
+    let startKey: string;
+    if (projectionFeatures.length > 0) {
+      const featureVec = buildFeatureVector(run, projectionFeatures);
+      if (featureVec) {
+        startKey = featureNodeKey(featureVec);
+        if (!nodesMap.has(startKey)) {
+          nodesMap.set(startKey, {
+            id: startKey,
+            criteria: [],
+            features: featureVec.slice().sort((a, b) => a.id.localeCompare(b.id)),
+            type: "prompt-features",
+            visits: 0,
+            isInitial: true,
+          });
+        }
+      } else {
+        // Run has no prompt features → "Unknown" start node
+        startKey = UNKNOWN_KEY;
+        if (!nodesMap.has(startKey)) {
+          nodesMap.set(startKey, {
+            id: startKey,
+            criteria: [],
+            features: [],
+            type: "prompt-features",
+            visits: 0,
+            isInitial: true,
+          });
+        }
+      }
+    } else {
+      // No features available at all → use synthetic all-failed initial state
+      startKey = syntheticInitialKey;
+      if (!nodesMap.has(startKey)) {
+        nodesMap.set(startKey, {
+          id: startKey,
+          criteria: initialCriteria,
+          visits: 0,
+          isInitial: true,
+        });
+      }
     }
 
     // Sort turns by iteration
     const sortedTurns = run.turns.slice().sort((a, b) => a.iteration - b.iteration);
 
     // Build the sequence of state keys for this episode
-    const states: string[] = [initialKey];
-    const stateVectors: CriterionState[][] = [initialCriteria];
+    const states: string[] = [startKey];
 
     for (const turn of sortedTurns) {
       const vec = buildStateVector(turn, projectionCriteria);
       const key = stateKey(vec);
       states.push(key);
-      stateVectors.push(vec);
 
-      // Ensure node exists
+      // Ensure criteria node exists
       if (!nodesMap.has(key)) {
         nodesMap.set(key, {
           id: key,
           criteria: vec.slice().sort((a, b) => a.id.localeCompare(b.id)),
+          type: "criteria",
           visits: 0,
         });
       }
@@ -267,6 +381,8 @@ export function computeMdp(
     episodeCount,
     availableCriteria,
     selectedCriteria: selectedCriteria || [],
+    availablePromptFeatures,
+    selectedFeatures: selectedFeatures || [],
     computedAt: new Date().toISOString(),
   };
 }
@@ -338,12 +454,20 @@ export function mergeMdpResponses(
     ...delta.availableCriteria,
   ]);
 
+  // Merge available prompt features
+  const allFeatures = new Set([
+    ...(existing.availablePromptFeatures || []),
+    ...(delta.availablePromptFeatures || []),
+  ]);
+
   return {
     nodes: Array.from(nodesMap.values()),
     edges: Array.from(edgesMap.values()),
     episodeCount: existing.episodeCount + delta.episodeCount,
     availableCriteria: Array.from(allCriteria).sort(),
     selectedCriteria: delta.selectedCriteria, // Use the latest selection
+    availablePromptFeatures: Array.from(allFeatures).sort(),
+    selectedFeatures: delta.selectedFeatures || [],
     computedAt: delta.computedAt,
   };
 }

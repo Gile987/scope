@@ -76,12 +76,20 @@ export function mergeMdpResponses(
     ...delta.availableCriteria,
   ]);
 
+  // Merge available prompt features
+  const allFeatures = new Set([
+    ...(existing.availablePromptFeatures || []),
+    ...(delta.availablePromptFeatures || []),
+  ]);
+
   return {
     nodes: Array.from(nodesMap.values()),
     edges: Array.from(edgesMap.values()),
     episodeCount: existing.episodeCount + delta.episodeCount,
     availableCriteria: Array.from(allCriteria).sort(),
     selectedCriteria: delta.selectedCriteria,
+    availablePromptFeatures: Array.from(allFeatures).sort(),
+    selectedFeatures: delta.selectedFeatures || [],
     computedAt: delta.computedAt,
   };
 }

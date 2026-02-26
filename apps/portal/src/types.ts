@@ -224,15 +224,28 @@ export interface MdpCriterionState {
   passed: boolean;
 }
 
+/** Per-feature state within a prompt-feature start node */
+export interface MdpFeatureState {
+  id: string;
+  detected: boolean;
+}
+
+/** Node type discriminator */
+export type MdpNodeType = "prompt-features" | "criteria";
+
 /** A node in the MDP graph — a unique composite state vector */
 export interface MdpStateNode {
   /** Canonical string key (e.g. "has_azure:0|has_cloud:1|has_iac:0") */
   id: string;
-  /** Sorted criteria states */
+  /** Sorted criteria states (present on criteria nodes) */
   criteria: MdpCriterionState[];
+  /** Sorted feature states (present on prompt-feature start nodes) */
+  features?: MdpFeatureState[];
+  /** Node type: "prompt-features" for start nodes, "criteria" for state nodes */
+  type?: MdpNodeType;
   /** How many times any episode visited this state */
   visits: number;
-  /** True for the synthetic all-failed initial state */
+  /** True for the start state (prompt-features node or synthetic initial) */
   isInitial?: boolean;
   /** True if no outgoing transitions exist (final state of some episodes) */
   isTerminal?: boolean;
@@ -258,6 +271,10 @@ export interface MdpResponse {
   availableCriteria: string[];
   /** Criteria IDs used for projection (empty = all) */
   selectedCriteria: string[];
+  /** All prompt feature IDs found across all runs */
+  availablePromptFeatures: string[];
+  /** Prompt feature IDs used for filtering (empty = all) */
+  selectedFeatures: string[];
   /** ISO timestamp of when this was computed — used for incremental polling */
   computedAt: string;
 }

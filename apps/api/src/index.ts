@@ -1625,6 +1625,12 @@ app.get("/api/v1/criteria/mdp", async (req: Request, res: Response, next: NextFu
       ? criteriaParam.split(",").map(c => c.trim()).filter(Boolean)
       : undefined;
 
+    // Parse optional prompt-feature filter
+    const featuresParam = req.query.features as string | undefined;
+    const selectedFeatures = featuresParam
+      ? featuresParam.split(",").map(f => f.trim()).filter(Boolean)
+      : undefined;
+
     // Parse optional ?since= for incremental polling
     const sinceParam = req.query.since as string | undefined;
     const sinceDate = sinceParam ? new Date(sinceParam) : undefined;
@@ -1656,17 +1662,34 @@ app.get("/api/v1/criteria/mdp", async (req: Request, res: Response, next: NextFu
         status: 1,
         turns: 1,
         updatedAt: 1,
+        taskPromptId: 1,
       })
       .toArray();
+
+    // Batch-lookup task prompts for their features
+    const taskPromptIds = [...new Set(runs.map(r => r.taskPromptId).filter(Boolean))] as string[];
+    const taskPromptFeatures = new Map<string, Array<{ featureId: string; detected: boolean; evaluated: boolean }>>();
+    if (taskPromptIds.length > 0) {
+      const taskPrompts = await taskPromptCollection
+        .find({ _id: { $in: taskPromptIds } })
+        .project({ _id: 1, features: 1 })
+        .toArray();
+      for (const tp of taskPrompts) {
+        if (tp.features && tp.features.length > 0) {
+          taskPromptFeatures.set(tp._id, tp.features);
+        }
+      }
+    }
 
     const mdpRuns: MdpAnalyzableRun[] = runs.map(r => ({
       scenario: r.scenario,
       status: r.status,
       turns: r.turns,
       updatedAt: r.updatedAt,
+      promptFeatures: r.taskPromptId ? taskPromptFeatures.get(r.taskPromptId) : undefined,
     }));
 
-    const mdpResult = computeMdp(mdpRuns, selectedCriteria);
+    const mdpResult = computeMdp(mdpRuns, selectedCriteria, selectedFeatures);
     res.json(mdpResult);
   } catch (error) {
     next(error);

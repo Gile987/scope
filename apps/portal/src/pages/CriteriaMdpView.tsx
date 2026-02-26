@@ -24,7 +24,7 @@ import { api } from "@/lib/api";
 import { mergeMdpResponses, topologyHash } from "@/lib/mdp-utils";
 import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
 import { cn } from "@/lib/utils";
-import type { MdpResponse, MdpCriterionState } from "@/types";
+import type { MdpResponse, MdpCriterionState, MdpFeatureState, MdpNodeType } from "@/types";
 import "@xyflow/react/dist/style.css";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -38,6 +38,8 @@ const NODE_ROW_HEIGHT = 20;
 
 interface MdpNodeData {
   criteria: MdpCriterionState[];
+  features?: MdpFeatureState[];
+  nodeType?: MdpNodeType;
   visits: number;
   isInitial?: boolean;
   isTerminal?: boolean;
@@ -46,8 +48,9 @@ interface MdpNodeData {
   [key: string]: unknown;
 }
 
-function getNodeHeight(criteriaCount: number): number {
-  return NODE_HEIGHT_BASE + criteriaCount * NODE_ROW_HEIGHT;
+function getNodeHeight(criteriaCount: number, featureCount?: number): number {
+  const rowCount = Math.max(criteriaCount, featureCount || 0);
+  return NODE_HEIGHT_BASE + rowCount * NODE_ROW_HEIGHT;
 }
 
 function layoutGraph(
@@ -110,9 +113,11 @@ function passRateColor(rate: number): string {
 // ─── Custom MDP state node ──────────────────────────────────────────────────
 
 function MdpStateNodeComponent({ data }: NodeProps<Node<MdpNodeData>>) {
+  const isFeatureNode = data.nodeType === "prompt-features";
+  const isUnknownFeatureNode = isFeatureNode && (!data.features || data.features.length === 0);
   const passRate = data.totalCount > 0 ? data.passedCount / data.totalCount : 0;
-  const borderColor = data.isInitial
-    ? "border-slate-500 border-dashed"
+  const borderColor = isFeatureNode
+    ? "border-violet-500 border-dashed"
     : data.isTerminal
       ? "border-blue-400 border-2"
       : "border-slate-600";
@@ -120,7 +125,8 @@ function MdpStateNodeComponent({ data }: NodeProps<Node<MdpNodeData>>) {
   return (
     <div
       className={cn(
-        "rounded-lg border bg-slate-900 px-3 py-2 text-xs font-mono shadow-md min-w-[160px]",
+        "rounded-lg border px-3 py-2 text-xs font-mono shadow-md min-w-[160px]",
+        isFeatureNode ? "bg-violet-950/80" : "bg-slate-900",
         borderColor
       )}
     >
@@ -130,9 +136,13 @@ function MdpStateNodeComponent({ data }: NodeProps<Node<MdpNodeData>>) {
         className="!bg-slate-500 !w-2 !h-2 !border-0"
       />
 
-      {/* Header: visits badge + pass fraction */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-1.5 gap-2">
-        {data.isInitial ? (
+        {isFeatureNode ? (
+          <span className="text-violet-300 text-[10px] italic">
+            {isUnknownFeatureNode ? "Unknown Task" : "Task Features"}
+          </span>
+        ) : data.isInitial ? (
           <span className="text-slate-400 text-[10px] italic">Start</span>
         ) : (
           <span className="text-slate-300 text-[10px]">
@@ -142,37 +152,80 @@ function MdpStateNodeComponent({ data }: NodeProps<Node<MdpNodeData>>) {
         <span
           className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
           style={{
-            backgroundColor: data.isInitial ? "rgb(100,116,139)" : passRateColor(passRate),
-            color: passRate > 0.6 ? "#064e3b" : "#fff",
+            backgroundColor: isFeatureNode
+              ? "rgb(139, 92, 246)"
+              : data.isInitial
+                ? "rgb(100,116,139)"
+                : passRateColor(passRate),
+            color: isFeatureNode
+              ? "#fff"
+              : passRate > 0.6
+                ? "#064e3b"
+                : "#fff",
           }}
         >
-          {data.isInitial ? `×${data.visits}` : `${Math.round(passRate * 100)}%`}
+          ×{data.visits}
         </span>
       </div>
 
-      {/* Heatmap strip: one row per criterion */}
-      <div className="flex flex-col gap-0.5">
-        {data.criteria.map((c) => (
-          <div
-            key={c.id}
-            className={cn(
-              "flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] truncate",
-              c.passed
-                ? "bg-emerald-500/20 text-emerald-300"
-                : "bg-red-500/20 text-red-300"
-            )}
-            title={`${c.id}: ${c.passed ? "passed" : "failed"}`}
-          >
-            <span
+      {/* Feature heatmap (for feature start nodes) */}
+      {isFeatureNode && data.features && data.features.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          {data.features.map((f) => (
+            <div
+              key={f.id}
               className={cn(
-                "w-1.5 h-1.5 rounded-full shrink-0",
-                c.passed ? "bg-emerald-400" : "bg-red-400"
+                "flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] truncate",
+                f.detected
+                  ? "bg-violet-500/20 text-violet-200"
+                  : "bg-slate-500/20 text-slate-400"
               )}
-            />
-            <span className="truncate">{c.id}</span>
-          </div>
-        ))}
-      </div>
+              title={`${f.id}: ${f.detected ? "detected" : "not detected"}`}
+            >
+              <span
+                className={cn(
+                  "w-1.5 h-1.5 rounded-full shrink-0",
+                  f.detected ? "bg-violet-400" : "bg-slate-500"
+                )}
+              />
+              <span className="truncate">{f.id}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Criteria heatmap (for criteria state nodes) */}
+      {!isFeatureNode && (
+        <div className="flex flex-col gap-0.5">
+          {data.criteria.map((c) => (
+            <div
+              key={c.id}
+              className={cn(
+                "flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] truncate",
+                c.passed
+                  ? "bg-emerald-500/20 text-emerald-300"
+                  : "bg-red-500/20 text-red-300"
+              )}
+              title={`${c.id}: ${c.passed ? "passed" : "failed"}`}
+            >
+              <span
+                className={cn(
+                  "w-1.5 h-1.5 rounded-full shrink-0",
+                  c.passed ? "bg-emerald-400" : "bg-red-400"
+                )}
+              />
+              <span className="truncate">{c.id}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Unknown feature node label */}
+      {isUnknownFeatureNode && (
+        <div className="text-[10px] text-slate-500 italic px-1.5 py-0.5">
+          No features extracted
+        </div>
+      )}
 
       {/* Visit count */}
       <div className="text-[9px] text-slate-500 mt-1 text-right">
@@ -283,6 +336,8 @@ export function CriteriaMdpView() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedCriteria =
     searchParams.get("criteria")?.split(",").filter(Boolean) || [];
+  const selectedFeatures =
+    searchParams.get("features")?.split(",").filter(Boolean) || [];
 
   // MDP state — managed manually for incremental merging
   const [mdpData, setMdpData] = useState<MdpResponse | null>(null);
@@ -291,18 +346,21 @@ export function CriteriaMdpView() {
   const [error, setError] = useState<string | null>(null);
   const computedAtRef = useRef<string | undefined>(undefined);
   const prevCriteriaRef = useRef<string>("");
+  const prevFeaturesRef = useRef<string>("");
 
   // Track topology for layout stability
   const prevTopologyRef = useRef<string>("");
   const layoutCacheRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
-  // Full fetch (on mount or criteria change)
-  const fetchFull = useCallback(async (criteria?: string[]) => {
+  // Full fetch (on mount or criteria/features change)
+  const fetchFull = useCallback(async (criteria?: string[], features?: string[]) => {
     setIsLoading(true);
     setError(null);
     try {
       const data = await api.getMdp(
-        criteria && criteria.length > 0 ? criteria : undefined
+        criteria && criteria.length > 0 ? criteria : undefined,
+        undefined,
+        features && features.length > 0 ? features : undefined
       );
       setMdpData(data);
       computedAtRef.current = data.computedAt;
@@ -314,13 +372,14 @@ export function CriteriaMdpView() {
   }, []);
 
   // Incremental fetch
-  const fetchDelta = useCallback(async (criteria?: string[]) => {
+  const fetchDelta = useCallback(async (criteria?: string[], features?: string[]) => {
     if (!computedAtRef.current) return;
     setIsPolling(true);
     try {
       const delta = await api.getMdp(
         criteria && criteria.length > 0 ? criteria : undefined,
-        computedAtRef.current
+        computedAtRef.current,
+        features && features.length > 0 ? features : undefined
       );
       if (delta.episodeCount > 0) {
         setMdpData((prev) => {
@@ -336,30 +395,42 @@ export function CriteriaMdpView() {
     }
   }, []);
 
-  // Initial fetch + refetch when criteria change
+  // Initial fetch + refetch when criteria or features change
   useEffect(() => {
     const criteriaKey = selectedCriteria.join(",");
-    if (criteriaKey !== prevCriteriaRef.current) {
+    const featuresKey = selectedFeatures.join(",");
+    if (criteriaKey !== prevCriteriaRef.current || featuresKey !== prevFeaturesRef.current) {
       prevCriteriaRef.current = criteriaKey;
+      prevFeaturesRef.current = featuresKey;
       computedAtRef.current = undefined;
-      fetchFull(selectedCriteria.length > 0 ? selectedCriteria : undefined);
+      fetchFull(
+        selectedCriteria.length > 0 ? selectedCriteria : undefined,
+        selectedFeatures.length > 0 ? selectedFeatures : undefined
+      );
     }
-  }, [selectedCriteria, fetchFull]);
+  }, [selectedCriteria, selectedFeatures, fetchFull]);
 
   // On mount
   useEffect(() => {
     prevCriteriaRef.current = selectedCriteria.join(",");
-    fetchFull(selectedCriteria.length > 0 ? selectedCriteria : undefined);
+    prevFeaturesRef.current = selectedFeatures.join(",");
+    fetchFull(
+      selectedCriteria.length > 0 ? selectedCriteria : undefined,
+      selectedFeatures.length > 0 ? selectedFeatures : undefined
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Polling
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchDelta(selectedCriteria.length > 0 ? selectedCriteria : undefined);
+      fetchDelta(
+        selectedCriteria.length > 0 ? selectedCriteria : undefined,
+        selectedFeatures.length > 0 ? selectedFeatures : undefined
+      );
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [selectedCriteria, fetchDelta]);
+  }, [selectedCriteria, selectedFeatures, fetchDelta]);
 
   // Build React Flow graph
   const { flowNodes, flowEdges } = useMemo(() => {
@@ -367,6 +438,8 @@ export function CriteriaMdpView() {
       return { flowNodes: [], flowEdges: [] };
 
     const criteriaCount = mdpData.nodes[0]?.criteria.length || 0;
+    const featureCount = mdpData.nodes.find((n) => n.type === "prompt-features")?.features?.length || 0;
+    const maxRowCount = Math.max(criteriaCount, featureCount);
 
     // Build nodes
     const rawNodes: Node<MdpNodeData>[] = mdpData.nodes.map((node) => {
@@ -377,6 +450,8 @@ export function CriteriaMdpView() {
         position: { x: 0, y: 0 },
         data: {
           criteria: node.criteria,
+          features: node.features,
+          nodeType: node.type,
           visits: node.visits,
           isInitial: node.isInitial,
           isTerminal: node.isTerminal,
@@ -426,7 +501,7 @@ export function CriteriaMdpView() {
     }
 
     // Run dagre layout
-    const laid = layoutGraph(rawNodes, rawEdges, criteriaCount);
+    const laid = layoutGraph(rawNodes, rawEdges, maxRowCount);
     prevTopologyRef.current = currentTopology;
 
     // Cache positions
@@ -454,6 +529,25 @@ export function CriteriaMdpView() {
 
   const handleClearCriteria = () => {
     searchParams.delete("criteria");
+    setSearchParams(searchParams, { replace: true });
+  };
+
+  // Feature filter handlers
+  const handleToggleFeature = (id: string) => {
+    const newSelected = selectedFeatures.includes(id)
+      ? selectedFeatures.filter((f) => f !== id)
+      : [...selectedFeatures, id];
+
+    if (newSelected.length === 0) {
+      searchParams.delete("features");
+    } else {
+      searchParams.set("features", newSelected.join(","));
+    }
+    setSearchParams(searchParams, { replace: true });
+  };
+
+  const handleClearFeatures = () => {
+    searchParams.delete("features");
     setSearchParams(searchParams, { replace: true });
   };
 
@@ -494,6 +588,21 @@ export function CriteriaMdpView() {
         />
       )}
 
+      {/* Prompt feature filter */}
+      {mdpData && mdpData.availablePromptFeatures && mdpData.availablePromptFeatures.length > 0 && (
+        <CriteriaFilterBar
+          availableCriteria={mdpData.availablePromptFeatures}
+          selectedCriteria={selectedFeatures}
+          onToggle={handleToggleFeature}
+          onClear={handleClearFeatures}
+          title="Task Features Filter"
+          emptyDescription="Select prompt features to filter runs by task characteristics. Runs must have all selected features."
+          selectedDescription={(count) =>
+            `Filtering by ${count} prompt feature${count !== 1 ? "s" : ""}. Only runs with all selected features are included.`
+          }
+        />
+      )}
+
       {/* Error state */}
       {error && (
         <div className="rounded-md border border-red-800 bg-red-950/50 p-4 text-sm text-red-300">
@@ -530,6 +639,7 @@ export function CriteriaMdpView() {
             <MiniMap
               nodeColor={(node) => {
                 const data = node.data as MdpNodeData;
+                if (data.nodeType === "prompt-features") return "#8b5cf6";
                 if (data.isInitial) return "#64748b";
                 const rate = data.totalCount > 0 ? data.passedCount / data.totalCount : 0;
                 return passRateColor(rate);
@@ -547,7 +657,10 @@ export function CriteriaMdpView() {
               <span className="w-2 h-2 rounded-full bg-red-400" /> Failed
             </span>
             <span className="flex items-center gap-1">
-              <span className="w-3 h-0.5 border-t border-dashed border-slate-500" /> Initial
+              <span className="w-2 h-2 rounded-full bg-violet-400" /> Feature
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-3 h-0.5 border-t border-dashed border-violet-500" /> Task Start
             </span>
             <span className="flex items-center gap-1">
               <span className="w-3 h-3 rounded border-2 border-blue-400" /> Terminal
