@@ -180,7 +180,7 @@ function MdpStateNodeComponent({ data }: NodeProps<Node<MdpNodeData>>) {
                 "flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] truncate",
                 f.detected
                   ? "bg-emerald-500/25 text-emerald-200"
-                  : "bg-red-500/15 text-red-300/60 line-through"
+                  : "bg-red-500/15 text-red-300/60"
               )}
               title={`${f.id}: ${f.detected ? "detected" : "not detected"}`}
             >
