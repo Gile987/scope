@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls, extractThinkingContent, detectCliVersion } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls, detectCliVersion } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -127,13 +127,11 @@ class CopilotProcessor implements WorkerProcessor {
           if (harFilePath) {
             const har = await parseHarFile(harFilePath);
             const toolCalls = extractToolCalls(har);
-            const thinkingContent = extractThinkingContent(har) || undefined;
             await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
               toolCallCount: toolCalls.length,
               toolNames: toolCalls.map((tc) => tc.name),
-              ...(thinkingContent && { thinkingContentLength: thinkingContent.length }),
             });
-            return { response, toolCalls, thinkingContent, harFilePath };
+            return { response, toolCalls, harFilePath };
           } else {
             await log("warn", "No HAR file found after DevProxy recording");
           }

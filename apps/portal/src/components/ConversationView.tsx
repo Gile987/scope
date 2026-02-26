@@ -5,16 +5,19 @@ import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Bot, Scale, CheckCircle2, AlertCircle, Brain, Wrench, ChevronRight, ChevronDown } from "lucide-react";
+import { Bot, Scale, CheckCircle2, AlertCircle, Brain, Wrench, ChevronRight, ChevronDown, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import type { ConversationTurn, ToolCall } from "@/types";
+import { useHarExtraction } from "@/hooks/useHarExtraction";
 
 interface ConversationViewProps {
   turns: ConversationTurn[];
   /** The original task / user prompt, shown as the first message */
   task?: string;
+  /** Run ID — needed to fetch HAR data for each turn */
+  runId: string;
 }
 
 /**
@@ -28,7 +31,7 @@ interface ConversationViewProps {
  *   - Tool calls (inline, collapsible)
  *   - Judge feedback (left-aligned, amber tint)
  */
-export function ConversationView({ turns, task }: ConversationViewProps) {
+export function ConversationView({ turns, task, runId }: ConversationViewProps) {
   if (turns.length === 0 && !task) {
     return (
       <div className="text-sm text-muted-foreground italic py-4 text-center">
@@ -59,7 +62,7 @@ export function ConversationView({ turns, task }: ConversationViewProps) {
 
       {/* Turn messages */}
       {turns.map((turn) => (
-        <TurnMessages key={turn.iteration} turn={turn} />
+        <TurnMessages key={turn.iteration} turn={turn} runId={runId} />
       ))}
     </div>
   );
@@ -149,7 +152,14 @@ function ToolCallInline({ tc }: { tc: ToolCall }) {
   );
 }
 
-function TurnMessages({ turn }: { turn: ConversationTurn }) {
+function TurnMessages({ turn, runId }: { turn: ConversationTurn; runId: string }) {
+  const hasHar = !!turn.harUrl;
+  const { data: harData, isLoading: harLoading } = useHarExtraction(runId, turn.iteration, hasHar);
+
+  // Use HAR-extracted data when available, fall back to DB-stored data
+  const thinkingContent = harData?.thinkingContent || undefined;
+  const toolCalls = harData?.toolCalls ?? turn.toolCalls ?? [];
+
   return (
     <>
       {/* Iteration divider */}
@@ -165,7 +175,7 @@ function TurnMessages({ turn }: { turn: ConversationTurn }) {
       </div>
 
       {/* Thinking content — collapsible, above agent response */}
-      {turn.thinkingContent && (
+      {thinkingContent && (
         <div className="flex justify-end">
           <div className="max-w-[85%] w-full">
             <CollapsibleSection
@@ -176,7 +186,7 @@ function TurnMessages({ turn }: { turn: ConversationTurn }) {
               <Card className="bg-violet-500/5 border-violet-200 dark:border-violet-800">
                 <CardContent className="p-3">
                   <div className="prose prose-sm dark:prose-invert max-w-none max-h-64 overflow-y-auto text-muted-foreground italic text-xs">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{turn.thinkingContent}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{thinkingContent}</ReactMarkdown>
                   </div>
                 </CardContent>
               </Card>
@@ -209,18 +219,26 @@ function TurnMessages({ turn }: { turn: ConversationTurn }) {
       </div>
 
       {/* Tool calls — inline, collapsible */}
-      {turn.toolCalls && turn.toolCalls.length > 0 && (
+      {harLoading && hasHar && (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] flex items-center gap-1.5 text-xs text-muted-foreground py-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>Loading tool calls…</span>
+          </div>
+        </div>
+      )}
+      {toolCalls.length > 0 && (
         <div className="flex justify-end">
           <div className="max-w-[85%] w-full">
             <CollapsibleSection
               label="Tool Calls"
               icon={Wrench}
               iconClassName="text-blue-500"
-              count={turn.toolCalls.length}
-              defaultOpen={turn.toolCalls.length <= 5}
+              count={toolCalls.length}
+              defaultOpen={toolCalls.length <= 5}
             >
               <div className="space-y-1">
-                {turn.toolCalls.map((tc, idx) => (
+                {toolCalls.map((tc, idx) => (
                   <ToolCallInline key={tc.id || idx} tc={tc} />
                 ))}
               </div>

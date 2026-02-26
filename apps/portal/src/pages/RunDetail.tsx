@@ -218,7 +218,7 @@ export function RunDetail() {
         {/* Conversation tab — chat-style view of agent/judge exchanges */}
         {run.turns && run.turns.length > 0 && (
           <TabsContent value="conversation" className="mt-4">
-            <ConversationView turns={run.turns} task={run.scenario?.task} />
+            <ConversationView turns={run.turns} task={run.scenario?.task} runId={run._id} />
           </TabsContent>
         )}
 

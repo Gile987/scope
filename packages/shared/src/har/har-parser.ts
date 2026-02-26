@@ -130,7 +130,13 @@ function getResponseBody(entry: HarEntry): string | null {
 
   if (content.encoding === "base64") {
     try {
-      return Buffer.from(content.text, "base64").toString("utf-8");
+      // Use globalThis.atob for browser+Node 16+ compatibility
+      // (avoids Node-only Buffer dependency)
+      return decodeURIComponent(
+        Array.from(globalThis.atob(content.text), (c) =>
+          "%" + c.charCodeAt(0).toString(16).padStart(2, "0")
+        ).join("")
+      );
     } catch {
       return null;
     }
