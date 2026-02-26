@@ -32,9 +32,9 @@ interface HarFile {
 // Chronological segment types
 // ---------------------------------------------------------------------------
 export type ConversationSegment =
-  | { type: "thinking"; content: string }
-  | { type: "content"; content: string }
-  | { type: "tool_calls"; toolCalls: ToolCall[] };
+  | { type: "thinking"; content: string; timestamp: string }
+  | { type: "content"; content: string; timestamp: string }
+  | { type: "tool_calls"; toolCalls: ToolCall[]; timestamp: string };
 
 // ---------------------------------------------------------------------------
 // HAR body helpers
@@ -121,10 +121,10 @@ function extractEntrySegments(
             const response = toolResponses.get(tc.id);
             tcs.push({ id: tc.id, name: tc.function?.name || "unknown", arguments: args, timestamp, ...(response && { response }) });
           }
-          if (contentParts.length > 0) segments.push({ type: "content", content: contentParts.join("") });
-          if (tcs.length > 0) segments.push({ type: "tool_calls", toolCalls: tcs });
+          if (contentParts.length > 0) segments.push({ type: "content", content: contentParts.join(""), timestamp });
+          if (tcs.length > 0) segments.push({ type: "tool_calls", toolCalls: tcs, timestamp });
         } else if (contentParts.length > 0) {
-          segments.push({ type: "content", content: contentParts.join("") });
+          segments.push({ type: "content", content: contentParts.join(""), timestamp });
         }
       }
       return segments;
@@ -177,10 +177,10 @@ function extractEntrySegments(
 
   // Build segments in chronological order: thinking → content → tool_calls
   if (thinkingParts.length > 0) {
-    segments.push({ type: "thinking", content: thinkingParts.join("") });
+    segments.push({ type: "thinking", content: thinkingParts.join(""), timestamp });
   }
   if (contentParts.length > 0) {
-    segments.push({ type: "content", content: contentParts.join("") });
+    segments.push({ type: "content", content: contentParts.join(""), timestamp });
   }
   if (partialToolCalls.size > 0) {
     const tcs: ToolCall[] = [];
@@ -190,7 +190,7 @@ function extractEntrySegments(
       const response = toolResponses.get(id);
       tcs.push({ id, name: partial.name, arguments: args, timestamp, ...(response && { response }) });
     }
-    segments.push({ type: "tool_calls", toolCalls: tcs });
+    segments.push({ type: "tool_calls", toolCalls: tcs, timestamp });
   }
 
   return segments;

@@ -270,6 +270,7 @@ function SegmentBlock({ segment, turn }: { segment: ConversationSegment; turn: C
               icon={Brain}
               iconClassName="text-violet-500"
               preview={segment.content}
+              timestamp={segment.timestamp}
             >
               <Card className="bg-violet-500/5 border-violet-200 dark:border-violet-800">
                 <CardContent className="p-3">
