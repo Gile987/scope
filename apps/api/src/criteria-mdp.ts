@@ -110,6 +110,22 @@ function stateKey(criteria: CriterionState[]): string {
 }
 
 /**
+ * Parse a state key string back into a CriterionState array.
+ * Input:  "has_azure:0|has_cloud:1"
+ * Output: [{id: "has_azure", passed: false}, {id: "has_cloud", passed: true}]
+ */
+export function parseStateKey(key: string): CriterionState[] {
+  if (!key || key.trim() === "") return [];
+  return key.split("|").map((part) => {
+    const lastColon = part.lastIndexOf(":");
+    if (lastColon === -1) return { id: part, passed: false };
+    const id = part.slice(0, lastColon);
+    const passed = part.slice(lastColon + 1) === "1";
+    return { id, passed };
+  });
+}
+
+/**
  * Build a canonical key for a prompt-feature start node.
  * Prefixed with "F||" to avoid collision with criteria state keys.
  */

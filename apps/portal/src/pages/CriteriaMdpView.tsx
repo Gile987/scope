@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   ReactFlow,
   Background,
@@ -17,6 +17,7 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
+  MarkerType,
 } from "@xyflow/react";
 import dagre from "dagre";
 import { RefreshCw } from "lucide-react";
@@ -127,6 +128,7 @@ function MdpStateNodeComponent({ data }: NodeProps<Node<MdpNodeData>>) {
       className={cn(
         "rounded-lg border px-3 py-2 text-xs font-mono shadow-md min-w-[160px]",
         isFeatureNode ? "bg-violet-950/80" : "bg-slate-900",
+        !isFeatureNode && "cursor-pointer hover:border-slate-400 transition-colors",
         borderColor
       )}
     >
@@ -177,15 +179,15 @@ function MdpStateNodeComponent({ data }: NodeProps<Node<MdpNodeData>>) {
               className={cn(
                 "flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] truncate",
                 f.detected
-                  ? "bg-violet-500/20 text-violet-200"
-                  : "bg-slate-500/20 text-slate-400"
+                  ? "bg-emerald-500/25 text-emerald-200"
+                  : "bg-red-500/15 text-red-300/60 line-through"
               )}
               title={`${f.id}: ${f.detected ? "detected" : "not detected"}`}
             >
               <span
                 className={cn(
                   "w-1.5 h-1.5 rounded-full shrink-0",
-                  f.detected ? "bg-violet-400" : "bg-slate-500"
+                  f.detected ? "bg-emerald-400" : "bg-red-400/50"
                 )}
               />
               <span className="truncate">{f.id}</span>
@@ -480,6 +482,12 @@ export function CriteriaMdpView() {
           probability: edge.probability,
           count: edge.count,
         },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: isSelfLoop ? "#94a3b8" : "#64748b",
+          width: 16,
+          height: 16,
+        },
         style: {
           stroke: isSelfLoop ? "#94a3b8" : "#64748b",
           strokeWidth: thickness,
@@ -550,6 +558,17 @@ export function CriteriaMdpView() {
     searchParams.delete("features");
     setSearchParams(searchParams, { replace: true });
   };
+
+  // Node click → navigate to runs list filtered by criteria state
+  const navigate = useNavigate();
+  const handleNodeClick = useCallback(
+    (_event: React.MouseEvent, node: Node<MdpNodeData>) => {
+      // Only criteria nodes are clickable (not prompt-feature start nodes)
+      if (node.data.nodeType === "prompt-features") return;
+      navigate(`/runs?criteria=${encodeURIComponent(node.id)}`);
+    },
+    [navigate]
+  );
 
   return (
     <div className="space-y-4">
@@ -630,7 +649,8 @@ export function CriteriaMdpView() {
             fitViewOptions={{ padding: 0.2 }}
             nodesDraggable
             nodesConnectable={false}
-            elementsSelectable={false}
+            elementsSelectable
+            onNodeClick={handleNodeClick}
             proOptions={{ hideAttribution: true }}
             className="[&_.react-flow__renderer]:!bg-transparent"
           >

@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import {
   computeMdp,
   mergeMdpResponses,
+  parseStateKey,
   type MdpAnalyzableRun,
 } from "./criteria-mdp.js";
 
@@ -550,5 +551,52 @@ describe("computeMdp with prompt features", () => {
     // No type set (backward compat) or undefined
     expect(startNode!.criteria.length).toBeGreaterThan(0);
     expect(result.availablePromptFeatures).toEqual([]);
+  });
+});
+
+// ─── parseStateKey ───────────────────────────────────────────────────────────
+
+describe("parseStateKey", () => {
+  it("parses a single criterion", () => {
+    expect(parseStateKey("has_azure:1")).toEqual([
+      { id: "has_azure", passed: true },
+    ]);
+  });
+
+  it("parses multiple criteria", () => {
+    expect(parseStateKey("has_azure:0|has_cloud:1")).toEqual([
+      { id: "has_azure", passed: false },
+      { id: "has_cloud", passed: true },
+    ]);
+  });
+
+  it("returns empty array for empty string", () => {
+    expect(parseStateKey("")).toEqual([]);
+  });
+
+  it("returns empty array for whitespace-only string", () => {
+    expect(parseStateKey("  ")).toEqual([]);
+  });
+
+  it("handles criteria with colons in the ID", () => {
+    // e.g. a namespaced criterion "ns:foo:1" → id="ns:foo", passed=true
+    expect(parseStateKey("ns:foo:1")).toEqual([
+      { id: "ns:foo", passed: true },
+    ]);
+  });
+
+  it("round-trips with computeMdp stateKey format", () => {
+    // Verify parseStateKey can parse output from computeMdp nodes
+    const run = makeRun(["b", "a"], [{ a: true, b: false }]);
+    const result = computeMdp([run]);
+    const criteriaNode = result.nodes.find(
+      (n) => n.type !== "prompt-features" && !n.isInitial && n.criteria.length > 0
+    );
+    if (criteriaNode) {
+      const parsed = parseStateKey(criteriaNode.id);
+      expect(parsed).toEqual(
+        criteriaNode.criteria.map((c) => ({ id: c.id, passed: c.passed }))
+      );
+    }
   });
 });

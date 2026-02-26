@@ -25,7 +25,7 @@ import {
   extractPromptFeatures,
 } from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
-import { computeMdp, type MdpAnalyzableRun } from "./criteria-mdp.js";
+import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult } from "shared";
 import { evaluateTrigger } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
@@ -949,6 +949,7 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
   try {
     const workerFilter = req.query.worker as string;
     const taskPromptIdFilter = req.query.taskPromptId as string;
+    const criteriaFilter = req.query.criteria as string;
     const includeDeleted = req.query.includeDeleted === "true";
     
     const filter: Record<string, unknown> = {};
@@ -960,6 +961,27 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
     }
     if (!includeDeleted) {
       filter.deletedAt = { $exists: false };
+    }
+
+    // Filter by MDP criteria state vector (e.g. "has_azure:0|has_cloud:1")
+    // Matches runs whose LAST turn contains criteria results matching every
+    // criterion in the state vector.
+    if (criteriaFilter) {
+      const criteriaStates = parseStateKey(criteriaFilter);
+      if (criteriaStates.length > 0) {
+        filter.$and = criteriaStates.map((cs) => ({
+          "turns": {
+            $elemMatch: {
+              "criteriaResults": {
+                $elemMatch: {
+                  criterionId: cs.id,
+                  passed: cs.passed,
+                },
+              },
+            },
+          },
+        }));
+      }
     }
 
     const resources = await collection

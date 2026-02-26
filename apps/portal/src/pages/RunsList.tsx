@@ -28,6 +28,7 @@ import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent } from 
 export function RunsList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const taskPromptId = searchParams.get("taskPromptId") ?? undefined;
+  const criteriaState = searchParams.get("criteria") ?? undefined;
   const [workerFilter, setWorkerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [taskFilter, setTaskFilter] = useState("all");
@@ -38,10 +39,11 @@ export function RunsList() {
   const queryClient = useQueryClient();
 
   const { data: runs = [], isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, taskPromptId],
+    queryKey: ["runs", workerFilter, taskPromptId, criteriaState],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId,
+      criteria: criteriaState,
     }),
     refetchInterval: 10_000,
   });
@@ -258,6 +260,45 @@ export function RunsList() {
           {filteredRuns.length} run{filteredRuns.length !== 1 ? "s" : ""}
         </span>
       </div>
+
+      {/* MDP criteria state filter indicator */}
+      {criteriaState && (
+        <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2">
+          <span className="text-sm text-muted-foreground">Filtered by criteria state:</span>
+          <div className="flex items-center gap-1">
+            {criteriaState.split("|").map((part) => {
+              const lastColon = part.lastIndexOf(":");
+              const id = lastColon !== -1 ? part.slice(0, lastColon) : part;
+              const passed = lastColon !== -1 ? part.slice(lastColon + 1) === "1" : false;
+              return (
+                <Badge
+                  key={part}
+                  variant="secondary"
+                  className={`text-xs ${
+                    passed
+                      ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                      : "bg-red-500/20 text-red-400 border-red-500/30"
+                  }`}
+                >
+                  {id}: {passed ? "pass" : "fail"}
+                </Badge>
+              );
+            })}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("criteria");
+              setSearchParams(next);
+            }}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
 
       {/* Task prompt filter indicator */}
       {taskPromptId && (
