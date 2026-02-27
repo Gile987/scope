@@ -264,12 +264,15 @@ run
     }
   });
 
+withOutputOption(
 run
   .command("status")
   .description("Get status of a request")
   .requiredOption("-i, --id <id>", "Request ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     const { id } = options;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}`);
@@ -281,6 +284,20 @@ run
       }
 
       const request = await response.json();
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: 'id', label: 'ID' },
+          { key: 'workerType', label: 'Worker' },
+          { key: 'status', label: 'Status' },
+          { key: 'mode', label: 'Mode' },
+          { key: 'createdAt', label: 'Created' },
+          { key: 'completedAt', label: 'Completed' },
+        ];
+        console.log(formatData([request], fields, format));
+        return;
+      }
+
       console.log(`${label('ID:')} ${value(request.id)}`);
       console.log(`${label('Worker:')} ${value(request.workerType)}`);
       console.log(`${label('Status:')} ${value(request.status)}`);
@@ -908,11 +925,14 @@ criteria
     }
   });
 
+withOutputOption(
 criteria
   .command("graph")
   .description("Display the criteria dependency graph as ASCII")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/graph`);
 
@@ -926,6 +946,11 @@ criteria
         nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
         edges: Array<{ source: string; target: string }>;
       };
+
+      if (isMachineReadable(format)) {
+        console.log(format === 'json' ? JSON.stringify(graph, null, 2) : format === 'yaml' ? yamlStringify(graph).trimEnd() : JSON.stringify(graph));
+        return;
+      }
 
       if (graph.nodes.length === 0) {
         console.log(warnBanner("No criteria in the graph."));
@@ -1343,11 +1368,14 @@ promptFeature
     }
   });
 
+withOutputOption(
 promptFeature
   .command("graph")
   .description("Display the prompt feature dependency graph as ASCII")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/graph`);
 
@@ -1361,6 +1389,11 @@ promptFeature
         nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
         edges: Array<{ source: string; target: string }>;
       };
+
+      if (isMachineReadable(format)) {
+        console.log(format === 'json' ? JSON.stringify(graph, null, 2) : format === 'yaml' ? yamlStringify(graph).trimEnd() : JSON.stringify(graph));
+        return;
+      }
 
       if (graph.nodes.length === 0) {
         console.log(warnBanner("No prompt features in the graph."));
@@ -1524,6 +1557,7 @@ promptFeature
     }
   });
 
+withOutputOption(
 promptFeature
   .command("extract")
   .description("Extract prompt features from a task text or scenario file (uses task prompt pipeline)")
@@ -1532,7 +1566,9 @@ promptFeature
   .option("--model <model>", "LLM model to use for extraction")
   .option("--force", "Force re-extraction even if already extracted")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       let taskText = options.task;
 
@@ -1549,7 +1585,7 @@ promptFeature
           console.error(errorText("Could not find 'task' field in scenario file"));
           process.exit(1);
         }
-        console.log(`${label('Scenario:')} ${value(basename(absPath))}`);
+        if (!isMachineReadable(format)) console.log(`${label('Scenario:')} ${value(basename(absPath))}`);
       }
 
       if (!taskText) {
@@ -1558,7 +1594,7 @@ promptFeature
       }
 
       // Step 1: Register task prompt (idempotent)
-      console.log(`${label('Registering task prompt...')}`);
+      if (!isMachineReadable(format)) console.log(`${label('Registering task prompt...')}`);
       const createResponse = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1572,10 +1608,10 @@ promptFeature
       }
 
       const taskPromptDoc = await createResponse.json() as { _id: string };
-      console.log(`${label('Task prompt ID:')} ${value(taskPromptDoc._id)}`);
+      if (!isMachineReadable(format)) console.log(`${label('Task prompt ID:')} ${value(taskPromptDoc._id)}`);
 
       // Step 2: Extract features on the task prompt entity
-      console.log(`${label('Extracting prompt features...')}`);
+      if (!isMachineReadable(format)) console.log(`${label('Extracting prompt features...')}`);
 
       const qs = options.force ? "?force=true" : "";
       const body: Record<string, unknown> = {};
@@ -1597,6 +1633,11 @@ promptFeature
         features: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
         cached: boolean;
       };
+
+      if (isMachineReadable(format)) {
+        console.log(format === 'json' ? JSON.stringify(extraction, null, 2) : format === 'yaml' ? yamlStringify(extraction).trimEnd() : JSON.stringify(extraction));
+        return;
+      }
 
       if (extraction.cached) {
         console.log(dimTimestamp('(cached — use --force to re-extract)'));
@@ -3136,12 +3177,15 @@ skill
     }
   });
 
+withOutputOption(
 skill
   .command("resolve")
   .description("Resolve a skill from GitHub (fetch latest version and create a revision)")
   .requiredOption("-i, --id <id>", "Skill slug")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}/resolve`, {
         method: "POST",
@@ -3152,6 +3196,18 @@ skill
         process.exit(1);
       }
       const revision = await response.json();
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: 'ref', label: 'Ref' },
+          { key: 'commitHash', label: 'Commit' },
+          { key: 'description', label: 'Description', formatter: (r: any) => r.description || '' },
+          { key: 'archiveUrl', label: 'Archive URL', formatter: (r: any) => r.archiveUrl || '' },
+        ];
+        console.log(formatData([revision], fields, format));
+        return;
+      }
+
       console.log(successText(`Skill resolved to revision:`));
       console.log(`${label('Ref:')} ${value(revision.ref)}`);
       console.log(`${label('Commit:')} ${value(revision.commitHash)}`);
@@ -3722,6 +3778,7 @@ taskPrompt
     }
   });
 
+withOutputOption(
 taskPrompt
   .command("extract-features")
   .description("Extract prompt features for a task prompt")
@@ -3729,9 +3786,13 @@ taskPrompt
   .option("--model <model>", "LLM model to use for extraction")
   .option("--force", "Force re-extraction even if already extracted")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
   .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
     try {
-      console.log(`${label('Extracting prompt features for task prompt')} ${value(options.id)}${label('...')}`);
+      if (!isMachineReadable(format)) {
+        console.log(`${label('Extracting prompt features for task prompt')} ${value(options.id)}${label('...')}`);
+      }
 
       const qs = options.force ? "?force=true" : "";
       const body: Record<string, unknown> = {};
@@ -3755,6 +3816,11 @@ taskPrompt
         featuresExtractedAt: string;
         cached: boolean;
       };
+
+      if (isMachineReadable(format)) {
+        console.log(format === 'json' ? JSON.stringify(extraction, null, 2) : format === 'yaml' ? yamlStringify(extraction).trimEnd() : JSON.stringify(extraction));
+        return;
+      }
 
       const detected = extraction.features.filter(r => r.detected);
       const notDetected = extraction.features.filter(r => !r.detected && r.evaluated);
