@@ -647,6 +647,7 @@ export function CriteriaMdpView() {
             edgeTypes={edgeTypes}
             fitView
             fitViewOptions={{ padding: 0.2 }}
+            minZoom={0.1}
             nodesDraggable
             nodesConnectable={false}
             elementsSelectable
