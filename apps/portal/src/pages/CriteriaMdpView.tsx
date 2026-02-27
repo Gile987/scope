@@ -25,48 +25,35 @@ import { api } from "@/lib/api";
 import { mergeMdpResponses, topologyHash } from "@/lib/mdp-utils";
 import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
 import { cn } from "@/lib/utils";
-import type { MdpResponse, MdpCriterionState, MdpFeatureState, MdpNodeType } from "@/types";
+import {
+  type MdpNodeData,
+  type NodeSize,
+  NODE_MIN_WIDTH,
+  NODE_HEIGHT_BASE,
+  getNodeHeight,
+  estimateNodeWidth,
+} from "@/lib/mdp-layout";
+import type { MdpResponse } from "@/types";
 import "@xyflow/react/dist/style.css";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = 30_000;
-const NODE_WIDTH = 180;
-const NODE_HEIGHT_BASE = 48; // base + per-criterion row height
-const NODE_ROW_HEIGHT = 20;
 
 // ─── Dagre layout helper ─────────────────────────────────────────────────────
-
-interface MdpNodeData {
-  criteria: MdpCriterionState[];
-  features?: MdpFeatureState[];
-  nodeType?: MdpNodeType;
-  visits: number;
-  isInitial?: boolean;
-  isTerminal?: boolean;
-  passedCount: number;
-  totalCount: number;
-  [key: string]: unknown;
-}
-
-function getNodeHeight(criteriaCount: number, featureCount?: number): number {
-  const rowCount = Math.max(criteriaCount, featureCount || 0);
-  return NODE_HEIGHT_BASE + rowCount * NODE_ROW_HEIGHT;
-}
 
 function layoutGraph(
   nodes: Node<MdpNodeData>[],
   edges: Edge[],
-  criteriaCount: number
+  nodeSizes: Map<string, NodeSize>
 ): { nodes: Node<MdpNodeData>[]; edges: Edge[] } {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "TB", nodesep: 60, ranksep: 80 });
-
-  const nodeHeight = getNodeHeight(criteriaCount);
+  g.setGraph({ rankdir: "TB", nodesep: 80, ranksep: 80 });
 
   for (const node of nodes) {
-    g.setNode(node.id, { width: NODE_WIDTH, height: nodeHeight });
+    const size = nodeSizes.get(node.id) ?? { width: NODE_MIN_WIDTH, height: NODE_HEIGHT_BASE };
+    g.setNode(node.id, { width: size.width, height: size.height });
   }
   for (const edge of edges) {
     g.setEdge(edge.source, edge.target);
@@ -76,11 +63,16 @@ function layoutGraph(
 
   const laidOut = nodes.map((node) => {
     const pos = g.node(node.id);
+    const size = nodeSizes.get(node.id) ?? { width: NODE_MIN_WIDTH, height: NODE_HEIGHT_BASE };
     return {
       ...node,
       position: {
-        x: pos.x - NODE_WIDTH / 2,
-        y: pos.y - nodeHeight / 2,
+        x: pos.x - size.width / 2,
+        y: pos.y - size.height / 2,
+      },
+      data: {
+        ...node.data,
+        layoutWidth: size.width,
       },
     };
   });
@@ -126,11 +118,12 @@ function MdpStateNodeComponent({ data }: NodeProps<Node<MdpNodeData>>) {
   return (
     <div
       className={cn(
-        "rounded-lg border px-3 py-2 text-xs font-mono shadow-md min-w-[160px]",
+        "rounded-lg border px-3 py-2 text-xs font-mono shadow-md min-w-[160px] overflow-hidden",
         isFeatureNode ? "bg-violet-950/80" : "bg-slate-900",
         !isFeatureNode && "cursor-pointer hover:border-slate-400 transition-colors",
         borderColor
       )}
+      style={data.layoutWidth ? { width: data.layoutWidth } : undefined}
     >
       <Handle
         type="target"
@@ -439,10 +432,6 @@ export function CriteriaMdpView() {
     if (!mdpData || mdpData.nodes.length === 0)
       return { flowNodes: [], flowEdges: [] };
 
-    const criteriaCount = mdpData.nodes[0]?.criteria.length || 0;
-    const featureCount = mdpData.nodes.find((n) => n.type === "prompt-features")?.features?.length || 0;
-    const maxRowCount = Math.max(criteriaCount, featureCount);
-
     // Build nodes
     const rawNodes: Node<MdpNodeData>[] = mdpData.nodes.map((node) => {
       const passedCount = node.criteria.filter((c) => c.passed).length;
@@ -462,6 +451,17 @@ export function CriteriaMdpView() {
         },
       };
     });
+
+    // Compute per-node dimensions so dagre can space nodes correctly
+    const nodeSizes = new Map<string, NodeSize>();
+    for (const node of rawNodes) {
+      const featureRows = node.data.features?.length ?? 0;
+      const criteriaRows = node.data.criteria.length;
+      nodeSizes.set(node.id, {
+        width: estimateNodeWidth(node.data),
+        height: getNodeHeight(criteriaRows, featureRows),
+      });
+    }
 
     // Build edges
     const maxCount = Math.max(...mdpData.edges.map((e) => e.count), 1);
@@ -509,7 +509,7 @@ export function CriteriaMdpView() {
     }
 
     // Run dagre layout
-    const laid = layoutGraph(rawNodes, rawEdges, maxRowCount);
+    const laid = layoutGraph(rawNodes, rawEdges, nodeSizes);
     prevTopologyRef.current = currentTopology;
 
     // Cache positions
@@ -647,6 +647,7 @@ export function CriteriaMdpView() {
             edgeTypes={edgeTypes}
             fitView
             fitViewOptions={{ padding: 0.2 }}
+            minZoom={0.1}
             nodesDraggable
             nodesConnectable={false}
             elementsSelectable
