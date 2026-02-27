@@ -26,6 +26,7 @@ import {
 } from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
+import { parseCommaSeparatedIds, buildScenarioCriteriaFilter, buildPromptFeatureTaskPromptFilter } from "./request-filters.js";
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult } from "shared";
 import { evaluateTrigger } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
@@ -950,6 +951,8 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
     const workerFilter = req.query.worker as string;
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
+    const scenarioCriteriaFilter = req.query.scenarioCriteria as string;
+    const promptFeaturesFilter = req.query.promptFeatures as string;
     const includeDeleted = req.query.includeDeleted === "true";
     
     const filter: Record<string, unknown> = {};
@@ -982,6 +985,29 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
           },
         }));
       }
+    }
+
+    // Filter by scenario criteria IDs (e.g. "has_azure,has_cloud")
+    // Matches runs whose scenario.criteria array contains ALL specified IDs.
+    const scenarioCriteriaIds = parseCommaSeparatedIds(scenarioCriteriaFilter);
+    const scenarioCriteriaClause = buildScenarioCriteriaFilter(scenarioCriteriaIds);
+    if (scenarioCriteriaClause) {
+      Object.assign(filter, scenarioCriteriaClause);
+    }
+
+    // Filter by prompt features (e.g. "asks_for_api,asks_for_azure")
+    // First resolves task prompt IDs that have ALL specified features detected,
+    // then filters runs by those task prompt IDs.
+    const featureIds = parseCommaSeparatedIds(promptFeaturesFilter);
+    const featureTaskPromptFilter = buildPromptFeatureTaskPromptFilter(featureIds);
+    if (featureTaskPromptFilter) {
+      const matchingTaskPrompts = await taskPromptCollection
+        .find(featureTaskPromptFilter, { projection: { _id: 1 } })
+        .toArray();
+      const matchingIds = matchingTaskPrompts.map(tp => tp._id);
+      filter.taskPromptId = taskPromptIdFilter
+        ? (matchingIds.includes(taskPromptIdFilter) ? taskPromptIdFilter : "__no_match__")
+        : { $in: matchingIds };
     }
 
     const resources = await collection
