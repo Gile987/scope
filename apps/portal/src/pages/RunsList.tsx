@@ -20,10 +20,12 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
+import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
+import { PromptFeatureFilterBar } from "@/components/PromptFeatureFilterBar";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
-import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent } from "@/types";
+import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, CriteriaDocument, PromptFeatureDocument } from "@/types";
 
 export function RunsList() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -32,6 +34,18 @@ export function RunsList() {
   const [workerFilter, setWorkerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [taskFilter, setTaskFilter] = useState("all");
+
+  // Scenario criteria filter (which criteria IDs are assigned to the run)
+  const selectedScenarioCriteria = useMemo(() => {
+    const raw = searchParams.get("scenarioCriteria");
+    return raw ? raw.split(",").filter(Boolean) : [];
+  }, [searchParams]);
+
+  // Prompt feature filter (which features the run's task prompt has)
+  const selectedPromptFeatures = useMemo(() => {
+    const raw = searchParams.get("promptFeatures");
+    return raw ? raw.split(",").filter(Boolean) : [];
+  }, [searchParams]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [resubmitCount, setResubmitCount] = useState(1);
   const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
@@ -39,14 +53,35 @@ export function RunsList() {
   const queryClient = useQueryClient();
 
   const { data: runs = [], isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, taskPromptId, criteriaState],
+    queryKey: ["runs", workerFilter, taskPromptId, criteriaState, selectedScenarioCriteria, selectedPromptFeatures],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId,
       criteria: criteriaState,
+      scenarioCriteria: selectedScenarioCriteria.length > 0 ? selectedScenarioCriteria : undefined,
+      promptFeatures: selectedPromptFeatures.length > 0 ? selectedPromptFeatures : undefined,
     }),
     refetchInterval: 10_000,
   });
+
+  // Fetch available criteria and prompt features for the filter bars
+  const { data: allCriteria = [] } = useQuery<CriteriaDocument[]>({
+    queryKey: ["criteria"],
+    queryFn: () => api.listCriteria(),
+  });
+  const availableCriteriaIds = useMemo(
+    () => allCriteria.filter((c) => !c.deletedAt).map((c) => c.id).sort(),
+    [allCriteria],
+  );
+
+  const { data: allPromptFeatures = [] } = useQuery<PromptFeatureDocument[]>({
+    queryKey: ["prompt-features"],
+    queryFn: () => api.listPromptFeatures(),
+  });
+  const availableFeatureIds = useMemo(
+    () => allPromptFeatures.filter((f) => !f.deletedAt).map((f) => f.id).sort(),
+    [allPromptFeatures],
+  );
 
   // Fetch MCP servers for the resubmit dialog
   const { data: mcpServers = [] } = useQuery<McpServerDocument[]>({
@@ -193,6 +228,52 @@ export function RunsList() {
     });
   };
 
+  // Toggle a scenario criteria filter in URL search params
+  const toggleScenarioCriteria = (id: string) => {
+    const next = new URLSearchParams(searchParams);
+    const current = new Set(selectedScenarioCriteria);
+    if (current.has(id)) {
+      current.delete(id);
+    } else {
+      current.add(id);
+    }
+    if (current.size > 0) {
+      next.set("scenarioCriteria", [...current].join(","));
+    } else {
+      next.delete("scenarioCriteria");
+    }
+    setSearchParams(next);
+  };
+
+  const clearScenarioCriteria = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("scenarioCriteria");
+    setSearchParams(next);
+  };
+
+  // Toggle a prompt feature filter in URL search params
+  const togglePromptFeature = (id: string) => {
+    const next = new URLSearchParams(searchParams);
+    const current = new Set(selectedPromptFeatures);
+    if (current.has(id)) {
+      current.delete(id);
+    } else {
+      current.add(id);
+    }
+    if (current.size > 0) {
+      next.set("promptFeatures", [...current].join(","));
+    } else {
+      next.delete("promptFeatures");
+    }
+    setSearchParams(next);
+  };
+
+  const clearPromptFeatures = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("promptFeatures");
+    setSearchParams(next);
+  };
+
   return (
     <div className="space-y-6">
       {/* Page header */}
@@ -323,6 +404,27 @@ export function RunsList() {
           </Button>
         </div>
       )}
+
+      {/* Scenario criteria filter bar */}
+      <CriteriaFilterBar
+        availableCriteria={availableCriteriaIds}
+        selectedCriteria={selectedScenarioCriteria}
+        onToggle={toggleScenarioCriteria}
+        onClear={clearScenarioCriteria}
+        title="Scenario Criteria Filter"
+        emptyDescription="Click criteria to filter runs by which criteria are assigned to their scenario."
+        selectedDescription={(count) =>
+          `Showing runs whose scenario includes ${count} selected criteri${count !== 1 ? "a" : "on"}.`
+        }
+      />
+
+      {/* Prompt feature filter bar */}
+      <PromptFeatureFilterBar
+        availableFeatures={availableFeatureIds}
+        selectedFeatures={selectedPromptFeatures}
+        onToggle={togglePromptFeature}
+        onClear={clearPromptFeatures}
+      />
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
