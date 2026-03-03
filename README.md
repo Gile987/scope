@@ -102,6 +102,16 @@ pnpm docker:dev:all            # All services
 | Config files (`config/`) | ~1-2s (tsx watch restart) |
 | Dependencies (`package.json`, lockfile) | Full rebuild (~30-60s) |
 
+### Git Worktree Support
+
+Docker Compose works seamlessly in [git worktrees](https://git-scm.com/docs/git-worktree). The `scripts/worktree-env.ts` script runs automatically before every `docker:*` / `pnpm docker:*` command and assigns each worktree a unique port offset so multiple stacks can run in parallel without conflicts.
+
+- **Main repo**: offset 0 — base ports used as-is (e.g. API on 3100, MongoDB on 27100)
+- **Worktrees**: offset 1–99 — ports are shifted (e.g. offset 1 → API on 3101, MongoDB on 27101)
+- The offset is persisted in a `.port-offset` file inside each worktree and reused across restarts.
+
+No manual configuration is needed — just run `pnpm docker:dev:copilot` from any worktree.
+
 ### Environment Variables
 
 See [ENV_VARIABLES.md](ENV_VARIABLES.md) for a full reference of configurable environment variables.
