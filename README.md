@@ -1,6 +1,6 @@
 # Scope MT
 
-**Scope MT** is a platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers, evaluates results using a criteria DAG, and provides real-time log streaming — all backed by MongoDB, Redis, and Azure Storage Queues.
+**Scope MT** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers, evaluates results using a criteria DAG, and provides real-time log streaming — all backed by MongoDB, Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
 
 ## Components
 
@@ -145,7 +145,9 @@ The `config/` directory contains YAML-based configuration for the evaluation sys
 
 ## Deployment
 
-Infrastructure provisioning and deployment are managed in the [scope-mt-infra](https://github.com/cedricvidal/scope-mt-infra) repository. Kubernetes GitOps manifests (FluxCD / Kustomize) live in the `deploy/` directory within this repo.
+Scope MT is a Kubernetes-native application deployed via [FluxCD](https://fluxcd.io/) GitOps. The `deploy/` directory contains Kustomize base manifests and environment overlays that FluxCD reconciles automatically.
+
+Infrastructure provisioning (AKS cluster, Azure resources) is managed in the [scope-mt-infra](https://github.com/cedricvidal/scope-mt-infra) repository.
 
 ## Project Structure
 
