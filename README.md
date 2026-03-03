@@ -143,6 +143,15 @@ The `config/` directory contains YAML-based configuration for the evaluation sys
 | `config/scenarios/` | Benchmark scenario definitions |
 | `config/traits.yaml` | Trait dimensions (personality, experience, verbosity, type) |
 
+## Documentation
+
+The [`docs/`](docs/README.md) directory contains architecture and research documentation:
+
+| Path | Contents |
+|------|----------|
+| `docs/architecture/` | System design — app design, criteria provider, DB migrations, token manager, skills |
+| `docs/research/` | Research spikes — delta storage, real-time data flow |
+
 ## Deployment
 
 Scope MT is a Kubernetes-native application deployed via [FluxCD](https://fluxcd.io/) GitOps. The `deploy/` directory contains Kustomize base manifests and environment overlays that FluxCD reconciles automatically.
