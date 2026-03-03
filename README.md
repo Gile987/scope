@@ -58,7 +58,7 @@ flowchart LR
 
 - Node.js 22+
 - [pnpm](https://pnpm.io/)
-- Docker & Docker Compose
+- Docker & Docker Compose — on macOS, [OrbStack](https://orbstack.dev/) is recommended over Docker Desktop (faster, lighter)
 - [GitHub CLI](https://cli.github.com/) (`gh`) with authentication
 
 ### Run locally
