@@ -194,7 +194,3 @@ scope-mt-app/
 ├── docker-compose.yml
 └── package.json
 ```
-
-## License
-
-MIT
