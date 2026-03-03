@@ -147,7 +147,7 @@ The `config/` directory contains YAML-based configuration for the evaluation sys
 
 Scope MT is a Kubernetes-native application deployed via [FluxCD](https://fluxcd.io/) GitOps. The `deploy/` directory contains Kustomize base manifests and environment overlays that FluxCD reconciles automatically.
 
-Infrastructure provisioning (AKS cluster, Azure resources) is managed in the [scope-mt-infra](https://github.com/cedricvidal/scope-mt-infra) repository.
+Infrastructure provisioning (AKS cluster, Azure resources) is managed in the [scope-mt-infra](https://github.com/growth-ecosystems/scope-mt-infra) repository.
 
 ## Project Structure
 
