@@ -15,7 +15,8 @@
 
 import { readFileSync, existsSync } from "fs";
 import { execSync } from "child_process";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 /**
  * Extract a named port from a .env file content.
@@ -43,7 +44,8 @@ export function extractPort(
 const DEFAULT_PORTAL_PORT = 5100;
 
 function main() {
-  const repoRoot = join(import.meta.dirname, "..");
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  const repoRoot = join(scriptDir, "..");
   const envFile = join(repoRoot, ".env");
 
   let port = DEFAULT_PORTAL_PORT;
