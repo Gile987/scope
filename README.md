@@ -68,7 +68,23 @@ pnpm install
 GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot
 ```
 
-This starts all core services (MongoDB, Redis, Azurite, API, Judge, Token Manager) plus the Copilot worker and report generator — with hot reload. Edit any source file and the running service restarts automatically.
+This starts all core services (MongoDB, Redis, Azurite, API, Judge, Token Manager) plus the Copilot worker, report generator, and **portal** — with hot reload. Edit any source file and the running service restarts automatically.
+
+### Accessing the Portal
+
+Once the services are running, open the portal in your browser:
+
+```
+http://localhost:5100
+```
+
+Or use the convenience command to open it automatically:
+
+```bash
+pnpm open:portal
+```
+
+> **Worktree note:** In a [git worktree](#git-worktree-support), ports are offset for isolation so the portal may run on a different port (e.g. `5103`). Check `PORTAL_PORT` in your `.env` file for the actual port, or just run `pnpm open:portal` — it reads `.env` and opens the correct URL.
 
 ### Other useful commands
 
@@ -88,8 +104,8 @@ pnpm dev:coder-acp-claude-code
 The `docker:dev:*` commands use [Docker Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/) to sync source files into containers:
 
 ```bash
-pnpm docker:dev:claude-code    # Core + Claude Code + Report Generator
-pnpm docker:dev:copilot        # Core + Copilot + Report Generator
+pnpm docker:dev:claude-code    # Core + Claude Code + Report Generator + Portal
+pnpm docker:dev:copilot        # Core + Copilot + Report Generator + Portal
 pnpm docker:dev:portal         # Core + Portal (Vite HMR)
 pnpm docker:dev:all            # All services
 ```
