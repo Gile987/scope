@@ -7,7 +7,7 @@
  */
 
 /** Supported output formats for list commands */
-export type OutputFormat = 'table' | 'tsv' | 'json' | 'yaml';
+export type OutputFormat = 'table' | 'tsv' | 'json' | 'yaml' | 'markdown';
 
 /** All valid output format values */
 export const OUTPUT_FORMAT_VALUES: OutputFormat[] = ['table', 'tsv', 'json', 'yaml'];
