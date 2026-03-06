@@ -101,8 +101,13 @@ jobs:
           path: ctrf/
 
   integration-test:
-    name: Integration Tests
+    name: Integration Tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Checkout repository
@@ -128,18 +133,18 @@ jobs:
         run: pnpm --filter shared build
 
       - name: Run integration tests
-        run: pnpm test:integration --silent=false
+        run: npx vitest run --config vitest.integration.config.ts --silent=false --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
       - name: Generate GitHub test summary from CTRF
         if: always()
         run: |
-          pnpm exec github-actions-ctrf "ctrf/*-integration-ctrf-report.json" --title "Integration Test Results" || true
+          pnpm exec github-actions-ctrf "ctrf/*-integration-ctrf-report.json" --title "Integration Test Results (shard ${{ matrix.shard }})" || true
 
       - name: Upload CTRF integration test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ctrf-integration-test-results
+          name: ctrf-integration-test-results-shard-${{ matrix.shard }}
           path: ctrf/
 
   lint:
