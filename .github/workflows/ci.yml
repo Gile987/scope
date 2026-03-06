@@ -133,7 +133,7 @@ jobs:
         run: pnpm --filter shared build
 
       - name: Run integration tests
-        run: pnpm test:integration -- --silent=false --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+        run: npx vitest run --config vitest.integration.config.ts --silent=false --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
       - name: Generate GitHub test summary from CTRF
         if: always()
