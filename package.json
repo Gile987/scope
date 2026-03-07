@@ -40,7 +40,8 @@
     "dev:model-scanner-anthropic": "pnpm --filter model-scanner-anthropic dev",
     "migrate:up": "pnpm --filter db-migrations migrate:up",
     "migrate:down": "pnpm --filter db-migrations migrate:down",
-    "migrate:status": "pnpm --filter db-migrations migrate:status"
+    "migrate:status": "pnpm --filter db-migrations migrate:status",
+    "check:versions:vscode-web": "pnpm --filter version-checker-vscode-web check"
   },
   "devDependencies": {
     "@d2t/vitest-ctrf-json-reporter": "^1.3.0",

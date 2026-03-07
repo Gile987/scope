@@ -39,6 +39,7 @@ jobs:
         id: check
         run: |
           set +e
+          pnpm --filter version-checker-vscode-web check > /tmp/versions.json 2>&1
           EXIT_CODE=$?
           set -e
 
