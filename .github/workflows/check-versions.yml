@@ -19,6 +19,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # pnpm/action-setup@v4 is not allowed on EMU
+      - name: Install pnpm
+        run: |
+          curl -fsSL https://get.pnpm.io/install.sh | sh -
+          echo "$HOME/.local/share/pnpm" >> $GITHUB_PATH
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Check for new versions
         id: check
         run: |
@@ -26,35 +42,24 @@ jobs:
           EXIT_CODE=$?
           set -e
 
-          # Extract just the JSON (last non-empty lines before stderr)
-
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
 
           if [ "$EXIT_CODE" -eq 1 ]; then
             echo "updates_available=true" >> $GITHUB_OUTPUT
 
-            # Parse update details for the issue
-            VSCODE_CURRENT=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['current']['vscode'])")
-            VSCODE_LATEST=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['latest']['vscode'])")
-            COPILOT_CURRENT=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['current']['copilot_chat'])")
-            COPILOT_LATEST=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['latest']['copilot_chat'])")
-            UPDATE_COUNT=$(echo "$JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['updates']))")
-
-            echo "vscode_current=$VSCODE_CURRENT" >> $GITHUB_OUTPUT
-            echo "vscode_latest=$VSCODE_LATEST" >> $GITHUB_OUTPUT
-            echo "copilot_current=$COPILOT_CURRENT" >> $GITHUB_OUTPUT
-            echo "copilot_latest=$COPILOT_LATEST" >> $GITHUB_OUTPUT
-            echo "update_count=$UPDATE_COUNT" >> $GITHUB_OUTPUT
-
-            # Build title
-            TITLE_PARTS=""
-            if [ "$VSCODE_CURRENT" != "$VSCODE_LATEST" ]; then
-              TITLE_PARTS="VS Code $VSCODE_LATEST"
-            fi
-            if [ "$COPILOT_CURRENT" != "$COPILOT_LATEST" ]; then
-              [ -n "$TITLE_PARTS" ] && TITLE_PARTS="$TITLE_PARTS, "
-              TITLE_PARTS="${TITLE_PARTS}Copilot Chat $COPILOT_LATEST"
-            fi
+            # Parse update details using node (no python dependency)
+            node -e "
+              const r = JSON.parse(process.argv[1]);
+              const fs = require('fs');
+              const out = fs.createWriteStream(process.env.GITHUB_OUTPUT, { flags: 'a' });
+              out.write('vscode_current=' + r.vscode.current + '\n');
+              out.write('vscode_latest=' + r.vscode.latest + '\n');
+              out.write('copilot_current=' + r.copilotChat.current + '\n');
+              out.write('copilot_latest=' + r.copilotChat.latest + '\n');
+              out.write('update_count=' + r.updates.length + '\n');
+              const parts = r.updates.map(u => u.component + ' ' + u.latest).join(', ');
+              out.end();
+            " "$JSON"
           else
             echo "updates_available=false" >> $GITHUB_OUTPUT
           fi
