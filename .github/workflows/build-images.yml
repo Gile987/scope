@@ -172,6 +172,21 @@ jobs:
             echo "overlay=integration" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Load pinned versions
+        id: versions
+        run: |
+          EXTRA_ARGS=""
+          for f in apps/workers/${{ matrix.image.name }}/versions.env apps/${{ matrix.image.name }}/versions.env; do
+            if [ -f "$f" ]; then
+              while IFS='=' read -r key value; do
+                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+                EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+              done < "$f"
+              break
+            fi
+          done
+          echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
+
       - name: Build and push to ACR
         run: |
           SHORT_SHA="${{ github.sha }}"
@@ -187,6 +202,7 @@ jobs:
             --image "scoped/${{ matrix.image.name }}:${ENV_TAG}-${TIMESTAMP}-${SHORT_SHA}" \
             --build-arg GIT_COMMIT=${{ github.sha }} \
             --build-arg BUILD_TIME=${BUILD_TIME} \
+            ${{ steps.versions.outputs.extra_args }} \
             --file "${{ matrix.image.dockerfile }}" \
             .
 
@@ -256,6 +272,21 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Load pinned versions
+        id: versions
+        run: |
+          EXTRA_ARGS=""
+          for f in apps/workers/${{ matrix.image.name }}/versions.env apps/${{ matrix.image.name }}/versions.env; do
+            if [ -f "$f" ]; then
+              while IFS='=' read -r key value; do
+                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+                EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+              done < "$f"
+              break
+            fi
+          done
+          echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
+
       - name: Build and push to ACR
         run: |
           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -266,6 +297,7 @@ jobs:
             --image "scoped/${{ matrix.image.name }}:pr-${{ github.event.pull_request.number }}-latest" \
             --build-arg GIT_COMMIT=${{ github.event.pull_request.head.sha }} \
             --build-arg BUILD_TIME=${BUILD_TIME} \
+            ${{ steps.versions.outputs.extra_args }} \
             --file "${{ matrix.image.dockerfile }}" \
             .
 
@@ -312,6 +344,21 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Load pinned versions
+        id: versions
+        run: |
+          EXTRA_ARGS=""
+          for f in apps/workers/${{ matrix.image }}/versions.env apps/${{ matrix.image }}/versions.env; do
+            if [ -f "$f" ]; then
+              while IFS='=' read -r key value; do
+                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+                EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+              done < "$f"
+              break
+            fi
+          done
+          echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
+
       - name: Build and push to ACR
         if: steps.check.outputs.build == 'true'
         run: |
@@ -328,5 +375,6 @@ jobs:
             --image "scoped/${{ matrix.image }}:${TAG}-${TIMESTAMP}-${SHORT_SHA}" \
             --build-arg GIT_COMMIT=${{ github.sha }} \
             --build-arg BUILD_TIME=${BUILD_TIME} \
+            ${{ steps.versions.outputs.extra_args }} \
             --file "${{ steps.dockerfile.outputs.path }}" \
             .
