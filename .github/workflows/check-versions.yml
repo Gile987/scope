@@ -2,8 +2,8 @@ name: Check VS Code Worker Versions
 
 on:
   schedule:
-    # Every Monday at 9:00 UTC
-    - cron: '0 9 * * 1'
+    # Weekdays at 8am SF time (3pm UTC during PDT, 4pm during PST)
+    - cron: '0 15 * * 1-5'
   workflow_dispatch:
 
 permissions:
