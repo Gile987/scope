@@ -1,0 +1,102 @@
+name: Check VS Code Worker Versions
+
+on:
+  schedule:
+    # Every Monday at 9:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-versions:
+    name: Check for version updates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for new versions
+        id: check
+        run: |
+          set +e
+          EXIT_CODE=$?
+          set -e
+
+          # Extract just the JSON (last non-empty lines before stderr)
+
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          if [ "$EXIT_CODE" -eq 1 ]; then
+            echo "updates_available=true" >> $GITHUB_OUTPUT
+
+            # Parse update details for the issue
+            VSCODE_CURRENT=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['current']['vscode'])")
+            VSCODE_LATEST=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['latest']['vscode'])")
+            COPILOT_CURRENT=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['current']['copilot_chat'])")
+            COPILOT_LATEST=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['latest']['copilot_chat'])")
+            UPDATE_COUNT=$(echo "$JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['updates']))")
+
+            echo "vscode_current=$VSCODE_CURRENT" >> $GITHUB_OUTPUT
+            echo "vscode_latest=$VSCODE_LATEST" >> $GITHUB_OUTPUT
+            echo "copilot_current=$COPILOT_CURRENT" >> $GITHUB_OUTPUT
+            echo "copilot_latest=$COPILOT_LATEST" >> $GITHUB_OUTPUT
+            echo "update_count=$UPDATE_COUNT" >> $GITHUB_OUTPUT
+
+            # Build title
+            TITLE_PARTS=""
+            if [ "$VSCODE_CURRENT" != "$VSCODE_LATEST" ]; then
+              TITLE_PARTS="VS Code $VSCODE_LATEST"
+            fi
+            if [ "$COPILOT_CURRENT" != "$COPILOT_LATEST" ]; then
+              [ -n "$TITLE_PARTS" ] && TITLE_PARTS="$TITLE_PARTS, "
+              TITLE_PARTS="${TITLE_PARTS}Copilot Chat $COPILOT_LATEST"
+            fi
+          else
+            echo "updates_available=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for existing open issue
+        if: steps.check.outputs.updates_available == 'true'
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Search for open issues with the same title prefix
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Existing open issue found, skipping creation"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create issue
+        if: steps.check.outputs.updates_available == 'true' && steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+
+          | Component | Current | Latest |
+          |-----------|---------|--------|
+          | VS Code | ${{ steps.check.outputs.vscode_current }} | ${{ steps.check.outputs.vscode_latest }} |
+          | Copilot Chat | ${{ steps.check.outputs.copilot_current }} | ${{ steps.check.outputs.copilot_latest }} |
+
+          ### How to update
+
+          2. Update the matching ARG defaults in the Dockerfile
+          3. Run integration tests: \`pnpm test:integration\`
+          4. Create a PR targeting \`dev\`
+
+          ### Links
+
+          - [VS Code Release Notes](https://code.visualstudio.com/updates)
+          - [Copilot Chat on Marketplace](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot-chat)
+          "
+
+          gh issue create \
+            --title "${{ steps.check.outputs.title }}" \
+            --body "$BODY" \
+            --label "dependencies"
