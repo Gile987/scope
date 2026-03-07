@@ -42,10 +42,25 @@ jobs:
           EXIT_CODE=$?
           set -e
 
+          echo "::group::check-versions output"
+          cat /tmp/versions.json
+          echo "::endgroup::"
+          echo "Exit code: $EXIT_CODE"
+
+          # The script outputs JSON to stdout and status to stderr.
+          # When run without separating streams, both go to the file.
+          # Extract the JSON (last valid JSON object in output).
+          JSON=$(grep -E '^\{' /tmp/versions.json | tail -1)
+          # If no JSON line found, try the whole file
+          if [ -z "$JSON" ]; then
+            JSON=$(cat /tmp/versions.json)
+          fi
+
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
 
           if [ "$EXIT_CODE" -eq 1 ]; then
             echo "updates_available=true" >> $GITHUB_OUTPUT
+            echo "Updates available — parsing details..."
 
             # Parse update details using node (no python dependency)
             node -e "
@@ -62,6 +77,7 @@ jobs:
             " "$JSON"
           else
             echo "updates_available=false" >> $GITHUB_OUTPUT
+            echo "No updates available (exit code: $EXIT_CODE)"
           fi
 
       - name: Check for existing open issue
