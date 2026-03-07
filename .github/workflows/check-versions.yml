@@ -91,9 +91,16 @@ jobs:
 
           ### How to update
 
-          2. Update the matching ARG defaults in the Dockerfile
-          3. Run integration tests: \`pnpm test:integration\`
-          4. Create a PR targeting \`dev\`
+
+          \`\`\`env
+          VSCODE_VERSION=${{ steps.check.outputs.vscode_latest }}
+          COPILOT_CHAT_VERSION=${{ steps.check.outputs.copilot_latest }}
+          \`\`\`
+
+          Then run integration tests and create a PR:
+          \`\`\`bash
+          pnpm test:integration
+          \`\`\`
 
           ### Links
 
