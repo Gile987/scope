@@ -2,8 +2,8 @@ name: Check VS Code Worker Versions
 
 on:
   schedule:
-    # Every Monday at 9:00 UTC
-    - cron: '0 9 * * 1'
+    # Weekdays at 8am SF time (3pm UTC during PDT, 4pm during PST)
+    - cron: '0 15 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -33,35 +33,46 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter version-checker-vscode-web
 
       - name: Check for new versions
         id: check
         run: |
           set +e
+          pnpm --silent --filter version-checker-vscode-web check > /tmp/versions.json 2>/tmp/versions.log
           EXIT_CODE=$?
           set -e
+
+          echo "::group::check-versions stderr"
+          cat /tmp/versions.log
+          echo "::endgroup::"
+          echo "::group::check-versions stdout"
+          cat /tmp/versions.json
+          echo "::endgroup::"
+          echo "Exit code: $EXIT_CODE"
 
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
 
           if [ "$EXIT_CODE" -eq 1 ]; then
             echo "updates_available=true" >> $GITHUB_OUTPUT
 
-            # Parse update details using node (no python dependency)
+            # Parse the JSON output — stdout only, no pnpm noise
             node -e "
-              const r = JSON.parse(process.argv[1]);
               const fs = require('fs');
+              const r = JSON.parse(fs.readFileSync('/tmp/versions.json', 'utf8'));
               const out = fs.createWriteStream(process.env.GITHUB_OUTPUT, { flags: 'a' });
               out.write('vscode_current=' + r.vscode.current + '\n');
               out.write('vscode_latest=' + r.vscode.latest + '\n');
               out.write('copilot_current=' + r.copilotChat.current + '\n');
               out.write('copilot_latest=' + r.copilotChat.latest + '\n');
-              out.write('update_count=' + r.updates.length + '\n');
-              const parts = r.updates.map(u => u.component + ' ' + u.latest).join(', ');
+              const parts = [];
+              if (r.vscode.current !== r.vscode.latest) parts.push('VS Code ' + r.vscode.latest);
+              if (r.copilotChat.current !== r.copilotChat.latest) parts.push('Copilot Chat ' + r.copilotChat.latest);
               out.end();
-            " "$JSON"
+            "
           else
             echo "updates_available=false" >> $GITHUB_OUTPUT
+            echo "No updates available (exit code: $EXIT_CODE)"
           fi
 
       - name: Check for existing open issue

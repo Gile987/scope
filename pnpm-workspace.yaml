@@ -6,6 +6,7 @@ packages:
   - "apps/token-manager"
   - "apps/workers/*"
   - "apps/model-scanners/*"
+  - "apps/version-checkers/*"
   - "packages/shared"
   - "packages/model-scanning"
   - "packages/db-migrations"
