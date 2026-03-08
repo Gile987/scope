@@ -24,8 +24,8 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@22.19.10)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
       worktree-env:
-        specifier: link:/Users/cv/Documents/Projects/cedricvidal/worktree-env
-        version: link:../../../../../cedricvidal/worktree-env
+        specifier: ^0.1.0
+        version: 0.1.0
 
   apps/api:
     dependencies:
@@ -4389,6 +4389,11 @@ packages:
   wordwrap@1.0.0:
     resolution: {integrity: sha512-gvVzJFlPycKc5dZN4yPkP8w7Dc37BtP1yczEneOb4uq34pXZcvrtRTmWV8W+Ume+XCxKgbjM+nevkyFPMybd4Q==}
 
+  worktree-env@0.1.0:
+    resolution: {integrity: sha512-7jqOD0hY6eOcmsaR1AMzbUwe58Et1kUx1/3SiNnsUGCpfORpoaHSDP++cgXlA/GLrs7NMW1/bLrACUCPjbZ4IA==}
+    engines: {node: '>=18'}
+    hasBin: true
+
   wrap-ansi@7.0.0:
     resolution: {integrity: sha512-YVGIj2kamLSTxw6NsZjoBxfSwsn0ycdesmc4p+Q21c5zPuZ1pl+NfxVdxPtdHvmNVOQ6XSYG4AUtyt/Fi7D16Q==}
     engines: {node: '>=10'}
@@ -8653,6 +8658,8 @@ snapshots:
       string-width: 7.2.0
 
   wordwrap@1.0.0: {}
+
+  worktree-env@0.1.0: {}
 
   wrap-ansi@7.0.0:
     dependencies:
