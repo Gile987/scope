@@ -84,9 +84,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Search for open issues with the same title prefix
-          if [ "$EXISTING" -gt 0 ]; then
+          if [ -n "$ISSUE_URL" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Existing open issue found, skipping creation"
+            echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+            echo "Existing open issue found: $ISSUE_URL"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
@@ -147,6 +148,6 @@ jobs:
             if [ -n "${{ steps.create_issue.outputs.issue_url }}" ]; then
               echo "📝 **Issue created:** ${{ steps.create_issue.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
             elif [ "${{ steps.existing.outputs.exists }}" == "true" ]; then
-              echo "ℹ️ **Issue already exists** — skipped creation." >> $GITHUB_STEP_SUMMARY
+              echo "ℹ️ **Issue already exists:** ${{ steps.existing.outputs.issue_url }} — skipped creation." >> $GITHUB_STEP_SUMMARY
             fi
           fi
