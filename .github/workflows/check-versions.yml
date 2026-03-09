@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: dev
 
       # pnpm/action-setup@v4 is not allowed on EMU
       - name: Install pnpm
