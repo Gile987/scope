@@ -77,6 +77,24 @@ jobs:
             echo "No updates available (exit code: $EXIT_CODE)"
           fi
 
+      - name: Write job summary
+        if: always() && steps.check.outputs.exit_code != '2'
+        run: |
+          if [ "${{ steps.check.outputs.updates_available }}" == "true" ]; then
+            cat >> $GITHUB_STEP_SUMMARY <<'EOF'
+
+          | Component | Current | Latest | Status |
+          |-----------|---------|--------|--------|
+          | VS Code | ${{ steps.check.outputs.vscode_current }} | ${{ steps.check.outputs.vscode_latest }} | ${{ steps.check.outputs.vscode_current == steps.check.outputs.vscode_latest && '✅' || '🔄' }} |
+          | Copilot Chat | ${{ steps.check.outputs.copilot_current }} | ${{ steps.check.outputs.copilot_latest }} | ${{ steps.check.outputs.copilot_current == steps.check.outputs.copilot_latest && '✅' || '🔄' }} |
+          EOF
+          else
+            cat >> $GITHUB_STEP_SUMMARY <<'EOF'
+          ## ✅ All versions up to date
+
+          EOF
+          fi
+
       - name: Check for existing open issue
         if: steps.check.outputs.updates_available == 'true'
         id: existing
