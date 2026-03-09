@@ -83,7 +83,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Search for open issues with the same title prefix
+          # List open issues with the dependencies label and filter by title prefix.
+          # Using list + jq instead of --search to avoid GitHub search index lag
+          # which can cause duplicate issues when runs happen close together.
+          ISSUE_URL=$(gh issue list --state open --label dependencies --json title,url \
           if [ -n "$ISSUE_URL" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
@@ -144,10 +147,12 @@ jobs:
           |-----------|---------|--------|--------|
           | VS Code | ${{ steps.check.outputs.vscode_current }} | ${{ steps.check.outputs.vscode_latest }} | ${{ steps.check.outputs.vscode_current == steps.check.outputs.vscode_latest && '✅' || '🔄' }} |
           | Copilot Chat | ${{ steps.check.outputs.copilot_current }} | ${{ steps.check.outputs.copilot_latest }} | ${{ steps.check.outputs.copilot_current == steps.check.outputs.copilot_latest && '✅' || '🔄' }} |
+
+          ## Issue tracking
           EOF
             if [ -n "${{ steps.create_issue.outputs.issue_url }}" ]; then
               echo "📝 **Issue created:** ${{ steps.create_issue.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
             elif [ "${{ steps.existing.outputs.exists }}" == "true" ]; then
-              echo "ℹ️ **Issue already exists:** ${{ steps.existing.outputs.issue_url }} — skipped creation." >> $GITHUB_STEP_SUMMARY
+              echo "ℹ️ **Issue already exists:** ${{ steps.existing.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
             fi
           fi
