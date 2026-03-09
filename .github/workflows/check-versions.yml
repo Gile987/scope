@@ -77,24 +77,6 @@ jobs:
             echo "No updates available (exit code: $EXIT_CODE)"
           fi
 
-      - name: Write job summary
-        if: always() && steps.check.outputs.exit_code != '2'
-        run: |
-          if [ "${{ steps.check.outputs.updates_available }}" == "true" ]; then
-            cat >> $GITHUB_STEP_SUMMARY <<'EOF'
-
-          | Component | Current | Latest | Status |
-          |-----------|---------|--------|--------|
-          | VS Code | ${{ steps.check.outputs.vscode_current }} | ${{ steps.check.outputs.vscode_latest }} | ${{ steps.check.outputs.vscode_current == steps.check.outputs.vscode_latest && '✅' || '🔄' }} |
-          | Copilot Chat | ${{ steps.check.outputs.copilot_current }} | ${{ steps.check.outputs.copilot_latest }} | ${{ steps.check.outputs.copilot_current == steps.check.outputs.copilot_latest && '✅' || '🔄' }} |
-          EOF
-          else
-            cat >> $GITHUB_STEP_SUMMARY <<'EOF'
-          ## ✅ All versions up to date
-
-          EOF
-          fi
-
       - name: Check for existing open issue
         if: steps.check.outputs.updates_available == 'true'
         id: existing
@@ -110,6 +92,7 @@ jobs:
           fi
 
       - name: Create issue
+        id: create_issue
         if: steps.check.outputs.updates_available == 'true' && steps.existing.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -139,7 +122,31 @@ jobs:
           - [Copilot Chat on Marketplace](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot-chat)
           "
 
-          gh issue create \
+          ISSUE_URL=$(gh issue create \
             --title "${{ steps.check.outputs.title }}" \
             --body "$BODY" \
-            --label "dependencies"
+            --label "dependencies")
+          echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+
+      - name: Write job summary
+        if: always() && steps.check.outputs.exit_code != '2'
+        run: |
+          if [ "${{ steps.check.outputs.updates_available }}" != "true" ]; then
+            cat >> $GITHUB_STEP_SUMMARY <<'EOF'
+          ## ✅ All versions up to date
+
+          EOF
+          else
+            cat >> $GITHUB_STEP_SUMMARY <<EOF
+
+          | Component | Current | Latest | Status |
+          |-----------|---------|--------|--------|
+          | VS Code | ${{ steps.check.outputs.vscode_current }} | ${{ steps.check.outputs.vscode_latest }} | ${{ steps.check.outputs.vscode_current == steps.check.outputs.vscode_latest && '✅' || '🔄' }} |
+          | Copilot Chat | ${{ steps.check.outputs.copilot_current }} | ${{ steps.check.outputs.copilot_latest }} | ${{ steps.check.outputs.copilot_current == steps.check.outputs.copilot_latest && '✅' || '🔄' }} |
+          EOF
+            if [ -n "${{ steps.create_issue.outputs.issue_url }}" ]; then
+              echo "📝 **Issue created:** ${{ steps.create_issue.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ steps.existing.outputs.exists }}" == "true" ]; then
+              echo "ℹ️ **Issue already exists** — skipped creation." >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
