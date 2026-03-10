@@ -8,6 +8,7 @@
 #   docker compose --profile copilot up                  # + Copilot worker
 #   docker compose --profile vscode-web up               # + VS Code Web worker
 #   docker compose --profile claude-code --profile copilot up  # multiple workers
+#   docker compose --profile report up                   # + Report Generator worker
 #   docker compose up mongodb redis azurite              # infra only (run app services natively)
 #
 # Host-native debugging:
@@ -33,6 +34,18 @@ x-common-env: &common-env
 x-worker-env: &worker-env
   <<: *common-env
   JUDGE_SERVICE_URL: http://judge:80
+  SCOPE_MT_API_URL: http://api:80
+  TOKEN_MANAGER_URL: http://token-manager:80
+
+x-worker-deps: &worker-deps
+  mongodb:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  azurite:
+    condition: service_healthy
+  judge:
+    condition: service_started
 
 services:
   # ===========================================================================
@@ -43,7 +56,7 @@ services:
   mongodb:
     image: mongo:7.0
     ports:
-      - "${MONGODB_PORT:-27117}:27017"
+      - "${MONGODB_PORT:-27000}:27017"
     environment:
       MONGO_INITDB_DATABASE: requests-db
     volumes:
@@ -63,9 +76,35 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6300}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Lowkey Vault (Azure Key Vault emulator)
+  # Persists vault state via export/import. On first start, seeds from import.json.hbs.
+  lowkey-vault:
+    image: nagyesta/lowkey-vault:7.1.13-ubi10-minimal
+    ports:
+      - "${LOWKEY_VAULT_PORT:-8400}:8443"
+    environment:
+      LOWKEY_ARGS: >-
+        --server.port=8443
+        --spring.main.banner-mode=off
+        --LOWKEY_DEBUG_REQUEST_LOG=false
+        --LOWKEY_VAULT_NAMES=-
+        --LOWKEY_IMPORT_LOCATION=/import/export.json
+        --LOWKEY_EXPORT_LOCATION=/import/export.json
+        --LOWKEY_IMPORT_TEMPLATE_HOST=lowkey-vault
+        --LOWKEY_IMPORT_TEMPLATE_PORT=8443
+    volumes:
+      - lowkey_vault_data:/import
+      - ./config/lowkey-vault/import.json.hbs:/import/seed.json.hbs:ro
+    entrypoint: ["/bin/sh", "-c", "[ -f /import/export.json ] || cp /import/seed.json.hbs /import/export.json; exec java -jar /lowkey-vault.jar $$LOWKEY_ARGS"]
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:8443/ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -75,9 +114,11 @@ services:
     image: mcr.microsoft.com/azure-storage/azurite
     ports:
       - "${AZURITE_BLOB_PORT:-10100}:10000"  # Blob
-      - "${AZURITE_QUEUE_PORT:-10101}:10001"  # Queue
-      - "${AZURITE_TABLE_PORT:-10102}:10002"  # Table
+      - "${AZURITE_QUEUE_PORT:-10200}:10001"  # Queue
+      - "${AZURITE_TABLE_PORT:-10300}:10002"  # Table
     command: azurite --loose --skipApiVersionCheck --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --silent --location /data
+    environment:
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ""
     volumes:
       - azurite_data:/data
     healthcheck:
@@ -101,10 +142,14 @@ services:
     environment:
       <<: *common-env
       PORT: "80"
+      TOKEN_MANAGER_URL: http://token-manager:80
       AZURE_STORAGE_QUEUE_WORKER_1: queue-coder-acp-claude-code
       AZURE_STORAGE_QUEUE_WORKER_2: queue-coder-acp-copilot
+      AZURE_STORAGE_QUEUE_REPORT: report-queue
       GITHUB_MODELS_API_KEY: ${GITHUB_MODELS_API_KEY:-${GITHUB_TOKEN}}
       LLM_MODEL: ${LLM_MODEL:-gpt-4.1}
+      GIT_COMMIT: ${GIT_COMMIT:-development}
+      BUILD_TIME: ${BUILD_TIME:-}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -113,16 +158,76 @@ services:
       azurite:
         condition: service_healthy
 
+  # Seed agents - registers agent definitions that aren't covered by model scanners
+  seed-agent-vscode-web:
+    image: curlimages/curl:latest
+    depends_on:
+      api:
+        condition: service_started
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        API_URL="http://api:80"
+        echo "Waiting for API to be ready..."
+        until curl -sf "$$API_URL/health" > /dev/null 2>&1; do
+          echo "API not ready, retrying in 3s..."
+          sleep 3
+        done
+
+        if curl -sf "$$API_URL/api/v1/agents/$$AGENT_ID" > /dev/null 2>&1; then
+          echo "Agent $$AGENT_ID already exists, skipping."
+        else
+          curl -sf -X POST "$$API_URL/api/v1/agents" \
+            -H "Content-Type: application/json" \
+          echo ""
+          echo "Agent $$AGENT_ID seeded."
+        fi
+
+  # Model scanner: GitHub Copilot - scans available models and syncs to API
+  model-scanner-copilot:
+    build:
+      context: .
+      dockerfile: apps/model-scanners/copilot/Dockerfile
+    depends_on:
+      api:
+        condition: service_started
+      token-manager:
+        condition: service_started
+    restart: "no"
+    environment:
+      API_URL: http://api:80
+      TOKEN_MANAGER_URL: http://token-manager:80
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+
+  # Model scanner: Anthropic - scans available models and syncs to API
+  model-scanner-anthropic:
+    build:
+      context: .
+      dockerfile: apps/model-scanners/anthropic/Dockerfile
+    depends_on:
+      api:
+        condition: service_started
+      token-manager:
+        condition: service_started
+    restart: "no"
+    environment:
+      API_URL: http://api:80
+      TOKEN_MANAGER_URL: http://token-manager:80
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
   # Judge - evaluation service (always starts)
   judge:
     build:
       context: .
       dockerfile: apps/judge/Dockerfile
     ports:
-      - "${JUDGE_PORT:-3101}:80"
+      - "${JUDGE_PORT:-3200}:80"
     environment:
       PORT: "80"
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      TOKEN_MANAGER_URL: http://token-manager:80
       AZURE_STORAGE_ACCOUNT_NAME: devstoreaccount1
       STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;QueueEndpoint=http://azurite:10001/devstoreaccount1;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
       # Redis for real-time criterion progress streaming
@@ -145,6 +250,28 @@ services:
       redis:
         condition: service_healthy
 
+  # Token Manager - token lifecycle and KeyVault integration
+  token-manager:
+    build:
+      context: .
+      dockerfile: apps/token-manager/Dockerfile
+    ports:
+      - "${TOKEN_MANAGER_PORT:-3300}:80"
+    environment:
+      <<: *common-env
+      PORT: "80"
+      VALIDATION_INTERVAL_MS: "300000"
+      AZURE_KEYVAULT_URI: https://lowkey-vault:8443
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      IDENTITY_ENDPOINT: http://lowkey-vault:8080/metadata/identity/oauth2/token
+      IDENTITY_HEADER: header
+      AZURE_POD_IDENTITY_AUTHORITY_HOST: http://lowkey-vault:8080
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      lowkey-vault:
+        condition: service_healthy
+
   # ===========================================================================
   # Worker services (opt-in via profiles)
   # ===========================================================================
@@ -156,7 +283,7 @@ services:
       dockerfile: apps/portal/Dockerfile
     profiles: [portal]
     ports:
-      - "${PORTAL_PORT:-5180}:80"
+      - "${PORTAL_PORT:-5100}:80"
     depends_on:
       api:
         condition: service_started
@@ -172,15 +299,7 @@ services:
       WORKER_NAME: coder-acp-claude-code
       QUEUE_NAME: queue-coder-acp-claude-code
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      azurite:
-        condition: service_healthy
-      judge:
-        condition: service_started
+    depends_on: *worker-deps
 
   # GitHub Copilot worker (via ACP)
   coder-acp-copilot:
@@ -193,6 +312,71 @@ services:
       WORKER_NAME: coder-acp-copilot
       QUEUE_NAME: queue-coder-acp-copilot
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # DevProxy integration (enabled by default when using copilot profile)
+      DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
+      DEV_PROXY_API_URL: http://devproxy-copilot:18897
+      DEV_PROXY_HAR_DIR: /har-output
+      HTTP_PROXY: http://devproxy-copilot:18000
+      HTTPS_PROXY: http://devproxy-copilot:18000
+      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-copilot"
+      NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
+    volumes:
+      - copilot_har_output:/har-output
+    depends_on:
+      <<: *worker-deps
+      devproxy-copilot:
+        condition: service_healthy
+      devproxy-copilot-init:
+        condition: service_completed_successfully
+
+  # DevProxy sidecar for Copilot worker (HAR capture)
+  devproxy-copilot:
+    image: ghcr.io/dotnet/dev-proxy:2.1.0
+    profiles: [copilot]
+    user: "1000:1000"
+    working_dir: /har-output
+    command: ["--config-file", "/config/devproxyrc.json", "--record"]
+    volumes:
+      - ./apps/workers/coder-acp-copilot/devproxy-config.json:/config/devproxyrc.json:ro
+      - copilot_har_output:/har-output
+      - copilot_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
+    ports:
+      - "${DEVPROXY_API_PORT:-18800}:18897"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:18897/proxy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      devproxy-copilot-init:
+        condition: service_completed_successfully
+
+  # Init service: fix ownership on shared volumes so UID 1000 containers can
+  # read/write. Equivalent of the K8s initContainer in coder-acp-copilot.yaml.
+  devproxy-copilot-init:
+    image: busybox:1.37
+    profiles: [copilot]
+    command: ["sh", "-c", "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'"]
+    volumes:
+      - copilot_har_output:/har-output
+      - copilot_devproxy_cert:/certs
+
+  # Report Generator worker (LLM-powered run reports via Copilot SDK)
+  report-generator:
+    build:
+      context: .
+      dockerfile: apps/workers/report-generator/Dockerfile
+    profiles: [report]
+    environment:
+      <<: *common-env
+      AZURE_STORAGE_QUEUE_REPORT: report-queue
+      REPORT_MODEL: ${REPORT_MODEL:-gpt-4.1}
+      SCOPE_MT_API_URL: http://api:80
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      TOKEN_MANAGER_URL: http://token-manager:80
+      GIT_COMMIT: ${GIT_COMMIT:-development}
+      SESSION_TIMEOUT_MS: ${SESSION_TIMEOUT_MS:-300000}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -200,9 +384,16 @@ services:
         condition: service_healthy
       azurite:
         condition: service_healthy
-      judge:
+      api:
         condition: service_started
 
 volumes:
   mongodb_data:
   azurite_data:
+  lowkey_vault_data:
+  copilot_har_output:
+  copilot_devproxy_cert:
+
+networks:
+  default:
+    name: ${COMPOSE_PROJECT_NAME:-scope-mt-app}

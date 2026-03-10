@@ -1,0 +1,4 @@
+id: asks_for_database
+prompt: |
+  The task prompt asks the agent to set up, use, or integrate with a
+  database (SQL, NoSQL, MongoDB, PostgreSQL, Redis, etc.).

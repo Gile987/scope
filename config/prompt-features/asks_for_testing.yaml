@@ -1,0 +1,4 @@
+id: asks_for_testing
+prompt: |
+  The task prompt asks the agent to write tests, add test coverage,
+  or set up a testing framework (unit tests, integration tests, e2e tests).

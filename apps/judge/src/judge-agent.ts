@@ -6,9 +6,10 @@ import {
   CriterionResult,
   ConversationTurn,
   DetailedEvaluationResult,
+  DependencyGraph,
+  normalizeCriteria,
 } from "shared";
 import { getCriteriaProvider } from "shared/criteria-provider-factory";
-import { CriteriaGraph, normalizeCriteria } from "shared/criteria-graph";
 import { createJudgeStrategy } from "./judge-strategies.js";
 import { FeedbackGenerator } from "./feedback-generator.js";
 
@@ -78,9 +79,9 @@ export async function evaluateWorkspace(
   }
 
   // 4. Build criteria graph (validates DAG)
-  let criteriaGraph: CriteriaGraph;
+  let criteriaGraph: DependencyGraph;
   try {
-    criteriaGraph = new CriteriaGraph(normalizedCriteria);
+    criteriaGraph = new DependencyGraph(normalizedCriteria);
     console.log(
       `[judge-agent] Built criteria DAG with ${normalizedCriteria.length} nodes`
     );

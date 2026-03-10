@@ -18,6 +18,33 @@ COPY apps/workers/coder-acp-copilot/src ./apps/workers/coder-acp-copilot/src/
 
 RUN pnpm --filter shared build && pnpm --filter coder-acp-copilot build
 
+# --- Dev stage: hot reload with tsx watch ---
+FROM builder AS dev
+# Install system tools needed at runtime
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    curl \
+    git \
+    && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
+    && rm -rf /var/lib/apt/lists/*
+ENV PATH="/root/.local/bin:$PATH"
+RUN npm install -g @anthropic-ai/claude-code@2.1.37 @github/copilot@0.0.415
+
+# Use existing node user (UID 1000) so coding agents allow bypassPermissions mode
+RUN mkdir -p /workspace && chown node:node /workspace
+# Copy uv to a shared location accessible by non-root user
+RUN cp -r /root/.local/bin/* /usr/local/bin/ 2>/dev/null || true
+
+ENV NODE_ENV=development
+ENV SERVICE_DIR=workers/coder-acp-copilot
+ENV WORKER_NAME=coder-acp-copilot
+COPY scripts/dev-entrypoint.sh /app/scripts/dev-entrypoint.sh
+COPY config /app/config/
+USER node
+CMD ["/app/scripts/dev-entrypoint.sh"]
+
+# --- Production stage ---
 FROM node:22.22.0-slim
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
@@ -35,7 +62,7 @@ RUN apt-get update && apt-get install -y \
 ENV PATH="/root/.local/bin:$PATH"
 
 # Install GitHub Copilot CLI globally
-RUN npm install -g @anthropic-ai/claude-code@2.1.37 @github/copilot@0.0.406
+RUN npm install -g @anthropic-ai/claude-code@2.1.37 @github/copilot@0.0.415
 
 WORKDIR /app
 
@@ -48,11 +75,14 @@ RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/apps/workers/coder-acp-copilot/dist ./apps/workers/coder-acp-copilot/dist/
 
-# Create workspace directory
-RUN mkdir -p /workspace
+# Use existing node user (UID 1000) so coding agents allow bypassPermissions mode
+RUN mkdir -p /workspace && chown node:node /workspace
+# Copy uv to a shared location accessible by non-root user
+RUN cp -r /root/.local/bin/* /usr/local/bin/ 2>/dev/null || true
 
 WORKDIR /app/apps/workers/coder-acp-copilot
 
 ENV WORKER_NAME=coder-acp-copilot
 
+USER node
 CMD ["node", "dist/index.js"]

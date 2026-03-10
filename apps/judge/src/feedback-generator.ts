@@ -2,12 +2,11 @@
 // Licensed under the MIT License.
 
 import { CopilotClient, SessionEvent } from "@github/copilot-sdk";
-import { CriteriaConfig, CriterionResult } from "shared";
-import { CriteriaGraph } from "shared/criteria-graph";
+import { CriteriaConfig, CriterionResult, DependencyGraph, TokenManagerClient } from "shared";
 
 export interface FeedbackContext {
   judgeResults: CriterionResult[];
-  criteriaGraph: CriteriaGraph;
+  criteriaGraph: DependencyGraph;
   criteriaRegistry: Map<string, CriteriaConfig>;
   personaInstructions?: string;
   maxCriteria?: number;
@@ -55,9 +54,11 @@ Examples of bad feedback:
  */
 export class FeedbackGenerator {
   private model: string;
+  private tokenClient: TokenManagerClient;
 
   constructor(model?: string) {
     this.model = model || process.env.FEEDBACK_MODEL || "gpt-4.1";
+    this.tokenClient = new TokenManagerClient();
   }
 
   async generateFeedback(
@@ -119,7 +120,7 @@ export class FeedbackGenerator {
   private buildSystemPrompt(
     baseInstructions: string,
     selectedCriteriaIds: string[],
-    criteriaGraph: CriteriaGraph,
+    criteriaGraph: DependencyGraph,
     criteriaRegistry: Map<string, CriteriaConfig>,
     includeDescendantGuard: boolean
   ): string {
@@ -148,7 +149,7 @@ export class FeedbackGenerator {
 
   private getDescendantPrompts(
     criteriaIds: string[],
-    graph: CriteriaGraph,
+    graph: DependencyGraph,
     registry: Map<string, CriteriaConfig>
   ): string[] {
     const descendantPrompts: string[] = [];
@@ -177,7 +178,8 @@ export class FeedbackGenerator {
     systemPrompt: string,
     failureContext: string
   ): Promise<string> {
-    const client = new CopilotClient();
+    const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
+    const client = new CopilotClient({ githubToken });
     let fullResponse = "";
 
     try {

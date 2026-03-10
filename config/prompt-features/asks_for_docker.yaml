@@ -1,0 +1,4 @@
+id: asks_for_docker
+prompt: |
+  The task prompt asks the agent to containerize the application, create
+  Dockerfiles, or use Docker/Docker Compose for local development or deployment.

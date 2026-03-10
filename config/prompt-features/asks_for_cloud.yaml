@@ -1,0 +1,4 @@
+id: asks_for_cloud
+prompt: |
+  The task prompt asks the agent to use, deploy to, or configure cloud
+  infrastructure or services (Azure, AWS, GCP, or other cloud providers).

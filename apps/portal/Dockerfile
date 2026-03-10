@@ -2,6 +2,12 @@
 FROM node:20-alpine AS builder
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 
+# Version information (passed as build args, used by Vite at build time)
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+ENV GIT_COMMIT=$GIT_COMMIT
+ENV BUILD_TIME=$BUILD_TIME
+
 WORKDIR /app
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/portal/package.json apps/portal/
@@ -9,6 +15,13 @@ RUN pnpm install --frozen-lockfile --filter portal
 
 COPY apps/portal/ apps/portal/
 RUN pnpm --filter portal build
+
+# --- Dev stage: Vite dev server with HMR ---
+FROM builder AS dev
+ENV NODE_ENV=development
+WORKDIR /app/apps/portal
+EXPOSE 80
+CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "80"]
 
 # Stage 2: Serve with nginx
 FROM nginx:alpine

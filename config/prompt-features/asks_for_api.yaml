@@ -1,0 +1,4 @@
+id: asks_for_api
+prompt: |
+  The task prompt asks the agent to create, modify, or work with a REST API,
+  web service, HTTP server, or backend endpoint.

@@ -3,6 +3,7 @@
 
 import ModelClient, { isUnexpected } from "@azure-rest/ai-inference";
 import { AzureKeyCredential } from "@azure/core-auth";
+import { isGitHubModelsTokenAvailable, acquireGitHubModelsToken } from "./llm-token.js";
 
 const GITHUB_MODELS_ENDPOINT = "https://models.inference.ai.azure.com";
 
@@ -44,18 +45,8 @@ export interface GenerateResult {
   suggestedChildren: string[];
 }
 
-let client: ReturnType<typeof ModelClient> | null = null;
-
-function getClient(): ReturnType<typeof ModelClient> | null {
-  if (client) return client;
-  const token = process.env.GITHUB_MODELS_API_KEY;
-  if (!token) return null;
-  client = ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token));
-  return client;
-}
-
 export function isLlmAvailable(): boolean {
-  return !!process.env.GITHUB_MODELS_API_KEY;
+  return isGitHubModelsTokenAvailable();
 }
 
 function buildUserMessage(behavior: string, existingCriteria: ExistingCriterion[]): string {
@@ -79,10 +70,8 @@ export async function generateCriteriaPrompt(
   existingCriteria: ExistingCriterion[] = [],
   model?: string,
 ): Promise<GenerateResult> {
-  const llm = getClient();
-  if (!llm) {
-    throw new Error("LLM not configured: GITHUB_MODELS_API_KEY is not set");
-  }
+  const token = await acquireGitHubModelsToken();
+  const llm = ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token));
 
   const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
   const userMessage = buildUserMessage(behavior, existingCriteria);

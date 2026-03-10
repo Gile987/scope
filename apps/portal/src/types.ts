@@ -12,6 +12,14 @@ export interface CriterionResult {
   evaluated: boolean;
 }
 
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  response?: string;
+  timestamp?: string;
+}
+
 export interface ConversationTurn {
   iteration: number;
   codingAgentResponse: string;
@@ -20,6 +28,7 @@ export interface ConversationTurn {
   passed: boolean;
   timestamp: string;
   criteriaResults?: CriterionResult[];
+  harUrl?: string;
 }
 
 export interface Scenario {
@@ -48,6 +57,8 @@ export interface Run {
   id: string;
   scenario?: Scenario;
   workerType: string;
+  model?: string;
+  agentVersion?: string;
   status: RunStatus;
   result?: string;
   error?: string;
@@ -59,6 +70,13 @@ export interface Run {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
+  taskPromptId?: string;
+  /** @deprecated — use taskPromptId instead */
+  promptFeatureExtractionId?: string;
+  mcpServers?: string[];
+  skills?: string[];
+  skillRevisions?: string[];
+  harUrl?: string;
 }
 
 export const WORKER_TYPES = [
@@ -102,9 +120,70 @@ export interface GeneratePromptResponse {
   suggestedChildren: string[];
 }
 
-// Analysis types for insights dashboard
+// Prompt Feature types
+export interface PromptFeatureConfig {
+  id: string;
+  prompt: string;
+  dependsOn?: string[];
+}
+
+export interface PromptFeatureDocument extends PromptFeatureConfig {
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface PromptFeatureGraphData {
+  nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
+  edges: Array<{ source: string; target: string }>;
+}
+
+export interface PromptFeatureResult {
+  featureId: string;
+  detected: boolean;
+  evaluated: boolean;
+}
+
+export interface SuggestedPromptFeature {
+  suggestedId: string;
+  behavior: string;
+  prompt: string;
+}
+
+export interface PromptFeatureExtraction {
+  _id?: string;
+  taskText: string;
+  taskTextHash?: string;
+  promptFeatureResults: PromptFeatureResult[];
+  suggestedFeatures?: SuggestedPromptFeature[];
+  extractedAt: string;
+  model?: string;
+  cached?: boolean;
+}
+
+// Task Prompt types (first-class entity for benchmark task texts)
+export interface TaskPrompt {
+  _id: string;                          // UUIDv5 content-addressed ID
+  text: string;                         // Full task prompt text
+  features?: PromptFeatureResult[];     // Detected prompt features
+  featuresExtractedAt?: string;         // When features were last extracted
+  createdAt: string;
+  deletedAt?: string;
+}
+
+/** Response shape from feature extraction endpoints */
+export interface TaskPromptFeatureExtractionResult {
+  taskPromptId?: string;
+  features: PromptFeatureResult[];
+  featuresExtractedAt?: string;
+  suggestedFeatures?: SuggestedPromptFeature[];
+  cached: boolean;
+}
+
+// Analysis types for statistics dashboard
 export interface TaskWorkerGroup {
   task: string;
+  taskPromptId: string;
   workerType: string;
   total: number;
   completed: number;
@@ -137,9 +216,427 @@ export interface AnalysisResponse {
   selectedCriteria: string[];
 }
 
+// MDP state-transition graph types
+
+/** Per-criterion state within a composite state vector */
+export interface MdpCriterionState {
+  id: string;
+  passed: boolean;
+}
+
+/** Per-feature state within a prompt-feature start node */
+export interface MdpFeatureState {
+  id: string;
+  detected: boolean;
+}
+
+/** Node type discriminator */
+export type MdpNodeType = "prompt-features" | "criteria";
+
+/** A node in the MDP graph — a unique composite state vector */
+export interface MdpStateNode {
+  /** Canonical string key (e.g. "has_azure:0|has_cloud:1|has_iac:0") */
+  id: string;
+  /** Sorted criteria states (present on criteria nodes) */
+  criteria: MdpCriterionState[];
+  /** Sorted feature states (present on prompt-feature start nodes) */
+  features?: MdpFeatureState[];
+  /** Node type: "prompt-features" for start nodes, "criteria" for state nodes */
+  type?: MdpNodeType;
+  /** How many times any episode visited this state */
+  visits: number;
+  /** True for the start state (prompt-features node or synthetic initial) */
+  isInitial?: boolean;
+  /** True if no outgoing transitions exist (final state of some episodes) */
+  isTerminal?: boolean;
+}
+
+/** An edge in the MDP graph — a transition between two states */
+export interface MdpTransitionEdge {
+  source: string;
+  target: string;
+  /** How many times this specific transition was observed */
+  count: number;
+  /** Probability: count / total outgoing from source */
+  probability: number;
+}
+
+/** Full MDP response */
+export interface MdpResponse {
+  nodes: MdpStateNode[];
+  edges: MdpTransitionEdge[];
+  /** Total number of episodes (runs) that contributed */
+  episodeCount: number;
+  /** All criteria IDs found across all runs (before filtering) */
+  availableCriteria: string[];
+  /** Criteria IDs used for projection (empty = all) */
+  selectedCriteria: string[];
+  /** All prompt feature IDs found across all runs */
+  availablePromptFeatures: string[];
+  /** Prompt feature IDs used for filtering (empty = all) */
+  selectedFeatures: string[];
+  /** ISO timestamp of when this was computed — used for incremental polling */
+  computedAt: string;
+}
+
+// Bulk re-submit overrides
+export interface BulkResubmitOverrides {
+  workerType?: string;
+  model?: string | null;
+  maxIterations?: number | null;
+  mcpServers?: string[] | null;
+  skillRevisions?: string[] | null;
+}
+
 // Bulk re-submit response
 export interface BulkResubmitResponse {
   submitted: number;
   failed: string[];
   newIds: string[];
+}
+
+// Report types
+export type ReportStatus = "pending" | "generating" | "completed" | "failed";
+
+export interface Reporter {
+  id: string;
+  name: string;
+  gitHash: string;
+  model: string;
+  agentId: string;
+  agentVersion: string;
+}
+
+export interface Report {
+  _id: string;
+  id: string;
+  requestId: string;
+  task?: string;
+  reporter?: Reporter;
+  content?: string;
+  status: ReportStatus;
+  error?: string;
+  logs: LogEvent[];
+  insightReferences?: InsightReference[];
+  templateId?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export const REPORT_STATUS_LIST: ReportStatus[] = [
+  "pending",
+  "generating",
+  "completed",
+  "failed",
+];
+
+export interface BulkReportStatus {
+  [requestId: string]: { reportId: string; status: ReportStatus };
+}
+
+// =============================================================================
+// Report Template types
+// =============================================================================
+
+export type ReportTriggerType = "always" | "criteria" | "taskPrompt" | "promptFeature";
+
+export interface AlwaysTrigger {
+  type: "always";
+}
+
+export interface CriteriaTrigger {
+  type: "criteria";
+  criteriaIds: string[];
+  match?: "any" | "all";
+}
+
+export interface TaskPromptTrigger {
+  type: "taskPrompt";
+  taskPromptIds: string[];
+}
+
+export interface PromptFeatureTrigger {
+  type: "promptFeature";
+  featureIds: string[];
+  match?: "any" | "all";
+}
+
+export type ReportTrigger =
+  | AlwaysTrigger
+  | CriteriaTrigger
+  | TaskPromptTrigger
+  | PromptFeatureTrigger;
+
+export interface ReportTemplateSystemPrompt {
+  mode: "append" | "override";
+  content: string;
+}
+
+export interface ReportTemplate {
+  _id: string;
+  id: string;
+  name: string;
+  description?: string;
+  userPrompt: string;
+  systemPrompt?: ReportTemplateSystemPrompt;
+  trigger?: ReportTrigger;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+// =============================================================================
+// Token Manager types
+// =============================================================================
+
+export type TokenType =
+  | "github-pat-classic"
+  | "github-pat-fine-grained"
+  | "github-oauth"
+  | "github-oauth-cookie-state"
+  | "anthropic-api-key";
+
+export type TokenCapability =
+  "github-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
+
+export type TokenValidationStatus =
+  | "valid"
+  | "invalid"
+  | "expired"
+  | "error"
+  | "unknown";
+
+export interface TokenDocument {
+  _id: string;
+  type: TokenType;
+  capabilities: TokenCapability[];
+  secretName: string;
+  expiresAt?: string;
+  lastValidatedAt?: string;
+  lastValidationStatus: TokenValidationStatus;
+  lastValidationError?: string;
+  enabled: boolean;
+  comment?: string;
+  acquireCount: number;
+  lastAcquiredAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface TokenValidationResult {
+  status: TokenValidationStatus;
+  scopes?: string[];
+  capabilities?: TokenCapability[];
+  expiresAt?: string;
+  error?: string;
+  rateLimit?: {
+    limit: number;
+    remaining: number;
+    reset: string;
+  };
+}
+
+export interface CreateTokenRequest {
+  type: TokenType;
+  value: string;
+  expiresAt?: string;
+  enabled?: boolean;
+  comment?: string;
+}
+
+export interface UpdateTokenRequest {
+  enabled?: boolean;
+  expiresAt?: string | null;
+  comment?: string | null;
+}
+
+export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
+  "github-pat-classic": "GitHub PAT (classic)",
+  "github-pat-fine-grained": "GitHub PAT (fine-grained)",
+  "github-oauth": "GitHub OAuth",
+  "github-oauth-cookie-state": "GitHub OAuth Cookie State",
+  "anthropic-api-key": "Anthropic API Key",
+};
+
+export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
+  "github-models": "GitHub Models",
+  "copilot-sdk": "Copilot SDK",
+  "copilot-cli": "Copilot CLI",
+  "claude-code-cli": "Claude Code CLI"
+};
+
+export const TOKEN_CAPABILITY_DESCRIPTIONS: Record<TokenCapability, string> = {
+  "github-models": "Access AI models hosted on GitHub (GPT-4o, Claude, etc.)",
+  "copilot-sdk": "Use the Copilot SDK to make LLM requests programmatically",
+  "copilot-cli": "Run GitHub Copilot in the CLI for code suggestions",
+  "claude-code-cli": "Run Claude Code as an agentic coding assistant"
+};
+
+export const ALL_CAPABILITIES: TokenCapability[] = [
+  "github-models", "copilot-sdk", "copilot-cli", "claude-code-cli"
+];
+
+// Coding Agent types
+export interface CodingAgent {
+  _id: string;
+  name: string;
+  description?: string;
+  supportedModels: string[];
+  defaultModel?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+// MCP Server types
+export type McpTransportType = "sse" | "http";
+
+export interface McpServerHeader {
+  name: string;
+  value: string;
+}
+
+export interface McpServerDocument {
+  _id: string;
+  name: string;
+  type: McpTransportType;
+  url: string;
+  headers?: McpServerHeader[];
+  description?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface CreateMcpServerRequest {
+  _id: string;
+  name: string;
+  type: McpTransportType;
+  url: string;
+  headers?: McpServerHeader[];
+  description?: string;
+}
+
+export interface UpdateMcpServerRequest {
+  name?: string;
+  type?: McpTransportType;
+  url?: string;
+  headers?: McpServerHeader[];
+  description?: string;
+}
+
+// =============================================================================
+// Insight types
+// =============================================================================
+
+/** Reference from a report to an insight */
+export interface InsightReference {
+  insightId: string;
+  referencedAt: string;
+  isNew: boolean;
+}
+
+/** Insight entity */
+export interface Insight {
+  _id: string;
+  id: string;
+  title: string;
+  /** Markdown-formatted detailed observation */
+  description: string;
+  category?: string;
+  tags?: string[];
+  upvotes: number;
+  downvotes: number;
+  blocked: boolean;
+  referenceCount: number;
+  createdBy: "agent" | "user";
+  sourceReportId?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** Insight enriched with reference metadata (when fetched via report) */
+export interface InsightWithReference extends Insight {
+  referencedAt?: string;
+  isNew?: boolean;
+}
+
+// =============================================================================
+// Model types
+// =============================================================================
+
+/** A scanned model tracked across agents and providers */
+export interface Model {
+  _id: string;
+  modelId: string;
+  provider: string;
+  agentId: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  disappearedAt?: string;
+  providerAvailableFrom?: string;
+  providerEndOfLife?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// =============================================================================
+// Skill types
+// =============================================================================
+
+/** Origin of a skill */
+export type SkillOrigin = "skills-sh" | "manual";
+
+/** An imported skill */
+export interface SkillDocument {
+  _id: string;
+  source: string;
+  skillName: string;
+  name: string;
+  origin: SkillOrigin;
+  description?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** A resolved skill revision (immutable) */
+export interface SkillRevisionDocument {
+  _id: string;
+  ref: string;
+  source: string;
+  skillName: string;
+  commitHash: string;
+  name: string;
+  description?: string;
+  license?: string;
+  compatibility?: string;
+  allowedTools?: string;
+  metadata?: Record<string, string>;
+  content: string;
+  archiveUrl?: string;
+  resolvedAt: string;
+}
+
+/** Unified search result */
+export interface SkillSearchResult {
+  id: string;
+  name: string;
+  source: string;
+  description?: string;
+  internal: boolean;
+  installs?: number;
+}
+
+// =============================================================================
+// Feature flag types
+// =============================================================================
+
+/** A runtime feature flag controlling portal feature visibility */
+export interface FeatureFlag {
+  key: string;
+  label: string;
+  enabled: boolean;
+  updatedAt: string;
 }

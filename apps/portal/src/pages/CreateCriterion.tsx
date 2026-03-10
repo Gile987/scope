@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState, useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,8 @@ import {
   RefreshCw,
   Pencil,
 } from "lucide-react";
+import { useCommandEnter } from "@/hooks/useCommandEnter";
+import { KbdBadge } from "@/components/KbdBadge";
 
 const STEPS = ["Define Criteria", "Review & Create"];
 
@@ -41,7 +43,11 @@ function slugify(text: string): string {
 
 export function CreateCriterion() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+
+  // Pre-populate parent dependency from ?parent= query param
+  const parentParam = searchParams.get("parent");
 
   // Wizard step (1 or 2)
   const [step, setStep] = useState(1);
@@ -51,7 +57,7 @@ export function CreateCriterion() {
   const [id, setId] = useState("");
   const [idManuallyEdited, setIdManuallyEdited] = useState(false);
   const [idEditMode, setIdEditMode] = useState(false);
-  const [dependsOn, setDependsOn] = useState<string[]>([]);
+  const [dependsOn, setDependsOn] = useState<string[]>(parentParam ? [parentParam] : []);
 
   // Step 2 fields
   const [prompt, setPrompt] = useState("");
@@ -155,6 +161,12 @@ export function CreateCriterion() {
       dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
     });
   };
+
+  // Cmd+Enter / Ctrl+Enter shortcut for primary action
+  useCommandEnter(
+    step === 1 ? handleContinue : handleCreate,
+    step === 1 ? canContinue : !!prompt.trim() && !createMutation.isPending,
+  );
 
   // Regenerate prompt
   const handleRegenerate = () => {
@@ -302,6 +314,7 @@ export function CreateCriterion() {
             >
               Continue
               <ArrowRight className="h-4 w-4" />
+              <KbdBadge />
             </Button>
           </div>
         </div>
@@ -409,7 +422,7 @@ export function CreateCriterion() {
 
                 {generateMutation.isError && (
                   <p className="text-xs text-amber-600">
-                    AI generation unavailable — write your prompt manually
+                    AI generation unavailable — register a GitHub Models token or write your prompt manually
                   </p>
                 )}
               </div>
@@ -475,6 +488,7 @@ export function CreateCriterion() {
                 <Sparkles className="h-4 w-4" />
               )}
               Create Criteria
+              <KbdBadge />
             </Button>
           </div>
         </div>

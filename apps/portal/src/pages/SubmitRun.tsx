@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -12,12 +12,23 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Send, Loader2 } from "lucide-react";
-import { WORKER_TYPES } from "@/types";
+import { Badge } from "@/components/ui/badge";
+import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen } from "lucide-react";
+import { WORKER_TYPES, type CodingAgent, type McpServerDocument } from "@/types";
+import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
+import { SkillPicker } from "@/components/SkillPicker";
+import { Stepper } from "@/components/Stepper";
+import { TaskPromptPicker } from "@/components/TaskPromptPicker";
+import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
+import { useCommandEnter } from "@/hooks/useCommandEnter";
+import { KbdBadge } from "@/components/KbdBadge";
+
+const STEPS = ["Configure", "Review & Submit"];
 
 export function SubmitRun() {
   const navigate = useNavigate();
+  const [step, setStep] = useState(1);
 
   // Form state
   const [task, setTask] = useState("");
@@ -25,8 +36,41 @@ export function SubmitRun() {
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
   const [version, setVersion] = useState<"v1" | "v2">("v2");
   const [worker, setWorker] = useState<string>("coder-acp-copilot");
+  const [model, setModel] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<string>("10");
   const [occurrences, setOccurrences] = useState<number>(1);
+
+  // MCP servers
+  const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
+
+  // Skills
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+
+  // Fetch agents from the API
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents"],
+    queryFn: () => api.listAgents(),
+  });
+
+  // Fetch MCP servers
+  const { data: mcpServers = [] } = useQuery({
+    queryKey: ["mcp-servers"],
+    queryFn: () => api.listMcpServers(),
+  });
+
+  const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
+
+  const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
+  const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
+
+  // When agent changes, reset model to the agent's default
+  useEffect(() => {
+    if (selectedAgent) {
+      setModel(selectedAgent.defaultModel ?? "");
+    } else {
+      setModel("");
+    }
+  }, [worker, selectedAgent?.defaultModel]);
 
   // Optional persona
   const [personality, setPersonality] = useState<string>("");
@@ -34,22 +78,37 @@ export function SubmitRun() {
   const [verbosity, setVerbosity] = useState<string>("");
   const [userType, setUserType] = useState<string>("");
 
+  // Task prompt entity state (created on "Continue" to step 2)
+  const [taskPromptId, setTaskPromptId] = useState<string | null>(null);
+
+  const createTaskPromptMutation = useMutation({
+    mutationFn: async () => {
+      const taskPrompt = await api.createTaskPrompt(task.trim());
+      return taskPrompt;
+    },
+    onSuccess: (data) => setTaskPromptId(data._id),
+  });
+
   const submitMutation = useMutation({
     mutationFn: api.submitRun,
     onSuccess: (data) => {
-      // If multiple runs were created, navigate to runs list
-      if ('ids' in data && data.ids.length > 1) {
-        navigate('/runs');
-      } else if ('id' in data) {
+      if ("ids" in data && data.ids.length > 1) {
+        navigate("/runs");
+      } else if ("id" in data) {
         navigate(`/runs/${data.id}`);
       } else {
-        navigate('/runs');
+        navigate("/runs");
       }
     },
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleContinue = () => {
+    if (!task.trim()) return;
+    setStep(2);
+    createTaskPromptMutation.mutate();
+  };
+
+  const doSubmit = () => {
     if (!task.trim()) return;
 
     const criteria =
@@ -69,6 +128,7 @@ export function SubmitRun() {
         version,
       },
       worker,
+      ...(model ? { model } : {}),
       maxIterations: parseInt(maxIterations, 10) || undefined,
       ...(occurrences > 1 ? { count: occurrences } : {}),
       ...(hasPersona
@@ -81,8 +141,21 @@ export function SubmitRun() {
             },
           }
         : {}),
+      ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
+      ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
     });
   };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    doSubmit();
+  };
+
+  // Cmd+Enter / Ctrl+Enter shortcut for primary action
+  useCommandEnter(
+    step === 1 ? handleContinue : doSubmit,
+    step === 1 ? !!task.trim() : !!task.trim() && !submitMutation.isPending,
+  );
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -91,200 +164,403 @@ export function SubmitRun() {
         <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Scenario */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Scenario</CardTitle>
-            <CardDescription>Define the task and evaluation criteria</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="task">Task *</Label>
-              <Textarea
-                id="task"
-                placeholder="e.g., Create a Hello World Express API"
-                value={task}
-                onChange={(e) => setTask(e.target.value)}
-                rows={3}
-                required
-              />
-            </div>
+      <Stepper steps={STEPS} currentStep={step} />
 
-            <div className="grid grid-cols-2 gap-4">
+      {/* ─── STEP 1: Configure ──────────────────────────────────────────── */}
+      {step === 1 && (
+        <div className="space-y-6">
+          {/* Scenario */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Scenario</CardTitle>
+              <CardDescription>Define the task and evaluation criteria</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="version">Criteria Version</Label>
-                <Select value={version} onValueChange={(v) => setVersion(v as "v1" | "v2")}>
-                  <SelectTrigger id="version">
+                <Label htmlFor="task">Task *</Label>
+                <TaskPromptPicker onSelect={(text) => setTask(text)} />
+                <Textarea
+                  id="task"
+                  placeholder="e.g., Create a Hello World Express API"
+                  value={task}
+                  onChange={(e) => setTask(e.target.value)}
+                  rows={3}
+                  required
+                />
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  New task prompts are automatically added to the task prompt library.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="version">Criteria Version</Label>
+                  <Select value={version} onValueChange={(v) => setVersion(v as "v1" | "v2")}>
+                    <SelectTrigger id="version">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="v1">v1 — free-text prompts</SelectItem>
+                      <SelectItem value="v2">v2 — criteria IDs</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="maxIterations">Max Iterations</Label>
+                  <Input
+                    id="maxIterations"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={maxIterations}
+                    onChange={(e) => setMaxIterations(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="criteria">
+                  Criteria{" "}
+                  {version === "v2" ? (
+                    <span className="text-muted-foreground font-normal">(select from registry)</span>
+                  ) : (
+                    <span className="text-muted-foreground font-normal">(one per line)</span>
+                  )}
+                </Label>
+                {version === "v2" ? (
+                  <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
+                ) : (
+                  <Textarea
+                    id="criteria"
+                    placeholder="The code must include unit tests&#10;The API should return JSON responses"
+                    value={criteriaText}
+                    onChange={(e) => setCriteriaText(e.target.value)}
+                    rows={4}
+                    className="font-mono text-sm"
+                  />
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Worker */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Worker</CardTitle>
+              <CardDescription>Select which coding agent to run</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="worker">Worker Type *</Label>
+                <Select value={worker} onValueChange={setWorker}>
+                  <SelectTrigger id="worker">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="v1">v1 — free-text prompts</SelectItem>
-                    <SelectItem value="v2">v2 — criteria IDs</SelectItem>
+                    {activeAgents.length > 0
+                      ? activeAgents.map((a: CodingAgent) => (
+                          <SelectItem key={a._id} value={a._id}>
+                            {a.name}
+                          </SelectItem>
+                        ))
+                      : WORKER_TYPES.map((w) => (
+                          <SelectItem key={w} value={w}>
+                            {w}
+                          </SelectItem>
+                        ))
+                    }
                   </SelectContent>
                 </Select>
               </div>
+              {selectedAgent && selectedAgent.supportedModels.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="model">Model</Label>
+                  <Select value={model} onValueChange={setModel}>
+                    <SelectTrigger id="model">
+                      <SelectValue placeholder="Select model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedAgent.supportedModels.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-2">
-                <Label htmlFor="maxIterations">Max Iterations</Label>
+                <Label htmlFor="occurrences">Number of occurrences</Label>
                 <Input
-                  id="maxIterations"
+                  id="occurrences"
                   type="number"
                   min={1}
-                  max={50}
-                  value={maxIterations}
-                  onChange={(e) => setMaxIterations(e.target.value)}
+                  max={10}
+                  value={occurrences}
+                  onChange={(e) => setOccurrences(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                  className="w-24"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Submit {occurrences} identical run{occurrences !== 1 ? "s" : ""}
+                </p>
               </div>
-            </div>
+            </CardContent>
+          </Card>
 
-            <div className="space-y-2">
-              <Label htmlFor="criteria">
-                Criteria{" "}
-                {version === "v2" ? (
-                  <span className="text-muted-foreground font-normal">(select from registry)</span>
-                ) : (
-                  <span className="text-muted-foreground font-normal">(one per line)</span>
-                )}
-              </Label>
-              {version === "v2" ? (
-                <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
-              ) : (
-                <Textarea
-                  id="criteria"
-                  placeholder="The code must include unit tests&#10;The API should return JSON responses"
-                  value={criteriaText}
-                  onChange={(e) => setCriteriaText(e.target.value)}
-                  rows={4}
-                  className="font-mono text-sm"
-                />
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Worker */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Worker</CardTitle>
-            <CardDescription>Select which coding agent to run</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="worker">Worker Type *</Label>
-              <Select value={worker} onValueChange={setWorker}>
-                <SelectTrigger id="worker">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WORKER_TYPES.map((w) => (
-                    <SelectItem key={w} value={w}>
-                      {w}
-                    </SelectItem>
+          {/* MCP Servers (optional) */}
+          {activeMcpServers.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Server className="h-5 w-5" />
+                  MCP Servers <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+                </CardTitle>
+                <CardDescription>Select remote MCP servers to make available to the coding agent</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {activeMcpServers.map((s: McpServerDocument) => (
+                    <label
+                      key={s._id}
+                      className="flex items-center gap-3 rounded-md border p-3 cursor-pointer hover:bg-accent/50 transition-colors"
+                    >
+                      <Checkbox
+                        checked={selectedMcpServers.includes(s._id)}
+                        onCheckedChange={(checked) => {
+                          setSelectedMcpServers(prev =>
+                            checked
+                              ? [...prev, s._id]
+                              : prev.filter(id => id !== s._id)
+                          );
+                        }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm">{s._id}</span>
+                          <Badge variant="outline" className="text-xs uppercase">{s.type}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">{s.name}{s.description ? ` — ${s.description}` : ""}</p>
+                      </div>
+                    </label>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="occurrences">Number of occurrences</Label>
-              <Input
-                id="occurrences"
-                type="number"
-                min={1}
-                max={10}
-                value={occurrences}
-                onChange={(e) => setOccurrences(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
-                className="w-24"
-              />
-              <p className="text-xs text-muted-foreground">
-                Submit {occurrences} identical run{occurrences !== 1 ? "s" : ""}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Persona (optional) */}
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              Persona <span className="text-muted-foreground font-normal text-sm">(optional)</span>
-            </CardTitle>
-            <CardDescription>Configure the judge persona for evaluation style</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Personality</Label>
-                <Select value={personality} onValueChange={setPersonality}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="friendly">Friendly</SelectItem>
-                    <SelectItem value="demanding">Demanding</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Experience</Label>
-                <Select value={experience} onValueChange={setExperience}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="junior">Junior</SelectItem>
-                    <SelectItem value="senior">Senior</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Verbosity</Label>
-                <Select value={verbosity} onValueChange={setVerbosity}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="brief">Brief</SelectItem>
-                    <SelectItem value="moderate">Moderate</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>User Type</Label>
-                <Select value={userType} onValueChange={setUserType}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="traditional">Traditional</SelectItem>
-                    <SelectItem value="ai_assisted">AI Assisted</SelectItem>
-                    <SelectItem value="vibe">Vibe Coder</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Separator />
-
-        {/* Submit */}
-        <div className="flex items-center justify-between">
-          {submitMutation.isError && (
-            <p className="text-sm text-destructive">
-              {submitMutation.error instanceof Error ? submitMutation.error.message : "Submission failed"}
-            </p>
+                </div>
+                {selectedMcpServers.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {selectedMcpServers.length} server{selectedMcpServers.length !== 1 ? "s" : ""} selected
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           )}
-          <div className="flex-1" />
-          <Button type="submit" disabled={!task.trim() || submitMutation.isPending} className="gap-1.5">
-            {submitMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-            Submit {occurrences > 1 ? `${occurrences} Runs` : "Run"}
-          </Button>
+
+          {/* Skills (optional) */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BookOpen className="h-5 w-5" />
+                Skills <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+              </CardTitle>
+              <CardDescription>Search and select agent skills to inject into the coding agent prompt</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} />
+            </CardContent>
+          </Card>
+
+          {/* Persona (optional) */}
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                Persona <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+              </CardTitle>
+              <CardDescription>Configure the judge persona for evaluation style</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Personality</Label>
+                  <Select value={personality} onValueChange={setPersonality}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Default" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="friendly">Friendly</SelectItem>
+                      <SelectItem value="demanding">Demanding</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Experience</Label>
+                  <Select value={experience} onValueChange={setExperience}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Default" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="junior">Junior</SelectItem>
+                      <SelectItem value="senior">Senior</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Verbosity</Label>
+                  <Select value={verbosity} onValueChange={setVerbosity}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Default" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="brief">Brief</SelectItem>
+                      <SelectItem value="moderate">Moderate</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>User Type</Label>
+                  <Select value={userType} onValueChange={setUserType}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Default" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="traditional">Traditional</SelectItem>
+                      <SelectItem value="ai_assisted">AI Assisted</SelectItem>
+                      <SelectItem value="vibe">Vibe Coder</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Separator />
+
+          {/* Continue */}
+          <div className="flex justify-end">
+            <Button type="button" onClick={handleContinue} disabled={!task.trim()} className="gap-1.5">
+              Continue <ArrowRight className="h-4 w-4" /> <KbdBadge />
+            </Button>
+          </div>
         </div>
-      </form>
+      )}
+
+      {/* ─── STEP 2: Review & Submit ────────────────────────────────────── */}
+      {step === 2 && (
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Summary */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Run Summary</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="grid grid-cols-[8rem_1fr] gap-y-2">
+                <span className="text-muted-foreground">Task</span>
+                <span className="whitespace-pre-wrap">{task.trim()}</span>
+                <span className="text-muted-foreground">Worker</span>
+                <span className="font-mono">{worker}</span>
+                <span className="text-muted-foreground">Max iterations</span>
+                <span>{maxIterations}</span>
+                <span className="text-muted-foreground">Occurrences</span>
+                <span>{occurrences}</span>
+                {version === "v2" && pickedCriteria.length > 0 && (
+                  <>
+                    <span className="text-muted-foreground">Criteria</span>
+                    <div className="flex flex-wrap gap-1">
+                      {pickedCriteria.map((c) => (
+                        <Badge key={c} variant="secondary" className="font-mono text-xs">
+                          {c}
+                        </Badge>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {selectedMcpServers.length > 0 && (
+                  <>
+                    <span className="text-muted-foreground">MCP Servers</span>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedMcpServers.map((s) => (
+                        <Badge key={s} variant="secondary" className="font-mono text-xs">
+                          {s}
+                        </Badge>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {selectedSkills.length > 0 && (
+                  <>
+                    <span className="text-muted-foreground">Skills</span>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedSkills.map((s) => (
+                        <Badge key={s} variant="secondary" className="font-mono text-xs">
+                          {s}
+                        </Badge>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Prompt Features */}
+          {createTaskPromptMutation.isPending && (
+            <Card>
+              <CardContent className="py-6">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Registering task prompt…</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {createTaskPromptMutation.isError && (
+            <Card>
+              <CardContent className="py-6">
+                <p className="text-sm text-destructive">
+                  {createTaskPromptMutation.error instanceof Error
+                    ? createTaskPromptMutation.error.message
+                    : "Failed to register task prompt"}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {taskPromptId && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Prompt Features</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TaskPromptFeatures taskPromptId={taskPromptId} autoExtract />
+              </CardContent>
+            </Card>
+          )}
+
+          <Separator />
+
+          {/* Back / Submit */}
+          <div className="flex items-center justify-between">
+            <Button type="button" variant="ghost" onClick={() => setStep(1)} className="gap-1.5">
+              <ArrowLeft className="h-4 w-4" /> Back
+            </Button>
+            <div className="flex items-center gap-3">
+              {submitMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {submitMutation.error instanceof Error ? submitMutation.error.message : "Submission failed"}
+                </p>
+              )}
+              <Button type="submit" disabled={!task.trim() || submitMutation.isPending} className="gap-1.5">
+                {submitMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Submit {occurrences > 1 ? `${occurrences} Runs` : "Run"}
+                <KbdBadge />
+              </Button>
+            </div>
+          </div>
+        </form>
+      )}
     </div>
   );
 }

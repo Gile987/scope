@@ -119,6 +119,14 @@ export function LogViewer({
                     <span className="text-purple-400 shrink-0">[{log.source}]</span>
                   )}
                   <span className="text-slate-200 break-all">{log.message}</span>
+                  {log.data && Object.keys(log.data).filter(k => k !== "iteration" && k !== "final").length > 0 && (
+                    <span className="text-slate-500 shrink-0 truncate max-w-[40%]" title={JSON.stringify(log.data, null, 2)}>
+                      {Object.entries(log.data)
+                        .filter(([k]) => k !== "iteration" && k !== "final")
+                        .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
+                        .join(" ")}
+                    </span>
+                  )}
                 </div>
               </div>
             );
