@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 1.2.0)"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version format. Expected semver (e.g., 1.2.0)"
+            exit 1
+          fi
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "::error::Tag v${VERSION} already exists"
+            exit 1
+          fi
+
+  build-images:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          [
+            api,
+            coder-acp-claude-code,
+            coder-acp-copilot,
+            judge,
+            portal,
+            token-manager,
+            model-scanner-copilot,
+            model-scanner-anthropic,
+            report-generator,
+            db-migrations,
+          ]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Compute Dockerfile path
+        id: dockerfile
+        run: |
+          case "${{ matrix.image }}" in
+            api|judge|portal) DOCKERFILE="apps/${{ matrix.image }}/Dockerfile" ;;
+            coder-*) DOCKERFILE="apps/workers/${{ matrix.image }}/Dockerfile" ;;
+            report-generator) DOCKERFILE="apps/workers/${{ matrix.image }}/Dockerfile" ;;
+            model-scanner-copilot) DOCKERFILE="apps/model-scanners/copilot/Dockerfile" ;;
+            model-scanner-anthropic) DOCKERFILE="apps/model-scanners/anthropic/Dockerfile" ;;
+            db-migrations) DOCKERFILE="packages/db-migrations/Dockerfile" ;;
+            token-manager) DOCKERFILE="apps/token-manager/Dockerfile" ;;
+            *) DOCKERFILE="apps/${{ matrix.image }}/Dockerfile" ;;
+          esac
+          echo "path=$DOCKERFILE" >> "$GITHUB_OUTPUT"
+
+      - name: Load pinned versions
+        id: versions
+        run: |
+          EXTRA_ARGS=""
+          for f in apps/workers/${{ matrix.image }}/versions.env apps/${{ matrix.image }}/versions.env; do
+            if [ -f "$f" ]; then
+              while IFS='=' read -r key value; do
+                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+                EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+              done < "$f"
+              break
+            fi
+          done
+          echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
+
+      - name: Build and push to ACR
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          az acr build \
+            --registry "${{ vars.ACR_NAME }}" \
+            --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
+            --image "scoped/${{ matrix.image }}:${{ github.sha }}" \
+            --image "scoped/${{ matrix.image }}:v${VERSION}" \
+            --build-arg GIT_COMMIT=${{ github.sha }} \
+            --build-arg BUILD_TIME=${BUILD_TIME} \
+            ${{ steps.versions.outputs.extra_args }} \
+            --file "${{ steps.dockerfile.outputs.path }}" \
+            .
+
+  create-release:
+    needs: build-images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Flux App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.FLUX_APP_ID }}
+          private-key: ${{ secrets.FLUX_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Pin image tags in prod overlay
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          sed -i 's|\(image: ${ACR_LOGIN_SERVER}/scoped/[^:]*\):.*|\1:v'"${VERSION}"'|' deploy/overlays/prod/images.yaml
+
+      - name: Commit pinned image tags
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/overlays/prod/images.yaml
+          git commit -m "release: pin prod images to v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin main "v${VERSION}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --generate-notes

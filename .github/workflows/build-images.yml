@@ -6,31 +6,31 @@ on:
       images:
         description: 'Comma-separated list of images to build (or "all")'
         required: false
-        default: 'all'
+        default: "all"
       tag:
-        description: 'Image tag to use (default: dev)'
+        description: "Image tag to use (default: dev)"
         required: false
-        default: 'dev'
+        default: "dev"
   push:
-    branches: [main, dev]
+    branches: [dev]
     paths:
-      - 'apps/**'
-      - 'packages/shared/**'
-      - 'packages/model-scanning/**'
-      - 'packages/db-migrations/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'tsconfig.base.json'
+      - "apps/**"
+      - "packages/shared/**"
+      - "packages/model-scanning/**"
+      - "packages/db-migrations/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "tsconfig.base.json"
   pull_request:
     branches: [dev]
     paths:
-      - 'apps/**'
-      - 'packages/shared/**'
-      - 'packages/model-scanning/**'
-      - 'packages/db-migrations/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'tsconfig.base.json'
+      - "apps/**"
+      - "packages/shared/**"
+      - "packages/model-scanning/**"
+      - "packages/db-migrations/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "tsconfig.base.json"
 
 permissions:
   id-token: write
@@ -150,7 +150,7 @@ jobs:
             changed: ${{ (needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
         exclude:
           - image:
-              changed: 'false'
+              changed: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -261,7 +261,7 @@ jobs:
             changed: ${{ (needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
         exclude:
           - image:
-              changed: 'false'
+              changed: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -308,6 +308,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        image:
+          [
+            api,
+            coder-acp-claude-code,
+            coder-acp-copilot,
+            judge,
+            portal,
+            token-manager,
+            model-scanner-copilot,
+            model-scanner-anthropic,
+            report-generator,
+            db-migrations,
+          ]
     steps:
       - uses: actions/checkout@v4
 
