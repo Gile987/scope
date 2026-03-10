@@ -29,6 +29,7 @@ export interface ConversationTurn {
   timestamp: string;
   criteriaResults?: CriterionResult[];
   harUrl?: string;
+  videoUrls?: string[];
 }
 
 export interface Scenario {
@@ -77,6 +78,7 @@ export interface Run {
   skills?: string[];
   skillRevisions?: string[];
   harUrl?: string;
+  videoUrls?: string[];
 }
 
 export const WORKER_TYPES = [

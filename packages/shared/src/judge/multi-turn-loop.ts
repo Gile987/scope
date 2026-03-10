@@ -130,6 +130,7 @@ export async function runMultiTurnLoop(
     await iterLog("info", "Calling coding agent...");
     let codingResponse: string;
     let turnHarUrl: string | undefined;
+    const turnVideoUrls: string[] = [];
     try {
       const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs });
       codingResponse = workerResult.response;
@@ -150,9 +151,65 @@ export async function runMultiTurnLoop(
           await iterLog("warn", `Failed to upload HAR file: ${msg}`);
         }
       }
+
+      // Upload video files to blob storage if available
+      if (workerResult.videoFilePaths && workerResult.videoFilePaths.length > 0) {
+        try {
+          for (let i = 0; i < workerResult.videoFilePaths.length; i++) {
+            const videoBlobName = `${requestId}/iteration-${iteration}/video-${i}.webm`;
+            const videoUrl = await blobStorage.uploadFile(
+              workerResult.videoFilePaths[i],
+              videoBlobName,
+              "video/webm"
+            );
+            turnVideoUrls.push(videoUrl);
+          }
+          await iterLog("info", "Video files uploaded", { videoUrls: turnVideoUrls });
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await iterLog("warn", `Failed to upload video files: ${msg}`);
+        }
+      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       await iterLog("error", `Coding agent failed: ${errorMsg}`, { error: errorMsg });
+
+      // Extract video paths from the error if the worker attached them
+      const errorVideoPaths: string[] = (error as any)?.videoFilePaths ?? [];
+      let errorVideoUrls: string[] = [];
+      if (errorVideoPaths.length > 0) {
+        try {
+          for (let i = 0; i < errorVideoPaths.length; i++) {
+            const videoBlobName = `${requestId}/iteration-${iteration}/video-${i}.webm`;
+            const videoUrl = await blobStorage.uploadFile(
+              errorVideoPaths[i],
+              videoBlobName,
+              "video/webm"
+            );
+            errorVideoUrls.push(videoUrl);
+          }
+          await iterLog("info", "Video files uploaded from failed iteration", { videoUrls: errorVideoUrls });
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await iterLog("warn", `Failed to upload video files: ${msg}`);
+        }
+      }
+
+      // Persist a partial turn so video URLs are not lost
+      const partialTurn: ConversationTurn = {
+        iteration,
+        codingAgentResponse: `Coding agent failed: ${errorMsg}`,
+        judgeFeedback: "",
+        snapshotUrl: "",
+        passed: false,
+        timestamp: new Date(),
+        ...(errorVideoUrls.length > 0 && { videoUrls: errorVideoUrls }),
+      };
+      turns.push(partialTurn);
+      if (onTurnComplete) {
+        await onTurnComplete(partialTurn);
+      }
+
       return {
         turns,
         passed: false,
@@ -176,6 +233,23 @@ export async function runMultiTurnLoop(
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       await iterLog("error", `Snapshot upload failed: ${errorMsg}`, { error: errorMsg });
+
+      // Persist a partial turn so video/HAR URLs are not lost
+      const partialTurn: ConversationTurn = {
+        iteration,
+        codingAgentResponse: codingResponse,
+        judgeFeedback: `Snapshot upload failed: ${errorMsg}`,
+        snapshotUrl: "",
+        passed: false,
+        timestamp: new Date(),
+        ...(turnHarUrl && { harUrl: turnHarUrl }),
+        ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+      };
+      turns.push(partialTurn);
+      if (onTurnComplete) {
+        await onTurnComplete(partialTurn);
+      }
+
       return {
         turns,
         passed: false,
@@ -239,6 +313,7 @@ export async function runMultiTurnLoop(
       timestamp: new Date(),
       criteriaResults,
       ...(turnHarUrl && { harUrl: turnHarUrl }),
+      ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
     };
     turns.push(turn);
 
