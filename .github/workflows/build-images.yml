@@ -58,38 +58,42 @@ jobs:
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: changes
         with:
-          base: ${{ github.event.before }}
-          filters: |
-            shared:
-              - 'packages/shared/**'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'tsconfig.base.json'
-            model-scanning:
-              - 'packages/model-scanning/**'
-            api:
-              - 'apps/api/**'
-            judge:
-              - 'apps/judge/**'
-            portal:
-              - 'apps/portal/**'
-            coder-acp-copilot:
-              - 'apps/workers/coder-acp-copilot/**'
-            coder-acp-claude-code:
-              - 'apps/workers/coder-acp-claude-code/**'
-            token-manager:
-              - 'apps/token-manager/**'
-            model-scanner-copilot:
-              - 'apps/model-scanners/copilot/**'
-            model-scanner-anthropic:
-              - 'apps/model-scanners/anthropic/**'
-            report-generator:
-              - 'apps/workers/report-generator/**'
-            db-migrations:
-              - 'packages/db-migrations/**'
+          fetch-depth: 0
+      - name: Detect changed paths
+        id: changes
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+          fi
+          CHANGED=$(git diff --name-only "$BASE_SHA" "${{ github.sha }}" || true)
+
+          check_paths() {
+            local name="$1"
+            shift
+            for pattern in "$@"; do
+              if echo "$CHANGED" | grep -qE "$pattern"; then
+                echo "${name}=true" >> "$GITHUB_OUTPUT"
+                return
+              fi
+            done
+            echo "${name}=false" >> "$GITHUB_OUTPUT"
+          }
+
+          check_paths shared '^packages/shared/' '^package\.json$' '^pnpm-lock\.yaml$' '^tsconfig\.base\.json$'
+          check_paths model-scanning '^packages/model-scanning/'
+          check_paths api '^apps/api/'
+          check_paths judge '^apps/judge/'
+          check_paths portal '^apps/portal/'
+          check_paths coder-acp-copilot '^apps/workers/coder-acp-copilot/'
+          check_paths coder-acp-claude-code '^apps/workers/coder-acp-claude-code/'
+          check_paths token-manager '^apps/token-manager/'
+          check_paths model-scanner-copilot '^apps/model-scanners/copilot/'
+          check_paths model-scanner-anthropic '^apps/model-scanners/anthropic/'
+          check_paths report-generator '^apps/workers/report-generator/'
+          check_paths db-migrations '^packages/db-migrations/'
 
   build-on-push:
     if: >-
@@ -168,6 +172,21 @@ jobs:
             echo "overlay=integration" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Load pinned versions
+        id: versions
+        run: |
+          EXTRA_ARGS=""
+          for f in apps/workers/${{ matrix.image.name }}/versions.env apps/${{ matrix.image.name }}/versions.env; do
+            if [ -f "$f" ]; then
+              while IFS='=' read -r key value; do
+                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+                EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+              done < "$f"
+              break
+            fi
+          done
+          echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
+
       - name: Build and push to ACR
         run: |
           SHORT_SHA="${{ github.sha }}"
@@ -183,6 +202,7 @@ jobs:
             --image "scoped/${{ matrix.image.name }}:${ENV_TAG}-${TIMESTAMP}-${SHORT_SHA}" \
             --build-arg GIT_COMMIT=${{ github.sha }} \
             --build-arg BUILD_TIME=${BUILD_TIME} \
+            ${{ steps.versions.outputs.extra_args }} \
             --file "${{ matrix.image.dockerfile }}" \
             .
 
@@ -252,6 +272,21 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Load pinned versions
+        id: versions
+        run: |
+          EXTRA_ARGS=""
+          for f in apps/workers/${{ matrix.image.name }}/versions.env apps/${{ matrix.image.name }}/versions.env; do
+            if [ -f "$f" ]; then
+              while IFS='=' read -r key value; do
+                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+                EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+              done < "$f"
+              break
+            fi
+          done
+          echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
+
       - name: Build and push to ACR
         run: |
           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -262,6 +297,7 @@ jobs:
             --image "scoped/${{ matrix.image.name }}:pr-${{ github.event.pull_request.number }}-latest" \
             --build-arg GIT_COMMIT=${{ github.event.pull_request.head.sha }} \
             --build-arg BUILD_TIME=${BUILD_TIME} \
+            ${{ steps.versions.outputs.extra_args }} \
             --file "${{ matrix.image.dockerfile }}" \
             .
 
@@ -308,6 +344,21 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Load pinned versions
+        id: versions
+        run: |
+          EXTRA_ARGS=""
+          for f in apps/workers/${{ matrix.image }}/versions.env apps/${{ matrix.image }}/versions.env; do
+            if [ -f "$f" ]; then
+              while IFS='=' read -r key value; do
+                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+                EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+              done < "$f"
+              break
+            fi
+          done
+          echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
+
       - name: Build and push to ACR
         if: steps.check.outputs.build == 'true'
         run: |
@@ -324,5 +375,6 @@ jobs:
             --image "scoped/${{ matrix.image }}:${TAG}-${TIMESTAMP}-${SHORT_SHA}" \
             --build-arg GIT_COMMIT=${{ github.sha }} \
             --build-arg BUILD_TIME=${BUILD_TIME} \
+            ${{ steps.versions.outputs.extra_args }} \
             --file "${{ steps.dockerfile.outputs.path }}" \
             .
