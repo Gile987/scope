@@ -68,14 +68,14 @@ export function TokenDetail() {
       queryClient.invalidateQueries({ queryKey: ["token", id] });
       queryClient.invalidateQueries({ queryKey: ["tokens"] });
       setEditing(false);
-      toast.success("Token updated");
+      toast.success("Key updated");
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => api.deleteToken(id!),
     onSuccess: () => {
-      toast.success("Token deleted");
+      toast.success("Key deleted");
       navigate("/tokens");
     },
   });
@@ -111,10 +111,10 @@ export function TokenDetail() {
     return (
       <div className="space-y-4 max-w-2xl">
         <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/tokens")}>
-          <ArrowLeft className="h-4 w-4" /> Back to Tokens
+          <ArrowLeft className="h-4 w-4" /> Back to Keys
         </Button>
         <div className="text-center py-12 text-muted-foreground">
-          Token not found
+          Key not found
         </div>
       </div>
     );
@@ -124,7 +124,7 @@ export function TokenDetail() {
     <div className="space-y-6 max-w-2xl">
       {/* Back link */}
       <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/tokens")}>
-        <ArrowLeft className="h-4 w-4" /> Back to Tokens
+        <ArrowLeft className="h-4 w-4" /> Back to Keys
       </Button>
 
       {/* Header */}
@@ -157,9 +157,9 @@ export function TokenDetail() {
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete token?</AlertDialogTitle>
+                <AlertDialogTitle>Delete key?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This soft-deletes the token. The KeyVault secret is preserved and can be restored.
+                  This soft-deletes the key. The KeyVault secret is preserved and can be restored.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -298,7 +298,7 @@ export function TokenDetail() {
                 <Textarea
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  placeholder="e.g. John's CI token"
+                  placeholder="e.g. John's CI key"
                   maxLength={500}
                   rows={2}
                 />
