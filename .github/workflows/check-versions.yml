@@ -129,7 +129,8 @@ jobs:
           ISSUE_URL=$(gh issue create \
             --title "${{ steps.check.outputs.title }}" \
             --body "$BODY" \
-            --label "dependencies")
+            --label "dependencies" \
+            --assignee "Copilot")
           echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
 
       - name: Write job summary
