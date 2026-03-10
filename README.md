@@ -1,173 +1,115 @@
-# Coding Agent Workers with Real-Time Logging (MongoDB + Azure Managed Redis)
+# Scope MT
 
-This experiment demonstrates a TypeScript-based API with **three coding agent workers** and **real-time log streaming** using Azure Container Apps:
+**Scope MT** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers, evaluates results using a criteria DAG, and provides real-time log streaming — all backed by MongoDB, Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
 
-- **API**: Express.js REST API that routes coding requests to different agent workers and streams logs via SSE
-- **coder-acp-claude-code**: Claude Code agent using Agent Client Protocol (ACP)
-- **coder-acp-copilot**: GitHub Copilot agent using Agent Client Protocol (ACP)
-- **Storage Queues**: Separate queue per worker for message routing
-- **CosmosDB (MongoDB API)**: Shared database for request status tracking and log persistence
-- **Azure Managed Redis**: Real-time log publishing via Pub/Sub
-- **Azure Key Vault**: Secure storage for API keys and auth state
+## Components
+
+| Component | Description |
+|-----------|-------------|
+| **API** | Express.js REST API — routes requests to workers, streams logs via SSE |
+| **Judge** | Evaluates completed runs against a criteria DAG using Copilot SDK |
+| **Portal** | React web UI for managing and inspecting runs |
+| **CLI** | Command-line interface for submitting runs, managing criteria, and more |
+| **coder-acp-claude-code** | Claude Code agent worker (ACP) |
+| **coder-acp-copilot** | GitHub Copilot agent worker (ACP) |
+| **report-generator** | Generates evaluation reports from completed runs |
 
 ## Architecture
 
-```
-                                    ┌─────────────────┐     ┌─────────────────────────┐
-                                ┌──▶│ Queue claude    │────▶│ coder-acp-claude-code   │───┐
-┌─────────┐     ┌───────────┐   │   └─────────────────┘     │ (Claude Code ACP)       │   │
-│ Client  │────▶│ API (ACA) │───┤                           └─────────────────────────┘   │
-└─────────┘     └───────────┘   │   ┌─────────────────┐     ┌─────────────────────────┐   │
-       ▲        │           │   ├──▶│ Queue copilot   │────▶│ coder-acp-copilot       │───┤
-       │        │  SSE ◀────┼───┤   └─────────────────┘     │ (Copilot ACP)           │   │
-       │        └───────────┘   │                           └─────────────────────────┘   │
-       │                        │   ┌─────────────────┐     ┌─────────────────────────┐   │
-       │                            └─────────────────┘     │ (Playwright + VS Code)  │   │
-       │                                                    └─────────────────────────┘   │
-       │        ┌─────────────────┐     ┌─────────────────┐                               │
-       └────────│  Redis Pub/Sub  │◀────│   Log Events    │◀──────────────────────────────┤
-                └─────────────────┘     └─────────────────┘                               │
-                                                                                          │
-                                        ┌─────────────────┐                               │
-                                        │    CosmosDB     │◀──────────────────────────────┘
-                                        └─────────────────┘
-```
+```mermaid
+flowchart LR
+    Client([Client / CLI])
+    Portal([Portal])
+    API[API]
+    Judge[Judge]
 
-## Features
+    subgraph Queues
+        Q1[claude-code]
+        Q2[copilot]
+        Q3[vscode-web]
+    end
 
-### Coding Agent Workers
+    subgraph Workers
+        W1[coder-acp-claude-code]
+        W2[coder-acp-copilot]
+    end
 
-| Worker | Agent | Protocol | Use Case |
-|--------|-------|----------|----------|
-| coder-acp-claude-code | Claude Code | ACP (stdio) | AI coding with Claude |
-| coder-acp-copilot | GitHub Copilot | ACP (stdio) | AI coding with Copilot CLI |
+    MongoDB[(MongoDB)]
+    Redis[(Redis Pub/Sub)]
+    Blob[(Blob Storage)]
 
-### Real-Time Log Streaming
-Workers publish step-by-step progress logs that clients can stream in real-time:
-- **Redis Pub/Sub** for instant log delivery (milliseconds latency)
-- **Server-Sent Events (SSE)** for browser and CLI compatibility
-- **CosmosDB persistence** for log replay and history
-
-## CLI Usage
-
-The CLI provides an easy way to submit requests and stream logs.
-
-```bash
-export $(azd env get-values | xargs)
-
-# Run demo TUI with concurrent requests to all coders
-pnpm cli demo -m "create a hello world app" -c 2 -u $API_ENDPOINT
-
-# Submit to Copilot and stream logs
-pnpm cli submit -m "Explain this code: const x = 42;" -w coder-acp-copilot -u $API_ENDPOINT
-
-# Submit to Claude Code
-pnpm cli submit -m "Create a hello world function in Python" -w coder-acp-claude-code -u $API_ENDPOINT
-
-# Submit to VS Code Web
-
-# Submit without streaming logs
-pnpm cli submit -m "Say hello" -w coder-acp-copilot -u $API_ENDPOINT --no-stream
-
-# Check request status
-pnpm cli status <request-id> -u $API_ENDPOINT
-
-# Stream logs for existing request
-pnpm cli logs <request-id> -u $API_ENDPOINT --from-start
-
-# List all requests
-pnpm cli list -u $API_ENDPOINT
+    Client -->|REST| API
+    Portal -->|REST| API
+    API -->|SSE| Client
+    API --> Q1 & Q2 & Q3
+    Q1 --> W1
+    Q2 --> W2
+    Q3 --> W3
+    W1 & W2 & W3 -->|status + logs| MongoDB
+    W1 & W2 & W3 -->|real-time logs| Redis
+    W1 & W2 & W3 -->|workspace snapshots| Blob
+    Redis -->|subscribe| API
+    Judge -->|evaluate| MongoDB
 ```
 
-## API Endpoints
-
-### Health Check
-```bash
-export $(azd env get-values | xargs) && curl $API_ENDPOINT/health
-```
-
-### Get Request Status
-```bash
-curl $API_ENDPOINT/api/v1/requests/:id
-```
-
-### Stream Logs (SSE)
-```bash
-curl -N "$API_ENDPOINT/api/v1/requests/:id/logs?fromStart=true"
-```
-
-## Local Development
-
-### Quickstart
-
-```bash
-GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot
-```
-
-This starts all core services (MongoDB, Redis, Azurite, API, judge, token-manager) plus the Copilot worker and report generator — with hot reload. Edit any source file and the running service restarts automatically.
+## Quick Start
 
 ### Prerequisites
 
 - Node.js 22+
-- pnpm
-- Docker & Docker Compose
-- GitHub CLI (`gh`) with authentication
-- Azure CLI (for Azure deployment)
+- [pnpm](https://pnpm.io/)
+- Docker & Docker Compose — on macOS, [OrbStack](https://orbstack.dev/) is recommended over Docker Desktop (faster, lighter)
+- [GitHub CLI](https://cli.github.com/) (`gh`) with authentication
 
-### Local Development with Docker Compose
+### Run locally
 
 ```bash
-# Start local services (MongoDB, Redis, Azurite)
-pnpm docker:up
-
-# Copy environment template
-cp .env.example .env
-
-# Set required credentials in .env:
-# - ANTHROPIC_API_KEY (for coder-acp-claude-code)
-# - GITHUB_TOKEN (for coder-acp-copilot)
-
-# Install dependencies
 pnpm install
-
-# Build all packages
-pnpm build
-
-# Run API locally
-pnpm dev:api
-
-# Run workers locally (separate terminals)
-pnpm dev:coder-acp-claude-code
-pnpm dev:coder-acp-copilot
+GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot
 ```
 
-### Environment Variables
+This starts all core services (MongoDB, Redis, Azurite, API, Judge, Token Manager) plus the Copilot worker, report generator, and **portal** — with hot reload. Edit any source file and the running service restarts automatically.
 
-See `.env.example` for all required variables.
+### Accessing the Portal
+
+Once the services are running, open the portal in your browser:
+
+```
+http://localhost:5100
+```
+
+Or use the convenience command to open it automatically:
+
+```bash
+pnpm open:portal
+```
+
+> **Worktree note:** In a [git worktree](#git-worktree-support), ports are offset for isolation so the portal may run on a different port (e.g. `5103`). Check `PORTAL_PORT` in your `.env` file for the actual port, or just run `pnpm open:portal` — it reads `.env` and opens the correct URL.
+
+### Other useful commands
+
+```bash
+# Start only infrastructure services (MongoDB, Redis, Azurite)
+pnpm docker:up:infra
+
+# Run individual services locally (after starting infra)
+pnpm dev:api
+pnpm dev:portal
+pnpm dev:coder-acp-copilot
+pnpm dev:coder-acp-claude-code
+```
 
 ### Hot Reload with Docker Compose
 
-For active development, use the dev mode which provides **hot reload** for all services:
+The `docker:dev:*` commands use [Docker Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/) to sync source files into containers:
 
 ```bash
-# Start core services (API, judge, token-manager) with hot reload
-pnpm docker:dev
-
-# With specific worker profiles
-pnpm docker:dev:claude-code    # + Claude Code + Report Generator
-pnpm docker:dev:copilot        # + Copilot + Report Generator
-pnpm docker:dev:portal         # + Portal (Vite HMR)
+pnpm docker:dev:claude-code    # Core + Claude Code + Report Generator + Portal
+pnpm docker:dev:copilot        # Core + Copilot + Report Generator + Portal
+pnpm docker:dev:portal         # Core + Portal (Vite HMR)
 pnpm docker:dev:all            # All services
 ```
 
-**How it works:**
-- Uses [Docker Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/) to sync source files into containers
-- Backend services run `tsx watch` — restarts in ~1-2 seconds on file changes
-- Portal runs Vite dev server — instant HMR in the browser
-- Shared package (`packages/shared`) changes are recompiled automatically inside each container
-- `package.json` or lockfile changes trigger a full image rebuild
-
-**Change propagation speeds:**
 | Change | Reload Time |
 |--------|-------------|
 | Service source (`apps/*/src`) | ~1-2s (tsx watch restart) |
@@ -176,101 +118,95 @@ pnpm docker:dev:all            # All services
 | Config files (`config/`) | ~1-2s (tsx watch restart) |
 | Dependencies (`package.json`, lockfile) | Full rebuild (~30-60s) |
 
+### Git Worktree Support
+
+Docker Compose works seamlessly in [git worktrees](https://git-scm.com/docs/git-worktree). The `scripts/worktree-env.ts` script runs automatically before every `docker:*` / `pnpm docker:*` command and assigns each worktree a unique port offset so multiple stacks can run in parallel without conflicts.
+
+- **Main repo**: offset 0 — base ports used as-is (e.g. API on 3100, MongoDB on 27100)
+- **Worktrees**: offset 1–99 — ports are shifted (e.g. offset 1 → API on 3101, MongoDB on 27101)
+- The offset is persisted in a `.port-offset` file inside each worktree and reused across restarts.
+
+No manual configuration is needed — just run `pnpm docker:dev:copilot` from any worktree.
+
+### Environment Variables
+
+See [ENV_VARIABLES.md](ENV_VARIABLES.md) for a full reference of configurable environment variables.
+
+## CLI
+
+The CLI is the primary interface for interacting with Scope MT. Show available commands with:
+
+```bash
+pnpm cli --help
+```
+
+It is organized into subcommand groups (`run`, `criteria`, …). Use `--help` at any level to discover options:
+
+```bash
+pnpm cli run --help
+pnpm cli run submit --help
+pnpm cli criteria --help
+```
+
+## Configuration
+
+The `config/` directory contains YAML-based configuration for the evaluation system:
+
+| Directory | Purpose |
+|-----------|---------|
+| `config/criteria/` | Evaluation criteria definitions (used by the Judge DAG) |
+| `config/personas/` | Judge personas (e.g. `demanding-senior`, `friendly-senior`) |
+| `config/scenarios/` | Benchmark scenario definitions |
+| `config/traits.yaml` | Trait dimensions (personality, experience, verbosity, type) |
+
+## Documentation
+
+The [`docs/`](docs/README.md) directory contains architecture and research documentation:
+
+| Path | Contents |
+|------|----------|
+| `docs/architecture/` | System design — app design, criteria provider, DB migrations, token manager, skills |
+| `docs/research/` | Research spikes — delta storage, real-time data flow |
+
 ## Deployment
 
-```bash
-# Login to Azure
-azd auth login
+Scope MT is a Kubernetes-native application deployed via [FluxCD](https://fluxcd.io/) GitOps. The `deploy/` directory contains Kustomize base manifests and environment overlays that FluxCD reconciles automatically.
 
-# Create environment
-azd env new myenv
-
-# Deploy
-azd up
-```
-
-### Configure Worker Credentials
-
-Worker credentials (GitHub tokens, Anthropic API keys) are managed centrally via the **Token Manager** service. Workers acquire tokens dynamically at runtime — no static secrets are injected into pods.
-
-To register tokens, use the Token Manager admin UI in the portal:
-
-1. Navigate to the portal → **Tokens** page
-2. Click **Register Token** and paste your token (e.g., `gho_` from `gh auth token`, or `sk-ant-` Anthropic key)
-3. The token's capabilities are auto-detected and it becomes available to workers immediately
-
-See [Token Manager Architecture](docs/architecture/token-manager.md) for details on token types, capabilities, and the acquisition flow.
-
-#### VS Code Web Auth State
-
-The VS Code Web worker requires GitHub authentication via Playwright browser state stored in Key Vault:
-
-```bash
-# Upload auth state (write-only, stored in Key Vault)
-curl -X PUT "$(azd env get-values | grep API_ENDPOINT | cut -d= -f2 | tr -d '"')/api/v1/auth/vscode-web" \
-  -H "Content-Type: application/json" \
-  -d @github-storage.json
-
-# Check if auth state exists
-curl "$(azd env get-values | grep API_ENDPOINT | cut -d= -f2 | tr -d '"')/api/v1/auth/vscode-web/status"
-
-# Delete auth state
-curl -X DELETE "$(azd env get-values | grep API_ENDPOINT | cut -d= -f2 | tr -d '"')/api/v1/auth/vscode-web"
-```
-
-### Deploy Individual Services
-
-Use the postprovision script to build and deploy specific services:
-
-```bash
-# Deploy all services
-./infra/hooks/postprovision.sh
-
-# Deploy only a specific service
-./infra/hooks/postprovision.sh api
-./infra/hooks/postprovision.sh coder-acp-claude-code
-./infra/hooks/postprovision.sh coder-acp-copilot
-```
-
-## Azure Resources
-
-- **Azure Container Apps Environment**: Hosting for API and workers
-- **Azure Container Registry**: Container image storage
-- **Azure Cosmos DB (MongoDB API)**: Request and log persistence
-- **Azure Storage Account**: Queue-based message routing
-- **Azure Managed Redis**: Real-time log pub/sub
-- **Azure Key Vault**: API keys, auth state storage
+Infrastructure provisioning (AKS cluster, Azure resources) is managed in the [scope-mt-infra](https://github.com/growth-ecosystems/scope-mt-infra) repository.
 
 ## Project Structure
 
 ```
-├── azure.yaml
-├── docker-compose.yml
-├── .env.example
-├── infra/
-│   ├── main.bicep
-│   ├── resources.bicep
-│   └── modules/
+scope-mt-app/
 ├── apps/
-│   ├── api/
-│   │   ├── Dockerfile
-│   │   └── src/index.ts
-│   ├── cli/
-│   ├── judge/
-│   │   └── Dockerfile
-│   ├── portal/
-│   │   └── Dockerfile
+│   ├── api/                          # REST API + SSE
+│   ├── cli/                          # CLI (commander + ink TUI)
+│   ├── judge/                        # Criteria DAG evaluator
+│   ├── portal/                       # React + Vite web UI
+│   ├── model-scanners/
+│   │   ├── anthropic/                # Anthropic model scanner
+│   │   └── copilot/                  # Copilot model scanner
+│   ├── token-manager/                # Token management service
 │   └── workers/
-│       ├── coder-acp-claude-code/
-│       │   └── Dockerfile
-│       ├── coder-acp-copilot/
-│       │   └── Dockerfile
-│           └── Dockerfile
+│       ├── coder-acp-claude-code/    # Claude Code worker (ACP)
+│       ├── coder-acp-copilot/        # Copilot worker (ACP)
+│       └── report-generator/         # Report generation worker
 ├── packages/
-│   └── shared/src/
+│   ├── shared/                       # Shared library (criteria graph, MongoDB, Redis, etc.)
+│   ├── db-migrations/                # Database migration scripts
+│   └── model-scanning/               # Model scanning library
+├── config/
+│   ├── criteria/                     # Evaluation criteria YAML definitions
+│   ├── personas/                     # Judge persona configurations
+│   ├── scenarios/                    # Benchmark scenario definitions
+│   └── traits.yaml                   # Trait dimensions
+├── deploy/
+│   ├── base/                         # Kustomize base manifests
+│   ├── overlays/                     # Environment overlays (integration, preview, prod)
+│   ├── image-automation/             # FluxCD image automation
+│   └── pr-envs/                      # PR preview environments
+├── docs/                             # Architecture & research documentation
+├── scripts/                          # Utility scripts
+├── docker-compose.yml
 └── package.json
 ```
-
-## License
-
-MIT
