@@ -1,0 +1,6 @@
+id: asks_for_azure
+prompt: |
+  The task prompt specifically mentions Azure cloud services, Azure deployment,
+  or Azure-specific technologies (e.g. Azure Functions, App Service, AKS).
+depends_on:
+  - asks_for_cloud

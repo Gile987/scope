@@ -2,8 +2,11 @@ node_modules/
 dist/
 .env
 .env.local
+.port-offset
 *.log
 .DS_Store
 .azure/
 .venv/
 downloads/
+ctrf/
+coverage/

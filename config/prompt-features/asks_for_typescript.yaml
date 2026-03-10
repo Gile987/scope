@@ -1,0 +1,6 @@
+id: asks_for_typescript
+prompt: |
+  The task prompt asks the agent to use TypeScript, or mentions TypeScript-specific
+  features like type annotations, interfaces, or tsconfig.
+depends_on:
+  - asks_for_node

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -14,14 +14,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || `HTTP ${res.status}`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
 export const api = {
-  /** List all runs, optionally filtered by worker */
-  listRuns: (worker?: string): Promise<Run[]> => {
+  /** List all runs, optionally filtered by worker, task prompt, and/or MDP criteria state */
+  listRuns: (opts?: { worker?: string; taskPromptId?: string; criteria?: string }): Promise<Run[]> => {
     const params = new URLSearchParams();
-    if (worker) params.set("worker", worker);
+    if (opts?.worker) params.set("worker", opts.worker);
+    if (opts?.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
+    if (opts?.criteria) params.set("criteria", opts.criteria);
     const qs = params.toString();
     return request(`/requests${qs ? `?${qs}` : ""}`);
   },
@@ -35,10 +38,13 @@ export const api = {
   submitRun: (body: {
     scenario: { task: string; criteria: string[]; version?: "v1" | "v2" };
     worker: string;
+    model?: string;
     maxIterations?: number;
     personaInstructions?: string;
     persona?: { personality: string; experience: string; verbosity: string; type: string };
     count?: number;
+    mcpServers?: string[];
+    skills?: string[];
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     return request(`/requests?worker=${encodeURIComponent(worker)}`, {
@@ -61,16 +67,27 @@ export const api = {
   },
 
   /** Bulk re-submit runs (create new runs from existing ones) */
-  bulkResubmitRuns: (ids: string[], count = 1): Promise<{ submitted: number; failed: string[]; newIds: string[] }> => {
+  bulkResubmitRuns: (ids: string[], count = 1, overrides?: BulkResubmitOverrides): Promise<{ submitted: number; failed: string[]; newIds: string[] }> => {
     return request(`/requests/bulk-resubmit`, {
       method: "POST",
-      body: JSON.stringify({ ids, count }),
+      body: JSON.stringify({ ids, count, ...(overrides ? { overrides } : {}) }),
     });
   },
 
   /** Get snapshot download URL for a specific iteration */
   snapshotUrl: (id: string, iteration: number): string => {
     return `${BASE}/requests/${id}/snapshots/${iteration}`;
+  },
+
+  /** Get HAR file download URL for a request (optionally per-iteration) */
+  harUrl: (id: string, iteration?: number): string => {
+    const qs = iteration ? `?iteration=${iteration}` : "";
+    return `${BASE}/requests/${id}/har${qs}`;
+  },
+
+  /** Get full run archive download URL (.tar.gz with run.yaml + iteration snapshots) */
+  archiveUrl: (id: string): string => {
+    return `${BASE}/requests/${id}/archive`;
   },
 
   /** SSE endpoint URL for log streaming */
@@ -127,9 +144,171 @@ export const api = {
     });
   },
 
+  // ─── Prompt Features ───────────────────────────────────────────────────────
+
+  /** List all prompt features, optionally filtered by search query */
+  listPromptFeatures: (q?: string): Promise<PromptFeatureDocument[]> => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    const qs = params.toString();
+    return request(`/prompt-features${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single prompt feature by ID */
+  getPromptFeature: (id: string): Promise<PromptFeatureDocument & { dependents: string[] }> => {
+    return request(`/prompt-features/${id}`);
+  },
+
+  /** Create a new prompt feature */
+  createPromptFeature: (body: { id: string; prompt: string; dependsOn?: string[] }): Promise<PromptFeatureDocument> => {
+    return request("/prompt-features", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update an existing prompt feature */
+  updatePromptFeature: (id: string, body: { prompt?: string; dependsOn?: string[] }): Promise<PromptFeatureDocument> => {
+    return request(`/prompt-features/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Delete a prompt feature */
+  deletePromptFeature: (id: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/prompt-features/${id}`, { method: "DELETE" });
+  },
+
+  /** Get the full prompt feature dependency graph */
+  getPromptFeatureGraph: (): Promise<PromptFeatureGraphData> => {
+    return request("/prompt-features/graph");
+  },
+
+  /** Generate a prompt feature prompt from a behavior description using AI */
+  generatePromptFeaturePrompt: (behavior: string, currentId?: string): Promise<GeneratePromptResponse> => {
+    return request("/prompt-features/generate-prompt", {
+      method: "POST",
+      body: JSON.stringify({ behavior, ...(currentId && { currentId }) }),
+    });
+  },
+
+  // ─── Task Prompts ──────────────────────────────────────────────────────────
+
+  /** List all task prompts (paginated, optional search) */
+  listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string }): Promise<{ items: TaskPrompt[]; total: number }> => {
+    const params = new URLSearchParams();
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.offset) params.set("offset", String(opts.offset));
+    if (opts?.search) params.set("search", opts.search);
+    const qs = params.toString();
+    return request(`/task-prompts${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single task prompt by ID */
+  getTaskPrompt: (id: string): Promise<TaskPrompt> => {
+    return request(`/task-prompts/${encodeURIComponent(id)}`);
+  },
+
+  /** Create (or find existing) task prompt — idempotent */
+  createTaskPrompt: (text: string): Promise<TaskPrompt> => {
+    return request("/task-prompts", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+  },
+
+  /** Soft-delete a task prompt */
+  deleteTaskPrompt: (id: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/task-prompts/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  /** Extract prompt features for a task prompt entity */
+  extractTaskPromptFeatures: (id: string, opts?: { model?: string; force?: boolean }): Promise<TaskPromptFeatureExtractionResult> => {
+    const url = opts?.force ? `/task-prompts/${encodeURIComponent(id)}/extract-features?force=true` : `/task-prompts/${encodeURIComponent(id)}/extract-features`;
+    return request(url, {
+      method: "POST",
+      body: JSON.stringify({ ...(opts?.model && { model: opts.model }) }),
+    });
+  },
+
+  /** Extract features from raw text without persisting a task prompt entity */
+  extractFeaturesFromText: (text: string, opts?: { model?: string }): Promise<TaskPromptFeatureExtractionResult> => {
+    return request(`/prompt-features/extract-from-text`, {
+      method: "POST",
+      body: JSON.stringify({ text, ...(opts?.model && { model: opts.model }) }),
+    });
+  },
+
+  /** Toggle a single feature's detected status on a task prompt */
+  toggleTaskPromptFeature: (id: string, featureId: string, detected: boolean): Promise<TaskPrompt> => {
+    return request(`/task-prompts/${encodeURIComponent(id)}/features/${encodeURIComponent(featureId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ detected }),
+    });
+  },
+
+  // ─── Agents ─────────────────────────────────────────────────────────────────
+
+  /** List all coding agents */
+  listAgents: (): Promise<CodingAgent[]> => {
+    return request("/agents");
+  },
+
+  /** Get a single coding agent by ID */
+  getAgent: (id: string): Promise<CodingAgent> => {
+    return request(`/agents/${encodeURIComponent(id)}`);
+  },
+
+  /** Update a coding agent */
+  updateAgent: (id: string, body: Partial<Pick<CodingAgent, 'name' | 'description' | 'supportedModels' | 'defaultModel'>>): Promise<CodingAgent> => {
+    return request(`/agents/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a coding agent */
+  deleteAgent: (id: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  // ─── MCP Servers ────────────────────────────────────────────────────────────
+
+  /** List all MCP servers */
+  listMcpServers: (): Promise<McpServerDocument[]> => {
+    return request("/mcp/servers");
+  },
+
+  /** Get a single MCP server by slug */
+  getMcpServer: (slug: string): Promise<McpServerDocument> => {
+    return request(`/mcp/servers/${encodeURIComponent(slug)}`);
+  },
+
+  /** Create a new MCP server (upsert by slug) */
+  createMcpServer: (body: CreateMcpServerRequest): Promise<McpServerDocument> => {
+    return request("/mcp/servers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update an MCP server */
+  updateMcpServer: (slug: string, body: UpdateMcpServerRequest): Promise<McpServerDocument> => {
+    return request(`/mcp/servers/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete an MCP server */
+  deleteMcpServer: (slug: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/mcp/servers/${encodeURIComponent(slug)}`, { method: "DELETE" });
+  },
+
   // ─── Analysis ──────────────────────────────────────────────────────────────
 
-  /** Get analysis data for insights dashboard */
+  /** Get analysis data for statistics dashboard */
   getAnalysis: (kValues: number[] = [1, 2, 5], criteria?: string[]): Promise<AnalysisResponse> => {
     const params = new URLSearchParams();
     params.set("k", kValues.join(","));
@@ -137,5 +316,342 @@ export const api = {
       params.set("criteria", criteria.join(","));
     }
     return request(`/analysis?${params.toString()}`);
+  },
+
+  // ─── MDP ────────────────────────────────────────────────────────────────────
+
+  /** Get MDP state-transition graph (optionally incremental via since) */
+  getMdp: (criteria?: string[], since?: string, features?: string[]): Promise<MdpResponse> => {
+    const params = new URLSearchParams();
+    if (criteria && criteria.length > 0) {
+      params.set("criteria", criteria.join(","));
+    }
+    if (features && features.length > 0) {
+      params.set("features", features.join(","));
+    }
+    if (since) {
+      params.set("since", since);
+    }
+    const qs = params.toString();
+    return request(`/criteria/mdp${qs ? `?${qs}` : ""}`);
+  },
+
+  // ─── Reports ──────────────────────────────────────────────────────────────
+
+  /** Trigger report generation for a run — evaluates all templates and creates one report per match */
+  triggerReports: (requestId: string): Promise<{ triggered: number; reports: { id: string; requestId: string; templateId?: string; status: string }[] }> => {
+    return request("/reports/trigger", {
+      method: "POST",
+      body: JSON.stringify({ requestId }),
+    });
+  },
+
+  /** Create a single report for a run (optionally with a specific template) */
+  createReport: (requestId: string, templateId?: string): Promise<{ id: string; requestId: string; status: string }> => {
+    return request("/reports", {
+      method: "POST",
+      body: JSON.stringify({ requestId, ...(templateId ? { templateId } : {}) }),
+    });
+  },
+
+  /** Bulk trigger reports for multiple runs (evaluates all templates per run) */
+  bulkTriggerReports: (requestIds: string[]): Promise<{ created: number; reports: { reportId: string; requestId: string; templateId?: string }[]; notFound: string[] }> => {
+    return request("/reports/bulk-trigger", {
+      method: "POST",
+      body: JSON.stringify({ requestIds }),
+    });
+  },
+
+  /** Bulk create reports for multiple runs (legacy, no template evaluation) */
+  bulkCreateReports: (requestIds: string[]): Promise<{ created: number; reports: { reportId: string; requestId: string }[]; notFound: string[] }> => {
+    return request("/reports/bulk-create", {
+      method: "POST",
+      body: JSON.stringify({ requestIds }),
+    });
+  },
+
+  /** List all reports, optionally filtered by requestId */
+  listReports: (requestId?: string): Promise<Report[]> => {
+    const params = new URLSearchParams();
+    if (requestId) params.set("requestId", requestId);
+    const qs = params.toString();
+    return request(`/reports${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single report by ID */
+  getReport: (id: string): Promise<Report> => {
+    return request(`/reports/${id}`);
+  },
+
+  /** Get reports for a specific run */
+  getRunReports: (requestId: string): Promise<Report[]> => {
+    return request(`/requests/${requestId}/reports`);
+  },
+
+  /** Bulk report status for multiple runs (returns latest report status per requestId) */
+  bulkReportStatus: (requestIds: string[]): Promise<BulkReportStatus> => {
+    return request("/reports/bulk-status", {
+      method: "POST",
+      body: JSON.stringify({ requestIds }),
+    });
+  },
+
+  /** SSE endpoint URL for report log streaming */
+  reportLogsUrl: (id: string, fromStart = true): string => {
+    return `${BASE}/reports/${id}/logs?fromStart=${fromStart}`;
+  },
+
+  // ─── Report Templates ─────────────────────────────────────────────────────
+
+  /** List all report templates */
+  listReportTemplates: (): Promise<ReportTemplate[]> => {
+    return request("/report-templates");
+  },
+
+  /** Get a single report template by slug ID */
+  getReportTemplate: (id: string): Promise<ReportTemplate> => {
+    return request(`/report-templates/${id}`);
+  },
+
+  /** Create a new report template */
+  createReportTemplate: (body: {
+    id: string;
+    name: string;
+    userPrompt: string;
+    description?: string;
+    systemPrompt?: ReportTemplateSystemPrompt;
+    trigger?: ReportTrigger;
+  }): Promise<ReportTemplate> => {
+    return request("/report-templates", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update an existing report template */
+  updateReportTemplate: (id: string, body: {
+    name?: string;
+    description?: string;
+    userPrompt?: string;
+    systemPrompt?: ReportTemplateSystemPrompt | null;
+    trigger?: ReportTrigger | null;
+  }): Promise<ReportTemplate> => {
+    return request(`/report-templates/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Delete a report template (soft-delete) */
+  deleteReportTemplate: (id: string): Promise<void> => {
+    return request(`/report-templates/${id}`, { method: "DELETE" });
+  },
+
+  // ─── Version ───────────────────────────────────────────────────────────────
+
+  /** Get API version information (commit hash and build time) */
+  getVersion: (): Promise<{ commit: string; buildTime: string }> => {
+    return request("/version");
+  },
+
+  // ─── Token Manager ──────────────────────────────────────────────────────────
+
+  /** List all tokens (metadata only), optionally filtered by capability */
+  listTokens: (capability?: string): Promise<TokenDocument[]> => {
+    const params = new URLSearchParams();
+    if (capability) params.set("capability", capability);
+    const qs = params.toString();
+    return request(`/tokens${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single token by ID */
+  getToken: (id: string): Promise<TokenDocument> => {
+    return request(`/tokens/${id}`);
+  },
+
+  /** Preview token — validate without storing */
+  previewToken: (body: { type: string; value: string }): Promise<TokenValidationResult> => {
+    return request("/tokens/preview", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Register a new token */
+  createToken: (body: CreateTokenRequest): Promise<TokenDocument> => {
+    return request("/tokens", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update token metadata (enabled, expiresAt) */
+  updateToken: (id: string, body: UpdateTokenRequest): Promise<TokenDocument> => {
+    return request(`/tokens/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a token */
+  deleteToken: (id: string): Promise<void> => {
+    return request(`/tokens/${id}`, { method: "DELETE" });
+  },
+
+  /** Trigger on-demand validation for a token */
+  validateToken: (id: string): Promise<TokenDocument> => {
+    return request(`/tokens/${id}/validate`, { method: "POST" });
+  },
+
+  // ─── Insights ──────────────────────────────────────────────────────────────
+
+  /** List all insights (with optional text search and blocked filter) */
+  listInsights: (q?: string, blocked?: boolean): Promise<Insight[]> => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (blocked !== undefined) params.set("blocked", String(blocked));
+    const qs = params.toString();
+    return request(`/insights${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Search insights by keyword (fuzzy match) */
+  searchInsights: (q: string): Promise<Insight[]> => {
+    return request(`/insights/search?q=${encodeURIComponent(q)}`);
+  },
+
+  /** Get a single insight by ID */
+  getInsight: (id: string): Promise<Insight> => {
+    return request(`/insights/${id}`);
+  },
+
+  /** Create a new insight */
+  createInsight: (body: { title: string; description: string; category?: string; tags?: string[] }): Promise<Insight> => {
+    return request("/insights", {
+      method: "POST",
+      body: JSON.stringify({ ...body, createdBy: "user" }),
+    });
+  },
+
+  /** Update an insight */
+  updateInsight: (id: string, body: { title?: string; description?: string; category?: string; tags?: string[] }): Promise<Insight> => {
+    return request(`/insights/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete an insight */
+  deleteInsight: (id: string): Promise<void> => {
+    return request(`/insights/${id}`, { method: "DELETE" });
+  },
+
+  /** Upvote an insight */
+  upvoteInsight: (id: string): Promise<Insight> => {
+    return request(`/insights/${id}/upvote`, { method: "POST" });
+  },
+
+  /** Downvote an insight */
+  downvoteInsight: (id: string): Promise<Insight> => {
+    return request(`/insights/${id}/downvote`, { method: "POST" });
+  },
+
+  /** Block an insight */
+  blockInsight: (id: string): Promise<Insight> => {
+    return request(`/insights/${id}/block`, { method: "POST" });
+  },
+
+  /** Unblock an insight */
+  unblockInsight: (id: string): Promise<Insight> => {
+    return request(`/insights/${id}/unblock`, { method: "POST" });
+  },
+
+  /** Get reports that reference a specific insight */
+  getInsightReports: (insightId: string): Promise<Report[]> => {
+    return request(`/insights/${insightId}/reports`);
+  },
+
+  /** Get insights referenced by a specific report */
+  getReportInsights: (reportId: string): Promise<InsightWithReference[]> => {
+    return request(`/reports/${reportId}/insights`);
+  },
+
+  // ─── Models ────────────────────────────────────────────────────────────────
+
+  /** List all scanned models, optionally filtered by agentId or provider */
+  listModels: (params?: { agentId?: string; provider?: string }): Promise<Model[]> => {
+    const searchParams = new URLSearchParams();
+    if (params?.agentId) searchParams.set("agentId", params.agentId);
+    if (params?.provider) searchParams.set("provider", params.provider);
+    const qs = searchParams.toString();
+    return request(`/models${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Get a single model by compound ID */
+  getModel: (id: string): Promise<Model> => {
+    return request(`/models/${encodeURIComponent(id)}`);
+  },
+
+  // ─── Feature Flags ──────────────────────────────────────────────────────────
+
+  /** List all feature flags */
+  listFeatureFlags: (): Promise<FeatureFlag[]> => {
+    return request("/feature-flags");
+  },
+
+  /** Update a feature flag's enabled state */
+  updateFeatureFlag: (key: string, enabled: boolean): Promise<FeatureFlag> => {
+    return request(`/feature-flags/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    });
+  },
+
+  // ─── Skills ───────────────────────────────────────────────────────────────
+
+  /** List all imported skills */
+  listSkills: (): Promise<SkillDocument[]> => {
+    return request("/skills");
+  },
+
+  /** Get a single skill by slug */
+  getSkill: (slug: string): Promise<SkillDocument> => {
+    return request(`/skills/${slug}`);
+  },
+
+  /** Search skills (internal + skills.sh) */
+  searchSkills: (query: string, limit?: number): Promise<SkillSearchResult[]> => {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    return request(`/skills/search?${params}`);
+  },
+
+  /** Search external skills registry only */
+  searchExternalSkills: (query: string, limit?: number): Promise<SkillSearchResult[]> => {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    return request(`/skills/search/external?${params}`);
+  },
+
+  /** Import a skill */
+  createSkill: (body: { source: string; skillName: string; name: string; origin: string; description?: string }): Promise<SkillDocument> => {
+    return request("/skills", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a skill */
+  deleteSkill: (slug: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/skills/${slug}`, { method: "DELETE" });
+  },
+
+  /** Resolve a skill (create/update revision from GitHub) */
+  resolveSkill: (slug: string): Promise<SkillRevisionDocument> => {
+    return request(`/skills/${slug}/resolve`, { method: "POST" });
+  },
+
+  /** List revisions for a skill */
+  listSkillRevisions: (slug: string): Promise<SkillRevisionDocument[]> => {
+    return request(`/skills/${slug}/revisions`);
   },
 };

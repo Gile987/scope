@@ -1,0 +1,41 @@
+# Dependencies (installed inside container)
+node_modules
+
+# Build outputs
+dist
+coverage
+ctrf
+
+# Git
+.git
+.gitignore
+
+# Worktrees
+.worktrees
+
+# IDE / Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment files (secrets — not needed in build context)
+.env
+.env.*
+!.env.example
+
+# Documentation (not needed in images)
+docs
+
+# Deployment manifests (not part of app images)
+deploy
+infra
+
+# Scripts (except dev-entrypoint.sh which is COPY'd explicitly)
+# scripts/ is kept since dev-entrypoint.sh lives there
+
+# Misc
+tmp
+*.md
+!README.md
+LICENSE

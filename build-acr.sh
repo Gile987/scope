@@ -28,13 +28,16 @@ IMAGE_ARGS=("${@:-all}")
 echo "Using ACR: ${ACR_NAME}"
 
 # Image list
-ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal"
+ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal token-manager model-scanner-copilot model-scanner-anthropic report-generator"
 
 get_dockerfile() {
   local name=$1
   case "$name" in
     api|judge|portal) echo "apps/${name}/Dockerfile" ;;
     coder-acp-*) echo "apps/workers/${name}/Dockerfile" ;;
+    report-generator) echo "apps/workers/${name}/Dockerfile" ;;
+    model-scanner-copilot) echo "apps/model-scanners/copilot/Dockerfile" ;;
+    model-scanner-anthropic) echo "apps/model-scanners/anthropic/Dockerfile" ;;
     *) echo "apps/${name}/Dockerfile" ;;
   esac
 }
@@ -43,10 +46,29 @@ build_image() {
   local name=$1
   local dockerfile=$(get_dockerfile "$name")
   local full_image="scoped/${name}:latest"
+  local git_commit=$(git rev-parse --short HEAD)
+  local build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  # Source pinned versions if available (e.g. coder-acp-copilot/versions.env)
+  local extra_args=""
+  local versions_file
+  for versions_file in "apps/workers/${name}/versions.env" "apps/${name}/versions.env"; do
+    if [ -f "$versions_file" ]; then
+      local key value
+      while IFS='=' read -r key value; do
+        [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+        extra_args="${extra_args} --build-arg ${key}=${value}"
+      done < "$versions_file"
+      break
+    fi
+  done
 
   az acr build \
     --registry "$ACR_NAME" \
     --image "$full_image" \
+    --build-arg GIT_COMMIT="$git_commit" \
+    --build-arg BUILD_TIME="$build_time" \
+    ${extra_args} \
     --file "$dockerfile" \
     .
 }

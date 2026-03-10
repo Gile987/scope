@@ -1,35 +1,62 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { QueueProcessor, WorkerProcessor, QueueProcessorConfig, LogEvent } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, detectCliVersion } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-claude-code";
+const tokenClient = new TokenManagerClient();
+const AGENT_VERSION = detectCliVersion("claude-code-acp", "@zed-industries/claude-code-acp");
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
 
+  getAgentVersion(): string {
+    return AGENT_VERSION;
+  }
+
   async processMessage(
     message: string,
-    log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>
-  ): Promise<string> {
-    await log("info", "Starting Claude Code ACP processor", { inputLength: message.length });
+    log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
+    options?: WorkerProcessorOptions
+  ): Promise<WorkerResult> {
+    const mcpConfigs = options?.mcpServerConfigs ?? [];
+    const skillConfigs = options?.skillConfigs ?? [];
+    await log("info", "Starting Claude Code ACP processor", {
+      inputLength: message.length,
+      model: options?.model,
+      mcpServerCount: mcpConfigs.length,
+      mcpServers: mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
+      skillCount: skillConfigs.length,
+      skills: skillConfigs.map((s) => s.name),
+    });
     
     try {
+      // Acquire token dynamically (env var fallback or Token Manager)
+      const apiKey = await tokenClient.acquireToken("claude-code-cli");
+      await log("info", "Acquired ANTHROPIC_API_KEY", {
+        preview: `${apiKey.substring(0, 7)}...(${apiKey.length} chars)`,
+      });
+
       // Run ACP session with Claude Code
+      const env: Record<string, string> = {
+        ANTHROPIC_API_KEY: apiKey,
+      };
+      if (options?.model) {
+        env.ANTHROPIC_MODEL = options.model;
+      }
       const result = await runACPSession(message, {
         command: "claude-code-acp",
         args: [],
-        env: {
-          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
-        },
+        env,
         cwd: "/workspace",
         onLog: async (msg) => {
           await log("debug", msg);
         },
+        mcpServers: options?.mcpServerConfigs,
       });
 
       await log("info", "Claude Code processing complete", { 
@@ -37,7 +64,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         responseLength: result.response.length 
       });
       
-      return result.response || `[${this.workerName}] No response from Claude Code`;
+      return { response: result.response || `[${this.workerName}] No response from Claude Code` };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await log("error", `Claude Code processing failed: ${errorMessage}`);
@@ -60,10 +87,11 @@ async function main(): Promise<void> {
     redisHost: process.env.REDIS_HOST || "",
     redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),
     redisPassword: process.env.REDIS_PASSWORD || "",
+    apiBaseUrl: process.env.SCOPE_MT_API_URL,
   };
 
   const processor = new ClaudeCodeProcessor();
-  const queueProcessor = new QueueProcessor(config, processor);
+  const queueProcessor = new CodingAgentQueueProcessor(config, processor);
 
   await queueProcessor.start();
 }
