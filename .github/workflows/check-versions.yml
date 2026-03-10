@@ -129,9 +129,23 @@ jobs:
           ISSUE_URL=$(gh issue create \
             --title "${{ steps.check.outputs.title }}" \
             --body "$BODY" \
-            --label "dependencies" \
-            --assignee "Copilot")
+            --label "dependencies")
           echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+
+      - name: Assign issue to Copilot
+        if: steps.create_issue.outputs.issue_url != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Copilot is a bot (BOT_kgDOC9w8XQ), not a regular user,
+          # so we must use the GraphQL API to assign it.
+          ISSUE_ID=$(gh issue view "${{ steps.create_issue.outputs.issue_url }}" --json id --jq .id)
+          gh api graphql -f query='
+            mutation($issueId: ID!, $assigneeId: ID!) {
+              addAssigneesToAssignable(input: {assignableId: $issueId, assigneeIds: [$assigneeId]}) {
+                assignable { ... on Issue { number } }
+              }
+            }' -f issueId="$ISSUE_ID" -f assigneeId="BOT_kgDOC9w8XQ"
 
       - name: Write job summary
         if: always() && steps.check.outputs.exit_code != '2'
