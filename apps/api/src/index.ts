@@ -220,6 +220,7 @@ interface RequestDocument {
     passed: boolean;
     timestamp: Date;
     harUrl?: string;
+    videoUrls?: string[];
   }>;
   personaInstructions?: string;
   persona?: { personality: string; experience: string; verbosity: string; type: string };
@@ -230,6 +231,7 @@ interface RequestDocument {
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Human-readable skill revision refs (source/skillName@commitHash)
   harUrl?: string;
+  videoUrls?: string[];
 }
 
 // Coding agent document interface
@@ -1438,6 +1440,132 @@ app.get("/api/v1/requests/:id/har", async (req: Request, res: Response, next: Ne
   } catch (error) {
     if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
       res.status(404).json({ error: "HAR file not found — the blob may have been deleted or is no longer available" });
+      return;
+    }
+    next(error);
+  }
+});
+
+// Download a session recording video for a specific request or turn
+// For one-shot runs: GET /api/v1/requests/:id/video?index=0
+// For multi-turn runs: GET /api/v1/requests/:id/video?iteration=N&index=0
+app.get("/api/v1/requests/:id/video", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const iterationParam = req.query.iteration as string | undefined;
+    const indexParam = req.query.index as string | undefined;
+    const videoIndex = indexParam ? parseInt(indexParam, 10) : 0;
+
+    if (isNaN(videoIndex) || videoIndex < 0) {
+      res.status(400).json({ error: "Invalid video index" });
+      return;
+    }
+
+    const resource = await collection.findOne({ _id: id });
+    if (!resource) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+
+    // Determine the videoUrls array — from a specific turn or from the top-level document
+    let videoUrls: string[] | undefined;
+    let label: string;
+
+    if (iterationParam) {
+      const iterNum = parseInt(iterationParam, 10);
+      if (isNaN(iterNum) || iterNum < 1) {
+        res.status(400).json({ error: "Invalid iteration number" });
+        return;
+      }
+      const turn = resource.turns?.find(t => t.iteration === iterNum);
+      videoUrls = turn?.videoUrls;
+      label = `${id}-iteration-${iterNum}-video-${videoIndex}`;
+    } else {
+      // One-shot: videoUrls on document root; multi-turn fallback: last turn
+      videoUrls = resource.videoUrls ?? resource.turns?.[resource.turns.length - 1]?.videoUrls;
+      label = `${id}-video-${videoIndex}`;
+    }
+
+    if (!videoUrls || videoUrls.length === 0) {
+      res.status(404).json({ error: "No video recordings available" });
+      return;
+    }
+
+    if (videoIndex >= videoUrls.length) {
+      res.status(404).json({ error: `Video index ${videoIndex} not found (${videoUrls.length} available)` });
+      return;
+    }
+
+    const videoUrl = videoUrls[videoIndex];
+
+    // Connect to blob storage and proxy the video file
+    let blobServiceClient: BlobServiceClient;
+    if (storageConnectionString) {
+      blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+    } else {
+      blobServiceClient = new BlobServiceClient(
+        `https://${storageAccountName}.blob.core.windows.net`,
+        new DefaultAzureCredential()
+      );
+    }
+
+    const parsedUrl = new URL(videoUrl);
+    const containerPrefix = "/snapshots/";
+    const containerIndex = parsedUrl.pathname.indexOf(containerPrefix);
+    if (containerIndex === -1) {
+      res.status(500).json({ error: "Invalid video URL format" });
+      return;
+    }
+    const blobName = parsedUrl.pathname.substring(containerIndex + containerPrefix.length);
+    const containerClient = blobServiceClient.getContainerClient("snapshots");
+    const blobClient = containerClient.getBlockBlobClient(blobName);
+
+    // Get blob properties for content length
+    const properties = await blobClient.getProperties();
+    const totalSize = properties.contentLength ?? 0;
+
+    // Support HTTP Range requests for video seeking
+    const rangeHeader = req.headers.range;
+    if (rangeHeader && totalSize > 0) {
+      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+      if (match) {
+        const start = parseInt(match[1], 10);
+        const end = match[2] ? parseInt(match[2], 10) : totalSize - 1;
+        const chunkSize = end - start + 1;
+
+        const downloadResponse = await blobClient.download(start, chunkSize);
+        if (!downloadResponse.readableStreamBody) {
+          res.status(500).json({ error: "Failed to download video file" });
+          return;
+        }
+
+        res.status(206);
+        res.setHeader("Content-Type", "video/webm");
+        res.setHeader("Content-Range", `bytes ${start}-${end}/${totalSize}`);
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Content-Length", chunkSize);
+        downloadResponse.readableStreamBody.pipe(res);
+        return;
+      }
+    }
+
+    const downloadResponse = await blobClient.download();
+    if (!downloadResponse.readableStreamBody) {
+      res.status(500).json({ error: "Failed to download video file" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "video/webm");
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Disposition", `inline; filename="${label}.webm"`);
+    if (totalSize > 0) {
+      res.setHeader("Content-Length", totalSize);
+    }
+
+    downloadResponse.readableStreamBody.pipe(res);
+  } catch (error) {
+    if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+      res.status(404).json({ error: "Video file not found — the blob may have been deleted or is no longer available" });
       return;
     }
     next(error);

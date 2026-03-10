@@ -17,12 +17,13 @@ import { TurnTimeline } from "@/components/TurnTimeline";
 import { CriteriaGraphView } from "@/components/CriteriaGraphView";
 import { HarNetworkViewer } from "@/components/HarNetworkViewer";
 import { ConversationView } from "@/components/ConversationView";
+import { VideoPlayer } from "@/components/VideoPlayer";
 import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video } from "lucide-react";
 import { formatDate, formatId } from "@/lib/utils";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -120,6 +121,7 @@ export function RunDetail() {
 
   const isV2 = run.scenario?.version === "v2";
   const hasHarData = !!(run.harUrl || run.turns?.some(t => t.harUrl));
+  const hasVideoData = !!(run.videoUrls?.length || run.turns?.some(t => t.videoUrls?.length));
 
   return (
     <div className="space-y-6">
@@ -215,6 +217,7 @@ export function RunDetail() {
           )}
           {hasHarData && <TabsTrigger value="network">Network</TabsTrigger>}
           {hasHarData && <TabsTrigger value="tool-calls">Tool Calls</TabsTrigger>}
+          {hasVideoData && <TabsTrigger value="video"><Video className="h-3.5 w-3.5 mr-1" />Video</TabsTrigger>}
           <TabsTrigger value="logs">Logs</TabsTrigger>
           <TabsTrigger value="reports">
             Reports {reports && reports.length > 0 ? `(${reports.length})` : ""}
@@ -243,6 +246,21 @@ export function RunDetail() {
             ) : (
               <HarNetworkViewer runId={run._id} />
             )}
+          </TabsContent>
+        )}
+
+        {/* Video tab — session recording player */}
+        {hasVideoData && (
+          <TabsContent value="video" className="mt-4">
+            {run.turns && run.turns.some(t => t.videoUrls?.length) ? (
+              <VideoIterationTabs runId={run._id} turns={run.turns} />
+            ) : run.videoUrls && run.videoUrls.length > 0 ? (
+              <div className="space-y-4">
+                {run.videoUrls.map((_, i) => (
+                  <VideoPlayer key={i} src={api.videoUrl(run._id, undefined, i)} label={run.videoUrls!.length > 1 ? `Video ${i + 1}` : undefined} />
+                ))}
+              </div>
+            ) : null}
           </TabsContent>
         )}
 
@@ -523,6 +541,50 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
       </div>
       {activeIteration !== undefined && (
         <HarNetworkViewer runId={runId} iteration={activeIteration} />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helper: per-iteration video player tabs for multi-turn runs
+// ---------------------------------------------------------------------------
+
+function VideoIterationTabs({ runId, turns }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[] }) {
+  const turnsWithVideo = turns.filter(t => t.videoUrls && t.videoUrls.length > 0);
+  const [activeIteration, setActiveIteration] = useState(turnsWithVideo[0]?.iteration);
+
+  if (turnsWithVideo.length === 0) return null;
+
+  const activeTurn = turnsWithVideo.find(t => t.iteration === activeIteration);
+
+  return (
+    <div className="space-y-3">
+      {turnsWithVideo.length > 1 && (
+        <div className="flex gap-1.5 flex-wrap">
+          {turnsWithVideo.map(t => (
+            <Button
+              key={t.iteration}
+              variant={activeIteration === t.iteration ? "default" : "outline"}
+              size="sm"
+              className="font-mono text-xs"
+              onClick={() => setActiveIteration(t.iteration)}
+            >
+              Iteration {t.iteration}
+            </Button>
+          ))}
+        </div>
+      )}
+      {activeTurn && activeIteration !== undefined && (
+        <div className="space-y-4">
+          {activeTurn.videoUrls!.map((_, i) => (
+            <VideoPlayer
+              key={`${activeIteration}-${i}`}
+              src={api.videoUrl(runId, activeIteration, i)}
+              label={activeTurn.videoUrls!.length > 1 ? `Video ${i + 1}` : undefined}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
