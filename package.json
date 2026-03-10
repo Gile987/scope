@@ -5,7 +5,6 @@
   "description": "Scoped - coding agent workers (Claude Code, Copilot ACP, VS Code Web) + API + CLI",
   "scripts": {
     "build": "pnpm -r build",
-    "capture-auth-state": "npx tsx scripts/capture-auth-state.ts",
     "cli": "tsx apps/cli/src/index.ts",
     "dev:api": "pnpm --filter api dev",
     "dev:portal": "pnpm --filter portal dev",
@@ -42,7 +41,8 @@
     "migrate:up": "pnpm --filter db-migrations migrate:up",
     "migrate:down": "pnpm --filter db-migrations migrate:down",
     "migrate:status": "pnpm --filter db-migrations migrate:status",
-    "check:versions:vscode-web": "pnpm --filter version-checker-vscode-web check"
+    "check:versions:vscode-web": "pnpm --filter version-checker-vscode-web check",
+    "vscode-web:capture-auth-state": "npx tsx scripts/capture-auth-state.ts"
   },
   "devDependencies": {
     "@d2t/vitest-ctrf-json-reporter": "^1.3.0",
