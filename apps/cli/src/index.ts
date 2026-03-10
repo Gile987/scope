@@ -11,7 +11,7 @@ import { tmpdir } from "os";
 import { join, resolve, dirname, basename, extname } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
-import { parse as yamlParse, parseAllDocuments } from "yaml";
+import { parse as yamlParse, parseAllDocuments, stringify as yamlStringify } from "yaml";
 import React from "react";
 import { render } from "ink";
 import { DemoApp } from "./components/DemoApp.js";
