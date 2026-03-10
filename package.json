@@ -5,6 +5,7 @@
   "description": "Scoped - coding agent workers (Claude Code, Copilot ACP, VS Code Web) + API + CLI",
   "scripts": {
     "build": "pnpm -r build",
+    "capture-auth-state": "npx tsx scripts/capture-auth-state.ts",
     "cli": "tsx apps/cli/src/index.ts",
     "dev:api": "pnpm --filter api dev",
     "dev:portal": "pnpm --filter portal dev",
@@ -48,6 +49,7 @@
     "@vitest/coverage-v8": "^4.0.18",
     "concurrently": "^9.2.1",
     "github-actions-ctrf": "^0.0.58",
+    "playwright": "^1.40.0",
     "vitest": "^4.0.18",
     "worktree-env": "^0.1.0"
   },
