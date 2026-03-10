@@ -41,6 +41,7 @@
     "migrate:status": "pnpm --filter db-migrations migrate:status",
     "check:versions:vscode-web": "pnpm --filter version-checker-vscode-web check",
     "vscode-web:capture-auth-state": "npx tsx scripts/capture-auth-state.ts",
+    "vscode-web:auto-auth-state": "npx tsx scripts/auto-auth-state.ts",
     "clean:worktrees": "npx tsx scripts/clean-worktrees.ts"
   },
   "devDependencies": {
@@ -65,5 +66,8 @@
     "copilot"
   ],
   "license": "MIT",
-  "packageManager": "pnpm@10.29.1"
+  "packageManager": "pnpm@10.29.1",
+  "dependencies": {
+    "otpauth": "^9.5.0"
+  }
 }
