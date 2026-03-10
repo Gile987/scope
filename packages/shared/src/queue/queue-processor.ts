@@ -165,6 +165,30 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
     }
 
+    // Upload video files to blob storage if available
+    let videoUrls: string[] | undefined;
+    if (workerResult.videoFilePaths && workerResult.videoFilePaths.length > 0) {
+      try {
+        const blobStorage = new BlobStorage({
+          storageAccountName: this.config.storageAccountName,
+          storageConnectionString: this.config.storageConnectionString,
+        });
+        videoUrls = [];
+        for (let i = 0; i < workerResult.videoFilePaths.length; i++) {
+          const videoUrl = await blobStorage.uploadFile(
+            workerResult.videoFilePaths[i],
+            `${requestId}/video-${i}.webm`,
+            "video/webm"
+          );
+          videoUrls.push(videoUrl);
+        }
+        await log("info", "Video files uploaded to blob storage", { videoUrls });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        await log("warn", `Failed to upload video files: ${msg}`);
+      }
+    }
+
     // Update request with result and HAR URL
     await this.collection.updateOne(
       { _id: requestId },
@@ -173,6 +197,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           status: "completed",
           result: workerResult.response,
           ...(harUrl && { harUrl }),
+          ...(videoUrls && videoUrls.length > 0 && { videoUrls }),
           updatedAt: new Date(),
         },
       }

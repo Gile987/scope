@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Download, CheckCircle2, XCircle, AlertCircle, MinusCircle, ChevronDown, ChevronRight, FileText } from "lucide-react";
+import { Download, CheckCircle2, XCircle, AlertCircle, MinusCircle, ChevronDown, ChevronRight, FileText, Video } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -98,6 +98,20 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                     >
                       <FileText className="h-3 w-3" />
                       HAR
+                    </Button>
+                  )}
+                  {turn.videoUrls && turn.videoUrls.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(api.videoUrl(runId, turn.iteration), "_blank");
+                      }}
+                    >
+                      <Video className="h-3 w-3" />
+                      Video
                     </Button>
                   )}
                 </div>

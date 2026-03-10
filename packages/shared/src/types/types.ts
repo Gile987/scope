@@ -18,6 +18,7 @@ export interface ConversationTurn {
   timestamp: Date;
   criteriaResults?: CriterionResult[];  // Per-criterion breakdown from DAG evaluation
   harUrl?: string;         // Blob storage URL to the HAR file for this turn
+  videoUrls?: string[];    // Blob storage URLs to session recording videos for this turn
 }
 
 // Multi-turn configuration constants
@@ -104,6 +105,7 @@ export interface RequestDocument {
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
   agentVersion?: string;          // Coding agent binary version (e.g. "@github/copilot@0.0.415")
   harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
+  videoUrls?: string[];            // Blob storage URLs to session recording videos (one-shot)
 }
 
 // Log event for real-time streaming and persistence
@@ -133,6 +135,8 @@ export interface WorkerResult {
   response: string;
   /** Path to the HAR file on disk (for upload to blob storage) */
   harFilePath?: string;
+  /** Paths to session recording video files on disk (for upload to blob storage) */
+  videoFilePaths?: string[];
 }
 
 // Worker processor interface - each worker implements this
