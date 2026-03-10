@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import { Command } from "commander";
 import EventSource from "eventsource";
 import { execSync } from "child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, createWriteStream, rmSync, readFileSync, readdirSync, existsSync, statSync } from "fs";
+import { mkdtempSync, mkdirSync, createWriteStream, rmSync, readFileSync, readdirSync, existsSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve, dirname, basename, extname } from "path";
 import { pipeline } from "stream/promises";
@@ -515,7 +515,7 @@ run
     const outputFile = options.output || defaultFile;
 
     try {
-      // Step 1: Fetch request document
+      // Step 1: Fetch request document (lightweight — for metadata display)
       console.log(`${label('Fetching run')} ${value(id)}...`);
       const response = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}`);
       if (!response.ok) {
@@ -535,59 +535,42 @@ run
       console.log(`${label('Iterations:')} ${value(String(request.turns.length))}`);
       console.log();
 
-      // Step 2: Create temp staging directory
-      const stageDir = mkdtempSync(join(tmpdir(), `scope-mt-${id.substring(0, 8)}-`));
-      const runDir = join(stageDir, id);
-      mkdirSync(runDir, { recursive: true });
+      // Step 2: Download the full archive from the server
+      console.log(`${label('Downloading archive')}...`);
+      const archiveResp = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}/archive`);
+      if (!archiveResp.ok || !archiveResp.body) {
+        const error = await archiveResp.json().catch(() => ({ error: archiveResp.statusText }));
+        console.error(errorText("Error downloading archive:"), error);
+        process.exit(1);
+      }
 
-      try {
-        // Step 3: Write run document as YAML
-        writeFileSync(join(runDir, "run.yaml"), yamlStringify(request, { lineWidth: 120 }));
-        console.log(`  ${successText('+')} run.yaml`);
+      const outputPath = resolve(outputFile);
+      mkdirSync(dirname(outputPath), { recursive: true });
+      const fileStream = createWriteStream(outputPath);
+      await pipeline(Readable.fromWeb(archiveResp.body as any), fileStream);
+      console.log(`${successText('Archive:')} ${value(outputPath)}`);
 
-        // Step 4: Download each iteration snapshot
-        for (const turn of request.turns) {
-          const iter = turn.iteration;
-          const iterDir = join(runDir, `iteration-${iter}`);
-          mkdirSync(iterDir, { recursive: true });
+      // Step 3: Optionally extract
+      if (shouldExtract) {
+        const extractDir = options.dir || downloadDir || ".";
+        mkdirSync(extractDir, { recursive: true });
+        execSync(`tar xzf "${outputPath}" -C "${extractDir}"`, { stdio: "pipe" });
 
-          process.stdout.write(`  ${label(`iteration-${iter}/`)} downloading...`);
-
-          const snapshotResp = await fetch(`${normalizeUrl(url)}/api/v1/requests/${id}/snapshots/${iter}`);
-          if (!snapshotResp.ok || !snapshotResp.body) {
-            console.log(` ${errorText('FAILED')}`);
-            console.error(`    ${errorText(`Could not download iteration ${iter}: ${snapshotResp.statusText}`)}`);
-            continue;
+        // Extract nested iteration-*.tar.gz files into iteration-N/ directories
+        const runExtractDir = join(extractDir, id);
+        if (existsSync(runExtractDir)) {
+          const nestedArchives = readdirSync(runExtractDir).filter(f => f.startsWith("iteration-") && f.endsWith(".tar.gz"));
+          for (const archive of nestedArchives) {
+            const iterName = archive.replace(".tar.gz", "");
+            const iterDir = join(runExtractDir, iterName);
+            mkdirSync(iterDir, { recursive: true });
+            execSync(`tar xzf "${join(runExtractDir, archive)}" -C "${iterDir}"`, { stdio: "pipe" });
+            rmSync(join(runExtractDir, archive), { force: true });
           }
-
-          // Save tar.gz to temp then extract into iteration dir
-          const archivePath = join(stageDir, `iter-${iter}.tar.gz`);
-          const fileStream = createWriteStream(archivePath);
-          await pipeline(Readable.fromWeb(snapshotResp.body as any), fileStream);
-          execSync(`tar xzf "${archivePath}" -C "${iterDir}"`, { stdio: "pipe" });
-
-          process.stdout.write(`\r  ${label(`iteration-${iter}/`)} ${successText('downloaded')}\n`);
         }
 
-        // Step 5: Create the final tar.gz archive
-        console.log();
-        const outputPath = resolve(outputFile);
-        mkdirSync(dirname(outputPath), { recursive: true });
-        execSync(`tar czf "${outputPath}" -C "${stageDir}" "${id}"`, { stdio: "pipe" });
-        console.log(`${successText('Archive:')} ${value(outputPath)}`);
-
-        // Step 6: Optionally extract
-        if (shouldExtract) {
-          const extractDir = options.dir || downloadDir || ".";
-          mkdirSync(extractDir, { recursive: true });
-          execSync(`tar xzf "${outputPath}" -C "${extractDir}"`, { stdio: "pipe" });
-          rmSync(outputPath, { force: true });
-          console.log(`${successText('Extracted to:')} ${value(resolve(extractDir, id))}`);
-        }
-
-      } finally {
-        // Cleanup staging directory
-        rmSync(stageDir, { recursive: true, force: true });
+        rmSync(outputPath, { force: true });
+        console.log(`${successText('Extracted to:')} ${value(resolve(extractDir, id))}`);
       }
 
     } catch (error) {

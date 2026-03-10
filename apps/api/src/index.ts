@@ -17,7 +17,10 @@ import { readFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join, basename } from "path";
 import { createHash } from "crypto";
-import { parse as yamlParse } from "yaml";
+import { parse as yamlParse, stringify as yamlStringify } from "yaml";
+import { pack as tarPack } from "tar-stream";
+import { createGzip } from "zlib";
+import { pipeline } from "stream/promises";
 import { isLlmAvailable, generateCriteriaPrompt } from "./llm.js";
 import {
   isLlmAvailable as isPromptFeatureLlmAvailable,
@@ -1265,6 +1268,95 @@ app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: R
       return;
     }
     next(error);
+  }
+});
+
+// Download a full run archive (run.yaml + iteration snapshots as .tar.gz entries)
+app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const resource = await collection.findOne({ _id: id });
+    if (!resource) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+
+    if (!resource.turns || resource.turns.length === 0) {
+      res.status(404).json({ error: "No iterations found for this run" });
+      return;
+    }
+
+    // Connect to blob storage
+    let blobServiceClient: BlobServiceClient;
+    if (storageConnectionString) {
+      blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+    } else {
+      blobServiceClient = new BlobServiceClient(
+        `https://${storageAccountName}.blob.core.windows.net`,
+        new DefaultAzureCredential()
+      );
+    }
+    const containerClient = blobServiceClient.getContainerClient("snapshots");
+
+    // Set response headers before streaming
+    res.setHeader("Content-Type", "application/gzip");
+    res.setHeader("Content-Disposition", `attachment; filename="${id}.tar.gz"`);
+
+    // Create streaming tar+gzip pipeline → response
+    const pack = tarPack();
+    const gzip = createGzip();
+    pack.pipe(gzip).pipe(res);
+
+    // Entry 1: run.yaml — the full run document
+    const yamlContent = yamlStringify(resource, { lineWidth: 120 });
+    const yamlBuf = Buffer.from(yamlContent, "utf-8");
+    pack.entry({ name: `${id}/run.yaml`, size: yamlBuf.length }, yamlBuf);
+
+    // Entries 2..N: iteration snapshots as-is (.tar.gz blobs)
+    for (const turn of resource.turns) {
+      if (!turn.snapshotUrl) continue;
+
+      try {
+        const snapshotUrl = new URL(turn.snapshotUrl);
+        const containerPrefix = "/snapshots/";
+        const containerIndex = snapshotUrl.pathname.indexOf(containerPrefix);
+        if (containerIndex === -1) continue;
+
+        const blobName = snapshotUrl.pathname.substring(containerIndex + containerPrefix.length);
+        const blobClient = containerClient.getBlockBlobClient(blobName);
+        const downloadResponse = await blobClient.download();
+
+        if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
+
+        // Add the snapshot blob as a tar entry, streaming directly from blob storage
+        const entry = pack.entry({
+          name: `${id}/iteration-${turn.iteration}.tar.gz`,
+          size: downloadResponse.contentLength,
+        });
+        await pipeline(downloadResponse.readableStreamBody, entry);
+      } catch (blobError) {
+        // Skip snapshots that fail to download (e.g. deleted blobs)
+        if (blobError instanceof RestError && (blobError.statusCode === 404 || blobError.code === "ContainerNotFound" || blobError.code === "BlobNotFound")) {
+          continue;
+        }
+        throw blobError;
+      }
+    }
+
+    // Finalize the tar archive
+    pack.finalize();
+  } catch (error) {
+    if (!res.headersSent) {
+      if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+        res.status(404).json({ error: "Snapshot not found — the blob may have been deleted or is no longer available" });
+        return;
+      }
+      next(error);
+    } else {
+      // Headers already sent — destroy the response to signal an error to the client
+      res.destroy();
+    }
   }
 });
 

@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download } from "lucide-react";
 import { formatDate, formatId, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent } from "@/types";
@@ -785,6 +785,17 @@ export function RunsList() {
                         <Eye className="h-4 w-4" />
                       </Button>
                     </Link>
+                    {run.turns && run.turns.some(t => t.snapshotUrl) && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        title="Download archive"
+                        onClick={() => window.open(api.archiveUrl(run._id), "_blank")}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    )}
                     <DeleteRunButton
                       runId={run._id}
                       onDelete={() => deleteMutation.mutate(run._id)}
