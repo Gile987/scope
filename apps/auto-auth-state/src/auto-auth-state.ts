@@ -12,17 +12,21 @@
 //   4. Saves the resulting Playwright storageState (cookies + localStorage)
 //
 // Usage:
-//   npx tsx scripts/auto-auth-state.ts \
+//   npx tsx src/auto-auth-state.ts \
 //     --username USER --password PASS --totp-secret SECRET [--output PATH] [--headed]
 //
+//   Or with a QR code image (PNG):
+//     npx tsx src/auto-auth-state.ts \
+//       --username USER --password PASS --qr-code /path/to/qr.png [--output PATH] [--headed]
+//
 //   Or via env vars:
-//     GITHUB_USERNAME=... GITHUB_PASSWORD=... GITHUB_TOTP_SECRET=... npx tsx scripts/auto-auth-state.ts
+//     GITHUB_USERNAME=... GITHUB_PASSWORD=... GITHUB_TOTP_SECRET=... npx tsx src/auto-auth-state.ts
 //
 // Default output: .auth/github-storage.json
 // =============================================================================
 
 import { chromium } from "playwright";
-import { createTOTP, getTOTPInfo } from "./totp.js";
+import { createTOTP, getTOTPInfo, decodeQRImage } from "./totp.js";
 import { ensureDir, DEFAULT_OUTPUT } from "./capture-auth-state.js";
 
 export interface AutoAuthOptions {
@@ -50,13 +54,23 @@ export function resolveOptions(
 
   const username = flagValue("--username") ?? env.GITHUB_USERNAME;
   const password = flagValue("--password") ?? env.GITHUB_PASSWORD;
-  const totpSecret = flagValue("--totp-secret") ?? env.GITHUB_TOTP_SECRET;
+  const qrCode = flagValue("--qr-code");
   const output = flagValue("--output") ?? DEFAULT_OUTPUT;
   const headed = args.includes("--headed");
   const totpOnly = args.includes("--totp-only");
 
+  // Resolve TOTP secret: --qr-code decodes a PNG image, --totp-secret uses the value directly
+  let totpSecret: string | undefined;
+  if (qrCode) {
+    const decoded = decodeQRImage(qrCode);
+    console.log(`📷 Decoded QR code: ${decoded}`);
+    totpSecret = decoded;
+  } else {
+    totpSecret = flagValue("--totp-secret") ?? env.GITHUB_TOTP_SECRET;
+  }
+
   if (!totpSecret)
-    throw new Error("Missing --totp-secret or GITHUB_TOTP_SECRET env var");
+    throw new Error("Missing --totp-secret, --qr-code, or GITHUB_TOTP_SECRET env var");
 
   if (!totpOnly) {
     if (!username) throw new Error("Missing --username or GITHUB_USERNAME env var");

@@ -1,8 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// Mock decodeQRImage before importing resolveOptions
+vi.mock("./totp.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./totp.js")>();
+  return {
+    ...actual,
+    decodeQRImage: vi.fn(() => "otpauth://totp/GitHub:testuser?secret=JBSWY3DPEHPK3PXP&issuer=GitHub"),
+  };
+});
+
 import { resolveOptions } from "./auto-auth-state.js";
+import { decodeQRImage } from "./totp.js";
 
 describe("resolveOptions", () => {
   const baseEnv = {
@@ -90,7 +101,7 @@ describe("resolveOptions", () => {
         GITHUB_USERNAME: "user",
         GITHUB_PASSWORD: "pass",
       })
-    ).toThrow("Missing --totp-secret or GITHUB_TOTP_SECRET");
+    ).toThrow("Missing --totp-secret, --qr-code, or GITHUB_TOTP_SECRET");
   });
 
   it("detects --totp-only flag", () => {
@@ -114,6 +125,32 @@ describe("resolveOptions", () => {
   it("still throws when totp-secret is missing in --totp-only mode", () => {
     expect(() =>
       resolveOptions(["node", "script.ts", "--totp-only"], {})
-    ).toThrow("Missing --totp-secret or GITHUB_TOTP_SECRET");
+    ).toThrow("Missing --totp-secret, --qr-code, or GITHUB_TOTP_SECRET");
+  });
+
+  it("accepts --qr-code and decodes the image", () => {
+    const opts = resolveOptions(
+      ["node", "script.ts", "--qr-code", "/tmp/qr.png", "--username", "u", "--password", "p"],
+      {}
+    );
+    expect(decodeQRImage).toHaveBeenCalledWith("/tmp/qr.png");
+    expect(opts.totpSecret).toBe("otpauth://totp/GitHub:testuser?secret=JBSWY3DPEHPK3PXP&issuer=GitHub");
+  });
+
+  it("--qr-code works with --totp-only", () => {
+    const opts = resolveOptions(
+      ["node", "script.ts", "--totp-only", "--qr-code", "/tmp/qr.png"],
+      {}
+    );
+    expect(opts.totpOnly).toBe(true);
+    expect(opts.totpSecret).toContain("otpauth://");
+  });
+
+  it("--qr-code takes precedence over --totp-secret", () => {
+    const opts = resolveOptions(
+      ["node", "script.ts", "--qr-code", "/tmp/qr.png", "--totp-secret", "IGNORED", "--username", "u", "--password", "p"],
+      {}
+    );
+    expect(opts.totpSecret).toContain("otpauth://");
   });
 });

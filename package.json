@@ -40,8 +40,8 @@
     "migrate:down": "pnpm --filter db-migrations migrate:down",
     "migrate:status": "pnpm --filter db-migrations migrate:status",
     "check:versions:vscode-web": "pnpm --filter version-checker-vscode-web check",
-    "vscode-web:capture-auth-state": "npx tsx scripts/capture-auth-state.ts",
-    "vscode-web:auto-auth-state": "npx tsx scripts/auto-auth-state.ts",
+    "vscode-web:capture-auth-state": "pnpm --filter auto-auth-state capture",
+    "vscode-web:auto-auth-state": "pnpm --filter auto-auth-state start",
     "clean:worktrees": "npx tsx scripts/clean-worktrees.ts"
   },
   "devDependencies": {
@@ -49,7 +49,6 @@
     "@vitest/coverage-v8": "^4.0.18",
     "concurrently": "^9.2.1",
     "github-actions-ctrf": "^0.0.58",
-    "playwright": "^1.40.0",
     "vitest": "^4.0.18",
     "worktree-env": "^0.1.0"
   },
@@ -67,7 +66,5 @@
   ],
   "license": "MIT",
   "packageManager": "pnpm@10.29.1",
-  "dependencies": {
-    "otpauth": "^9.5.0"
-  }
+  "dependencies": {}
 }

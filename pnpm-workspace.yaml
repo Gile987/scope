@@ -1,5 +1,6 @@
 packages:
   - "apps/api"
+  - "apps/auto-auth-state"
   - "apps/cli"
   - "apps/judge"
   - "apps/portal"
