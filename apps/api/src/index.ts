@@ -3379,6 +3379,15 @@ if (TOKEN_MANAGER_URL) {
   // NOTE: POST /api/v1/tokens/acquire is intentionally NOT proxied.
   // Workers call token-manager directly (ClusterIP) for /acquire.
 
+  // Account CRUD routes proxied to Token Manager (portal uses these)
+  app.post("/api/v1/accounts", proxyToTokenManager);
+  app.get("/api/v1/accounts", proxyToTokenManager);
+  app.get("/api/v1/accounts/:id", proxyToTokenManager);
+  app.put("/api/v1/accounts/:id", proxyToTokenManager);
+  app.delete("/api/v1/accounts/:id", proxyToTokenManager);
+  // NOTE: GET /api/v1/accounts/:id/secrets is intentionally NOT proxied.
+  // Key-updaters call token-manager directly (ClusterIP) for secrets.
+
   console.log(`[api] Token Manager proxy enabled → ${TOKEN_MANAGER_URL}`);
 } else {
   console.log("[api] Token Manager proxy disabled (TOKEN_MANAGER_URL not set)");
