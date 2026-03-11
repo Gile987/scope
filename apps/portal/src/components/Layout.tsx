@@ -31,7 +31,7 @@ const navItems: NavItem[] = [
   { to: "/insights", label: "Insights", icon: Lightbulb },
   { to: "/criteria", label: "Criteria", icon: FlaskConical },
   { to: "/prompt-features", label: "Features", icon: Tags },
-  { to: "/tokens", label: "Keys", icon: KeyRound, featureKey: "tokens" },
+  { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
   { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
   { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
   { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },

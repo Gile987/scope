@@ -479,6 +479,41 @@ export const ALL_CAPABILITIES: TokenCapability[] = [
   "github-models", "copilot-sdk", "copilot-cli", "claude-code-cli"
 ];
 
+// Account types
+export type AccountType = "github";
+
+export interface AccountDocument {
+  _id: string;
+  type: AccountType;
+  secretName: string;
+  enabled: boolean;
+  comment?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface CreateAccountRequest {
+  type: AccountType;
+  username: string;
+  password: string;
+  totpSecret: string;
+  enabled?: boolean;
+  comment?: string;
+}
+
+export interface UpdateAccountRequest {
+  enabled?: boolean;
+  comment?: string | null;
+  username?: string;
+  password?: string;
+  totpSecret?: string;
+}
+
+export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
+  github: "GitHub",
+};
+
 // Coding Agent types
 export interface CodingAgent {
   _id: string;

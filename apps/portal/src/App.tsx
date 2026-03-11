@@ -23,6 +23,10 @@ import { CreateReportTemplate } from "@/pages/CreateReportTemplate";
 import { TokenList } from "@/pages/TokenList";
 import { CreateToken } from "@/pages/CreateToken";
 import { TokenDetail } from "@/pages/TokenDetail";
+import { AccountList } from "@/pages/AccountList";
+import { CreateAccount } from "@/pages/CreateAccount";
+import { AccountDetail } from "@/pages/AccountDetail";
+import { SecretsLayout } from "@/components/SecretsLayout";
 import { AgentList } from "@/pages/AgentList";
 import { AgentDetail } from "@/pages/AgentDetail";
 import { McpServerList } from "@/pages/McpServerList";
@@ -67,9 +71,15 @@ export function App() {
         <Route path="/task-prompts" element={<TaskPromptList />} />
         <Route path="/task-prompts/:id" element={<TaskPromptDetail />} />
         <Route path="/statistics" element={<Statistics />} />
-        <Route path="/tokens" element={<FeatureRoute featureKey="tokens"><TokenList /></FeatureRoute>} />
-        <Route path="/tokens/new" element={<FeatureRoute featureKey="tokens"><CreateToken /></FeatureRoute>} />
-        <Route path="/tokens/:id" element={<FeatureRoute featureKey="tokens"><TokenDetail /></FeatureRoute>} />
+        <Route path="/secrets" element={<FeatureRoute featureKey="tokens"><SecretsLayout /></FeatureRoute>}>
+          <Route index element={<Navigate to="/secrets/keys" replace />} />
+          <Route path="keys" element={<TokenList />} />
+          <Route path="keys/new" element={<CreateToken />} />
+          <Route path="keys/:id" element={<TokenDetail />} />
+          <Route path="accounts" element={<AccountList />} />
+          <Route path="accounts/new" element={<CreateAccount />} />
+          <Route path="accounts/:id" element={<AccountDetail />} />
+        </Route>
         <Route path="/agents" element={<FeatureRoute featureKey="agents"><AgentList /></FeatureRoute>} />
         <Route path="/agents/:id" element={<FeatureRoute featureKey="agents"><AgentDetail /></FeatureRoute>} />
         <Route path="/models" element={<FeatureRoute featureKey="models"><ModelList /></FeatureRoute>} />
