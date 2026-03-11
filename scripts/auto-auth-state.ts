@@ -31,6 +31,7 @@ export interface AutoAuthOptions {
   totpSecret: string;
   output: string;
   headed: boolean;
+  totpOnly: boolean;
 }
 
 /**
@@ -52,13 +53,17 @@ export function resolveOptions(
   const totpSecret = flagValue("--totp-secret") ?? env.GITHUB_TOTP_SECRET;
   const output = flagValue("--output") ?? DEFAULT_OUTPUT;
   const headed = args.includes("--headed");
+  const totpOnly = args.includes("--totp-only");
 
-  if (!username) throw new Error("Missing --username or GITHUB_USERNAME env var");
-  if (!password) throw new Error("Missing --password or GITHUB_PASSWORD env var");
   if (!totpSecret)
     throw new Error("Missing --totp-secret or GITHUB_TOTP_SECRET env var");
 
-  return { username, password, totpSecret, output, headed };
+  if (!totpOnly) {
+    if (!username) throw new Error("Missing --username or GITHUB_USERNAME env var");
+    if (!password) throw new Error("Missing --password or GITHUB_PASSWORD env var");
+  }
+
+  return { username: username ?? "", password: password ?? "", totpSecret, output, headed, totpOnly };
 }
 
 const LOGIN_TIMEOUT_MS = 30_000;
@@ -68,6 +73,13 @@ async function main() {
 
   // Parse TOTP secret (supports both bare secret and otpauth:// URI)
   const { secret } = parseTOTPSecret(opts.totpSecret);
+
+  // --totp-only mode: just print the code and exit
+  if (opts.totpOnly) {
+    const code = generateTOTP(secret);
+    console.log(code);
+    return;
+  }
 
   console.log("🔐 Starting automated GitHub login...");
 

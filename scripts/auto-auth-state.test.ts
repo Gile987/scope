@@ -92,4 +92,28 @@ describe("resolveOptions", () => {
       })
     ).toThrow("Missing --totp-secret or GITHUB_TOTP_SECRET");
   });
+
+  it("detects --totp-only flag", () => {
+    const opts = resolveOptions(
+      ["node", "script.ts", "--totp-only", "--totp-secret", "JBSWY3DPEHPK3PXP"],
+      {}
+    );
+    expect(opts.totpOnly).toBe(true);
+  });
+
+  it("does not require username/password in --totp-only mode", () => {
+    const opts = resolveOptions(
+      ["node", "script.ts", "--totp-only", "--totp-secret", "JBSWY3DPEHPK3PXP"],
+      {}
+    );
+    expect(opts.totpSecret).toBe("JBSWY3DPEHPK3PXP");
+    expect(opts.username).toBe("");
+    expect(opts.password).toBe("");
+  });
+
+  it("still throws when totp-secret is missing in --totp-only mode", () => {
+    expect(() =>
+      resolveOptions(["node", "script.ts", "--totp-only"], {})
+    ).toThrow("Missing --totp-secret or GITHUB_TOTP_SECRET");
+  });
 });
