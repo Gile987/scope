@@ -142,16 +142,14 @@ async function main() {
     if (await totpField.isVisible({ timeout: 5000 }).catch(() => false)) {
       const code = totp.generate();
       console.log("🔑 Entering TOTP code...");
+
+      // GitHub auto-submits the TOTP form when all 6 digits are filled.
+      // Start waiting for navigation before filling to avoid a race.
+      const navPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: LOGIN_TIMEOUT_MS });
       await totpField.fill(code);
+      await navPromise;
 
-      // Submit the TOTP form
-      const verifyButton = page.locator('button[type="submit"]');
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: LOGIN_TIMEOUT_MS }),
-        verifyButton.click(),
-      ]);
-
-      // Check for TOTP error (wrong code)
+      // Check for TOTP error (wrong code — GitHub stays on the TOTP page)
       if (await errorBanner.isVisible({ timeout: 1000 }).catch(() => false)) {
         const errorText = await errorBanner.first().textContent();
         throw new Error(`TOTP verification failed: ${errorText?.trim()}`);
