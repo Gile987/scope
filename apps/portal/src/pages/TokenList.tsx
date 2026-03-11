@@ -54,7 +54,7 @@ export function TokenList() {
     mutationFn: api.deleteToken,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tokens"] });
-      toast.success("Token deleted");
+      toast.success("Key deleted");
     },
   });
 
@@ -62,7 +62,7 @@ export function TokenList() {
     mutationFn: api.validateToken,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tokens"] });
-      toast.success("Token validated");
+      toast.success("Key validated");
     },
   });
 
@@ -84,12 +84,12 @@ export function TokenList() {
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Tokens</h1>
-          <p className="text-muted-foreground">Manage API tokens for workers and services</p>
+          <h1 className="text-3xl font-bold tracking-tight">Keys</h1>
+          <p className="text-muted-foreground">Manage API keys for workers and services</p>
         </div>
         <Link to="/tokens/new">
           <Button className="gap-1.5">
-            <Plus className="h-4 w-4" /> Register Token
+            <Plus className="h-4 w-4" /> Register Key
           </Button>
         </Link>
       </div>
@@ -117,7 +117,7 @@ export function TokenList() {
           <span>
             <span className="font-medium">Missing coverage:</span>{" "}
             {uncoveredCapabilities.map((c) => TOKEN_CAPABILITY_LABELS[c]).join(", ")}.
-            Register a token with these capabilities to enable the corresponding features.
+            Register a key with these capabilities to enable the corresponding features.
           </span>
         </div>
       )}
@@ -131,7 +131,7 @@ export function TokenList() {
         </div>
       ) : activeTokens.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
-          No tokens registered yet
+          No keys registered yet
         </div>
       ) : (
         <div className="rounded-md border">
@@ -222,9 +222,9 @@ export function TokenList() {
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Delete token?</AlertDialogTitle>
+                            <AlertDialogTitle>Delete key?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              This soft-deletes the token. The KeyVault secret is preserved.
+                              This soft-deletes the key. The KeyVault secret is preserved.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>

@@ -152,7 +152,7 @@ export function CreateToken() {
   const createMutation = useMutation({
     mutationFn: (body: CreateTokenRequest) => api.createToken(body),
     onSuccess: (data) => {
-      toast.success("Token registered successfully");
+      toast.success("Key registered successfully");
       navigate(`/tokens/${data._id}`);
     },
     onError: (err: Error) => {
@@ -162,12 +162,12 @@ export function CreateToken() {
 
   const doValidate = () => {
     if (!value.trim()) {
-      toast.error("Token value is required");
+      toast.error("Key value is required");
       return;
     }
     const prefixError = validateTokenPrefix(type, value);
     if (prefixError) {
-      toast.error(`Invalid token format: ${prefixError}`);
+      toast.error(`Invalid key format: ${prefixError}`);
       return;
     }
     previewMutation.mutate();
@@ -204,12 +204,12 @@ export function CreateToken() {
     <div className="space-y-6 max-w-2xl">
       {/* Back link */}
       <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/tokens")}>
-        <ArrowLeft className="h-4 w-4" /> Back to Tokens
+        <ArrowLeft className="h-4 w-4" /> Back to Keys
       </Button>
 
       {/* Step indicator */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span className={step === "input" ? "font-semibold text-foreground" : ""}>1. Enter Token</span>
+        <span className={step === "input" ? "font-semibold text-foreground" : ""}>1. Enter Key</span>
         <ArrowRight className="h-3 w-3" />
         <span className={step === "review" ? "font-semibold text-foreground" : ""}>2. Review & Register</span>
       </div>
@@ -217,16 +217,16 @@ export function CreateToken() {
       {step === "input" && (
         <Card>
           <CardHeader>
-            <CardTitle>Enter Token Details</CardTitle>
+            <CardTitle>Enter Key Details</CardTitle>
             <CardDescription>
-              Provide the token type and value. We'll validate it and show detected capabilities before registration.
+              Provide the key type and value. We'll validate it and show detected capabilities before registration.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleValidate} className="space-y-4">
               {/* Type */}
               <div className="space-y-2">
-                <Label htmlFor="type">Token Type</Label>
+                <Label htmlFor="type">Key Type</Label>
                 <Select value={type} onValueChange={(v) => setType(v as TokenType)}>
                   <SelectTrigger>
                     <SelectValue />
@@ -247,7 +247,7 @@ export function CreateToken() {
                 const info = TOKEN_INSTRUCTIONS[type];
                 return (
                   <div className="rounded-md border bg-muted/50 p-4 space-y-3">
-                    <p className="text-sm font-medium">How to create this token</p>
+                    <p className="text-sm font-medium">How to create this key</p>
                     <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
                       {info.steps.map((s, i) => (
                         <li key={i}>{s}</li>
@@ -273,7 +273,7 @@ export function CreateToken() {
 
               {/* Value */}
               <div className="space-y-2">
-                <Label htmlFor="value">Token Value</Label>
+                <Label htmlFor="value">Key Value</Label>
                 {type === "github-oauth-cookie-state" ? (
                   <Textarea
                     id="value"
@@ -289,7 +289,7 @@ export function CreateToken() {
                     type="password"
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
-                    placeholder="Paste token or API key…"
+                    placeholder="Paste API key…"
                   />
                 )}
                 <p className="text-xs text-muted-foreground">
@@ -302,7 +302,7 @@ export function CreateToken() {
                   return (
                     <p className="flex items-center gap-1.5 text-xs text-amber-600">
                       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      Token format doesn't match selected type. {warning}
+                      Key format doesn't match selected type. {warning}
                     </p>
                   );
                 })()}
@@ -326,11 +326,11 @@ export function CreateToken() {
                   id="comment"
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  placeholder="e.g. John's CI token"
+                  placeholder="e.g. John's CI key"
                   maxLength={500}
                 />
                 <p className="text-xs text-muted-foreground">
-                  A short note to help identify this token later.
+                  A short note to help identify this key later.
                 </p>
               </div>
 
@@ -355,7 +355,7 @@ export function CreateToken() {
           <CardHeader>
             <CardTitle>Review Detected Capabilities</CardTitle>
             <CardDescription>
-              Verify the validation results below before registering the token.
+              Verify the validation results below before registering the key.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -377,7 +377,7 @@ export function CreateToken() {
                 <AlertTriangle className="h-4 w-4" />
                 <AlertTitle>Validation failed</AlertTitle>
                 <AlertDescription>
-                  You can still register this token, but it won't be usable until validation passes.
+                  You can still register this key, but it won't be usable until validation passes.
                 </AlertDescription>
               </Alert>
             )}
@@ -386,7 +386,7 @@ export function CreateToken() {
 
             {/* Token type */}
             <div className="space-y-1">
-              <p className="text-sm font-medium text-muted-foreground">Token Type</p>
+              <p className="text-sm font-medium text-muted-foreground">Key Type</p>
               <p>{TOKEN_TYPE_LABELS[type]}</p>
             </div>
 
@@ -448,7 +448,7 @@ export function CreateToken() {
               </Button>
               <Button onClick={handleRegister} disabled={createMutation.isPending} className="gap-1.5">
                 {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-                Register Token
+                Register Key
                 <KbdBadge />
               </Button>
             </div>
