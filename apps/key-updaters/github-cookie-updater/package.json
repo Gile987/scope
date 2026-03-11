@@ -1,11 +1,11 @@
 {
-  "name": "auto-auth-state",
+  "name": "github-cookie-updater",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "npx tsx src/auto-auth-state.ts",
+    "start": "npx tsx src/github-cookie-updater.ts",
     "capture": "npx tsx src/capture-auth-state.ts"
   },
   "dependencies": {

@@ -3,7 +3,7 @@
 // Licensed under the MIT License.
 
 // =============================================================================
-// auto-auth-state.ts — Automated GitHub browser auth with TOTP MFA
+// github-cookie-updater.ts — Automated GitHub browser auth with TOTP MFA
 // =============================================================================
 // Automates the GitHub login flow using Playwright:
 //   1. Navigates to github.com/login
@@ -12,15 +12,15 @@
 //   4. Saves the resulting Playwright storageState (cookies + localStorage)
 //
 // Usage:
-//   npx tsx src/auto-auth-state.ts \
+//   npx tsx src/github-cookie-updater.ts \
 //     --username USER --password PASS --totp-secret SECRET [--output PATH] [--headed]
 //
 //   Or with a QR code image (PNG):
-//     npx tsx src/auto-auth-state.ts \
+//     npx tsx src/github-cookie-updater.ts \
 //       --username USER --password PASS --qr-code /path/to/qr.png [--output PATH] [--headed]
 //
 //   Or via env vars:
-//     GITHUB_USERNAME=... GITHUB_PASSWORD=... GITHUB_TOTP_SECRET=... npx tsx src/auto-auth-state.ts
+//     GITHUB_USERNAME=... GITHUB_PASSWORD=... GITHUB_TOTP_SECRET=... npx tsx src/github-cookie-updater.ts
 //
 // Default output: .auth/github-storage.json
 // =============================================================================
@@ -195,8 +195,8 @@ async function main() {
 // Only run main when executed directly
 const isDirectExecution =
   process.argv[1] &&
-  (process.argv[1].endsWith("auto-auth-state.ts") ||
-    process.argv[1].endsWith("auto-auth-state.js"));
+  (process.argv[1].endsWith("github-cookie-updater.ts") ||
+    process.argv[1].endsWith("github-cookie-updater.js"));
 
 if (isDirectExecution) {
   main().catch((err) => {

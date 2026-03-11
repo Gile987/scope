@@ -12,7 +12,7 @@ vi.mock("./totp.js", async (importOriginal) => {
   };
 });
 
-import { resolveOptions } from "./auto-auth-state.js";
+import { resolveOptions } from "./github-cookie-updater.js";
 import { decodeQRImage } from "./totp.js";
 
 describe("resolveOptions", () => {
