@@ -7,8 +7,7 @@
 
 import * as OTPAuth from "otpauth";
 
-export interface TOTPParams {
-  secret: string;
+export interface TOTPInfo {
   algorithm: string;
   digits: number;
   period: number;
@@ -17,41 +16,43 @@ export interface TOTPParams {
 }
 
 /**
- * Parse an otpauth:// URI or bare secret into full TOTP parameters.
+ * Create a TOTP instance from an otpauth:// URI or bare base32 secret.
  *
  * Accepts either:
  *   - A full URI:   otpauth://totp/GitHub:user?secret=XXXX&issuer=GitHub&algorithm=SHA1
  *   - A bare secret: JBSWY3DPEHPK3PXP  (defaults: SHA1, 6 digits, 30s)
+ *
+ * Returns the ready-to-use OTPAuth.TOTP instance (no round-tripping through base32).
  */
-export function parseTOTPSecret(input: string): TOTPParams {
+export function createTOTP(input: string): OTPAuth.TOTP {
   const trimmed = input.trim();
 
   if (trimmed.toLowerCase().startsWith("otpauth://")) {
-    const totp = OTPAuth.URI.parse(trimmed);
-    return {
-      secret: totp.secret.base32,
-      algorithm: totp.algorithm,
-      digits: totp.digits,
-      period: totp.period,
-      issuer: totp.issuer || undefined,
-      label: totp.label || undefined,
-    };
+    const parsed = OTPAuth.URI.parse(trimmed);
+    if (!(parsed instanceof OTPAuth.TOTP)) {
+      throw new Error("URI must be a TOTP URI (otpauth://totp/...)");
+    }
+    return parsed;
   }
 
   // Bare base32 secret — use standard defaults
-  return { secret: trimmed, algorithm: "SHA1", digits: 6, period: 30 };
+  return new OTPAuth.TOTP({
+    secret: OTPAuth.Secret.fromBase32(trimmed),
+    digits: 6,
+    period: 30,
+    algorithm: "SHA1",
+  });
 }
 
 /**
- * Generate a TOTP code using the given parameters.
- * If timestamp is provided, generates at that specific Unix epoch (seconds).
+ * Extract display info from a TOTP instance.
  */
-export function generateTOTP(params: TOTPParams, timestamp?: number): string {
-  const totp = new OTPAuth.TOTP({
-    secret: OTPAuth.Secret.fromBase32(params.secret),
-    digits: params.digits,
-    period: params.period,
-    algorithm: params.algorithm,
-  });
-  return totp.generate({ timestamp: timestamp != null ? timestamp * 1000 : undefined });
+export function getTOTPInfo(totp: OTPAuth.TOTP): TOTPInfo {
+  return {
+    algorithm: totp.algorithm,
+    digits: totp.digits,
+    period: totp.period,
+    issuer: totp.issuer || undefined,
+    label: totp.label || undefined,
+  };
 }

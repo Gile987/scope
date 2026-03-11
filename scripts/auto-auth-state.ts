@@ -22,7 +22,7 @@
 // =============================================================================
 
 import { chromium } from "playwright";
-import { parseTOTPSecret, generateTOTP } from "./totp.js";
+import { createTOTP, getTOTPInfo } from "./totp.js";
 import { ensureDir, DEFAULT_OUTPUT } from "./capture-auth-state.js";
 
 export interface AutoAuthOptions {
@@ -71,26 +71,27 @@ const LOGIN_TIMEOUT_MS = 30_000;
 async function main() {
   const opts = resolveOptions(process.argv, process.env as Record<string, string | undefined>);
 
-  // Parse TOTP secret (supports both bare secret and otpauth:// URI)
-  const totpParams = parseTOTPSecret(opts.totpSecret);
+  // Create TOTP instance (supports both bare secret and otpauth:// URI)
+  const totp = createTOTP(opts.totpSecret);
+  const info = getTOTPInfo(totp);
 
   // --totp-only mode: print codes with diagnostics and exit
   if (opts.totpOnly) {
     const now = Math.floor(Date.now() / 1000);
-    const step = Math.floor(now / totpParams.period);
-    const remaining = totpParams.period - (now % totpParams.period);
+    const step = Math.floor(now / info.period);
+    const remaining = info.period - (now % info.period);
 
-    const prevCode = generateTOTP(totpParams, (step - 1) * totpParams.period);
-    const currCode = generateTOTP(totpParams, step * totpParams.period);
-    const nextCode = generateTOTP(totpParams, (step + 1) * totpParams.period);
+    const prevCode = totp.generate({ timestamp: (step - 1) * info.period * 1000 });
+    const currCode = totp.generate({ timestamp: step * info.period * 1000 });
+    const nextCode = totp.generate({ timestamp: (step + 1) * info.period * 1000 });
 
     console.log(`Previous:  ${prevCode}`);
     console.log(`Current:   ${currCode}  ← use this one`);
     console.log(`Next:      ${nextCode}`);
     console.log();
-    console.log(`Algorithm: ${totpParams.algorithm}`);
-    console.log(`Digits:    ${totpParams.digits}`);
-    console.log(`Period:    ${totpParams.period}s`);
+    console.log(`Algorithm: ${info.algorithm}`);
+    console.log(`Digits:    ${info.digits}`);
+    console.log(`Period:    ${info.period}s`);
     console.log(`Remaining: ${remaining}s`);
     console.log(`System:    ${new Date().toISOString()}`);
     console.log(`Epoch:     ${now}`);
@@ -125,7 +126,7 @@ async function main() {
     // Step 4: Handle MFA if present
     const totpField = page.locator("#app_totp");
     if (await totpField.isVisible({ timeout: 5000 }).catch(() => false)) {
-      const code = generateTOTP(totpParams);
+      const code = totp.generate();
       console.log("🔑 Entering TOTP code...");
       await totpField.fill(code);
 

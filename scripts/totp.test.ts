@@ -2,72 +2,72 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect } from "vitest";
-import { parseTOTPSecret, generateTOTP } from "./totp.js";
+import { createTOTP, getTOTPInfo } from "./totp.js";
 
-describe("parseTOTPSecret", () => {
-  it("parses a bare base32 secret with defaults", () => {
-    const result = parseTOTPSecret("JBSWY3DPEHPK3PXP");
-    expect(result.secret).toBe("JBSWY3DPEHPK3PXP");
-    expect(result.algorithm).toBe("SHA1");
-    expect(result.digits).toBe(6);
-    expect(result.period).toBe(30);
-    expect(result.issuer).toBeUndefined();
-    expect(result.label).toBeUndefined();
+describe("createTOTP", () => {
+  it("creates TOTP from bare base32 secret with defaults", () => {
+    const totp = createTOTP("JBSWY3DPEHPK3PXP");
+    const info = getTOTPInfo(totp);
+    expect(info.algorithm).toBe("SHA1");
+    expect(info.digits).toBe(6);
+    expect(info.period).toBe(30);
   });
 
   it("trims whitespace from bare secrets", () => {
-    const result = parseTOTPSecret("  JBSWY3DPEHPK3PXP  \n");
-    expect(result.secret).toBe("JBSWY3DPEHPK3PXP");
+    const totp = createTOTP("  JBSWY3DPEHPK3PXP  \n");
+    expect(totp.generate()).toMatch(/^\d{6}$/);
   });
 
   it("parses a full otpauth:// URI with all params", () => {
     const uri =
       "otpauth://totp/GitHub:myuser?secret=JBSWY3DPEHPK3PXP&issuer=GitHub&algorithm=SHA256&digits=8&period=60";
-    const result = parseTOTPSecret(uri);
-    expect(result.secret).toBe("JBSWY3DPEHPK3PXP");
-    expect(result.issuer).toBe("GitHub");
-    expect(result.algorithm).toBe("SHA256");
-    expect(result.digits).toBe(8);
-    expect(result.period).toBe(60);
+    const totp = createTOTP(uri);
+    const info = getTOTPInfo(totp);
+    expect(info.issuer).toBe("GitHub");
+    expect(info.algorithm).toBe("SHA256");
+    expect(info.digits).toBe(8);
+    expect(info.period).toBe(60);
   });
 
   it("parses URI without issuer", () => {
     const uri = "otpauth://totp/myuser?secret=JBSWY3DPEHPK3PXP";
-    const result = parseTOTPSecret(uri);
-    expect(result.secret).toBe("JBSWY3DPEHPK3PXP");
-    expect(result.issuer).toBeUndefined();
+    const info = getTOTPInfo(createTOTP(uri));
+    expect(info.issuer).toBeUndefined();
   });
 
   it("is case-insensitive for the URI scheme", () => {
     const uri =
       "OTPAUTH://totp/GitHub:myuser?secret=JBSWY3DPEHPK3PXP&issuer=GitHub";
-    const result = parseTOTPSecret(uri);
-    expect(result.secret).toBe("JBSWY3DPEHPK3PXP");
+    const totp = createTOTP(uri);
+    expect(totp.generate()).toMatch(/^\d{6}$/);
+  });
+
+  it("URI and bare secret produce same codes for same secret", () => {
+    const fromUri = createTOTP("otpauth://totp/Test:user?secret=JBSWY3DPEHPK3PXP");
+    const fromBare = createTOTP("JBSWY3DPEHPK3PXP");
+    expect(fromUri.generate()).toBe(fromBare.generate());
   });
 });
 
-describe("generateTOTP", () => {
-  const defaultParams = { secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1", digits: 6, period: 30 };
-
+describe("generate", () => {
   it("returns a 6-digit string", () => {
-    const code = generateTOTP(defaultParams);
+    const code = createTOTP("JBSWY3DPEHPK3PXP").generate();
     expect(code).toMatch(/^\d{6}$/);
   });
 
-  it("returns consistent results for the same params within a 30s window", () => {
-    const code1 = generateTOTP(defaultParams);
-    const code2 = generateTOTP(defaultParams);
-    expect(code1).toBe(code2);
+  it("returns consistent results within a 30s window", () => {
+    const totp = createTOTP("JBSWY3DPEHPK3PXP");
+    expect(totp.generate()).toBe(totp.generate());
   });
 
   it("returns different codes for different secrets", () => {
-    const code1 = generateTOTP(defaultParams);
-    const code2 = generateTOTP({ ...defaultParams, secret: "HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ" });
+    const code1 = createTOTP("JBSWY3DPEHPK3PXP").generate();
+    const code2 = createTOTP("HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ").generate();
     expect(code1 === code2).toBe(false);
   });
 
-  it("respects custom digits parameter", () => {
-    const code = generateTOTP({ ...defaultParams, digits: 8 });
-    expect(code).toMatch(/^\d{8}$/);
+  it("respects custom digits from URI", () => {
+    const totp = createTOTP("otpauth://totp/Test:user?secret=JBSWY3DPEHPK3PXP&digits=8");
+    expect(totp.generate()).toMatch(/^\d{8}$/);
   });
 });
