@@ -157,11 +157,31 @@ async function main() {
     }
 
     // Step 5: Wait for session cookie to appear (works regardless of final URL)
+    // After TOTP, GitHub may show intermediate pages (device verification,
+    // recovery codes, etc.) before landing on the homepage with cookies set.
     console.log("⏳ Waiting for session cookie...");
-    await page.waitForFunction(
-      () => document.cookie.includes("logged_in=yes"),
-      { timeout: LOGIN_TIMEOUT_MS }
-    );
+    console.log(`   Current URL: ${page.url()}`);
+
+    try {
+      await page.waitForFunction(
+        () => document.cookie.includes("logged_in=yes"),
+        { timeout: LOGIN_TIMEOUT_MS }
+      );
+    } catch {
+      // Log diagnostic info before failing
+      const url = page.url();
+      const title = await page.title();
+      const cookies = await context.cookies();
+      const cookieNames = cookies.map((c) => c.name).join(", ");
+      throw new Error(
+        `Timed out waiting for logged_in cookie.\n` +
+        `  URL:     ${url}\n` +
+        `  Title:   ${title}\n` +
+        `  Cookies: ${cookieNames || "(none)"}\n` +
+        `  Hint:    GitHub may be showing a device verification or recovery codes page.\n` +
+        `           Re-run with --headed to see what page the browser is on.`
+      );
+    }
 
     // Step 6: Verify we're authenticated
     const cookies = await context.cookies();
