@@ -147,7 +147,7 @@ export type AccountType = "github";
 
 /**
  * Account metadata stored in MongoDB. Secret values (username, password,
- * totpSecret) are stored as a single JSON blob in Azure KeyVault.
+ * totpUri) are stored as a single JSON blob in Azure KeyVault.
  */
 export interface AccountDocument {
   _id: string;
@@ -169,7 +169,8 @@ export interface AccountDocument {
 export interface AccountSecretValue {
   username: string;
   password: string;
-  totpSecret: string;
+  /** Full otpauth:// URI (preserves issuer, algorithm, digits, period). */
+  totpUri: string;
 }
 
 /**
@@ -179,7 +180,8 @@ export interface CreateAccountRequest {
   type: AccountType;
   username: string;
   password: string;
-  totpSecret: string;
+  /** Full otpauth:// URI or bare base32 secret. */
+  totpUri: string;
   enabled?: boolean;
   comment?: string;
 }
@@ -193,7 +195,7 @@ export interface UpdateAccountRequest {
   /** If provided, rotates the secrets in KeyVault. */
   username?: string;
   password?: string;
-  totpSecret?: string;
+  totpUri?: string;
 }
 
 /**

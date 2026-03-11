@@ -22,7 +22,7 @@ interface AccountDocument {
 interface AccountSecretValue {
   username: string;
   password: string;
-  totpSecret: string;
+  totpUri: string;
 }
 
 // ── helpers ──────────────────────────────────────────────
@@ -164,7 +164,7 @@ describe("account-routes", () => {
         type: "github",
         username: "bot-user",
         password: "secret-pass",
-        totpSecret: "JBSWY3DPEHPK3PXP",
+        totpUri: "otpauth://totp/GitHub:bot-user?secret=JBSWY3DPEHPK3PXP&issuer=GitHub",
         comment: "CI bot",
       });
 
@@ -183,7 +183,7 @@ describe("account-routes", () => {
       const parsed: AccountSecretValue = JSON.parse(secretVal);
       expect(parsed.username).toBe("bot-user");
       expect(parsed.password).toBe("secret-pass");
-      expect(parsed.totpSecret).toBe("JBSWY3DPEHPK3PXP");
+      expect(parsed.totpUri).toBe("otpauth://totp/GitHub:bot-user?secret=JBSWY3DPEHPK3PXP&issuer=GitHub");
 
       // Metadata stored in MongoDB
       expect(collection.insertOne).toHaveBeenCalledTimes(1);
@@ -194,7 +194,7 @@ describe("account-routes", () => {
         type: "gitlab",
         username: "u",
         password: "p",
-        totpSecret: "t",
+        totpUri: "t",
       });
       expect(res.status).toBe(400);
       expect((res.body as any).error).toContain("Invalid type");
@@ -204,7 +204,7 @@ describe("account-routes", () => {
       const res = await request(app, "POST", "/api/v1/accounts", {
         type: "github",
         password: "p",
-        totpSecret: "t",
+        totpUri: "t",
       });
       expect(res.status).toBe(400);
       expect((res.body as any).error).toContain("username");
@@ -214,20 +214,20 @@ describe("account-routes", () => {
       const res = await request(app, "POST", "/api/v1/accounts", {
         type: "github",
         username: "u",
-        totpSecret: "t",
+        totpUri: "t",
       });
       expect(res.status).toBe(400);
       expect((res.body as any).error).toContain("password");
     });
 
-    it("rejects missing totpSecret", async () => {
+    it("rejects missing totpUri", async () => {
       const res = await request(app, "POST", "/api/v1/accounts", {
         type: "github",
         username: "u",
         password: "p",
       });
       expect(res.status).toBe(400);
-      expect((res.body as any).error).toContain("totpSecret");
+      expect((res.body as any).error).toContain("totpUri");
     });
 
     it("defaults enabled to true", async () => {
@@ -235,7 +235,7 @@ describe("account-routes", () => {
         type: "github",
         username: "u",
         password: "p",
-        totpSecret: "t",
+        totpUri: "t",
       });
       expect(res.status).toBe(201);
       expect((res.body as any).enabled).toBe(true);
@@ -246,7 +246,7 @@ describe("account-routes", () => {
         type: "github",
         username: "u",
         password: "p",
-        totpSecret: "t",
+        totpUri: "t",
         enabled: false,
       });
       expect(res.status).toBe(201);
@@ -267,14 +267,14 @@ describe("account-routes", () => {
         type: "github",
         username: "u1",
         password: "p1",
-        totpSecret: "t1",
+        totpUri: "t1",
         comment: "first",
       });
       await request(app, "POST", "/api/v1/accounts", {
         type: "github",
         username: "u2",
         password: "p2",
-        totpSecret: "t2",
+        totpUri: "t2",
         comment: "second",
       });
 
@@ -296,7 +296,7 @@ describe("account-routes", () => {
         type: "github",
         username: "u",
         password: "p",
-        totpSecret: "t",
+        totpUri: "t",
       });
       const id = (createRes.body as any)._id;
 
@@ -318,7 +318,7 @@ describe("account-routes", () => {
         type: "github",
         username: "bot",
         password: "pass123",
-        totpSecret: "TOTP_KEY",
+        totpUri: "otpauth://totp/GitHub:bot?secret=JBSWY3DPEHPK3PXP&issuer=GitHub",
       });
       const body = createRes.body as any;
 
@@ -327,7 +327,7 @@ describe("account-routes", () => {
       const secretBody = res.body as AccountSecretValue;
       expect(secretBody.username).toBe("bot");
       expect(secretBody.password).toBe("pass123");
-      expect(secretBody.totpSecret).toBe("TOTP_KEY");
+      expect(secretBody.totpUri).toBe("otpauth://totp/GitHub:bot?secret=JBSWY3DPEHPK3PXP&issuer=GitHub");
     });
   });
 
@@ -344,7 +344,7 @@ describe("account-routes", () => {
         type: "github",
         username: "u",
         password: "p",
-        totpSecret: "t",
+        totpUri: "t",
       });
       const id = (createRes.body as any)._id;
 
@@ -362,7 +362,7 @@ describe("account-routes", () => {
         type: "github",
         username: "old-user",
         password: "old-pass",
-        totpSecret: "old-totp",
+        totpUri: "otpauth://totp/GitHub:old-user?secret=OLDSECRET&issuer=GitHub",
       });
       const body = createRes.body as any;
 
@@ -376,7 +376,7 @@ describe("account-routes", () => {
       const parsed: AccountSecretValue = JSON.parse(secretRaw);
       expect(parsed.username).toBe("old-user"); // unchanged
       expect(parsed.password).toBe("new-pass"); // updated
-      expect(parsed.totpSecret).toBe("old-totp"); // unchanged
+      expect(parsed.totpUri).toBe("otpauth://totp/GitHub:old-user?secret=OLDSECRET&issuer=GitHub"); // unchanged
     });
   });
 
@@ -391,7 +391,7 @@ describe("account-routes", () => {
         type: "github",
         username: "u",
         password: "p",
-        totpSecret: "t",
+        totpUri: "t",
       });
       const id = (createRes.body as any)._id;
 

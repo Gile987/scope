@@ -497,7 +497,7 @@ export interface CreateAccountRequest {
   type: AccountType;
   username: string;
   password: string;
-  totpSecret: string;
+  totpUri: string;
   enabled?: boolean;
   comment?: string;
 }
@@ -507,7 +507,7 @@ export interface UpdateAccountRequest {
   comment?: string | null;
   username?: string;
   password?: string;
-  totpSecret?: string;
+  totpUri?: string;
 }
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {

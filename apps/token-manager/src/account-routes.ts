@@ -43,8 +43,8 @@ export function createAccountRouter(
         res.status(400).json({ error: "password is required" });
         return;
       }
-      if (!body.totpSecret || typeof body.totpSecret !== "string") {
-        res.status(400).json({ error: "totpSecret is required" });
+      if (!body.totpUri || typeof body.totpUri !== "string") {
+        res.status(400).json({ error: "totpUri is required" });
         return;
       }
 
@@ -55,7 +55,7 @@ export function createAccountRouter(
       const secretValue: AccountSecretValue = {
         username: body.username,
         password: body.password,
-        totpSecret: body.totpSecret,
+        totpUri: body.totpUri,
       };
       await store.setSecret(secretName, JSON.stringify(secretValue));
 
@@ -161,7 +161,7 @@ export function createAccountRouter(
       }
 
       // If any secret field is provided, rotate secrets in KeyVault
-      if (body.username || body.password || body.totpSecret) {
+      if (body.username || body.password || body.totpUri) {
         const account = await collection.findOne({
           _id: req.params.id,
           deletedAt: { $exists: false },
@@ -178,7 +178,7 @@ export function createAccountRouter(
         const merged: AccountSecretValue = {
           username: body.username || existing.username,
           password: body.password || existing.password,
-          totpSecret: body.totpSecret || existing.totpSecret,
+          totpUri: body.totpUri || existing.totpUri,
         };
         await store.setSecret(account.secretName, JSON.stringify(merged));
       }

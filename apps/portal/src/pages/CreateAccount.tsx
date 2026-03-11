@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
+import jsQR from "jsqr";
 import { api } from "@/lib/api";
 import type { AccountType, CreateAccountRequest } from "@/types";
 import { ACCOUNT_TYPE_LABELS } from "@/types";
@@ -15,7 +16,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Upload, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
 const ACCOUNT_TYPES: AccountType[] = ["github"];
@@ -25,8 +26,10 @@ export function CreateAccount() {
   const [type, setType] = useState<AccountType>("github");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [totpSecret, setTotpSecret] = useState("");
+  const [totpUri, setTotpUri] = useState("");
   const [comment, setComment] = useState("");
+  const [qrDecoding, setQrDecoding] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const createMutation = useMutation({
     mutationFn: (body: CreateAccountRequest) => api.createAccount(body),
@@ -39,7 +42,51 @@ export function CreateAccount() {
     },
   });
 
-  const canSubmit = username.trim() && password.trim() && totpSecret.trim();
+  const canSubmit = username.trim() && password.trim() && totpUri.trim();
+
+  function handleQrUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setQrDecoding(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          toast.error("Could not create canvas context");
+          setQrDecoding(false);
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        if (code?.data) {
+          setTotpUri(code.data);
+          toast.success("QR code decoded successfully");
+        } else {
+          toast.error("Could not decode QR code from image");
+        }
+        setQrDecoding(false);
+      };
+      img.onerror = () => {
+        toast.error("Could not load image");
+        setQrDecoding(false);
+      };
+      img.src = reader.result as string;
+    };
+    reader.onerror = () => {
+      toast.error("Could not read file");
+      setQrDecoding(false);
+    };
+    reader.readAsDataURL(file);
+    // Reset so the same file can be re-selected
+    e.target.value = "";
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -48,7 +95,7 @@ export function CreateAccount() {
       type,
       username: username.trim(),
       password: password.trim(),
-      totpSecret: totpSecret.trim(),
+      totpUri: totpUri.trim(),
       comment: comment.trim() || undefined,
     });
   }
@@ -112,17 +159,43 @@ export function CreateAccount() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="totpSecret">TOTP Secret</Label>
-              <Input
-                id="totpSecret"
-                type="password"
-                value={totpSecret}
-                onChange={(e) => setTotpSecret(e.target.value)}
-                placeholder="Base32-encoded TOTP secret (from QR code)"
-                autoComplete="off"
-              />
+              <Label htmlFor="totpUri">TOTP URI</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="totpUri"
+                  type="password"
+                  value={totpUri}
+                  onChange={(e) => setTotpUri(e.target.value)}
+                  placeholder="otpauth://totp/... or base32 secret"
+                  autoComplete="off"
+                  className="flex-1"
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleQrUpload}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={qrDecoding}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="gap-1.5 shrink-0"
+                >
+                  {qrDecoding ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : totpUri ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <Upload className="h-4 w-4" />
+                  )}
+                  QR Code
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">
-                The base32 secret from your authenticator QR code setup.
+                Paste an otpauth:// URI, a bare base32 secret, or upload a QR code image.
               </p>
             </div>
 
