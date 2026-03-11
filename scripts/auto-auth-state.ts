@@ -79,78 +79,61 @@ async function main() {
     // Step 1: Navigate to login page
     await page.goto("https://github.com/login", { waitUntil: "domcontentloaded" });
 
-    // Step 2: Fill in credentials
+    // Step 2: Fill in credentials and submit
     await page.fill("#login_field", opts.username);
     await page.fill("#password", opts.password);
-    await page.click('input[type="submit"], button[type="submit"]');
-
-    // Step 3: Wait for and handle MFA
-    // GitHub may show the TOTP input or an error
-    const totpSelector = "#app_totp";
-    const errorSelector = ".js-flash-alert, #js-flash-container .flash-error";
-
-    const result = await Promise.race([
-      page.waitForSelector(totpSelector, { timeout: LOGIN_TIMEOUT_MS }).then(
-        () => "totp" as const
-      ),
-      page.waitForSelector(errorSelector, { timeout: LOGIN_TIMEOUT_MS }).then(
-        () => "error" as const
-      ),
-      // Also detect if we're already logged in (no MFA prompt)
-      page
-        .waitForURL("https://github.com/", { timeout: LOGIN_TIMEOUT_MS })
-        .then(() => "logged-in" as const),
-      page
-        .waitForURL("https://github.com/**", { timeout: LOGIN_TIMEOUT_MS })
-        .then(() => "logged-in" as const),
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: LOGIN_TIMEOUT_MS }),
+      page.click('input[type="submit"], button[type="submit"]'),
     ]);
 
-    if (result === "error") {
-      const errorText = await page
-        .locator(errorSelector)
-        .first()
-        .textContent();
-      await browser.close();
+    // Step 3: Check for login error
+    const errorBanner = page.locator(".js-flash-alert, #js-flash-container .flash-error");
+    if (await errorBanner.isVisible({ timeout: 1000 }).catch(() => false)) {
+      const errorText = await errorBanner.first().textContent();
       throw new Error(`GitHub login failed: ${errorText?.trim()}`);
     }
 
-    if (result === "totp") {
-      // Generate and fill TOTP code
+    // Step 4: Handle MFA if present
+    const totpField = page.locator("#app_totp");
+    if (await totpField.isVisible({ timeout: 5000 }).catch(() => false)) {
       const code = generateTOTP(secret);
       console.log("🔑 Entering TOTP code...");
-      await page.fill(totpSelector, code);
+      await totpField.fill(code);
 
-      // Some GitHub MFA forms auto-submit, others have a button
-      const verifyButton = page.locator(
-        'button:has-text("Verify"), button[type="submit"]'
-      );
-      if (await verifyButton.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await verifyButton.click();
+      // Submit the TOTP form
+      const verifyButton = page.locator('button[type="submit"]');
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: LOGIN_TIMEOUT_MS }),
+        verifyButton.click(),
+      ]);
+
+      // Check for TOTP error (wrong code)
+      if (await errorBanner.isVisible({ timeout: 1000 }).catch(() => false)) {
+        const errorText = await errorBanner.first().textContent();
+        throw new Error(`TOTP verification failed: ${errorText?.trim()}`);
       }
-
-      // Wait for successful redirect after MFA
-      await page.waitForURL(
-        (url) =>
-          url.hostname === "github.com" &&
-          !url.pathname.startsWith("/sessions/") &&
-          !url.pathname.startsWith("/login"),
-        { timeout: LOGIN_TIMEOUT_MS }
-      );
     }
 
-    // Step 4: Verify we're authenticated
+    // Step 5: Wait for session cookie to appear (works regardless of final URL)
+    console.log("⏳ Waiting for session cookie...");
+    await page.waitForFunction(
+      () => document.cookie.includes("logged_in=yes"),
+      { timeout: LOGIN_TIMEOUT_MS }
+    );
+
+    // Step 6: Verify we're authenticated
     const cookies = await context.cookies();
     const hasSession = cookies.some(
       (c) => c.name === "user_session" && c.domain === "github.com"
     );
     if (!hasSession) {
-      await browser.close();
       throw new Error(
         "Login appeared to succeed but no user_session cookie was found"
       );
     }
 
-    // Step 5: Save storage state
+    // Step 7: Save storage state
     ensureDir(opts.output);
     await context.storageState({ path: opts.output });
 
