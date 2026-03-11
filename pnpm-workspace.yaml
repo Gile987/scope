@@ -1,5 +1,6 @@
 packages:
   - "apps/api"
+  - "apps/key-updaters/*"
   - "apps/cli"
   - "apps/judge"
   - "apps/portal"

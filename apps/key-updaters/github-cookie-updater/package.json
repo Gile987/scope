@@ -1,0 +1,23 @@
+{
+  "name": "github-cookie-updater",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "npx tsx src/github-cookie-updater.ts",
+    "capture": "npx tsx src/capture-auth-state.ts"
+  },
+  "dependencies": {
+    "otpauth": "^9.5.0",
+    "pngjs": "^7.0.0",
+    "playwright": "^1.40.0",
+    "qr": "^0.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "@types/pngjs": "^6.0.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.2"
+  }
+}
