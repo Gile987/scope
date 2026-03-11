@@ -72,12 +72,28 @@ async function main() {
   const opts = resolveOptions(process.argv, process.env as Record<string, string | undefined>);
 
   // Parse TOTP secret (supports both bare secret and otpauth:// URI)
-  const { secret } = parseTOTPSecret(opts.totpSecret);
+  const totpParams = parseTOTPSecret(opts.totpSecret);
 
-  // --totp-only mode: just print the code and exit
+  // --totp-only mode: print codes with diagnostics and exit
   if (opts.totpOnly) {
-    const code = generateTOTP(secret);
-    console.log(code);
+    const now = Math.floor(Date.now() / 1000);
+    const step = Math.floor(now / totpParams.period);
+    const remaining = totpParams.period - (now % totpParams.period);
+
+    const prevCode = generateTOTP(totpParams, (step - 1) * totpParams.period);
+    const currCode = generateTOTP(totpParams, step * totpParams.period);
+    const nextCode = generateTOTP(totpParams, (step + 1) * totpParams.period);
+
+    console.log(`Previous:  ${prevCode}`);
+    console.log(`Current:   ${currCode}  ← use this one`);
+    console.log(`Next:      ${nextCode}`);
+    console.log();
+    console.log(`Algorithm: ${totpParams.algorithm}`);
+    console.log(`Digits:    ${totpParams.digits}`);
+    console.log(`Period:    ${totpParams.period}s`);
+    console.log(`Remaining: ${remaining}s`);
+    console.log(`System:    ${new Date().toISOString()}`);
+    console.log(`Epoch:     ${now}`);
     return;
   }
 
@@ -109,7 +125,7 @@ async function main() {
     // Step 4: Handle MFA if present
     const totpField = page.locator("#app_totp");
     if (await totpField.isVisible({ timeout: 5000 }).catch(() => false)) {
-      const code = generateTOTP(secret);
+      const code = generateTOTP(totpParams);
       console.log("🔑 Entering TOTP code...");
       await totpField.fill(code);
 
