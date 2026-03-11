@@ -23,7 +23,7 @@ export type TokenType =
  * Workers acquire tokens by capability, not by type.
  */
 export type TokenCapability =
-  "github-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
+  "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
 
 /**
  * Validation status of a token.
@@ -125,6 +125,7 @@ export interface AcquireTokenRequest {
 export const TOKEN_CAPABILITY_ENV_VARS: Record<TokenCapability, string> = {
   "copilot-sdk": "GITHUB_TOKEN",
   "copilot-cli": "GITHUB_TOKEN",
+  "copilot-models": "GITHUB_TOKEN",
   "github-models": "GITHUB_TOKEN",
   "claude-code-cli": "ANTHROPIC_API_KEY",
 };

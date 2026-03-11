@@ -27,6 +27,7 @@ const VALID_TYPES: TokenType[] = [
 ];
 const VALID_CAPABILITIES: TokenCapability[] = [
   "github-models",
+  "copilot-models",
   "copilot-sdk",
   "copilot-cli",
   "claude-code-cli"

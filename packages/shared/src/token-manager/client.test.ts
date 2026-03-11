@@ -52,6 +52,15 @@ describe("TokenManagerClient", () => {
       expect(result).toBe("ghp_cli_test");
     });
 
+    it("returns GITHUB_TOKEN env var for copilot-models capability", async () => {
+      process.env.GITHUB_TOKEN = "ghp_copilot_models_test";
+      const client = new TokenManagerClient("http://localhost:3000");
+
+      const result = await client.acquireToken("copilot-models");
+
+      expect(result).toBe("ghp_copilot_models_test");
+    });
+
     it("does not make HTTP call when env var is set", async () => {
       process.env.GITHUB_TOKEN = "ghp_test123";
       const fetchSpy = vi.spyOn(globalThis, "fetch");
