@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { TokenType, TokenValidationResult, CreateTokenRequest } from "@/types";
-import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS } from "@/types";
+import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS, TOKEN_TYPE_EXPECTED_CAPABILITIES } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -233,7 +233,18 @@ export function CreateToken() {
                   </SelectTrigger>
                   <SelectContent>
                     {TOKEN_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>{TOKEN_TYPE_LABELS[t]}</SelectItem>
+                      <SelectItem key={t} value={t}>
+                        <div className="flex flex-col gap-1 py-0.5">
+                          <span>{TOKEN_TYPE_LABELS[t]}</span>
+                          <div className="flex flex-wrap gap-1">
+                            {TOKEN_TYPE_EXPECTED_CAPABILITIES[t].map((c) => (
+                              <Badge key={c} variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
+                                {TOKEN_CAPABILITY_LABELS[c]}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
