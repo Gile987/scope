@@ -135,3 +135,72 @@ export const TOKEN_CAPABILITY_ENV_VARS: Record<TokenCapability, string> = {
 export function deriveSecretName(type: TokenType, id: string): string {
   return `token-${type}-${id.substring(0, 8)}`;
 }
+
+// =============================================================================
+// Accounts — credential storage for key-updater automation
+// =============================================================================
+
+/**
+ * The kind of service account stored.
+ */
+export type AccountType = "github";
+
+/**
+ * Account metadata stored in MongoDB. Secret values (username, password,
+ * totpUri) are stored as a single JSON blob in Azure KeyVault.
+ */
+export interface AccountDocument {
+  _id: string;
+  type: AccountType;
+  /** Auto-derived: account-{type}-{_id.substring(0,8)} */
+  secretName: string;
+  enabled: boolean;
+  /** Optional free-text annotation (e.g. "CI bot account"). */
+  comment?: string;
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;
+}
+
+/**
+ * The secret value stored in KeyVault for an account.
+ * All fields are sensitive — none are stored in MongoDB.
+ */
+export interface AccountSecretValue {
+  username: string;
+  password: string;
+  /** Full otpauth:// URI (preserves issuer, algorithm, digits, period). */
+  totpUri: string;
+}
+
+/**
+ * Request body for POST /api/v1/accounts.
+ */
+export interface CreateAccountRequest {
+  type: AccountType;
+  username: string;
+  password: string;
+  /** Full otpauth:// URI or bare base32 secret. */
+  totpUri: string;
+  enabled?: boolean;
+  comment?: string;
+}
+
+/**
+ * Request body for PUT /api/v1/accounts/:id.
+ */
+export interface UpdateAccountRequest {
+  enabled?: boolean;
+  comment?: string | null;
+  /** If provided, rotates the secrets in KeyVault. */
+  username?: string;
+  password?: string;
+  totpUri?: string;
+}
+
+/**
+ * Derive the KeyVault secret name from an account's type and ID.
+ */
+export function deriveAccountSecretName(type: AccountType, id: string): string {
+  return `account-${type}-${id.substring(0, 8)}`;
+}
