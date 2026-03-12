@@ -229,7 +229,7 @@ export function CreateToken() {
                 <Label htmlFor="type">Key Type</Label>
                 <Select value={type} onValueChange={(v) => setType(v as TokenType)}>
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>{TOKEN_TYPE_LABELS[type]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {TOKEN_TYPES.map((t) => (
