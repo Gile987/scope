@@ -26,6 +26,7 @@ import { useState } from "react";
 
 const CAPABILITY_OPTIONS: TokenCapability[] = [
   "github-models",
+  "copilot-models",
   "copilot-sdk",
   "copilot-cli",
   "claude-code-cli"
