@@ -234,8 +234,8 @@ export function CreateToken() {
                   <SelectContent>
                     {TOKEN_TYPES.map((t) => (
                       <SelectItem key={t} value={t}>
-                        <div className="flex flex-col gap-1 py-0.5">
-                          <span>{TOKEN_TYPE_LABELS[t]}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="shrink-0">{TOKEN_TYPE_LABELS[t]}</span>
                           <div className="flex flex-wrap gap-1">
                             {TOKEN_TYPE_EXPECTED_CAPABILITIES[t].map((c) => (
                               <Badge key={c} variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
