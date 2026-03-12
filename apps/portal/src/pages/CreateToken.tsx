@@ -153,7 +153,7 @@ export function CreateToken() {
     mutationFn: (body: CreateTokenRequest) => api.createToken(body),
     onSuccess: (data) => {
       toast.success("Key registered successfully");
-      navigate(`/tokens/${data._id}`);
+      navigate(`/secrets/keys/${data._id}`);
     },
     onError: (err: Error) => {
       toast.error(err.message);
@@ -203,7 +203,7 @@ export function CreateToken() {
   return (
     <div className="space-y-6 max-w-2xl">
       {/* Back link */}
-      <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/tokens")}>
+      <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/secrets/keys")}>
         <ArrowLeft className="h-4 w-4" /> Back to Keys
       </Button>
 

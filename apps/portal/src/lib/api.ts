@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -510,6 +510,39 @@ export const api = {
   /** Trigger on-demand validation for a token */
   validateToken: (id: string): Promise<TokenDocument> => {
     return request(`/tokens/${id}/validate`, { method: "POST" });
+  },
+
+  // ─── Accounts ─────────────────────────────────────────────────────────────
+
+  /** List all accounts (metadata only) */
+  listAccounts: (): Promise<AccountDocument[]> => {
+    return request("/accounts");
+  },
+
+  /** Get a single account by ID */
+  getAccount: (id: string): Promise<AccountDocument> => {
+    return request(`/accounts/${id}`);
+  },
+
+  /** Register a new account */
+  createAccount: (body: CreateAccountRequest): Promise<AccountDocument> => {
+    return request("/accounts", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update account metadata + optionally rotate secrets */
+  updateAccount: (id: string, body: UpdateAccountRequest): Promise<AccountDocument> => {
+    return request(`/accounts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete an account */
+  deleteAccount: (id: string): Promise<void> => {
+    return request(`/accounts/${id}`, { method: "DELETE" });
   },
 
   // ─── Insights ──────────────────────────────────────────────────────────────

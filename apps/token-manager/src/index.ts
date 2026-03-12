@@ -5,9 +5,10 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, Collection, Db } from "mongodb";
-import { TokenDocument } from "shared";
+import { TokenDocument, AccountDocument } from "shared";
 import { createTokenStore, TokenSecretStore } from "./keyvault-store.js";
 import { createTokenRouter } from "./routes.js";
+import { createAccountRouter } from "./account-routes.js";
 import { startTokenScheduler } from "./token-scheduler.js";
 import { validateToken } from "./token-validators.js";
 
@@ -24,6 +25,7 @@ const validationIntervalMs = parseInt(
 
 let db: Db;
 let tokensCollection: Collection<TokenDocument>;
+let accountsCollection: Collection<AccountDocument>;
 let tokenStore: TokenSecretStore;
 
 const app = express();
@@ -40,6 +42,7 @@ async function initializeClients(): Promise<void> {
   await client.connect();
   db = client.db(dbName);
   tokensCollection = db.collection<TokenDocument>("tokens");
+  accountsCollection = db.collection<AccountDocument>("accounts");
 
   // Create indexes
   try {
@@ -65,6 +68,10 @@ async function initializeClients(): Promise<void> {
   // Mount token routes
   const router = createTokenRouter(tokensCollection, tokenStore);
   app.use(router);
+
+  // Mount account routes
+  const accountRouter = createAccountRouter(accountsCollection, tokenStore);
+  app.use(accountRouter);
 
   // Start validation scheduler
   const scheduler = startTokenScheduler({

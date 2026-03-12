@@ -80,7 +80,7 @@ export function TokenList() {
           <h1 className="text-3xl font-bold tracking-tight">Keys</h1>
           <p className="text-muted-foreground">Manage API keys for workers and services</p>
         </div>
-        <Link to="/tokens/new">
+        <Link to="/secrets/keys/new">
           <Button className="gap-1.5">
             <Plus className="h-4 w-4" /> Register Key
           </Button>
@@ -147,7 +147,7 @@ export function TokenList() {
               {activeTokens.map((token: TokenDocument) => (
                 <TableRow key={token._id}>
                   <TableCell className="font-mono text-xs">
-                    <Link to={`/tokens/${token._id}`} className="hover:underline">
+                    <Link to={`/secrets/keys/${token._id}`} className="hover:underline">
                       {formatId(token._id)}
                     </Link>
                   </TableCell>
@@ -193,7 +193,7 @@ export function TokenList() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Link to={`/tokens/${token._id}`}>
+                      <Link to={`/secrets/keys/${token._id}`}>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
                           <Eye className="h-4 w-4" />
                         </Button>

@@ -76,7 +76,7 @@ export function TokenDetail() {
     mutationFn: () => api.deleteToken(id!),
     onSuccess: () => {
       toast.success("Key deleted");
-      navigate("/tokens");
+      navigate("/secrets/keys");
     },
   });
 
@@ -110,7 +110,7 @@ export function TokenDetail() {
   if (error || !token) {
     return (
       <div className="space-y-4 max-w-2xl">
-        <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/tokens")}>
+        <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/secrets/keys")}>
           <ArrowLeft className="h-4 w-4" /> Back to Keys
         </Button>
         <div className="text-center py-12 text-muted-foreground">
@@ -123,7 +123,7 @@ export function TokenDetail() {
   return (
     <div className="space-y-6 max-w-2xl">
       {/* Back link */}
-      <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/tokens")}>
+      <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/secrets/keys")}>
         <ArrowLeft className="h-4 w-4" /> Back to Keys
       </Button>
 
