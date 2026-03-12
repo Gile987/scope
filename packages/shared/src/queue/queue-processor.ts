@@ -139,8 +139,21 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     await log("info", `Starting processing with ${this.processor.workerName}`);
 
-    // Process the task using the worker-specific processor
-    const workerResult = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
+    // Lifecycle: call setup() before processMessage so workers can acquire expensive resources
+    if (this.processor.setup) {
+      await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
+    }
+
+    let workerResult;
+    try {
+      // Process the task using the worker-specific processor
+      workerResult = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
+    } finally {
+      // Lifecycle: always call teardown() if setup() exists, even on error
+      if (this.processor.teardown) {
+        await this.processor.teardown(log);
+      }
+    }
 
     await log("info", "Processing completed", { responseLength: workerResult.response.length, final: true });
 

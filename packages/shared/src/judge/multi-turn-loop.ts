@@ -104,6 +104,14 @@ export async function runMultiTurnLoop(
     skills: skillConfigs?.map((s) => s.name) ?? [],
   });
 
+  // Lifecycle: call setup() once before all iterations so workers can acquire expensive resources
+  if (processor.setup) {
+    await log("info", "Calling processor setup...");
+    await processor.setup(log, { model, mcpServerConfigs, skillConfigs });
+  }
+
+  try {
+
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     // Create a per-iteration logger that automatically injects the iteration number
     // into every log event's data. This ensures all downstream log calls (including
@@ -354,4 +362,12 @@ export async function runMultiTurnLoop(
       turns[turns.length - 1]?.codingAgentResponse?.substring(0, 200) || "none"
     }`,
   };
+
+  } finally {
+    // Lifecycle: always call teardown() if setup() was called, even on error
+    if (processor.teardown) {
+      await log("info", "Calling processor teardown...");
+      await processor.teardown(log);
+    }
+  }
 }

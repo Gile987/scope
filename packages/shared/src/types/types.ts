@@ -139,12 +139,19 @@ export interface WorkerResult {
   videoFilePaths?: string[];
 }
 
+/** Log function signature used by worker processors. */
+export type WorkerLogFn = (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>;
+
 // Worker processor interface - each worker implements this
 export interface WorkerProcessor {
   readonly workerName: string;
-  processMessage(message: string, log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>, options?: WorkerProcessorOptions): Promise<WorkerResult>;
+  processMessage(message: string, log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<WorkerResult>;
   /** Return the coding agent binary version string (e.g. "@github/copilot@0.0.415"). */
   getAgentVersion?(): string;
+  /** Called once before the first processMessage in a run. Use to acquire expensive resources (e.g. start a long-lived process). */
+  setup?(log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<void>;
+  /** Called once after the last processMessage in a run. Always called if setup() was called, even on error. */
+  teardown?(log: WorkerLogFn): Promise<void>;
 }
 
 // Base configuration for queue processors
