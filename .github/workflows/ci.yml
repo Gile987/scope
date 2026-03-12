@@ -3,20 +3,32 @@ name: CI
 on:
   push:
     branches: [main, dev]
-    paths-ignore:
-      - 'deploy/**'
-      - 'docs/**'
-      - '*.md'
-      - 'coverage/**'
-      - 'ctrf/**'
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'config/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
+      - 'vitest.config.ts'
+      - 'vitest.integration.config.ts'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main, dev]
-    paths-ignore:
-      - 'deploy/**'
-      - 'docs/**'
-      - '*.md'
-      - 'coverage/**'
-      - 'ctrf/**'
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'config/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
+      - 'vitest.config.ts'
+      - 'vitest.integration.config.ts'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 permissions:
