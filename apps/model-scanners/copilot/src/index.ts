@@ -28,9 +28,9 @@ async function main(): Promise<void> {
   console.log(`Model scanner: copilot (agent: ${AGENT_ID})`);
   console.log(`Mode: ${dryRun ? "dry-run" : "live"}`);
 
-  // Acquire token
-  console.log("Acquiring token for copilot-cli capability...");
-  const token = await tokenClient.acquireToken("copilot-cli");
+  // Acquire token — must be an OAuth token, not a PAT (Copilot API rejects PATs)
+  console.log("Acquiring token for copilot-models capability...");
+  const token = await tokenClient.acquireToken("copilot-models");
   console.log("Token acquired.");
 
   // Scan models

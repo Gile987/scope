@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import type { TokenDocument, TokenCapability } from "@/types";
-import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS } from "@/types";
+import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS, ALL_CAPABILITIES } from "@/types";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -23,13 +23,6 @@ import { Plus, Trash2, Eye, RefreshCw, ShieldCheck, KeyRound, AlertTriangle } fr
 import { formatDate, formatId } from "@/lib/utils";
 import { toast } from "sonner";
 import { useState } from "react";
-
-const CAPABILITY_OPTIONS: TokenCapability[] = [
-  "github-models",
-  "copilot-sdk",
-  "copilot-cli",
-  "claude-code-cli"
-];
 
 function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
   switch (status) {
@@ -77,7 +70,7 @@ export function TokenList() {
       }
     }
   }
-  const uncoveredCapabilities = CAPABILITY_OPTIONS.filter((c) => !coveredCapabilities.has(c));
+  const uncoveredCapabilities = ALL_CAPABILITIES.filter((c) => !coveredCapabilities.has(c));
 
   return (
     <div className="space-y-6">
@@ -102,7 +95,7 @@ export function TokenList() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All capabilities</SelectItem>
-            {CAPABILITY_OPTIONS.map((c) => (
+            {ALL_CAPABILITIES.map((c) => (
               <SelectItem key={c} value={c}>{TOKEN_CAPABILITY_LABELS[c]}</SelectItem>
             ))}
           </SelectContent>

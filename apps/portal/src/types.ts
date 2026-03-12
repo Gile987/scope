@@ -399,7 +399,7 @@ export type TokenType =
   | "anthropic-api-key";
 
 export type TokenCapability =
-  "github-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
+  "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
 
 export type TokenValidationStatus =
   | "valid"
@@ -463,6 +463,7 @@ export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
 
 export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
   "github-models": "GitHub Models",
+  "copilot-models": "Copilot Models",
   "copilot-sdk": "Copilot SDK",
   "copilot-cli": "Copilot CLI",
   "claude-code-cli": "Claude Code CLI"
@@ -470,13 +471,28 @@ export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
 
 export const TOKEN_CAPABILITY_DESCRIPTIONS: Record<TokenCapability, string> = {
   "github-models": "Access AI models hosted on GitHub (GPT-4o, Claude, etc.)",
+  "copilot-models": "List models available via the Copilot API (OAuth only, PATs rejected)",
   "copilot-sdk": "Use the Copilot SDK to make LLM requests programmatically",
   "copilot-cli": "Run GitHub Copilot in the CLI for code suggestions",
   "claude-code-cli": "Run Claude Code as an agentic coding assistant"
 };
 
+/**
+ * Static matrix of which capabilities each token type can provide.
+ * Mirrors the server-side deriveCapabilities() logic for display purposes.
+ * Conditional capabilities (require specific scopes) are included — actual
+ * detection happens during validation.
+ */
+export const TOKEN_TYPE_EXPECTED_CAPABILITIES: Record<TokenType, TokenCapability[]> = {
+  "github-pat-classic": ["copilot-sdk", "copilot-cli"],
+  "github-pat-fine-grained": ["github-models"],
+  "github-oauth": ["github-models", "copilot-models", "copilot-sdk", "copilot-cli"],
+  "github-oauth-cookie-state": [],
+  "anthropic-api-key": ["claude-code-cli"],
+};
+
 export const ALL_CAPABILITIES: TokenCapability[] = [
-  "github-models", "copilot-sdk", "copilot-cli", "claude-code-cli"
+  "github-models", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli"
 ];
 
 // Account types

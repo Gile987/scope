@@ -49,7 +49,7 @@ export function deriveCapabilities(
     }
 
     case "github-oauth":
-      return ["github-models", "copilot-sdk", "copilot-cli"];
+      return ["github-models", "copilot-models", "copilot-sdk", "copilot-cli"];
 
     case "github-oauth-cookie-state":
       return [];
