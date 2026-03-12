@@ -21,7 +21,7 @@ describe("deriveCapabilities", () => {
       };
       expect(deriveCapabilities("github-pat-classic", result)).toEqual([
         "copilot-sdk",
-        "copilot-cli"
+        "copilot-cli",
       ]);
     });
 
@@ -70,7 +70,7 @@ describe("deriveCapabilities", () => {
         "github-models",
         "copilot-models",
         "copilot-sdk",
-        "copilot-cli"
+        "copilot-cli",
       ]);
     });
   });
