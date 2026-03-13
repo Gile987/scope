@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
     paths:
       - 'apps/**'
       - 'packages/**'
@@ -16,7 +16,7 @@ on:
       - 'vitest.integration.config.ts'
       - '.github/workflows/ci.yml'
   pull_request:
-    branches: [main, dev]
+    branches: [main]
     paths:
       - 'apps/**'
       - 'packages/**'
@@ -35,10 +35,6 @@ on:
         description: 'Comma-separated list of images to build (or "all"). Leave empty to run CI only.'
         required: false
         default: ''
-      tag:
-        description: 'Image tag to use (default: dev)'
-        required: false
-        default: 'dev'
 
 permissions:
   id-token: write
@@ -320,7 +316,7 @@ jobs:
       ))
     needs: [test, integration-test, build, detect-changes]
     runs-on: ubuntu-latest
-    environment: ${{ (github.event_name == 'pull_request' || github.ref_name != 'main') && 'integration' || 'production' }}
+    environment: integration
     strategy:
       fail-fast: false
       matrix:
@@ -396,16 +392,8 @@ jobs:
             GIT_SHA="${{ github.sha }}"
             SHORT_SHA="${GIT_SHA:0:7}"
             TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
-            if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-              ENV_TAG="${{ github.event.inputs.tag }}"
-            elif [[ "${{ github.ref_name }}" == "main" ]]; then
-              ENV_TAG="prod"
-            else
-              ENV_TAG="dev"
-            fi
             IMAGE_ARGS="--image scoped/${{ matrix.image.name }}:${GIT_SHA}"
-            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:${ENV_TAG}-latest"
-            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:${ENV_TAG}-${TIMESTAMP}-${SHORT_SHA}"
+            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:${TIMESTAMP}-${SHORT_SHA}"
           fi
 
           echo "git_sha=${GIT_SHA}" >> "$GITHUB_OUTPUT"
