@@ -4,37 +4,37 @@ on:
   push:
     branches: [main]
     paths:
-      - 'apps/**'
-      - 'packages/**'
-      - 'config/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'tsconfig.base.json'
-      - 'vitest.config.ts'
-      - 'vitest.integration.config.ts'
-      - '.github/workflows/ci.yml'
+      - "apps/**"
+      - "packages/**"
+      - "config/**"
+      - "scripts/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "tsconfig.base.json"
+      - "vitest.config.ts"
+      - "vitest.integration.config.ts"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [main]
     paths:
-      - 'apps/**'
-      - 'packages/**'
-      - 'config/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'tsconfig.base.json'
-      - 'vitest.config.ts'
-      - 'vitest.integration.config.ts'
-      - '.github/workflows/ci.yml'
+      - "apps/**"
+      - "packages/**"
+      - "config/**"
+      - "scripts/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "tsconfig.base.json"
+      - "vitest.config.ts"
+      - "vitest.integration.config.ts"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
     inputs:
       images:
         description: 'Comma-separated list of images to build (or "all"). Leave empty to run CI only.'
         required: false
-        default: ''
+        default: ""
 
 permissions:
   id-token: write
@@ -70,8 +70,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'pnpm'
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -157,9 +157,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'pnpm'
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -199,9 +199,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'pnpm'
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -228,9 +228,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'pnpm'
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -297,7 +297,7 @@ jobs:
   # Build container images — gated on CI passing
   # ---------------------------------------------------------------------------
   build-images:
-    name: 'Build image: ${{ matrix.image.name }}'
+    name: "Build image: ${{ matrix.image.name }}"
     if: >-
       (github.event_name == 'workflow_dispatch' && github.event.inputs.images != '') ||
       ((github.event_name == 'push' || github.event_name == 'pull_request') && (
@@ -353,7 +353,7 @@ jobs:
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
         exclude:
           - image:
-              changed: 'false'
+              changed: "false"
     steps:
       - name: Check if image should be built (manual trigger)
         id: check
