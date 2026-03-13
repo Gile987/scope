@@ -30,13 +30,28 @@ on:
       - 'vitest.integration.config.ts'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
+    inputs:
+      images:
+        description: 'Comma-separated list of images to build (or "all"). Leave empty to run CI only.'
+        required: false
+        default: ''
+      tag:
+        description: 'Image tag to use (default: dev)'
+        required: false
+        default: 'dev'
 
 permissions:
+  id-token: write
   contents: read
   pull-requests: write
   issues: write
 
+env:
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # CI Jobs — test, lint, build (run in parallel)
+  # ---------------------------------------------------------------------------
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -227,7 +242,207 @@ jobs:
       - name: Build
         run: pnpm build
 
-  # Summary job that depends on all other jobs
+  # ---------------------------------------------------------------------------
+  # Detect which images changed (runs in parallel with CI jobs)
+  # ---------------------------------------------------------------------------
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.changes.outputs.api }}
+      judge: ${{ steps.changes.outputs.judge }}
+      portal: ${{ steps.changes.outputs.portal }}
+      coder-acp-copilot: ${{ steps.changes.outputs.coder-acp-copilot }}
+      coder-acp-claude-code: ${{ steps.changes.outputs.coder-acp-claude-code }}
+      token-manager: ${{ steps.changes.outputs.token-manager }}
+      model-scanner-copilot: ${{ steps.changes.outputs.model-scanner-copilot }}
+      model-scanner-anthropic: ${{ steps.changes.outputs.model-scanner-anthropic }}
+      report-generator: ${{ steps.changes.outputs.report-generator }}
+      db-migrations: ${{ steps.changes.outputs.db-migrations }}
+      shared: ${{ steps.changes.outputs.shared }}
+      model-scanning: ${{ steps.changes.outputs.model-scanning }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+      - uses: dorny/paths-filter@v3
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        id: changes
+        with:
+          base: ${{ github.event.before }}
+          filters: |
+            shared:
+              - 'packages/shared/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'tsconfig.base.json'
+            model-scanning:
+              - 'packages/model-scanning/**'
+            api:
+              - 'apps/api/**'
+            judge:
+              - 'apps/judge/**'
+            portal:
+              - 'apps/portal/**'
+            coder-acp-copilot:
+              - 'apps/workers/coder-acp-copilot/**'
+            coder-acp-claude-code:
+              - 'apps/workers/coder-acp-claude-code/**'
+            token-manager:
+              - 'apps/token-manager/**'
+            model-scanner-copilot:
+              - 'apps/model-scanners/copilot/**'
+            model-scanner-anthropic:
+              - 'apps/model-scanners/anthropic/**'
+            report-generator:
+              - 'apps/workers/report-generator/**'
+            db-migrations:
+              - 'packages/db-migrations/**'
+
+  # ---------------------------------------------------------------------------
+  # Build container images — gated on CI passing
+  # ---------------------------------------------------------------------------
+  build-images:
+    name: 'Build image: ${{ matrix.image.name }}'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.images != '') ||
+      ((github.event_name == 'push' || github.event_name == 'pull_request') && (
+        needs.detect-changes.outputs.api == 'true' ||
+        needs.detect-changes.outputs.judge == 'true' ||
+        needs.detect-changes.outputs.portal == 'true' ||
+        needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
+        needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
+        needs.detect-changes.outputs.token-manager == 'true' ||
+        needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
+        needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
+        needs.detect-changes.outputs.report-generator == 'true' ||
+        needs.detect-changes.outputs.db-migrations == 'true' ||
+        needs.detect-changes.outputs.shared == 'true' ||
+        needs.detect-changes.outputs.model-scanning == 'true'
+      ))
+    needs: [test, integration-test, build, detect-changes]
+    runs-on: ubuntu-latest
+    environment: ${{ (github.event_name == 'pull_request' || github.ref_name != 'main') && 'integration' || 'production' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: api
+            dockerfile: apps/api/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.api == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: judge
+            dockerfile: apps/judge/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.judge == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: portal
+            dockerfile: apps/portal/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.portal == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: coder-acp-copilot
+            dockerfile: apps/workers/coder-acp-copilot/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.coder-acp-copilot == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: coder-acp-claude-code
+            dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: token-manager
+            dockerfile: apps/token-manager/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.token-manager == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: model-scanner-copilot
+            dockerfile: apps/model-scanners/copilot/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.model-scanner-copilot == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
+          - name: model-scanner-anthropic
+            dockerfile: apps/model-scanners/anthropic/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.model-scanner-anthropic == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
+          - name: report-generator
+            dockerfile: apps/workers/report-generator/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.report-generator == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: db-migrations
+            dockerfile: packages/db-migrations/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
+        exclude:
+          - image:
+              changed: 'false'
+    steps:
+      - name: Check if image should be built (manual trigger)
+        id: check
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          IMAGES="${{ github.event.inputs.images }}"
+          if [[ "$IMAGES" == "all" ]] || echo "$IMAGES" | grep -qw "${{ matrix.image.name }}"; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.skip != 'true'
+
+      - name: Log in to Azure
+        if: steps.check.outputs.skip != 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Compute image tags
+        id: tags
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            GIT_SHA="${{ github.event.pull_request.head.sha }}"
+            IMAGE_ARGS="--image scoped/${{ matrix.image.name }}:${GIT_SHA}"
+            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:pr-${{ github.event.pull_request.number }}-latest"
+          else
+            GIT_SHA="${{ github.sha }}"
+            SHORT_SHA="${GIT_SHA:0:7}"
+            TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+            if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+              ENV_TAG="${{ github.event.inputs.tag }}"
+            elif [[ "${{ github.ref_name }}" == "main" ]]; then
+              ENV_TAG="prod"
+            else
+              ENV_TAG="dev"
+            fi
+            IMAGE_ARGS="--image scoped/${{ matrix.image.name }}:${GIT_SHA}"
+            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:${ENV_TAG}-latest"
+            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:${ENV_TAG}-${TIMESTAMP}-${SHORT_SHA}"
+          fi
+
+          echo "git_sha=${GIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_args=${IMAGE_ARGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Load pinned versions
+        id: versions
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          EXTRA_ARGS=""
+          for f in apps/workers/${{ matrix.image.name }}/versions.env apps/${{ matrix.image.name }}/versions.env; do
+            if [ -f "$f" ]; then
+              while IFS='=' read -r key value; do
+                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+                EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+              done < "$f"
+              break
+            fi
+          done
+          echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
+
+      - name: Build and push to ACR
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          az acr build \
+            --registry "${{ vars.ACR_NAME }}" \
+            --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
+            ${{ steps.tags.outputs.image_args }} \
+            --build-arg GIT_COMMIT=${{ steps.tags.outputs.git_sha }} \
+            --build-arg BUILD_TIME=${{ steps.tags.outputs.build_time }} \
+            ${{ steps.versions.outputs.extra_args }} \
+            --file "${{ matrix.image.dockerfile }}" \
+            .
+
+  # ---------------------------------------------------------------------------
+  # Summary
+  # ---------------------------------------------------------------------------
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
