@@ -4,6 +4,7 @@
 import {
   ConversationTurn,
   CriterionResult,
+  SetupResult,
   WorkerProcessor,
   WorkerProcessorOptions,
   LogEvent,
@@ -108,31 +109,51 @@ export async function runMultiTurnLoop(
   });
 
   // Lifecycle: call setup() once before all iterations so workers can acquire expensive resources
+  let setupVideoUrls: string[] | undefined;
+
+  const uploadSetupVideos = async (result: SetupResult, label: string) => {
+    if (!result.videoFilePaths || result.videoFilePaths.length === 0) return;
+    try {
+      setupVideoUrls = [];
+      for (let i = 0; i < result.videoFilePaths.length; i++) {
+        const videoBlobName = `${requestId}/setup/video-${i}.webm`;
+        const videoUrl = await blobStorage.uploadFile(
+          result.videoFilePaths[i],
+          videoBlobName,
+          "video/webm"
+        );
+        setupVideoUrls.push(videoUrl);
+      }
+      await log("info", `Setup video files uploaded (${label})`, { videoCount: result.videoFilePaths.length });
+      if (onSetupVideosUploaded && setupVideoUrls.length > 0) {
+        await onSetupVideosUploaded(setupVideoUrls);
+      }
+    } catch (uploadError) {
+      const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+      await log("warn", `Failed to upload setup video files: ${msg}`);
+    }
+  };
+
   if (processor.setup) {
     await log("info", "Calling processor setup...", { phase: "setup" });
-    const setupResult = await processor.setup(log, { model, mcpServerConfigs, skillConfigs });
-
-    // Upload setup-phase videos (e.g. TOTP login recording) to a dedicated blob path
-    if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
-      try {
-        const setupVideoUrls: string[] = [];
-        for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
-          const videoBlobName = `${requestId}/setup/video-${i}.webm`;
-          const videoUrl = await blobStorage.uploadFile(
-            setupResult.videoFilePaths[i],
-            videoBlobName,
-            "video/webm"
-          );
-          setupVideoUrls.push(videoUrl);
-        }
-        await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
-        if (onSetupVideosUploaded && setupVideoUrls.length > 0) {
-          await onSetupVideosUploaded(setupVideoUrls);
-        }
-      } catch (uploadError) {
-        const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-        await log("warn", `Failed to upload setup video files: ${msg}`);
+    let setupResult: SetupResult | void;
+    try {
+      setupResult = await processor.setup(log, { model, mcpServerConfigs, skillConfigs });
+    } catch (setupError) {
+      // Even on setup failure, try to upload setup videos (e.g. TOTP login recording)
+      const errorResult = (setupError as any)?.setupResult as SetupResult | undefined;
+      if (errorResult) {
+        await uploadSetupVideos(errorResult, "from failed setup");
       }
+      // Call teardown to clean up any resources setup() partially acquired (e.g. port, browser)
+      if (processor.teardown) {
+        await processor.teardown(log).catch(() => {});
+      }
+      throw setupError;
+    }
+
+    if (setupResult) {
+      await uploadSetupVideos(setupResult, "success");
     }
   }
 
@@ -314,6 +335,23 @@ export async function runMultiTurnLoop(
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       await iterLog("error", `Judge evaluation failed: ${errorMsg}`, { error: errorMsg });
+
+      // Persist a partial turn so video/snapshot URLs are not lost
+      const partialTurn: ConversationTurn = {
+        iteration,
+        codingAgentResponse: codingResponse,
+        judgeFeedback: `Judge evaluation failed: ${errorMsg}`,
+        snapshotUrl,
+        passed: false,
+        timestamp: new Date(),
+        ...(turnHarUrl && { harUrl: turnHarUrl }),
+        ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+      };
+      turns.push(partialTurn);
+      if (onTurnComplete) {
+        await onTurnComplete(partialTurn);
+      }
+
       return {
         turns,
         passed: false,

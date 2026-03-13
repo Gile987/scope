@@ -148,7 +148,21 @@ export async function loginAndCaptureCookies(opts: LoginOptions): Promise<LoginR
     await browser.close();
     return { storageState, ...videoPart };
   } catch (error) {
+    // Collect video paths before closing so the caller can still upload them
+    const videoFilePaths: string[] = [];
+    if (opts.videoDir) {
+      for (const p of context.pages()) {
+        const video = p.video();
+        if (video) {
+          try { videoFilePaths.push(await video.path()); } catch { /* video may not be ready */ }
+        }
+      }
+    }
+    await context.close();
     await browser.close();
+    if (videoFilePaths.length > 0) {
+      (error as any).videoFilePaths = videoFilePaths;
+    }
     throw error;
   }
 }
