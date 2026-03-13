@@ -158,6 +158,10 @@ export interface AccountDocument {
   enabled: boolean;
   /** Optional free-text annotation (e.g. "CI bot account"). */
   comment?: string;
+  /** Number of times this account has been acquired via /acquire. */
+  acquireCount: number;
+  /** Timestamp of the last acquisition. */
+  lastAcquiredAt?: Date;
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;
@@ -197,6 +201,25 @@ export interface UpdateAccountRequest {
   username?: string;
   password?: string;
   totpUri?: string;
+}
+
+/**
+ * Request body for POST /api/v1/accounts/acquire.
+ */
+export interface AcquireAccountRequest {
+  type: AccountType;
+}
+
+/**
+ * Response from POST /api/v1/accounts/acquire.
+ * Returns the account's secret credentials.
+ */
+export interface AcquireAccountResponse {
+  accountId: string;
+  type: AccountType;
+  username: string;
+  password: string;
+  totpUri: string;
 }
 
 /**

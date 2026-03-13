@@ -90,9 +90,10 @@ export const api = {
     return `${BASE}/requests/${id}/archive`;
   },
 
-  /** Get video stream URL for a request (optionally per-iteration, per-index) */
-  videoUrl: (id: string, iteration?: number, index = 0): string => {
+  /** Get video stream URL for a request (optionally per-iteration, per-index, or setup phase) */
+  videoUrl: (id: string, iteration?: number, index = 0, phase?: string): string => {
     const params = new URLSearchParams();
+    if (phase) params.set("phase", phase);
     if (iteration) params.set("iteration", String(iteration));
     if (index > 0) params.set("index", String(index));
     const qs = params.toString();

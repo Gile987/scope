@@ -100,11 +100,15 @@ function makeMockCollection(docs: AccountDocument[] = []) {
       return { insertedId: doc._id };
     }),
     findOne: vi.fn(async (filter: any) => {
-      const id = filter._id;
-      const doc = store.get(id);
-      if (!doc) return null;
-      if (filter.deletedAt?.$exists === false && doc.deletedAt) return null;
-      return { ...doc };
+      // Support both _id-based lookup and field-based queries (e.g. acquire)
+      for (const doc of store.values()) {
+        if (filter._id && doc._id !== filter._id) continue;
+        if (filter.type && doc.type !== filter.type) continue;
+        if (filter.enabled !== undefined && doc.enabled !== filter.enabled) continue;
+        if (filter.deletedAt?.$exists === false && doc.deletedAt) continue;
+        return { ...doc };
+      }
+      return null;
     }),
     find: vi.fn(() => {
       const results = Array.from(store.values()).filter((d) => !d.deletedAt);
@@ -121,6 +125,15 @@ function makeMockCollection(docs: AccountDocument[] = []) {
       Object.assign(doc, $set);
       store.set(id, doc);
       return { ...doc };
+    }),
+    updateOne: vi.fn(async (filter: any, update: any) => {
+      const id = filter._id;
+      const doc = store.get(id);
+      if (!doc) return { matchedCount: 0, modifiedCount: 0 };
+      const $set = update.$set || {};
+      Object.assign(doc, $set);
+      store.set(id, doc);
+      return { matchedCount: 1, modifiedCount: 1 };
     }),
   };
 
@@ -405,6 +418,82 @@ describe("account-routes", () => {
       // Account should not be found by ID
       const getRes = await request(app, "GET", `/api/v1/accounts/${id}`);
       expect(getRes.status).toBe(404);
+    });
+  });
+
+  describe("POST /api/v1/accounts/acquire", () => {
+    it("rejects invalid type", async () => {
+      const res = await request(app, "POST", "/api/v1/accounts/acquire", {
+        type: "invalid",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects missing type", async () => {
+      const res = await request(app, "POST", "/api/v1/accounts/acquire", {});
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 when no enabled account exists", async () => {
+      const res = await request(app, "POST", "/api/v1/accounts/acquire", {
+        type: "github",
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("acquires an enabled account and returns credentials", async () => {
+      // Create an account first
+      await request(app, "POST", "/api/v1/accounts", {
+        type: "github",
+        username: "testuser",
+        password: "testpass",
+        totpUri: "otpauth://totp/Test?secret=JBSWY3DPEHPK3PXP",
+      });
+
+      const res = await request(app, "POST", "/api/v1/accounts/acquire", {
+        type: "github",
+      });
+
+      expect(res.status).toBe(200);
+      const body = res.body as any;
+      expect(body.accountId).toBeDefined();
+      expect(body.type).toBe("github");
+      expect(body.username).toBe("testuser");
+      expect(body.password).toBe("testpass");
+      expect(body.totpUri).toBe("otpauth://totp/Test?secret=JBSWY3DPEHPK3PXP");
+    });
+
+    it("does not acquire disabled accounts", async () => {
+      // Create a disabled account
+      await request(app, "POST", "/api/v1/accounts", {
+        type: "github",
+        username: "u",
+        password: "p",
+        totpUri: "t",
+        enabled: false,
+      });
+
+      const res = await request(app, "POST", "/api/v1/accounts/acquire", {
+        type: "github",
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("does not acquire deleted accounts", async () => {
+      // Create and then delete an account
+      const createRes = await request(app, "POST", "/api/v1/accounts", {
+        type: "github",
+        username: "u",
+        password: "p",
+        totpUri: "t",
+      });
+      const id = (createRes.body as any)._id;
+      await request(app, "DELETE", `/api/v1/accounts/${id}`);
+
+      const res = await request(app, "POST", "/api/v1/accounts/acquire", {
+        type: "github",
+      });
+      expect(res.status).toBe(404);
     });
   });
 });

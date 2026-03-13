@@ -121,7 +121,10 @@ export function RunDetail() {
 
   const isV2 = run.scenario?.version === "v2";
   const hasHarData = !!(run.harUrl || run.turns?.some(t => t.harUrl));
-  const hasVideoData = !!(run.videoUrls?.length || run.turns?.some(t => t.videoUrls?.length));
+  const hasVideoData = !!(run.videoUrls?.length || run.setupVideoUrls?.length || run.turns?.some(t => t.videoUrls?.length));
+  const videoCount = (run.setupVideoUrls?.length ?? 0)
+    + (run.videoUrls?.length ?? 0)
+    + (run.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
 
   return (
     <div className="space-y-6">
@@ -217,7 +220,7 @@ export function RunDetail() {
           )}
           {hasHarData && <TabsTrigger value="network">Network</TabsTrigger>}
           {hasHarData && <TabsTrigger value="tool-calls">Tool Calls</TabsTrigger>}
-          {hasVideoData && <TabsTrigger value="video"><Video className="h-3.5 w-3.5 mr-1" />Video</TabsTrigger>}
+          {hasVideoData && <TabsTrigger value="video"><Video className="h-3.5 w-3.5 mr-1" />Videos ({videoCount})</TabsTrigger>}
           <TabsTrigger value="logs">Logs</TabsTrigger>
           <TabsTrigger value="reports">
             Reports {reports && reports.length > 0 ? `(${reports.length})` : ""}
@@ -253,14 +256,21 @@ export function RunDetail() {
         {hasVideoData && (
           <TabsContent value="video" className="mt-4">
             {run.turns && run.turns.some(t => t.videoUrls?.length) ? (
-              <VideoIterationTabs runId={run._id} turns={run.turns} />
-            ) : run.videoUrls && run.videoUrls.length > 0 ? (
+              <VideoIterationTabs runId={run._id} turns={run.turns} setupVideoUrls={run.setupVideoUrls} />
+            ) : (
               <div className="space-y-4">
-                {run.videoUrls.map((_, i) => (
-                  <VideoPlayer key={i} src={api.videoUrl(run._id, undefined, i)} label={run.videoUrls!.length > 1 ? `Video ${i + 1}` : undefined} />
-                ))}
+                {run.setupVideoUrls && run.setupVideoUrls.length > 0 && (
+                  run.setupVideoUrls.map((_, i) => (
+                    <VideoPlayer key={`setup-${i}`} src={api.videoUrl(run._id, undefined, i, "setup")} label="Setup" />
+                  ))
+                )}
+                {run.videoUrls && run.videoUrls.length > 0 && (
+                  run.videoUrls.map((_, i) => (
+                    <VideoPlayer key={i} src={api.videoUrl(run._id, undefined, i)} label={run.videoUrls!.length > 1 ? `Video ${i + 1}` : undefined} />
+                  ))
+                )}
               </div>
-            ) : null}
+            )}
           </TabsContent>
         )}
 
@@ -550,37 +560,59 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
 // Helper: per-iteration video player tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function VideoIterationTabs({ runId, turns }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[] }) {
+function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[]; setupVideoUrls?: string[] }) {
   const turnsWithVideo = turns.filter(t => t.videoUrls && t.videoUrls.length > 0);
-  const [activeIteration, setActiveIteration] = useState(turnsWithVideo[0]?.iteration);
+  const hasSetupVideo = setupVideoUrls && setupVideoUrls.length > 0;
+  const [activeTab, setActiveTab] = useState<string>(hasSetupVideo ? "setup" : String(turnsWithVideo[0]?.iteration));
 
-  if (turnsWithVideo.length === 0) return null;
+  if (turnsWithVideo.length === 0 && !hasSetupVideo) return null;
 
-  const activeTurn = turnsWithVideo.find(t => t.iteration === activeIteration);
+  const activeTurn = turnsWithVideo.find(t => String(t.iteration) === activeTab);
 
   return (
     <div className="space-y-3">
-      {turnsWithVideo.length > 1 && (
+      {(hasSetupVideo || turnsWithVideo.length > 1) && (
         <div className="flex gap-1.5 flex-wrap">
+          {hasSetupVideo && (
+            <Button
+              variant={activeTab === "setup" ? "default" : "outline"}
+              size="sm"
+              className="font-mono text-xs"
+              onClick={() => setActiveTab("setup")}
+            >
+              Setup
+            </Button>
+          )}
           {turnsWithVideo.map(t => (
             <Button
               key={t.iteration}
-              variant={activeIteration === t.iteration ? "default" : "outline"}
+              variant={activeTab === String(t.iteration) ? "default" : "outline"}
               size="sm"
               className="font-mono text-xs"
-              onClick={() => setActiveIteration(t.iteration)}
+              onClick={() => setActiveTab(String(t.iteration))}
             >
               Iteration {t.iteration}
             </Button>
           ))}
         </div>
       )}
-      {activeTurn && activeIteration !== undefined && (
+      {activeTab === "setup" && hasSetupVideo && (
+        <div className="space-y-4">
+          {setupVideoUrls.map((_, i) => (
+            <VideoPlayer
+              key={`setup-${i}`}
+              src={api.videoUrl(runId, undefined, i, "setup")}
+              label={setupVideoUrls.length > 1 ? `Setup Video ${i + 1}` : "Setup"}
+            />
+          ))}
+        </div>
+      )}
+      {activeTab !== "setup" && activeTurn && (
         <div className="space-y-4">
           {activeTurn.videoUrls!.map((_, i) => (
             <VideoPlayer
-              key={`${activeIteration}-${i}`}
-              src={api.videoUrl(runId, activeIteration, i)}
+              key={`${activeTab}-${i}`}
+              src={api.videoUrl(runId, Number(activeTab), i)}
               label={activeTurn.videoUrls!.length > 1 ? `Video ${i + 1}` : undefined}
             />
           ))}

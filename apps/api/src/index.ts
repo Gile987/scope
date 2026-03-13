@@ -232,6 +232,7 @@ interface RequestDocument {
   skillRevisions?: string[];      // Human-readable skill revision refs (source/skillName@commitHash)
   harUrl?: string;
   videoUrls?: string[];
+  setupVideoUrls?: string[];
 }
 
 // Coding agent document interface
@@ -1449,10 +1450,12 @@ app.get("/api/v1/requests/:id/har", async (req: Request, res: Response, next: Ne
 // Download a session recording video for a specific request or turn
 // For one-shot runs: GET /api/v1/requests/:id/video?index=0
 // For multi-turn runs: GET /api/v1/requests/:id/video?iteration=N&index=0
+// For setup videos:   GET /api/v1/requests/:id/video?phase=setup&index=0
 app.get("/api/v1/requests/:id/video", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const iterationParam = req.query.iteration as string | undefined;
+    const phaseParam = req.query.phase as string | undefined;
     const indexParam = req.query.index as string | undefined;
     const videoIndex = indexParam ? parseInt(indexParam, 10) : 0;
 
@@ -1467,11 +1470,14 @@ app.get("/api/v1/requests/:id/video", async (req: Request, res: Response, next: 
       return;
     }
 
-    // Determine the videoUrls array — from a specific turn or from the top-level document
+    // Determine the videoUrls array — from setup, a specific turn, or from the top-level document
     let videoUrls: string[] | undefined;
     let label: string;
 
-    if (iterationParam) {
+    if (phaseParam === "setup") {
+      videoUrls = resource.setupVideoUrls;
+      label = `${id}-setup-video-${videoIndex}`;
+    } else if (iterationParam) {
       const iterNum = parseInt(iterationParam, 10);
       if (isNaN(iterNum) || iterNum < 1) {
         res.status(400).json({ error: "Invalid iteration number" });

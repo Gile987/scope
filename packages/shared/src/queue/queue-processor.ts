@@ -141,7 +141,37 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Lifecycle: call setup() before processMessage so workers can acquire expensive resources
     if (this.processor.setup) {
-      await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
+      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
+
+      // Upload setup-phase videos (e.g. TOTP login recording) to a dedicated blob path
+      if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
+        try {
+          const blobStorage = new BlobStorage({
+            storageAccountName: this.config.storageAccountName,
+            storageConnectionString: this.config.storageConnectionString,
+          });
+          const setupVideoUrls: string[] = [];
+          for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
+            const videoBlobName = `${requestId}/setup/video-${i}.webm`;
+            const videoUrl = await blobStorage.uploadFile(
+              setupResult.videoFilePaths[i],
+              videoBlobName,
+              "video/webm"
+            );
+            setupVideoUrls.push(videoUrl);
+          }
+          await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
+          if (setupVideoUrls.length > 0) {
+            await this.collection.updateOne(
+              { _id: requestId },
+              { $set: { setupVideoUrls, updatedAt: new Date() } }
+            );
+          }
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await log("warn", `Failed to upload setup video files: ${msg}`);
+        }
+      }
     }
 
     let workerResult;
@@ -300,6 +330,12 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
             $push: { turns: turn },
             $set: { updatedAt: new Date() },
           }
+        );
+      },
+      onSetupVideosUploaded: async (setupVideoUrls: string[]) => {
+        await this.collection.updateOne(
+          { _id: requestId },
+          { $set: { setupVideoUrls, updatedAt: new Date() } }
         );
       },
     });

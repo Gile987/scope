@@ -80,8 +80,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build shared package
-        run: pnpm --filter shared build
+      - name: Build shared packages
+        run: pnpm --filter shared --filter github-auth build
 
       - name: Run tests with coverage
         run: pnpm test:coverage
@@ -168,8 +168,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build shared package
-        run: pnpm --filter shared build
+      - name: Build shared packages
+        run: pnpm --filter shared --filter github-auth build
 
       - name: Run integration tests
         run: npx vitest run --config vitest.integration.config.ts --silent=false --shard=${{ matrix.shard }}/${{ strategy.job-total }}

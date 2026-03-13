@@ -42,6 +42,8 @@ export interface MultiTurnConfig {
   ) => Promise<void>;
   /** Called after each iteration to persist the turn to MongoDB */
   onTurnComplete?: (turn: ConversationTurn) => Promise<void>;
+  /** Called after setup-phase videos are uploaded, to persist URLs to MongoDB */
+  onSetupVideosUploaded?: (setupVideoUrls: string[]) => Promise<void>;
   /** Persona instructions for the judge (resolved prose from traits) */
   personaInstructions?: string;
   /** Model to pass to the coding agent */
@@ -85,6 +87,7 @@ export async function runMultiTurnLoop(
     requestId,
     log,
     onTurnComplete,
+    onSetupVideosUploaded,
     personaInstructions,
     model,
     mcpServerConfigs,
@@ -106,8 +109,31 @@ export async function runMultiTurnLoop(
 
   // Lifecycle: call setup() once before all iterations so workers can acquire expensive resources
   if (processor.setup) {
-    await log("info", "Calling processor setup...");
-    await processor.setup(log, { model, mcpServerConfigs, skillConfigs });
+    await log("info", "Calling processor setup...", { phase: "setup" });
+    const setupResult = await processor.setup(log, { model, mcpServerConfigs, skillConfigs });
+
+    // Upload setup-phase videos (e.g. TOTP login recording) to a dedicated blob path
+    if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
+      try {
+        const setupVideoUrls: string[] = [];
+        for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
+          const videoBlobName = `${requestId}/setup/video-${i}.webm`;
+          const videoUrl = await blobStorage.uploadFile(
+            setupResult.videoFilePaths[i],
+            videoBlobName,
+            "video/webm"
+          );
+          setupVideoUrls.push(videoUrl);
+        }
+        await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
+        if (onSetupVideosUploaded && setupVideoUrls.length > 0) {
+          await onSetupVideosUploaded(setupVideoUrls);
+        }
+      } catch (uploadError) {
+        const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+        await log("warn", `Failed to upload setup video files: ${msg}`);
+      }
+    }
   }
 
   try {
@@ -132,6 +158,7 @@ export async function runMultiTurnLoop(
 
     await iterLog("info", `--- Iteration ${iteration}/${maxIterations} ---`, {
       promptLength: nextPrompt.length,
+      iterationHeader: true,
     });
 
     // Step 1: Call the coding agent

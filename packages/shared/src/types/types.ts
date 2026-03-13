@@ -106,6 +106,7 @@ export interface RequestDocument {
   agentVersion?: string;          // Coding agent binary version (e.g. "@github/copilot@0.0.415")
   harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
   videoUrls?: string[];            // Blob storage URLs to session recording videos (one-shot)
+  setupVideoUrls?: string[];       // Blob storage URLs to setup-phase videos (e.g. TOTP login recording)
 }
 
 // Log event for real-time streaming and persistence
@@ -142,6 +143,11 @@ export interface WorkerResult {
 /** Log function signature used by worker processors. */
 export type WorkerLogFn = (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>;
 
+/** Result returned by setup() — carries optional video paths from the setup phase. */
+export interface SetupResult {
+  videoFilePaths?: string[];
+}
+
 // Worker processor interface - each worker implements this
 export interface WorkerProcessor {
   readonly workerName: string;
@@ -149,7 +155,7 @@ export interface WorkerProcessor {
   /** Return the coding agent binary version string (e.g. "@github/copilot@0.0.415"). */
   getAgentVersion?(): string;
   /** Called once before the first processMessage in a run. Use to acquire expensive resources (e.g. start a long-lived process). */
-  setup?(log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<void>;
+  setup?(log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<SetupResult | void>;
   /** Called once after the last processMessage in a run. Always called if setup() was called, even on error. */
   teardown?(log: WorkerLogFn): Promise<void>;
 }

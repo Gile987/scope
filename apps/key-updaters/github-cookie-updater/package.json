@@ -9,6 +9,7 @@
     "capture": "npx tsx src/capture-auth-state.ts"
   },
   "dependencies": {
+    "github-auth": "workspace:*",
     "otpauth": "^9.5.0",
     "pngjs": "^7.0.0",
     "playwright": "^1.40.0",

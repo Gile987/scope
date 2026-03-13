@@ -87,11 +87,22 @@ export function LogViewer({
           {logs.map((log, i) => {
             const iteration = log.data?.iteration as number | undefined;
             const prevIteration = i > 0 ? (logs[i - 1].data?.iteration as number | undefined) : undefined;
-            const showDivider = iteration !== undefined && iteration !== prevIteration;
+            const showIterationDivider = iteration !== undefined && iteration !== prevIteration;
+            const showSetupDivider = log.data?.phase === "setup";
+            const isIterationHeader = !!log.data?.iterationHeader;
 
             return (
               <div key={i}>
-                {showDivider && (
+                {showSetupDivider && (
+                  <div className="flex items-center gap-2 py-1.5 my-1 select-none">
+                    <div className="flex-1 border-t border-slate-700" />
+                    <span className="text-emerald-500 text-[10px] font-semibold tracking-wider uppercase">
+                      Setup
+                    </span>
+                    <div className="flex-1 border-t border-slate-700" />
+                  </div>
+                )}
+                {showIterationDivider && (
                   <div className="flex items-center gap-2 py-1.5 my-1 select-none">
                     <div className="flex-1 border-t border-slate-700" />
                     <span className="text-cyan-500 text-[10px] font-semibold tracking-wider uppercase">
@@ -100,6 +111,7 @@ export function LogViewer({
                     <div className="flex-1 border-t border-slate-700" />
                   </div>
                 )}
+                {!isIterationHeader && (
                 <div className="flex gap-2 py-0.5 hover:bg-slate-900/50">
                   <span className="text-slate-500 shrink-0 select-none">
                     {new Date(log.timestamp).toLocaleTimeString()}
@@ -119,15 +131,16 @@ export function LogViewer({
                     <span className="text-purple-400 shrink-0">[{log.source}]</span>
                   )}
                   <span className="text-slate-200 break-all">{log.message}</span>
-                  {log.data && Object.keys(log.data).filter(k => k !== "iteration" && k !== "final").length > 0 && (
+                  {log.data && Object.keys(log.data).filter(k => k !== "iteration" && k !== "final" && k !== "phase" && k !== "iterationHeader").length > 0 && (
                     <span className="text-slate-500 shrink-0 truncate max-w-[40%]" title={JSON.stringify(log.data, null, 2)}>
                       {Object.entries(log.data)
-                        .filter(([k]) => k !== "iteration" && k !== "final")
+                        .filter(([k]) => k !== "iteration" && k !== "final" && k !== "phase" && k !== "iterationHeader")
                         .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
                         .join(" ")}
                     </span>
                   )}
                 </div>
+                )}
               </div>
             );
           })}

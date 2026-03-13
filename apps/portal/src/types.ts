@@ -79,6 +79,7 @@ export interface Run {
   skillRevisions?: string[];
   harUrl?: string;
   videoUrls?: string[];
+  setupVideoUrls?: string[];
 }
 
 export const WORKER_TYPES = [

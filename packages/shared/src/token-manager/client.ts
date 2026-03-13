@@ -2,7 +2,9 @@
 // Licensed under the MIT License.
 
 import {
+  AcquireAccountResponse,
   AcquireTokenResponse,
+  AccountType,
   TOKEN_CAPABILITY_ENV_VARS,
   TokenCapability,
 } from "./types.js";
@@ -74,5 +76,59 @@ export class TokenManagerClient {
     }
 
     return result.value;
+  }
+
+  /**
+   * Acquire account credentials for the given account type.
+   *
+   * 1. If env var fallbacks are set (GITHUB_USERNAME + GITHUB_PASSWORD + GITHUB_TOTP_SECRET),
+   *    return them directly.
+   * 2. Otherwise, call `POST {baseUrl}/api/v1/accounts/acquire` with `{ type }`.
+   *
+   * @throws Error if no account is available or the request fails.
+   */
+  async acquireAccount(type: AccountType): Promise<AcquireAccountResponse> {
+    // Env var fallback — local dev / Docker Compose
+    if (type === "github") {
+      const username = process.env.GITHUB_USERNAME;
+      const password = process.env.GITHUB_PASSWORD;
+      const totpUri = process.env.GITHUB_TOTP_SECRET;
+      if (username && password && totpUri) {
+        return { accountId: "env", type, username, password, totpUri };
+      }
+    }
+
+    if (!this.baseUrl) {
+      throw new Error(
+        `No account available for type '${type}': ` +
+          `env vars are not set and TOKEN_MANAGER_URL is not configured`
+      );
+    }
+
+    const url = `${this.baseUrl}/api/v1/accounts/acquire`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type }),
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "unknown error");
+      throw new Error(
+        `Account acquisition failed for type '${type}' (HTTP ${response.status}): ${errorBody}`
+      );
+    }
+
+    const result = (await response.json()) as AcquireAccountResponse;
+
+    if (!result.username || !result.password || !result.totpUri) {
+      throw new Error(
+        `Invalid account response for type '${type}': missing credentials`
+      );
+    }
+
+    return result;
   }
 }

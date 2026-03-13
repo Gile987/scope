@@ -8,6 +8,7 @@ import {
   AccountDocument,
   AccountType,
   AccountSecretValue,
+  AcquireAccountRequest,
   CreateAccountRequest,
   UpdateAccountRequest,
   deriveAccountSecretName,
@@ -64,6 +65,7 @@ export function createAccountRouter(
         type: body.type,
         secretName,
         enabled: body.enabled !== false,
+        acquireCount: 0,
         createdAt: new Date(),
       };
 
@@ -74,6 +76,59 @@ export function createAccountRouter(
       await collection.insertOne(doc as any);
 
       res.status(201).json(doc);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ──────────────────────────────────────────────
+  // POST /api/v1/accounts/acquire — Acquire account credentials (internal only)
+  // ──────────────────────────────────────────────
+  router.post("/api/v1/accounts/acquire", async (req, res, next) => {
+    try {
+      const body = req.body as AcquireAccountRequest;
+
+      if (!body.type || !VALID_ACCOUNT_TYPES.includes(body.type)) {
+        res.status(400).json({
+          error: `Invalid type. Must be one of: ${VALID_ACCOUNT_TYPES.join(", ")}`,
+        });
+        return;
+      }
+
+      // Find an enabled, non-deleted account of the requested type
+      const account = await collection.findOne({
+        type: body.type,
+        enabled: true,
+        deletedAt: { $exists: false },
+      });
+
+      if (!account) {
+        res.status(404).json({
+          error: `No enabled account available for type '${body.type}'`,
+        });
+        return;
+      }
+
+      // Retrieve secrets from KeyVault
+      const raw = await store.getSecret(account.secretName);
+      const secrets: AccountSecretValue = JSON.parse(raw);
+
+      // Update acquire tracking
+      await collection.updateOne(
+        { _id: account._id },
+        {
+          $inc: { acquireCount: 1 },
+          $set: { lastAcquiredAt: new Date() },
+        }
+      );
+
+      res.json({
+        accountId: account._id,
+        type: account.type,
+        username: secrets.username,
+        password: secrets.password,
+        totpUri: secrets.totpUri,
+      });
     } catch (err) {
       next(err);
     }

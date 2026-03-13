@@ -25,8 +25,9 @@
 // Default output: .auth/github-storage.json
 // =============================================================================
 
-import { chromium } from "playwright";
-import { createTOTP, getTOTPInfo, decodeQRImage } from "./totp.js";
+import { writeFileSync } from "fs";
+import { createTOTP, getTOTPInfo, loginAndCaptureCookies } from "github-auth";
+import { decodeQRImage } from "./totp.js";
 import { ensureDir, DEFAULT_OUTPUT } from "./capture-auth-state.js";
 
 export interface AutoAuthOptions {
@@ -114,96 +115,24 @@ async function main() {
 
   console.log("🔐 Starting automated GitHub login...");
 
-  const browser = await chromium.launch({ headless: !opts.headed });
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  const { storageState } = await loginAndCaptureCookies({
+    username: opts.username,
+    password: opts.password,
+    totpSecret: opts.totpSecret,
+    headed: opts.headed,
+  });
 
-  try {
-    // Step 1: Navigate to login page
-    await page.goto("https://github.com/login", { waitUntil: "domcontentloaded" });
+  // Save storage state to file
+  ensureDir(opts.output);
+  writeFileSync(opts.output, storageState);
 
-    // Step 2: Fill in credentials and submit
-    await page.fill("#login_field", opts.username);
-    await page.fill("#password", opts.password);
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: LOGIN_TIMEOUT_MS }),
-      page.click('input[type="submit"], button[type="submit"]'),
-    ]);
-
-    // Step 3: Check for login error
-    const errorBanner = page.locator(".js-flash-alert, #js-flash-container .flash-error");
-    if (await errorBanner.isVisible({ timeout: 1000 }).catch(() => false)) {
-      const errorText = await errorBanner.first().textContent();
-      throw new Error(`GitHub login failed: ${errorText?.trim()}`);
-    }
-
-    // Step 4: Handle MFA if present
-    const totpField = page.locator("#app_totp");
-    if (await totpField.isVisible({ timeout: 5000 }).catch(() => false)) {
-      const code = totp.generate();
-      console.log("🔑 Entering TOTP code...");
-
-      // GitHub auto-submits the TOTP form when all 6 digits are filled.
-      // Start waiting for navigation before filling to avoid a race.
-      const navPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: LOGIN_TIMEOUT_MS });
-      await totpField.fill(code);
-      await navPromise;
-
-      // Check for TOTP error (wrong code — GitHub stays on the TOTP page)
-      if (await errorBanner.isVisible({ timeout: 1000 }).catch(() => false)) {
-        const errorText = await errorBanner.first().textContent();
-        throw new Error(`TOTP verification failed: ${errorText?.trim()}`);
-      }
-    }
-
-    // Step 5: Wait for session cookie to appear (works regardless of final URL)
-    // After TOTP, GitHub may show intermediate pages (device verification,
-    // recovery codes, etc.) before landing on the homepage with cookies set.
-    // Note: GitHub's logged_in cookie is httpOnly, so document.cookie can't see it.
-    // We poll context.cookies() instead.
-    console.log("⏳ Waiting for session cookie...");
-    console.log(`   Current URL: ${page.url()}`);
-
-    const deadline = Date.now() + LOGIN_TIMEOUT_MS;
-    let sessionFound = false;
-    while (Date.now() < deadline) {
-      const cookies = await context.cookies();
-      if (cookies.some((c) => c.name === "user_session" && c.domain === "github.com")) {
-        sessionFound = true;
-        break;
-      }
-      await page.waitForTimeout(500);
-    }
-
-    if (!sessionFound) {
-      const url = page.url();
-      const title = await page.title();
-      const cookies = await context.cookies();
-      const cookieNames = cookies.map((c) => c.name).join(", ");
-      throw new Error(
-        `Timed out waiting for session cookie.\n` +
-        `  URL:     ${url}\n` +
-        `  Title:   ${title}\n` +
-        `  Cookies: ${cookieNames || "(none)"}\n` +
-        `  Hint:    GitHub may be showing a device verification or recovery codes page.\n` +
-        `           Re-run with --headed to see what page the browser is on.`
-      );
-    }
-
-    // Step 6: Save storage state
-    ensureDir(opts.output);
-    await context.storageState({ path: opts.output });
-
-    console.log(`\n💾 Auth state saved to: ${opts.output}`);
-    console.log(
-      `\nTo use locally, set the env var:\n  export GITHUB_AUTH_STATE=$(cat ${opts.output})`
-    );
-    console.log(
-      `\nTo upload to Key Vault:\n  cd scope-mt-infra && ./scripts/update-keyvault-secrets.sh github-vscode-web-auth-state @${opts.output} --sync`
-    );
-  } finally {
-    await browser.close();
-  }
+  console.log(`\n💾 Auth state saved to: ${opts.output}`);
+  console.log(
+    `\nTo use locally, set the env var:\n  export GITHUB_AUTH_STATE=$(cat ${opts.output})`
+  );
+  console.log(
+    `\nTo upload to Key Vault:\n  cd scope-mt-infra && ./scripts/update-keyvault-secrets.sh github-vscode-web-auth-state @${opts.output} --sync`
+  );
 }
 
 // Only run main when executed directly
