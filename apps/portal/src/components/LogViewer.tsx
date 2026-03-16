@@ -1,12 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useLogStream } from "@/hooks/use-log-stream";
+import { formatLogsAsText } from "@/lib/format-logs";
 import type { LogEvent } from "@/types";
-import { Circle, Wifi, WifiOff } from "lucide-react";
+import { Check, Circle, Copy, Wifi, WifiOff } from "lucide-react";
 
 const levelColors: Record<string, string> = {
   info: "text-blue-600 dark:text-blue-400",
@@ -45,6 +47,14 @@ export function LogViewer({
   const isDone = externalIsDone ?? ownStream.isDone;
   const error = externalError !== undefined ? externalError : ownStream.error;
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    if (logs.length === 0) return;
+    await navigator.clipboard.writeText(formatLogsAsText(logs));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [logs]);
 
   // Auto-scroll to bottom on new logs
   useEffect(() => {
@@ -76,6 +86,27 @@ export function LogViewer({
             <span>Connecting…</span>
           </>
         )}
+        <div className="ml-auto">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 px-2 text-xs text-muted-foreground"
+            disabled={logs.length === 0}
+            onClick={handleCopy}
+          >
+            {copied ? (
+              <>
+                <Check className="h-3 w-3" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="h-3 w-3" />
+                Copy logs
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Log area */}
