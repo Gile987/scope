@@ -18,10 +18,14 @@ network: defaults
 
 tools:
   github:
-    # If in a public repo, setting `lockdown: false` allows
-    # reading issues, pull requests and comments from 3rd-parties
-    # If in a private repo this has no particular effect.
+    mode: remote
+    toolsets: [repos, issues, pull_requests]
     lockdown: false
+    github-app:
+      app-id: ${{ secrets.GH_AG_APP_ID }}
+      private-key: ${{ secrets.GH_AG_APP_PRIVATE_KEY }}
+      owner: "growth-ecosystems"
+      repositories: ["scope-core", "scope-core-infra"]
 
 safe-outputs:
   mentions: false
@@ -39,7 +43,8 @@ Create an upbeat daily status report for the repo as a GitHub issue.
 
 ## What to include
 
-- Recent repository activity (issues, PRs, discussions, releases, code changes)
+- Recent repository activity (issues, PRs, discussions, releases, code changes) from both `growth-ecosystems/scope-core` and `growth-ecosystems/scope-core-infra`
+- Infrastructure changes and deployment status from the infra repo
 - Progress tracking, goal reminders and highlights
 - Project status and recommendations
 - Actionable next steps for maintainers
