@@ -18,6 +18,8 @@ export interface LoginOptions {
   keepAlive?: boolean;
   /** Directory for Playwright video recording. When set, the login session is recorded. */
   videoDir?: string;
+  /** Extra Chromium launch args (e.g. `['--remote-debugging-port=9222']`). */
+  launchArgs?: string[];
 }
 
 export interface LoginResult {
@@ -45,7 +47,10 @@ export async function loginAndCaptureCookies(opts: LoginOptions): Promise<LoginR
 export async function loginAndCaptureCookies(opts: LoginOptions): Promise<LoginResult | LiveLoginResult> {
   const totp = createTOTP(opts.totpSecret);
 
-  const browser = await chromium.launch({ headless: !opts.headed });
+  const browser = await chromium.launch({
+    headless: !opts.headed,
+    ...(opts.launchArgs?.length && { args: opts.launchArgs }),
+  });
   const contextOptions: Parameters<typeof browser['newContext']>[0] = {
     viewport: { width: 1920, height: 1080 },
   };
