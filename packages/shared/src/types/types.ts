@@ -190,8 +190,6 @@ export interface BaseQueueProcessorConfig {
   redisHost: string;
   redisPort: number;
   redisPassword: string;
-  agentId?: string;            // Agent ID for version self-registration (e.g. "coder-acp-copilot")
-  apiBaseUrl?: string;         // API base URL for version self-registration
 }
 
 // Configuration for the coding agent queue processor

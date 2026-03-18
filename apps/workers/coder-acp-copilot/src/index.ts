@@ -172,7 +172,6 @@ async function main(): Promise<void> {
     redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),
     redisPassword: process.env.REDIS_PASSWORD || "",
     apiBaseUrl: process.env.SCOPE_MT_API_URL,
-    agentId: process.env.AGENT_ID || "coder-acp-copilot",
   };
 
   const processor = new CopilotProcessor();
