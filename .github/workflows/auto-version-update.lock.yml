@@ -25,13 +25,13 @@
 # by the check-worker-versions workflow. Copilot reads the issue body, updates
 # the versions.env file, runs integration tests, and opens a PR.
 #
-# gh-aw-metadata: {"schema_version":"v2","frontmatter_hash":"686e21116bcd01e425c061f35d1af34f5c5315d1159d011fc1459696637120df","compiler_version":"v0.60.0","strict":true}
+# gh-aw-metadata: {"schema_version":"v2","frontmatter_hash":"dc172e00a93bad46f0cd240a69c4fca08d29205d5e59786110e3e3e799701e42","compiler_version":"v0.60.0","strict":true}
 
 name: "Auto Version Update"
 "on":
   issues:
     # names: # Label filtering applied via job conditions
-    # - dependencies # Label filtering applied via job conditions
+    # - worker-update # Label filtering applied via job conditions
     types:
     - opened
     - edited

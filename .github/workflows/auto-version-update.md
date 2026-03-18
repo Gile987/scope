@@ -7,7 +7,7 @@ description: |
 on:
   issues:
     types: [opened, edited]
-    names: [dependencies]
+    names: [worker-update]
   workflow_dispatch:
   skip-bots: [github-actions]
 
