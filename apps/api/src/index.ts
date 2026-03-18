@@ -233,6 +233,21 @@ interface RequestDocument {
   harUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
+  agentVersion?: string;          // Agent software version prefix (FK → AgentVersion.agentVersion)
+  workerVersion?: string;          // Exact build that processed this run
+}
+
+// Agent version entry — embedded in CodingAgentDocument.versions[]
+interface AgentVersion {
+  agentVersion: string;
+  workerVersion: string;
+  components: Record<string, string>;
+  gitCommit: string;
+  buildTime: string;
+  imageTag: string;
+  queueName: string;
+  status: "active" | "retired";
+  createdAt: Date;
 }
 
 // Coding agent document interface
@@ -242,6 +257,7 @@ interface CodingAgentDocument {
   description?: string;
   supportedModels: string[];
   defaultModel?: string;
+  versions?: AgentVersion[];
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;
@@ -3553,6 +3569,161 @@ app.delete("/api/v1/agents/:id", async (req: Request, res: Response, next: NextF
     );
 
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================
+// Agent Versions routes (/api/v1/agents/:id/versions)
+// ============================================================
+
+// List versions for an agent (optional ?status=active filter)
+app.get("/api/v1/agents/:id/versions", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.query;
+
+    const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    let versions = agent.versions ?? [];
+    if (status && typeof status === "string") {
+      versions = versions.filter((v) => v.status === status);
+    }
+
+    res.json(versions);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Register/upsert an agent version (keyed by agentVersion)
+app.post("/api/v1/agents/:id/versions", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { agentVersion, workerVersion, components, gitCommit, buildTime, imageTag, queueName } = req.body;
+
+    // Validate required fields
+    if (!agentVersion || typeof agentVersion !== "string") {
+      res.status(400).json({ error: "agentVersion is required and must be a string" });
+      return;
+    }
+    if (!workerVersion || typeof workerVersion !== "string") {
+      res.status(400).json({ error: "workerVersion is required and must be a string" });
+      return;
+    }
+    if (!components || typeof components !== "object" || Array.isArray(components)) {
+      res.status(400).json({ error: "components is required and must be an object" });
+      return;
+    }
+    if (!gitCommit || typeof gitCommit !== "string") {
+      res.status(400).json({ error: "gitCommit is required and must be a string" });
+      return;
+    }
+    if (!buildTime || typeof buildTime !== "string") {
+      res.status(400).json({ error: "buildTime is required and must be a string" });
+      return;
+    }
+    if (!imageTag || typeof imageTag !== "string") {
+      res.status(400).json({ error: "imageTag is required and must be a string" });
+      return;
+    }
+    if (!queueName || typeof queueName !== "string") {
+      res.status(400).json({ error: "queueName is required and must be a string" });
+      return;
+    }
+
+    const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    const now = new Date();
+    const versionEntry: AgentVersion = {
+      agentVersion,
+      workerVersion,
+      components,
+      gitCommit,
+      buildTime,
+      imageTag,
+      queueName,
+      status: "active",
+      createdAt: now,
+    };
+
+    // Upsert: update existing entry with same agentVersion or push new
+    const existing = (agent.versions ?? []).find((v) => v.agentVersion === agentVersion);
+    if (existing) {
+      await agentCollection.updateOne(
+        { _id: id, "versions.agentVersion": agentVersion },
+        {
+          $set: {
+            "versions.$.workerVersion": workerVersion,
+            "versions.$.components": components,
+            "versions.$.gitCommit": gitCommit,
+            "versions.$.buildTime": buildTime,
+            "versions.$.imageTag": imageTag,
+            "versions.$.queueName": queueName,
+            "versions.$.status": "active",
+            updatedAt: now,
+          },
+        }
+      );
+    } else {
+      await agentCollection.updateOne(
+        { _id: id },
+        {
+          $push: { versions: versionEntry },
+          $set: { updatedAt: now },
+        }
+      );
+    }
+
+    res.status(existing ? 200 : 201).json(versionEntry);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update an agent version's status (e.g. retire)
+app.patch("/api/v1/agents/:id/versions/:agentVersion", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, agentVersion } = req.params;
+    const { status } = req.body;
+
+    if (!status || !(["active", "retired"] as string[]).includes(status)) {
+      res.status(400).json({ error: "status must be 'active' or 'retired'" });
+      return;
+    }
+
+    const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    const version = (agent.versions ?? []).find((v) => v.agentVersion === agentVersion);
+    if (!version) {
+      res.status(404).json({ error: "Version not found" });
+      return;
+    }
+
+    await agentCollection.updateOne(
+      { _id: id, "versions.agentVersion": agentVersion },
+      {
+        $set: {
+          "versions.$.status": status,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    res.json({ ...version, status });
   } catch (error) {
     next(error);
   }
