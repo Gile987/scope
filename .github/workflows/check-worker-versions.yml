@@ -90,6 +90,13 @@ jobs:
               const r = JSON.parse(fs.readFileSync('/tmp/versions.json', 'utf8'));
               const out = fs.createWriteStream(process.env.GITHUB_OUTPUT, { flags: 'a' });
 
+              // Helper: write a multi-line output using heredoc delimiter syntax
+              function writeMultiline(name, value) {
+                out.write(name + '<<GHEOF\n');
+                out.write(value + '\n');
+                out.write('GHEOF\n');
+              }
+
               // Build title from components that have updates
               const updated = r.components.filter(c => c.current !== c.latest);
               const title = 'chore(' + r.worker + '): update to ' +
@@ -100,22 +107,22 @@ jobs:
               const tableRows = r.components.map(c =>
                 '| ' + c.name + ' | ' + c.current + ' | ' + c.latest + ' |'
               ).join('\n');
-              out.write('table_rows=' + tableRows + '\n');
+              writeMultiline('table_rows', tableRows);
 
               // Build versions.env content
               const envLines = r.components.map(c => c.envVar + '=' + c.latest).join('\n');
-              out.write('env_content=' + envLines + '\n');
+              writeMultiline('env_content', envLines);
 
               // Build links
               const links = r.components.map(c => '- [' + c.name + '](' + c.link + ')').join('\n');
-              out.write('links=' + links + '\n');
+              writeMultiline('links', links);
 
               // Build summary status rows
               const statusRows = r.components.map(c => {
                 const status = c.current === c.latest ? '✅' : '🔄';
                 return '| ' + c.name + ' | ' + c.current + ' | ' + c.latest + ' | ' + status + ' |';
               }).join('\n');
-              out.write('status_rows=' + statusRows + '\n');
+              writeMultiline('status_rows', statusRows);
 
               // Pass through metadata
               out.write('worker=' + r.worker + '\n');
