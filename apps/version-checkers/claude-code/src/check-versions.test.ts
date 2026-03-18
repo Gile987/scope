@@ -85,10 +85,17 @@ describe("check-versions", () => {
       );
 
       expect(result.hasUpdates).toBe(false);
-      expect(result.claudeCodeAcp.current).toBe("0.16.0");
-      expect(result.claudeCodeAcp.latest).toBe("0.16.0");
-      expect(result.claudeAgentSdk.current).toBe("0.2.34");
-      expect(result.claudeAgentSdk.latest).toBe("0.2.34");
+      expect(result.worker).toBe("coder-acp-claude-code");
+      expect(result.versionsEnvPath).toBe("apps/workers/coder-acp-claude-code/versions.env");
+      expect(result.components).toHaveLength(2);
+      expect(result.components[0].name).toBe("claude-code-acp");
+      expect(result.components[0].envVar).toBe("CLAUDE_CODE_ACP_VERSION");
+      expect(result.components[0].current).toBe("0.16.0");
+      expect(result.components[0].latest).toBe("0.16.0");
+      expect(result.components[1].name).toBe("claude-agent-sdk");
+      expect(result.components[1].envVar).toBe("CLAUDE_AGENT_SDK_VERSION");
+      expect(result.components[1].current).toBe("0.2.34");
+      expect(result.components[1].latest).toBe("0.2.34");
     });
 
     it("detects claude-code-acp update", () => {
@@ -98,8 +105,8 @@ describe("check-versions", () => {
       );
 
       expect(result.hasUpdates).toBe(true);
-      expect(result.claudeCodeAcp.current).toBe("0.16.0");
-      expect(result.claudeCodeAcp.latest).toBe("0.16.2");
+      expect(result.components[0].current).toBe("0.16.0");
+      expect(result.components[0].latest).toBe("0.16.2");
     });
 
     it("detects claude-agent-sdk update", () => {
@@ -109,8 +116,8 @@ describe("check-versions", () => {
       );
 
       expect(result.hasUpdates).toBe(true);
-      expect(result.claudeAgentSdk.current).toBe("0.2.34");
-      expect(result.claudeAgentSdk.latest).toBe("0.2.44");
+      expect(result.components[1].current).toBe("0.2.34");
+      expect(result.components[1].latest).toBe("0.2.44");
     });
 
     it("detects both updates simultaneously", () => {

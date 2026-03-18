@@ -7,22 +7,17 @@
  *
  * Exports pure functions for fetching and comparing versions so they
  * can be unit-tested independently of the CLI entry point.
+ *
+ * Output conforms to the standardized CheckResult shape defined in
+ * packages/version-checking.
  */
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import type { CheckResult, ComponentVersionInfo } from "version-checking";
 
-export interface VersionInfo {
-  current: string;
-  latest: string;
-}
-
-export interface CheckResult {
-  claudeCodeAcp: VersionInfo;
-  claudeAgentSdk: VersionInfo;
-  hasUpdates: boolean;
-}
+export type { CheckResult, ComponentVersionInfo };
 
 /**
  * Load pinned versions from a versions.env file.
@@ -120,6 +115,9 @@ export async function fetchBundledSdkVersion(
   return sdkVersion;
 }
 
+const WORKER = "coder-acp-claude-code";
+const VERSIONS_ENV_PATH = "apps/workers/coder-acp-claude-code/versions.env";
+
 /**
  * Compare pinned versions against latest and return the result.
  */
@@ -128,17 +126,27 @@ export function compareVersions(
   latest: { claudeCodeAcpVersion: string; claudeAgentSdkVersion: string },
 ): CheckResult {
   return {
-    claudeCodeAcp: {
-      current: current.claudeCodeAcpVersion,
-      latest: latest.claudeCodeAcpVersion,
-    },
-    claudeAgentSdk: {
-      current: current.claudeAgentSdkVersion,
-      latest: latest.claudeAgentSdkVersion,
-    },
+    worker: WORKER,
+    versionsEnvPath: VERSIONS_ENV_PATH,
     hasUpdates:
       current.claudeCodeAcpVersion !== latest.claudeCodeAcpVersion ||
       current.claudeAgentSdkVersion !== latest.claudeAgentSdkVersion,
+    components: [
+      {
+        name: "claude-code-acp",
+        envVar: "CLAUDE_CODE_ACP_VERSION",
+        current: current.claudeCodeAcpVersion,
+        latest: latest.claudeCodeAcpVersion,
+        link: "https://www.npmjs.com/package/@zed-industries/claude-code-acp",
+      },
+      {
+        name: "claude-agent-sdk",
+        envVar: "CLAUDE_AGENT_SDK_VERSION",
+        current: current.claudeAgentSdkVersion,
+        latest: latest.claudeAgentSdkVersion,
+        link: "https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk",
+      },
+    ],
   };
 }
 
