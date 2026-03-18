@@ -8,29 +8,15 @@
  * can be unit-tested independently of the CLI entry point.
  *
  * Output conforms to the standardized CheckResult shape defined in
- * packages/shared/src/version-check.ts.
+ * packages/version-checking.
  */
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import type { CheckResult, ComponentVersionInfo } from "version-checking";
 
-/** Mirrors ComponentVersionInfo from packages/shared/src/version-check.ts */
-export interface ComponentVersionInfo {
-  name: string;
-  envVar: string;
-  current: string;
-  latest: string;
-  link: string;
-}
-
-/** Mirrors CheckResult from packages/shared/src/version-check.ts */
-export interface CheckResult {
-  worker: string;
-  versionsEnvPath: string;
-  hasUpdates: boolean;
-  components: ComponentVersionInfo[];
-}
+export type { CheckResult, ComponentVersionInfo };
 
 /**
  * Load pinned versions from a versions.env file.

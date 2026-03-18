@@ -8,10 +8,6 @@
  * JSON conforming to this shape.  The unified `check-versions.yml` GitHub
  * Actions workflow relies on the `components[]` array to generate issue
  * titles, bodies, and dedup logic generically — no per-worker parsing.
- *
- * Each checker defines its own copy of these interfaces (to avoid pulling
- * in the heavy `shared` dependency tree).  This file is the canonical
- * reference that all copies must stay in sync with.
  */
 
 /**

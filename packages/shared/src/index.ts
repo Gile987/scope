@@ -17,4 +17,3 @@ export * from "./skills/index.js";
 export * from "./agent-version.js";
 export * from "./devproxy/index.js";
 export * from "./har/index.js";
-export * from "./version-check.js";

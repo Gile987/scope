@@ -9,6 +9,7 @@ packages:
   - "apps/model-scanners/*"
   - "apps/version-checkers/*"
   - "packages/shared"
+  - "packages/version-checking"
   - "packages/github-auth"
   - "packages/model-scanning"
   - "packages/db-migrations"
