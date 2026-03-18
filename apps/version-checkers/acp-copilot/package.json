@@ -7,7 +7,8 @@
     "check": "tsx src/check-versions.ts"
   },
   "dependencies": {
-    "dotenv": "^16.5.0"
+    "dotenv": "^16.5.0",
+    "version-checking": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.4",

@@ -70,8 +70,14 @@ describe("check-versions", () => {
       );
 
       expect(result.hasUpdates).toBe(false);
-      expect(result.copilotCli.current).toBe("0.0.415");
-      expect(result.copilotCli.latest).toBe("0.0.415");
+      expect(result.worker).toBe("coder-acp-copilot");
+      expect(result.versionsEnvPath).toBe("apps/workers/coder-acp-copilot/versions.env");
+      expect(result.components).toHaveLength(1);
+      expect(result.components[0].name).toBe("@github/copilot");
+      expect(result.components[0].envVar).toBe("COPILOT_CLI_VERSION");
+      expect(result.components[0].current).toBe("0.0.415");
+      expect(result.components[0].latest).toBe("0.0.415");
+      expect(result.components[0].link).toBe("https://www.npmjs.com/package/@github/copilot");
     });
 
     it("detects Copilot CLI update", () => {
@@ -81,8 +87,8 @@ describe("check-versions", () => {
       );
 
       expect(result.hasUpdates).toBe(true);
-      expect(result.copilotCli.current).toBe("0.0.415");
-      expect(result.copilotCli.latest).toBe("0.0.420");
+      expect(result.components[0].current).toBe("0.0.415");
+      expect(result.components[0].latest).toBe("0.0.420");
     });
   });
 

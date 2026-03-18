@@ -1,18 +1,46 @@
-name: Check Claude Code Worker Versions
+name: Check Worker Versions
 
 on:
   schedule:
     # Weekdays at 8am SF time (3pm UTC during PDT, 4pm during PST)
     - cron: '0 15 * * 1-5'
   workflow_dispatch:
+    inputs:
+      worker:
+        description: 'Worker to check (blank = all)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - coder-acp-copilot
+          - coder-acp-claude-code
 
 permissions:
   contents: read
   issues: write
 
 jobs:
+  setup-matrix:
+    name: Setup matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          INPUT="${{ github.event.inputs.worker }}"
+          if [ -z "$INPUT" ]; then
+            echo "matrix={\"include\":$ALL}" >> $GITHUB_OUTPUT
+          else
+            echo "matrix={\"include\":[$(echo "$ALL" | jq -c ".[] | select(.worker == \"$INPUT\")")]}" >> $GITHUB_OUTPUT
+          fi
+
   check-versions:
-    name: Check for version updates
+    needs: setup-matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+    name: ${{ matrix.worker }}
     runs-on: ubuntu-latest
 
     steps:
@@ -33,13 +61,13 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --filter version-checker-claude-code
+        run: pnpm install --frozen-lockfile --filter ${{ matrix.checker }}
 
       - name: Check for new versions
         id: check
         run: |
           set +e
-          pnpm --silent --filter version-checker-claude-code check > /tmp/versions.json 2>/tmp/versions.log
+          pnpm --silent --filter ${{ matrix.checker }} check > /tmp/versions.json 2>/tmp/versions.log
           EXIT_CODE=$?
           set -e
 
@@ -56,19 +84,43 @@ jobs:
           if [ "$EXIT_CODE" -eq 1 ]; then
             echo "updates_available=true" >> $GITHUB_OUTPUT
 
-            # Parse the JSON output
+            # Parse the standardized components[] JSON output
             node -e "
               const fs = require('fs');
               const r = JSON.parse(fs.readFileSync('/tmp/versions.json', 'utf8'));
               const out = fs.createWriteStream(process.env.GITHUB_OUTPUT, { flags: 'a' });
-              out.write('acp_current=' + r.claudeCodeAcp.current + '\n');
-              out.write('acp_latest=' + r.claudeCodeAcp.latest + '\n');
-              out.write('sdk_current=' + r.claudeAgentSdk.current + '\n');
-              out.write('sdk_latest=' + r.claudeAgentSdk.latest + '\n');
-              const parts = [];
-              if (r.claudeCodeAcp.current !== r.claudeCodeAcp.latest) parts.push('claude-code-acp ' + r.claudeCodeAcp.latest);
-              if (r.claudeAgentSdk.current !== r.claudeAgentSdk.latest) parts.push('claude-agent-sdk ' + r.claudeAgentSdk.latest);
-              out.write('title=chore(coder-acp-claude-code): update to ' + parts.join(', ') + '\n');
+
+              // Build title from components that have updates
+              const updated = r.components.filter(c => c.current !== c.latest);
+              const title = 'chore(' + r.worker + '): update to ' +
+                updated.map(c => c.name + ' ' + c.latest).join(', ');
+              out.write('title=' + title + '\n');
+
+              // Build issue body table rows
+              const tableRows = r.components.map(c =>
+                '| ' + c.name + ' | ' + c.current + ' | ' + c.latest + ' |'
+              ).join('\n');
+              out.write('table_rows=' + tableRows + '\n');
+
+              // Build versions.env content
+              const envLines = r.components.map(c => c.envVar + '=' + c.latest).join('\n');
+              out.write('env_content=' + envLines + '\n');
+
+              // Build links
+              const links = r.components.map(c => '- [' + c.name + '](' + c.link + ')').join('\n');
+              out.write('links=' + links + '\n');
+
+              // Build summary status rows
+              const statusRows = r.components.map(c => {
+                const status = c.current === c.latest ? '✅' : '🔄';
+                return '| ' + c.name + ' | ' + c.current + ' | ' + c.latest + ' | ' + status + ' |';
+              }).join('\n');
+              out.write('status_rows=' + statusRows + '\n');
+
+              // Pass through metadata
+              out.write('worker=' + r.worker + '\n');
+              out.write('versions_env_path=' + r.versionsEnvPath + '\n');
+
               out.end();
             "
           else
@@ -82,8 +134,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # List open issues with the dependencies label and filter by title prefix.
+          # Using list + jq instead of --search to avoid GitHub search index lag
+          # which can cause duplicate issues when runs happen close together.
           ISSUE_URL=$(gh issue list --state open --label dependencies --json title,url \
-            --jq '[.[] | select(.title | startswith("chore(coder-acp-claude-code): update to"))] | .[0].url // empty')
+            --jq '[.[] | select(.title | startswith("chore(${{ matrix.worker }}): update to"))] | .[0].url // empty')
           if [ -n "$ISSUE_URL" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
@@ -98,36 +153,34 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BODY="## Version updates available for coder-acp-claude-code
+          cat > /tmp/issue-body.md <<'ISSUE_EOF'
+          ## Version updates available for ${{ matrix.worker }}
 
           | Component | Current | Latest |
           |-----------|---------|--------|
-          | claude-code-acp | ${{ steps.check.outputs.acp_current }} | ${{ steps.check.outputs.acp_latest }} |
-          | claude-agent-sdk | ${{ steps.check.outputs.sdk_current }} | ${{ steps.check.outputs.sdk_latest }} |
+          ${{ steps.check.outputs.table_rows }}
 
           ### How to update
 
-          Replace the contents of \`apps/workers/coder-acp-claude-code/versions.env\` with:
+          Replace the contents of `${{ steps.check.outputs.versions_env_path }}` with:
 
-          \`\`\`env
-          CLAUDE_CODE_ACP_VERSION=${{ steps.check.outputs.acp_latest }}
-          CLAUDE_AGENT_SDK_VERSION=${{ steps.check.outputs.sdk_latest }}
-          \`\`\`
+          ```env
+          ${{ steps.check.outputs.env_content }}
+          ```
 
-          Then rebuild the Docker image:
-          \`\`\`bash
-          pnpm docker:build:claude-code
-          \`\`\`
+          Then run integration tests:
+          ```bash
+          pnpm test:integration
+          ```
 
           ### Links
 
-          - [claude-code-acp on npm](https://www.npmjs.com/package/@zed-industries/claude-code-acp)
-          - [claude-agent-sdk on npm](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)
-          "
+          ${{ steps.check.outputs.links }}
+          ISSUE_EOF
 
           ISSUE_URL=$(gh issue create \
             --title "${{ steps.check.outputs.title }}" \
-            --body "$BODY" \
+            --body-file /tmp/issue-body.md \
             --label "dependencies")
           echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
 
@@ -138,16 +191,15 @@ jobs:
             cat >> $GITHUB_STEP_SUMMARY <<'EOF'
           ## ✅ All versions up to date
 
-          No updates available for coder-acp-claude-code.
+          No updates available for ${{ matrix.worker }}.
           EOF
           else
             cat >> $GITHUB_STEP_SUMMARY <<EOF
-          ## ⚠️ Updates available for coder-acp-claude-code
+          ## ⚠️ Updates available for ${{ matrix.worker }}
 
           | Component | Current | Latest | Status |
           |-----------|---------|--------|--------|
-          | claude-code-acp | ${{ steps.check.outputs.acp_current }} | ${{ steps.check.outputs.acp_latest }} | ${{ steps.check.outputs.acp_current == steps.check.outputs.acp_latest && '✅' || '🔄' }} |
-          | claude-agent-sdk | ${{ steps.check.outputs.sdk_current }} | ${{ steps.check.outputs.sdk_latest }} | ${{ steps.check.outputs.sdk_current == steps.check.outputs.sdk_latest && '✅' || '🔄' }} |
+          ${{ steps.check.outputs.status_rows }}
 
           ## Issue tracking
           EOF

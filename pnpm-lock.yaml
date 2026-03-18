@@ -424,6 +424,9 @@ importers:
       dotenv:
         specifier: ^16.5.0
         version: 16.6.1
+      version-checking:
+        specifier: workspace:*
+        version: link:../../../packages/version-checking
     devDependencies:
       tsx:
         specifier: ^4.19.4
@@ -437,6 +440,9 @@ importers:
       dotenv:
         specifier: ^16.5.0
         version: 16.6.1
+      version-checking:
+        specifier: workspace:*
+        version: link:../../../packages/version-checking
     devDependencies:
       tsx:
         specifier: ^4.19.4
@@ -450,6 +456,9 @@ importers:
       dotenv:
         specifier: ^16.5.0
         version: 16.6.1
+      version-checking:
+        specifier: workspace:*
+        version: link:../../../packages/version-checking
     devDependencies:
       tsx:
         specifier: ^4.19.4
@@ -628,6 +637,12 @@ importers:
         version: 10.0.0
       typescript:
         specifier: ^5.6.2
+        version: 5.9.3
+
+  packages/version-checking:
+    devDependencies:
+      typescript:
+        specifier: ^5.8.3
         version: 5.9.3
 
 packages:

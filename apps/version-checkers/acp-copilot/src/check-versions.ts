@@ -6,21 +6,17 @@
  *
  * Exports pure functions for fetching and comparing versions so they
  * can be unit-tested independently of the CLI entry point.
+ *
+ * Output conforms to the standardized CheckResult shape defined in
+ * packages/version-checking.
  */
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import type { CheckResult, ComponentVersionInfo } from "version-checking";
 
-export interface VersionInfo {
-  current: string;
-  latest: string;
-}
-
-export interface CheckResult {
-  copilotCli: VersionInfo;
-  hasUpdates: boolean;
-}
+export type { CheckResult, ComponentVersionInfo };
 
 /**
  * Load pinned versions from a versions.env file.
@@ -61,6 +57,9 @@ export async function fetchLatestCopilotCliVersion(): Promise<string> {
   return latest;
 }
 
+const WORKER = "coder-acp-copilot";
+const VERSIONS_ENV_PATH = "apps/workers/coder-acp-copilot/versions.env";
+
 /**
  * Compare pinned version against latest and return the result.
  */
@@ -69,11 +68,18 @@ export function compareVersions(
   latest: { copilotCliVersion: string }
 ): CheckResult {
   return {
-    copilotCli: {
-      current: current.copilotCliVersion,
-      latest: latest.copilotCliVersion,
-    },
+    worker: WORKER,
+    versionsEnvPath: VERSIONS_ENV_PATH,
     hasUpdates: current.copilotCliVersion !== latest.copilotCliVersion,
+    components: [
+      {
+        name: "@github/copilot",
+        envVar: "COPILOT_CLI_VERSION",
+        current: current.copilotCliVersion,
+        latest: latest.copilotCliVersion,
+        link: "https://www.npmjs.com/package/@github/copilot",
+      },
+    ],
   };
 }
 
