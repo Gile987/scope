@@ -17,9 +17,9 @@ import { decodeQRImage } from "./totp.js";
 
 describe("resolveOptions", () => {
   const baseEnv = {
-    GITHUB_USERNAME: "envuser",
-    GITHUB_PASSWORD: "envpass",
-    GITHUB_TOTP_SECRET: "JBSWY3DPEHPK3PXP",
+    GH_AUTH_USERNAME: "envuser",
+    GH_AUTH_PASSWORD: "envpass",
+    GH_AUTH_TOTP_SECRET: "JBSWY3DPEHPK3PXP",
   };
 
   it("reads all values from CLI flags", () => {
@@ -80,28 +80,28 @@ describe("resolveOptions", () => {
   it("throws when username is missing", () => {
     expect(() =>
       resolveOptions(["node", "script.ts"], {
-        GITHUB_PASSWORD: "pass",
-        GITHUB_TOTP_SECRET: "secret",
+        GH_AUTH_PASSWORD: "pass",
+        GH_AUTH_TOTP_SECRET: "secret",
       })
-    ).toThrow("Missing --username or GITHUB_USERNAME");
+    ).toThrow("Missing --username or GH_AUTH_USERNAME");
   });
 
   it("throws when password is missing", () => {
     expect(() =>
       resolveOptions(["node", "script.ts"], {
-        GITHUB_USERNAME: "user",
-        GITHUB_TOTP_SECRET: "secret",
+        GH_AUTH_USERNAME: "user",
+        GH_AUTH_TOTP_SECRET: "secret",
       })
-    ).toThrow("Missing --password or GITHUB_PASSWORD");
+    ).toThrow("Missing --password or GH_AUTH_PASSWORD");
   });
 
   it("throws when totp-secret is missing", () => {
     expect(() =>
       resolveOptions(["node", "script.ts"], {
-        GITHUB_USERNAME: "user",
-        GITHUB_PASSWORD: "pass",
+        GH_AUTH_USERNAME: "user",
+        GH_AUTH_PASSWORD: "pass",
       })
-    ).toThrow("Missing --totp-secret, --qr-code, or GITHUB_TOTP_SECRET");
+    ).toThrow("Missing --totp-secret, --qr-code, or GH_AUTH_TOTP_SECRET");
   });
 
   it("detects --totp-only flag", () => {
@@ -125,7 +125,7 @@ describe("resolveOptions", () => {
   it("still throws when totp-secret is missing in --totp-only mode", () => {
     expect(() =>
       resolveOptions(["node", "script.ts", "--totp-only"], {})
-    ).toThrow("Missing --totp-secret, --qr-code, or GITHUB_TOTP_SECRET");
+    ).toThrow("Missing --totp-secret, --qr-code, or GH_AUTH_TOTP_SECRET");
   });
 
   it("accepts --qr-code and decodes the image", () => {

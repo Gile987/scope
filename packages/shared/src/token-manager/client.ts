@@ -81,7 +81,7 @@ export class TokenManagerClient {
   /**
    * Acquire account credentials for the given account type.
    *
-   * 1. If env var fallbacks are set (GITHUB_USERNAME + GITHUB_PASSWORD + GITHUB_TOTP_SECRET),
+   * 1. If env var fallbacks are set (GH_AUTH_USERNAME + GH_AUTH_PASSWORD + GH_AUTH_TOTP_SECRET),
    *    return them directly.
    * 2. Otherwise, call `POST {baseUrl}/api/v1/accounts/acquire` with `{ type }`.
    *
@@ -90,9 +90,9 @@ export class TokenManagerClient {
   async acquireAccount(type: AccountType): Promise<AcquireAccountResponse> {
     // Env var fallback — local dev / Docker Compose
     if (type === "github") {
-      const username = process.env.GITHUB_USERNAME;
-      const password = process.env.GITHUB_PASSWORD;
-      const totpUri = process.env.GITHUB_TOTP_SECRET;
+      const username = process.env.GH_AUTH_USERNAME;
+      const password = process.env.GH_AUTH_PASSWORD;
+      const totpUri = process.env.GH_AUTH_TOTP_SECRET;
       if (username && password && totpUri) {
         return { accountId: "env", type, username, password, totpUri };
       }
