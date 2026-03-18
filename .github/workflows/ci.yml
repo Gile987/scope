@@ -401,7 +401,7 @@ jobs:
             coder-acp-copilot)
               VERSION_PREFIX="copilot-${COPILOT_CLI_VERSION}" ;;
             coder-acp-claude-code)
-              VERSION_PREFIX="claude-code-acp-${CLAUDE_CODE_ACP_VERSION}" ;;
+              VERSION_PREFIX="claude-code-acp-${CLAUDE_CODE_ACP_VERSION}-sdk-${CLAUDE_AGENT_SDK_VERSION}" ;;
               VERSION_PREFIX="vscode-${VSCODE_VERSION}-copilot-${COPILOT_CHAT_VERSION}" ;;
           esac
 

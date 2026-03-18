@@ -71,7 +71,7 @@ build_image() {
     coder-acp-copilot)
       version_prefix="copilot-${COPILOT_CLI_VERSION}" ;;
     coder-acp-claude-code)
-      version_prefix="claude-code-acp-${CLAUDE_CODE_ACP_VERSION}" ;;
+      version_prefix="claude-code-acp-${CLAUDE_CODE_ACP_VERSION}-sdk-${CLAUDE_AGENT_SDK_VERSION}" ;;
   esac
 
   local image_args="--image $full_image"
