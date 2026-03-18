@@ -3,15 +3,15 @@ name: Check Worker Versions
 on:
   schedule:
     # Weekdays at 8am SF time (3pm UTC during PDT, 4pm during PST)
-    - cron: '0 15 * * 1-5'
+    - cron: "0 15 * * 1-5"
   workflow_dispatch:
     inputs:
       worker:
-        description: 'Worker to check (blank = all)'
+        description: "Worker to check (blank = all)"
         required: false
         type: choice
         options:
-          - ''
+          - ""
           - coder-acp-copilot
           - coder-acp-claude-code
 
@@ -56,9 +56,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'pnpm'
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter ${{ matrix.checker }}

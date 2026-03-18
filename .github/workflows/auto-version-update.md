@@ -57,10 +57,7 @@ body with:
 
 5. **If tests fail** — Read the error output, identify the root cause, and
    attempt to fix it. Common issues include API changes in new versions that
-   require code updates in the worker source files under `apps/workers/`.
-
-6. **Assign the issue to Copilot** — Once the update is validated, Copilot
-   will create a pull request with the changes.
+   require code updates in the worker source files listed below.
 
 ## Workers and their version files
 
@@ -69,8 +66,15 @@ body with:
 | coder-acp-copilot     | `apps/workers/coder-acp-copilot/versions.env`     | `COPILOT_CLI_VERSION`                                 |
 | coder-acp-claude-code | `apps/workers/coder-acp-claude-code/versions.env` | `CLAUDE_CODE_ACP_VERSION`, `CLAUDE_AGENT_SDK_VERSION` |
 
+## Allowed source files for test fixes
+
+If integration tests fail after a version update, only edit files in these paths:
+
+- **coder-acp-copilot**: `apps/workers/coder-acp-copilot/src/acp-client.ts`
+- **coder-acp-claude-code**: `apps/workers/coder-acp-claude-code/src/acp-client.ts`
+
 ## Constraints
 
-- Only modify the `versions.env` file specified in the issue
+- Only modify the `versions.env` file and the allowed source files listed above
 - Do not modify Dockerfiles, docker-compose files, or build scripts
 - The `versions.env` file is the single source of truth for version pinning
