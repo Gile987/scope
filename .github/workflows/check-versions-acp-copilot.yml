@@ -1,0 +1,153 @@
+name: Check ACP Copilot Worker Versions
+
+on:
+  schedule:
+    # Weekdays at 8am SF time (3pm UTC during PDT, 4pm during PST)
+    - cron: '0 15 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-versions:
+    name: Check for version updates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # pnpm/action-setup@v4 is not allowed on EMU
+      - name: Install pnpm
+        run: |
+          curl -fsSL https://get.pnpm.io/install.sh | sh -
+          echo "$HOME/.local/share/pnpm" >> $GITHUB_PATH
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter version-checker-acp-copilot
+
+      - name: Check for new versions
+        id: check
+        run: |
+          set +e
+          pnpm --silent --filter version-checker-acp-copilot check > /tmp/versions.json 2>/tmp/versions.log
+          EXIT_CODE=$?
+          set -e
+
+          echo "::group::check-versions stderr"
+          cat /tmp/versions.log
+          echo "::endgroup::"
+          echo "::group::check-versions stdout"
+          cat /tmp/versions.json
+          echo "::endgroup::"
+          echo "Exit code: $EXIT_CODE"
+
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          if [ "$EXIT_CODE" -eq 1 ]; then
+            echo "updates_available=true" >> $GITHUB_OUTPUT
+
+            # Parse the JSON output — stdout only, no pnpm noise
+            node -e "
+              const fs = require('fs');
+              const r = JSON.parse(fs.readFileSync('/tmp/versions.json', 'utf8'));
+              const out = fs.createWriteStream(process.env.GITHUB_OUTPUT, { flags: 'a' });
+              out.write('copilot_cli_current=' + r.copilotCli.current + '\n');
+              out.write('copilot_cli_latest=' + r.copilotCli.latest + '\n');
+              out.write('title=chore(coder-acp-copilot): update to @github/copilot ' + r.copilotCli.latest + '\n');
+              out.end();
+            "
+          else
+            echo "updates_available=false" >> $GITHUB_OUTPUT
+            echo "No updates available (exit code: $EXIT_CODE)"
+          fi
+
+      - name: Check for existing open issue
+        if: steps.check.outputs.updates_available == 'true'
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # List open issues with the dependencies label and filter by title prefix.
+          # Using list + jq instead of --search to avoid GitHub search index lag
+          # which can cause duplicate issues when runs happen close together.
+          ISSUE_URL=$(gh issue list --state open --label dependencies --json title,url \
+            --jq '[.[] | select(.title | startswith("chore(coder-acp-copilot): update to"))] | .[0].url // empty')
+          if [ -n "$ISSUE_URL" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+            echo "Existing open issue found: $ISSUE_URL"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create issue
+        id: create_issue
+        if: steps.check.outputs.updates_available == 'true' && steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY="## Version updates available for coder-acp-copilot
+
+          | Component | Current | Latest |
+          |-----------|---------|--------|
+          | @github/copilot | ${{ steps.check.outputs.copilot_cli_current }} | ${{ steps.check.outputs.copilot_cli_latest }} |
+
+          ### How to update
+
+          Replace the contents of \`apps/workers/coder-acp-copilot/versions.env\` with:
+
+          \`\`\`env
+          COPILOT_CLI_VERSION=${{ steps.check.outputs.copilot_cli_latest }}
+          \`\`\`
+
+          Then run integration tests:
+          \`\`\`bash
+          pnpm test:integration
+          \`\`\`
+
+          ### Links
+
+          - [@github/copilot on npm](https://www.npmjs.com/package/@github/copilot)
+          "
+
+          ISSUE_URL=$(gh issue create \
+            --title "${{ steps.check.outputs.title }}" \
+            --body "$BODY" \
+            --label "dependencies")
+          echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+
+      - name: Write job summary
+        if: always() && steps.check.outputs.exit_code != '2'
+        run: |
+          if [ "${{ steps.check.outputs.updates_available }}" != "true" ]; then
+            cat >> $GITHUB_STEP_SUMMARY <<'EOF'
+          ## ✅ All versions up to date
+
+          No updates available for coder-acp-copilot.
+          EOF
+          else
+            cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## ⚠️ Updates available for coder-acp-copilot
+
+          | Component | Current | Latest | Status |
+          |-----------|---------|--------|--------|
+          | @github/copilot | ${{ steps.check.outputs.copilot_cli_current }} | ${{ steps.check.outputs.copilot_cli_latest }} | ${{ steps.check.outputs.copilot_cli_current == steps.check.outputs.copilot_cli_latest && '✅' || '🔄' }} |
+
+          ## Issue tracking
+          EOF
+            if [ -n "${{ steps.create_issue.outputs.issue_url }}" ]; then
+              echo "📝 **Issue created:** ${{ steps.create_issue.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ steps.existing.outputs.exists }}" == "true" ]; then
+              echo "ℹ️ **Issue already exists:** ${{ steps.existing.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
