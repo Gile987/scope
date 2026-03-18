@@ -4,7 +4,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { CodingAgent } from "@/types";
+import type { CodingAgent, AgentVersion } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -309,6 +309,71 @@ export function AgentDetail() {
           )}
         </CardContent>
       </Card>
+
+      {/* Versions card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Deployed Versions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {(() => {
+            const versions = agent.versions ?? [];
+            if (versions.length === 0) {
+              return <p className="text-sm text-muted-foreground">No versions registered yet.</p>;
+            }
+
+            const active = versions.filter((v) => v.status === "active");
+            const retired = versions.filter((v) => v.status === "retired");
+
+            return (
+              <div className="space-y-3">
+                {active.map((v) => (
+                  <VersionEntry key={v.agentVersion} version={v} />
+                ))}
+                {retired.length > 0 && (
+                  <div className="space-y-2 opacity-50">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Retired</p>
+                    {retired.map((v) => (
+                      <VersionEntry key={v.agentVersion} version={v} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function VersionEntry({ version }: { version: AgentVersion }) {
+  const componentDisplay = Object.entries(version.components)
+    .map(([key, val]) => {
+      // Convert env var names to readable labels
+      const label = key
+        .replace(/_VERSION$/, "")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+      return `${label} ${val}`;
+    })
+    .join(", ");
+
+  return (
+    <div className="flex items-start justify-between rounded-md border p-3">
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-sm font-medium">{version.agentVersion}</span>
+          <Badge variant={version.status === "active" ? "default" : "secondary"} className="text-xs">
+            {version.status}
+          </Badge>
+        </div>
+        <p className="text-xs text-muted-foreground">{componentDisplay}</p>
+        <p className="text-xs text-muted-foreground font-mono">
+          Build: {version.gitCommit} · {version.buildTime}
+        </p>
+      </div>
+      <span className="text-xs text-muted-foreground">{formatDate(version.createdAt)}</span>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -281,6 +281,20 @@ export const api = {
   /** Soft-delete a coding agent */
   deleteAgent: (id: string): Promise<{ id: string; deleted: boolean }> => {
     return request(`/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  /** List versions for an agent */
+  listAgentVersions: (agentId: string, status?: string): Promise<AgentVersion[]> => {
+    const params = status ? `?status=${encodeURIComponent(status)}` : "";
+    return request(`/agents/${encodeURIComponent(agentId)}/versions${params}`);
+  },
+
+  /** Update an agent version's status */
+  updateAgentVersionStatus: (agentId: string, agentVersion: string, status: "active" | "retired"): Promise<AgentVersion> => {
+    return request(`/agents/${encodeURIComponent(agentId)}/versions/${encodeURIComponent(agentVersion)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
   },
 
   // ─── MCP Servers ────────────────────────────────────────────────────────────

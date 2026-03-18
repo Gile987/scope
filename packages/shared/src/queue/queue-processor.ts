@@ -34,6 +34,18 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     this.processor = processor;
   }
 
+  /** Build agentVersion + workerVersion fields for stamping on request documents. */
+  private getVersionFields(): Record<string, string> {
+    const agentVersion = this.processor.getAgentVersion?.();
+    if (!agentVersion) return {};
+    const gitCommit = process.env.GIT_COMMIT || "unknown";
+    const buildTime = process.env.BUILD_TIME || "unknown";
+    return {
+      agentVersion,
+      workerVersion: `${agentVersion}-${buildTime}-${gitCommit}`,
+    };
+  }
+
   protected async handleRequest(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
@@ -132,9 +144,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     const requestId = requestDoc._id;
 
     // Update status to processing (preserve logs from handleRequest — MCP/skill resolution)
+    const versionFields = this.getVersionFields();
     await this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "processing", updatedAt: new Date(), ...(this.processor.getAgentVersion ? { agentVersion: this.processor.getAgentVersion() } : {}) } }
+      { $set: { status: "processing", updatedAt: new Date(), ...versionFields } }
     );
 
     await log("info", `Starting processing with ${this.processor.workerName}`);
@@ -273,9 +286,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     }
 
     // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution)
+    const versionFields = this.getVersionFields();
     await this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "iterating", turns: [], updatedAt: new Date(), ...(this.processor.getAgentVersion ? { agentVersion: this.processor.getAgentVersion() } : {}) } }
+      { $set: { status: "iterating", turns: [], updatedAt: new Date(), ...versionFields } }
     );
 
     // Extend queue message visibility for long-running multi-turn.
