@@ -20,6 +20,8 @@ RUN pnpm --filter shared build && pnpm --filter coder-acp-claude-code build
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
+ARG CLAUDE_CODE_ACP_VERSION
+RUN test -n "$CLAUDE_CODE_ACP_VERSION" || (echo 'CLAUDE_CODE_ACP_VERSION build-arg is required' && exit 1)
 # Install system tools needed at runtime
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -29,7 +31,7 @@ RUN apt-get update && apt-get install -y \
     && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH="/root/.local/bin:$PATH"
-RUN npm install -g @zed-industries/claude-code-acp@0.16.0
+RUN npm install -g @zed-industries/claude-code-acp@${CLAUDE_CODE_ACP_VERSION}
 
 # Use existing node user (UID 1000) so claude-code-acp allows bypassPermissions mode
 RUN mkdir -p /workspace && chown node:node /workspace
@@ -62,7 +64,9 @@ RUN apt-get update && apt-get install -y \
 ENV PATH="/root/.local/bin:$PATH"
 
 # Install Claude Code ACP globally
-RUN npm install -g @zed-industries/claude-code-acp@0.16.0
+ARG CLAUDE_CODE_ACP_VERSION
+RUN test -n "$CLAUDE_CODE_ACP_VERSION" || (echo 'CLAUDE_CODE_ACP_VERSION build-arg is required' && exit 1)
+RUN npm install -g @zed-industries/claude-code-acp@${CLAUDE_CODE_ACP_VERSION}
 
 WORKDIR /app
 

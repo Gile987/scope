@@ -293,6 +293,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
+      args:
+        CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION}
     profiles: [claude-code]
     environment:
       <<: *worker-env

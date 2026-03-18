@@ -1,0 +1,159 @@
+name: Check Claude Code Worker Versions
+
+on:
+  schedule:
+    # Weekdays at 8am SF time (3pm UTC during PDT, 4pm during PST)
+    - cron: '0 15 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-versions:
+    name: Check for version updates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # pnpm/action-setup@v4 is not allowed on EMU
+      - name: Install pnpm
+        run: |
+          curl -fsSL https://get.pnpm.io/install.sh | sh -
+          echo "$HOME/.local/share/pnpm" >> $GITHUB_PATH
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter version-checker-claude-code
+
+      - name: Check for new versions
+        id: check
+        run: |
+          set +e
+          pnpm --silent --filter version-checker-claude-code check > /tmp/versions.json 2>/tmp/versions.log
+          EXIT_CODE=$?
+          set -e
+
+          echo "::group::check-versions stderr"
+          cat /tmp/versions.log
+          echo "::endgroup::"
+          echo "::group::check-versions stdout"
+          cat /tmp/versions.json
+          echo "::endgroup::"
+          echo "Exit code: $EXIT_CODE"
+
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          if [ "$EXIT_CODE" -eq 1 ]; then
+            echo "updates_available=true" >> $GITHUB_OUTPUT
+
+            # Parse the JSON output
+            node -e "
+              const fs = require('fs');
+              const r = JSON.parse(fs.readFileSync('/tmp/versions.json', 'utf8'));
+              const out = fs.createWriteStream(process.env.GITHUB_OUTPUT, { flags: 'a' });
+              out.write('acp_current=' + r.claudeCodeAcp.current + '\n');
+              out.write('acp_latest=' + r.claudeCodeAcp.latest + '\n');
+              out.write('sdk_current=' + r.claudeAgentSdk.current + '\n');
+              out.write('sdk_latest=' + r.claudeAgentSdk.latest + '\n');
+              const parts = [];
+              if (r.claudeCodeAcp.current !== r.claudeCodeAcp.latest) parts.push('claude-code-acp ' + r.claudeCodeAcp.latest);
+              if (r.claudeAgentSdk.current !== r.claudeAgentSdk.latest) parts.push('claude-agent-sdk ' + r.claudeAgentSdk.latest);
+              out.write('title=chore(coder-acp-claude-code): update to ' + parts.join(', ') + '\n');
+              out.end();
+            "
+          else
+            echo "updates_available=false" >> $GITHUB_OUTPUT
+            echo "No updates available (exit code: $EXIT_CODE)"
+          fi
+
+      - name: Check for existing open issue
+        if: steps.check.outputs.updates_available == 'true'
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_URL=$(gh issue list --state open --label dependencies --json title,url \
+            --jq '[.[] | select(.title | startswith("chore(coder-acp-claude-code): update to"))] | .[0].url // empty')
+          if [ -n "$ISSUE_URL" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+            echo "Existing open issue found: $ISSUE_URL"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create issue
+        id: create_issue
+        if: steps.check.outputs.updates_available == 'true' && steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY="## Version updates available for coder-acp-claude-code
+
+          | Component | Current | Latest |
+          |-----------|---------|--------|
+          | claude-code-acp | ${{ steps.check.outputs.acp_current }} | ${{ steps.check.outputs.acp_latest }} |
+          | claude-agent-sdk | ${{ steps.check.outputs.sdk_current }} | ${{ steps.check.outputs.sdk_latest }} |
+
+          ### How to update
+
+          Replace the contents of \`apps/workers/coder-acp-claude-code/versions.env\` with:
+
+          \`\`\`env
+          CLAUDE_CODE_ACP_VERSION=${{ steps.check.outputs.acp_latest }}
+          CLAUDE_AGENT_SDK_VERSION=${{ steps.check.outputs.sdk_latest }}
+          \`\`\`
+
+          Then rebuild the Docker image:
+          \`\`\`bash
+          pnpm docker:build:claude-code
+          \`\`\`
+
+          ### Links
+
+          - [claude-code-acp on npm](https://www.npmjs.com/package/@zed-industries/claude-code-acp)
+          - [claude-agent-sdk on npm](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)
+          "
+
+          ISSUE_URL=$(gh issue create \
+            --title "${{ steps.check.outputs.title }}" \
+            --body "$BODY" \
+            --label "dependencies")
+          echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+
+      - name: Write job summary
+        if: always() && steps.check.outputs.exit_code != '2'
+        run: |
+          if [ "${{ steps.check.outputs.updates_available }}" != "true" ]; then
+            cat >> $GITHUB_STEP_SUMMARY <<'EOF'
+          ## ✅ All versions up to date
+
+          No updates available for coder-acp-claude-code.
+          EOF
+          else
+            cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## ⚠️ Updates available for coder-acp-claude-code
+
+          | Component | Current | Latest | Status |
+          |-----------|---------|--------|--------|
+          | claude-code-acp | ${{ steps.check.outputs.acp_current }} | ${{ steps.check.outputs.acp_latest }} | ${{ steps.check.outputs.acp_current == steps.check.outputs.acp_latest && '✅' || '🔄' }} |
+          | claude-agent-sdk | ${{ steps.check.outputs.sdk_current }} | ${{ steps.check.outputs.sdk_latest }} | ${{ steps.check.outputs.sdk_current == steps.check.outputs.sdk_latest && '✅' || '🔄' }} |
+
+          ## Issue tracking
+          EOF
+            if [ -n "${{ steps.create_issue.outputs.issue_url }}" ]; then
+              echo "📝 **Issue created:** ${{ steps.create_issue.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ steps.existing.outputs.exists }}" == "true" ]; then
+              echo "ℹ️ **Issue already exists:** ${{ steps.existing.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
