@@ -384,6 +384,27 @@ jobs:
           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
 
+          # Load versions.env if present (needed for version-prefixed tags)
+          VERSION_PREFIX=""
+          for f in apps/workers/${{ matrix.image.name }}/versions.env apps/${{ matrix.image.name }}/versions.env; do
+            if [ -f "$f" ]; then
+              while IFS='=' read -r key value; do
+                [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+                export "$key=$value"
+              done < "$f"
+              break
+            fi
+          done
+
+          # Build version prefix from component versions
+          case "${{ matrix.image.name }}" in
+            coder-acp-copilot)
+              VERSION_PREFIX="copilot-${COPILOT_CLI_VERSION}" ;;
+            coder-acp-claude-code)
+              VERSION_PREFIX="claude-code-acp-${CLAUDE_CODE_ACP_VERSION}" ;;
+              VERSION_PREFIX="vscode-${VSCODE_VERSION}-copilot-${COPILOT_CHAT_VERSION}" ;;
+          esac
+
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             GIT_SHA="${{ github.event.pull_request.head.sha }}"
             IMAGE_ARGS="--image scoped/${{ matrix.image.name }}:${GIT_SHA}"
@@ -394,6 +415,9 @@ jobs:
             TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
             IMAGE_ARGS="--image scoped/${{ matrix.image.name }}:${GIT_SHA}"
             IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:${TIMESTAMP}-${SHORT_SHA}"
+            if [ -n "$VERSION_PREFIX" ]; then
+              IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:${VERSION_PREFIX}-${TIMESTAMP}-${SHORT_SHA}"
+            fi
           fi
 
           echo "git_sha=${GIT_SHA}" >> "$GITHUB_OUTPUT"
