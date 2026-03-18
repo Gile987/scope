@@ -25,7 +25,7 @@
 # by the check-worker-versions workflow. Copilot reads the issue body, updates
 # the versions.env file, runs integration tests, and opens a PR.
 #
-# gh-aw-metadata: {"schema_version":"v2","frontmatter_hash":"dc172e00a93bad46f0cd240a69c4fca08d29205d5e59786110e3e3e799701e42","compiler_version":"v0.60.0","strict":true}
+# gh-aw-metadata: {"schema_version":"v2","frontmatter_hash":"13fe48cc8e60d0d7731e6de375888083f09ae4d1ce71efea49e10a14bbed63b1","compiler_version":"v0.60.0","strict":true}
 
 name: "Auto Version Update"
 "on":
@@ -35,8 +35,6 @@ name: "Auto Version Update"
     types:
     - opened
     - edited
-  # skip-bots: # Skip-bots processed as bot check in pre-activation job
-  # - github-actions # Skip-bots processed as bot check in pre-activation job
   workflow_dispatch:
 
 permissions: {}
@@ -952,7 +950,7 @@ jobs:
   pre_activation:
     runs-on: ubuntu-slim
     outputs:
-      activated: ${{ (steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true') }}
+      activated: ${{ steps.check_membership.outputs.is_team_member == 'true' }}
       matched_command: ''
     steps:
       - name: Setup Scripts
@@ -970,18 +968,6 @@ jobs:
             const { setupGlobals } = require('/opt/gh-aw/actions/setup_globals.cjs');
             setupGlobals(core, github, context, exec, io);
             const { main } = require('/opt/gh-aw/actions/check_membership.cjs');
-            await main();
-      - name: Check skip-bots
-        id: check_skip_bots
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
-        env:
-          GH_AW_SKIP_BOTS: github-actions
-          GH_AW_WORKFLOW_NAME: "Auto Version Update"
-        with:
-          script: |
-            const { setupGlobals } = require('/opt/gh-aw/actions/setup_globals.cjs');
-            setupGlobals(core, github, context, exec, io);
-            const { main } = require('/opt/gh-aw/actions/check_skip_bots.cjs');
             await main();
 
   safe_outputs:

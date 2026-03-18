@@ -9,7 +9,6 @@ on:
     types: [opened, edited]
     names: [worker-update]
   workflow_dispatch:
-  skip-bots: [github-actions]
 
 permissions:
   contents: read
