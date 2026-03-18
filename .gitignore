@@ -12,3 +12,4 @@ ctrf/
 coverage/
 .auth/
 test-videos/
+test-snapshots/
