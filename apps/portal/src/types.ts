@@ -531,6 +531,19 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   github: "GitHub",
 };
 
+// Agent version entry (embedded in CodingAgent)
+export interface AgentVersion {
+  agentVersion: string;
+  workerVersion: string;
+  components: Record<string, string>;
+  gitCommit: string;
+  buildTime: string;
+  imageTag: string;
+  queueName: string;
+  status: "active" | "retired";
+  createdAt: string;
+}
+
 // Coding Agent types
 export interface CodingAgent {
   _id: string;
@@ -538,6 +551,7 @@ export interface CodingAgent {
   description?: string;
   supportedModels: string[];
   defaultModel?: string;
+  versions?: AgentVersion[];
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
