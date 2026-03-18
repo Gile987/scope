@@ -86,6 +86,12 @@ RUN cp -r /root/.local/bin/* /usr/local/bin/ 2>/dev/null || true
 
 WORKDIR /app/apps/workers/coder-acp-copilot
 
+# Expose component versions + build metadata at runtime (used by self-registration)
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+ENV COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION
+ENV GIT_COMMIT=$GIT_COMMIT
+ENV BUILD_TIME=$BUILD_TIME
 ENV WORKER_NAME=coder-acp-copilot
 
 USER node
