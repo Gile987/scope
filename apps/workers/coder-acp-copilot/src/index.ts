@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls, detectCliVersion } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls } from "shared";
 // NOTE: extractToolCalls is used for server-side logging only; tool calls are NOT stored in the DB
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
@@ -38,13 +38,19 @@ export function buildSubprocessEnv(
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-copilot";
 const tokenClient = new TokenManagerClient();
-const AGENT_VERSION = detectCliVersion("copilot", "@github/copilot");
+const AGENT_VERSION = `copilot-${process.env.COPILOT_CLI_VERSION || "unknown"}`;
 
 class CopilotProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
 
   getAgentVersion(): string {
     return AGENT_VERSION;
+  }
+
+  getComponentVersions(): Record<string, string> {
+    return {
+      ...(process.env.COPILOT_CLI_VERSION ? { COPILOT_CLI_VERSION: process.env.COPILOT_CLI_VERSION } : {}),
+    };
   }
 
   async processMessage(
@@ -166,6 +172,7 @@ async function main(): Promise<void> {
     redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),
     redisPassword: process.env.REDIS_PASSWORD || "",
     apiBaseUrl: process.env.SCOPE_MT_API_URL,
+    agentId: process.env.AGENT_ID || "coder-acp-copilot",
   };
 
   const processor = new CopilotProcessor();

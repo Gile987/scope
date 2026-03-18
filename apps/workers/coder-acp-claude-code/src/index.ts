@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, detectCliVersion } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -9,13 +9,20 @@ dotenv.config();
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-claude-code";
 const tokenClient = new TokenManagerClient();
-const AGENT_VERSION = detectCliVersion("claude-code-acp", "@zed-industries/claude-code-acp");
+const AGENT_VERSION = `claude-code-acp-${process.env.CLAUDE_CODE_ACP_VERSION || "unknown"}-sdk-${process.env.CLAUDE_AGENT_SDK_VERSION || "unknown"}`;
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
 
   getAgentVersion(): string {
     return AGENT_VERSION;
+  }
+
+  getComponentVersions(): Record<string, string> {
+    return {
+      ...(process.env.CLAUDE_CODE_ACP_VERSION ? { CLAUDE_CODE_ACP_VERSION: process.env.CLAUDE_CODE_ACP_VERSION } : {}),
+      ...(process.env.CLAUDE_AGENT_SDK_VERSION ? { CLAUDE_AGENT_SDK_VERSION: process.env.CLAUDE_AGENT_SDK_VERSION } : {}),
+    };
   }
 
   async processMessage(
@@ -88,6 +95,7 @@ async function main(): Promise<void> {
     redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),
     redisPassword: process.env.REDIS_PASSWORD || "",
     apiBaseUrl: process.env.SCOPE_MT_API_URL,
+    agentId: process.env.AGENT_ID || "coder-acp-claude-code",
   };
 
   const processor = new ClaudeCodeProcessor();

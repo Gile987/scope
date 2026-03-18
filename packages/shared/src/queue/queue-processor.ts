@@ -34,6 +34,62 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     this.processor = processor;
   }
 
+  /**
+   * Start the queue processor. Before entering the poll loop, attempt to
+   * register this worker's version with the API (best-effort).
+   */
+  async start(): Promise<void> {
+    await this.registerVersion();
+    return super.start();
+  }
+
+  /**
+   * Self-register this worker's agent version with the API.
+   * Best-effort: logs a warning and continues if registration fails.
+   */
+  private async registerVersion(): Promise<void> {
+    const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+    const agentId = this.config.agentId;
+    const agentVersion = this.processor.getAgentVersion?.();
+    const components = this.processor.getComponentVersions?.();
+
+    if (!apiBaseUrl || !agentId || !agentVersion) {
+      console.log(`[${this.workerName}] Skipping version registration (apiBaseUrl=${!!apiBaseUrl}, agentId=${agentId}, agentVersion=${agentVersion})`);
+      return;
+    }
+
+    const gitCommit = process.env.GIT_COMMIT || "unknown";
+    const buildTime = process.env.BUILD_TIME || "unknown";
+    const workerVersion = `${agentVersion}-${buildTime}-${gitCommit}`;
+
+    const body = {
+      agentVersion,
+      workerVersion,
+      components: components ?? {},
+      gitCommit,
+      buildTime,
+      imageTag: workerVersion,
+      queueName: this.config.queueName,
+    };
+
+    try {
+      const url = `${apiBaseUrl}/api/v1/agents/${encodeURIComponent(agentId)}/versions`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (resp.ok) {
+        console.log(`[${this.workerName}] Registered version: ${workerVersion}`);
+      } else {
+        const text = await resp.text();
+        console.warn(`[${this.workerName}] Version registration failed (${resp.status}): ${text}`);
+      }
+    } catch (err) {
+      console.warn(`[${this.workerName}] Version registration error:`, err instanceof Error ? err.message : err);
+    }
+  }
+
   protected async handleRequest(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
