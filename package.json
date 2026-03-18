@@ -39,6 +39,7 @@
     "migrate:up": "pnpm --filter db-migrations migrate:up",
     "migrate:down": "pnpm --filter db-migrations migrate:down",
     "migrate:status": "pnpm --filter db-migrations migrate:status",
+    "check:versions:acp-copilot": "pnpm --filter version-checker-acp-copilot check",
     "check:versions:vscode-web": "pnpm --filter version-checker-vscode-web check",
     "vscode-web:capture-auth-state": "pnpm --filter github-cookie-updater capture",
     "vscode-web:auto-auth-state": "pnpm --filter github-cookie-updater start",
