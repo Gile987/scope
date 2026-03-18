@@ -55,6 +55,19 @@ export interface TraitDescriptions {
   type: Record<UserType, string>;
 }
 
+// Agent version entry — embedded in CodingAgentDocument.versions[]
+export interface AgentVersion {
+  agentVersion: string;                  // PK — version prefix from versions.env (e.g. "copilot-0.0.415")
+  workerVersion: string;                 // Latest deployed build = image tag (e.g. "copilot-0.0.415-20260318T163740Z-44d16d6")
+  components: Record<string, string>;    // Component env vars (e.g. { COPILOT_CLI_VERSION: "0.0.415" })
+  gitCommit: string;                     // Short SHA of the build
+  buildTime: string;                     // Build timestamp (e.g. "20260318T163740Z")
+  imageTag: string;                      // Full image tag (same as workerVersion)
+  queueName: string;                     // Queue this version listens on
+  status: "active" | "retired";
+  createdAt: Date;
+}
+
 // Coding agent definition stored in MongoDB
 export interface CodingAgentDocument {
   _id: string;               // Agent ID (e.g. "coder-acp-copilot")
@@ -62,6 +75,7 @@ export interface CodingAgentDocument {
   description?: string;
   supportedModels: string[];  // Empty array = model selection disabled
   defaultModel?: string;
+  versions?: AgentVersion[];  // Registered agent versions (embedded array)
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;           // Soft-delete timestamp
@@ -103,7 +117,8 @@ export interface RequestDocument {
   promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
-  agentVersion?: string;          // Coding agent binary version (e.g. "@github/copilot@0.0.415")
+  agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
+  workerVersion?: string;          // Exact build that processed this run (e.g. "copilot-0.0.415-20260318T163740Z-44d16d6")
   harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
   videoUrls?: string[];            // Blob storage URLs to session recording videos (one-shot)
   setupVideoUrls?: string[];       // Blob storage URLs to setup-phase videos (e.g. TOTP login recording)
@@ -152,8 +167,10 @@ export interface SetupResult {
 export interface WorkerProcessor {
   readonly workerName: string;
   processMessage(message: string, log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<WorkerResult>;
-  /** Return the coding agent binary version string (e.g. "@github/copilot@0.0.415"). */
+  /** Return the agent version prefix from versions.env components (e.g. "copilot-0.0.415"). */
   getAgentVersion?(): string;
+  /** Return component versions from versions.env (e.g. { COPILOT_CLI_VERSION: "0.0.415" }). */
+  getComponentVersions?(): Record<string, string>;
   /** Called once before the first processMessage in a run. Use to acquire expensive resources (e.g. start a long-lived process). */
   setup?(log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<SetupResult | void>;
   /** Called once after the last processMessage in a run. Always called if setup() was called, even on error. */
@@ -173,6 +190,8 @@ export interface BaseQueueProcessorConfig {
   redisHost: string;
   redisPort: number;
   redisPassword: string;
+  agentId?: string;            // Agent ID for version self-registration (e.g. "coder-acp-copilot")
+  apiBaseUrl?: string;         // API base URL for version self-registration
 }
 
 // Configuration for the coding agent queue processor
