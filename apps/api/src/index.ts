@@ -29,7 +29,7 @@ import {
 } from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
-import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult } from "shared";
+import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, resolveAgentVersion } from "shared";
 import { evaluateTrigger } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 
@@ -637,26 +637,16 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
     let resolvedAgentVersion: string | undefined;
     let versionQueueName: string | undefined;
     if (agentDoc) {
-      const activeVersions = (agentDoc.versions ?? []).filter((v) => v.status === "active");
-      if (requestedAgentVersion) {
-        const version = activeVersions.find((v) => v.agentVersion === requestedAgentVersion);
-        if (!version) {
-          res.status(400).json({
-            error: `Agent version "${requestedAgentVersion}" not found or not active for agent "${workerType}"`,
-            activeVersions: activeVersions.map((v) => v.agentVersion),
-          });
-          return;
-        }
-        resolvedAgentVersion = version.agentVersion;
-        versionQueueName = version.queueName;
-      } else if (activeVersions.length > 0) {
-        // Auto-select latest active version by createdAt descending
-        const latest = activeVersions.sort((a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        )[0];
-        resolvedAgentVersion = latest.agentVersion;
-        versionQueueName = latest.queueName;
+      const versionResult = resolveAgentVersion(agentDoc.versions, requestedAgentVersion);
+      if ("error" in versionResult) {
+        res.status(400).json({
+          error: `${versionResult.error} for agent "${workerType}"`,
+          activeVersions: versionResult.activeVersions,
+        });
+        return;
       }
+      resolvedAgentVersion = versionResult.agentVersion;
+      versionQueueName = versionResult.queueName;
     }
 
     // Validate MCP server slugs if provided
