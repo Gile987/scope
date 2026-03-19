@@ -89,6 +89,7 @@ let skillRevisionCollection: Collection<SkillRevisionDocument>;
 let skillRevisionStore: SkillRevisionStore;
 let skillResolver: SkillResolver;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
+const dynamicQueueClients: Map<string, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
 // Criteria document interface
@@ -506,6 +507,22 @@ async function initializeClients(): Promise<void> {
   console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}, report`);
 }
 
+// Get or create a QueueClient for a dynamically resolved queue name
+function getOrCreateQueueClient(queueName: string): QueueClient {
+  const existing = dynamicQueueClients.get(queueName);
+  if (existing) return existing;
+  let client: QueueClient;
+  if (storageConnectionString) {
+    client = new QueueClient(storageConnectionString, queueName);
+  } else {
+    const credential = new DefaultAzureCredential();
+    const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
+    client = new QueueClient(`${queueUrl}/${queueName}`, credential);
+  }
+  dynamicQueueClients.set(queueName, client);
+  return client;
+}
+
 // Health check endpoint (liveness probe — always returns 200)
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "healthy", version: GIT_COMMIT });
@@ -551,7 +568,7 @@ app.get("/api/v1/version", (_req: Request, res: Response) => {
 // Submit a request
 app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, agentVersion: requestedAgentVersion } = req.body;
     const worker = req.query.worker as string;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
@@ -613,6 +630,32 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       }
       if (!model && agentDoc.defaultModel) {
         model = agentDoc.defaultModel;
+      }
+    }
+
+    // Resolve agent version: explicit selection or latest active
+    let resolvedAgentVersion: string | undefined;
+    let versionQueueName: string | undefined;
+    if (agentDoc) {
+      const activeVersions = (agentDoc.versions ?? []).filter((v) => v.status === "active");
+      if (requestedAgentVersion) {
+        const version = activeVersions.find((v) => v.agentVersion === requestedAgentVersion);
+        if (!version) {
+          res.status(400).json({
+            error: `Agent version "${requestedAgentVersion}" not found or not active for agent "${workerType}"`,
+            activeVersions: activeVersions.map((v) => v.agentVersion),
+          });
+          return;
+        }
+        resolvedAgentVersion = version.agentVersion;
+        versionQueueName = version.queueName;
+      } else if (activeVersions.length > 0) {
+        // Auto-select latest active version by createdAt descending
+        const latest = activeVersions.sort((a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )[0];
+        resolvedAgentVersion = latest.agentVersion;
+        versionQueueName = latest.queueName;
       }
     }
 
@@ -710,7 +753,10 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
     };
 
     const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
-    const queueClient = queueClients.get(workerType)!;
+    // Use version-specific queue if resolved, otherwise fall back to static worker queue
+    const queueClient = versionQueueName
+      ? getOrCreateQueueClient(versionQueueName)
+      : queueClients.get(workerType)!;
 
     // Ensure a TaskPrompt entity exists for this task text (idempotent)
     const taskPrompt = await taskPromptStore.findOrCreate(scenario.task);
@@ -740,6 +786,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
           ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
+          ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
         };
         newDocs.push(requestDoc);
 
@@ -764,6 +811,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
         workerType,
         taskPromptId,
         ...(model ? { model } : {}),
+        ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
         status: "pending",
         mode,
         message: `${count} requests submitted successfully`,
@@ -791,6 +839,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
+      ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
     };
 
     // Store in MongoDB
@@ -807,6 +856,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       id: requestId,
       workerType,
       ...(model ? { model } : {}),
+      ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
       status: requestDoc.status,
       mode,
       message: "Request submitted successfully",
