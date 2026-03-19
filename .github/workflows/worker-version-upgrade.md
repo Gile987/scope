@@ -51,8 +51,9 @@ body with:
 3. **Install dependencies** — Run `pnpm install` to ensure the workspace is
    ready.
 
-4. **Run integration tests** — Execute `pnpm test:integration` to validate the
-   update works correctly.
+4. **Run integration tests** — Run only the updated worker's integration tests:
+   `npx vitest run --config vitest.integration.config.ts --passWithNoTests apps/workers/<worker-name>/`
+   Derive `<worker-name>` from the `versions.env` path parsed in step 1.
 
 5. **If tests fail** — Read the error output, identify the root cause, and
    attempt to fix it. Common issues include API changes in new versions that
