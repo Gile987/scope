@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen } from "lucide-react";
-import { WORKER_TYPES, type CodingAgent, type McpServerDocument } from "@/types";
+import { WORKER_TYPES, type CodingAgent, type McpServerDocument, type AgentVersion } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { SkillPicker } from "@/components/SkillPicker";
@@ -46,6 +46,9 @@ export function SubmitRun() {
   // Skills
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
 
+  // Agent version
+  const [selectedAgentVersion, setSelectedAgentVersion] = useState<string>("");
+
   // Fetch agents from the API
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
@@ -71,6 +74,27 @@ export function SubmitRun() {
       setModel("");
     }
   }, [worker, selectedAgent?.defaultModel]);
+
+  // Fetch active versions for selected agent
+  const { data: agentVersions = [] } = useQuery({
+    queryKey: ["agent-versions", worker],
+    queryFn: () => api.listAgentVersions(worker, "active"),
+    enabled: !!worker,
+  });
+
+  // Sort versions by createdAt descending (latest first)
+  const sortedVersions = [...agentVersions].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  // When agent changes or versions load, auto-select latest version
+  useEffect(() => {
+    if (sortedVersions.length > 0) {
+      setSelectedAgentVersion(sortedVersions[0].agentVersion);
+    } else {
+      setSelectedAgentVersion("");
+    }
+  }, [worker, agentVersions.length]);
 
   // Optional persona
   const [personality, setPersonality] = useState<string>("");
@@ -143,6 +167,7 @@ export function SubmitRun() {
         : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
+      ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
     });
   };
 
@@ -284,6 +309,23 @@ export function SubmitRun() {
                       {selectedAgent.supportedModels.map((m) => (
                         <SelectItem key={m} value={m}>
                           {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {sortedVersions.length > 1 && (
+                <div className="space-y-2">
+                  <Label htmlFor="agentVersion">Agent Version</Label>
+                  <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion}>
+                    <SelectTrigger id="agentVersion">
+                      <SelectValue placeholder="Select version" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sortedVersions.map((v, i) => (
+                        <SelectItem key={v.agentVersion} value={v.agentVersion}>
+                          {v.agentVersion}{i === 0 ? " (latest)" : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -456,6 +498,12 @@ export function SubmitRun() {
                 <span className="whitespace-pre-wrap">{task.trim()}</span>
                 <span className="text-muted-foreground">Worker</span>
                 <span className="font-mono">{worker}</span>
+                {selectedAgentVersion && (
+                  <>
+                    <span className="text-muted-foreground">Agent Version</span>
+                    <span className="font-mono">{selectedAgentVersion}</span>
+                  </>
+                )}
                 <span className="text-muted-foreground">Max iterations</span>
                 <span>{maxIterations}</span>
                 <span className="text-muted-foreground">Occurrences</span>
