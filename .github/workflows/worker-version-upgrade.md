@@ -23,7 +23,7 @@ safe-outputs:
     github-token: ${{ secrets.GH_AW_AGENT_TOKEN }}
 ---
 
-# Auto Version Update
+# Worker Version Upgrade
 
 When a version update issue is created by the check-worker-versions workflow,
 apply the update and open a pull request.
