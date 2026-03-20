@@ -3522,6 +3522,11 @@ app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunctio
       // Upsert: update existing (un-delete if soft-deleted)
       // Only update supportedModels if explicitly provided — prevents registration
       // jobs from wiping models set by the scanner
+      const effectiveModels = supportedModels ?? existing.supportedModels;
+      // Auto-set defaultModel to latest (last alphabetically) if not provided and not already set
+      const autoDefault = (!defaultModel && !existing.defaultModel && effectiveModels.length > 0)
+        ? effectiveModels[effectiveModels.length - 1]
+        : undefined;
       await agentCollection.updateOne(
         { _id },
         {
@@ -3530,6 +3535,7 @@ app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunctio
             ...(description !== undefined ? { description } : {}),
             ...(supportedModels !== undefined ? { supportedModels } : {}),
             ...(defaultModel !== undefined ? { defaultModel } : {}),
+            ...(autoDefault ? { defaultModel: autoDefault } : {}),
             updatedAt: now,
           },
           $unset: { deletedAt: "" },
@@ -3924,9 +3930,18 @@ app.post("/api/v1/models/sync", async (req: Request, res: Response, next: NextFu
 
     const agent = await agentCollection.findOne({ _id: agentId });
     if (agent) {
+      // Auto-set defaultModel to latest (last alphabetically) if unset or no longer in list
+      const needsDefault = !agent.defaultModel || !activeModelIds.includes(agent.defaultModel);
+      const autoDefault = needsDefault && activeModelIds.length > 0
+        ? activeModelIds[activeModelIds.length - 1]
+        : undefined;
       await agentCollection.updateOne(
         { _id: agentId },
-        { $set: { supportedModels: activeModelIds, updatedAt: new Date() } },
+        { $set: {
+          supportedModels: activeModelIds,
+          ...(autoDefault ? { defaultModel: autoDefault } : {}),
+          updatedAt: new Date(),
+        } },
       );
     }
 
