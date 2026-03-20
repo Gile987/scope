@@ -23,7 +23,7 @@
     "docker:dev:portal": "worktree-env && COMPOSE_EXPERIMENTAL_WATCH_POLL=1 docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile portal up --build --watch",
     "docker:dev:all": "worktree-env && COMPOSE_EXPERIMENTAL_WATCH_POLL=1 docker compose --env-file .env --env-file apps/workers/coder-acp-claude-code/versions.env -f docker-compose.yml -f docker-compose.dev.yml --profile claude-code --profile copilot --profile report --profile portal up --build --watch",
     "docker:dev:build": "worktree-env && docker compose --env-file .env --env-file apps/workers/coder-acp-claude-code/versions.env -f docker-compose.yml -f docker-compose.dev.yml --profile claude-code --profile copilot --profile report --profile portal build",
-    "docker:down": "worktree-env && docker compose --env-file .env --env-file apps/workers/coder-acp-claude-code/versions.env --profile claude-code --profile copilot down",
+    "docker:down": "worktree-env && docker compose --env-file .env --env-file apps/workers/coder-acp-claude-code/versions.env --profile claude-code --profile copilot --profile report --profile portal down --volumes",
     "docker:build": "worktree-env && docker compose --env-file .env --env-file apps/workers/coder-acp-claude-code/versions.env --profile claude-code --profile copilot --profile report build",
     "open:portal": "npx tsx scripts/open-portal.ts",
     "lint": "pnpm -r lint",
