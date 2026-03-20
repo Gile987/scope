@@ -160,7 +160,7 @@ export function RunDetail() {
               {run.agentVersion && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs">{run.agentVersion}</span>
+                  <span className="font-mono text-xs cursor-default" title={run.workerVersion ? `Worker: ${run.workerVersion}` : undefined}>{run.agentVersion}</span>
                 </>
               )}
               <Separator orientation="vertical" className="h-4" />

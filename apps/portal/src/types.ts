@@ -60,6 +60,7 @@ export interface Run {
   workerType: string;
   model?: string;
   agentVersion?: string;
+  workerVersion?: string;
   status: RunStatus;
   result?: string;
   error?: string;
