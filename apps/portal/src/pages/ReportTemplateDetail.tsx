@@ -105,7 +105,7 @@ export function ReportTemplateDetail() {
     mutationFn: api.deleteReportTemplate,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["report-templates"] });
-      navigate("/report-templates");
+      navigate("/reports/templates");
     },
   });
 
@@ -151,7 +151,7 @@ export function ReportTemplateDetail() {
   if (error || !template) {
     return (
       <div className="space-y-4">
-        <Link to="/report-templates" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <Link to="/reports/templates" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back to templates
         </Link>
         <div className="text-center py-12 text-muted-foreground">
@@ -166,7 +166,7 @@ export function ReportTemplateDetail() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/report-templates" className="text-muted-foreground hover:text-foreground">
+          <Link to="/reports/templates" className="text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-5 w-5" />
           </Link>
           <div>

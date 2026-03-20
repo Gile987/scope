@@ -135,7 +135,7 @@ export function ReportDetail() {
               <ReportStatusBadge status={report.status} />
               {report.templateId && (
                 <Link
-                  to={`/report-templates/${report.templateId}`}
+                  to={`/reports/templates/${report.templateId}`}
                   className="hover:text-foreground transition-colors"
                 >
                   <Badge variant="outline" className="text-xs font-mono hover:bg-accent">
