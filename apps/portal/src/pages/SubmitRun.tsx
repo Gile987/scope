@@ -246,7 +246,7 @@ export function SubmitRun() {
 
               <div className="space-y-2">
                 <Label htmlFor="criteria">
-                  Criteria{" "}
+                  Criteria *{" "}
                   {version === "v2" ? (
                     <span className="text-muted-foreground font-normal">(select from registry)</span>
                   ) : (
@@ -300,7 +300,7 @@ export function SubmitRun() {
               </div>
               {selectedAgent && selectedAgent.supportedModels.length > 0 && (
                 <div className="space-y-2">
-                  <Label htmlFor="model">Model</Label>
+                  <Label htmlFor="model">Model *</Label>
                   <Select value={model} onValueChange={setModel}>
                     <SelectTrigger id="model">
                       <SelectValue placeholder="Select model" />
@@ -317,7 +317,7 @@ export function SubmitRun() {
               )}
               {sortedVersions.length > 0 && (
                 <div className="space-y-2">
-                  <Label htmlFor="agentVersion">Agent Version</Label>
+                  <Label htmlFor="agentVersion">Agent Version *</Label>
                   <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion}>
                     <SelectTrigger id="agentVersion">
                       <SelectValue placeholder="Select version" />
