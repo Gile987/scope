@@ -43,6 +43,7 @@ vi.mock("shared", () => {
   return {
     BaseQueueProcessor: StubBaseQueueProcessor,
     TokenManagerClient: StubTokenManagerClient,
+    withRetry: vi.fn((fn: () => Promise<unknown>) => fn()),
   };
 });
 
