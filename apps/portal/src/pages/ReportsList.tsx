@@ -99,7 +99,7 @@ export function ReportsList() {
                 </TableCell>
                 <TableCell>
                   {report.templateId ? (
-                    <Link to={`/report-templates/${report.templateId}`}>
+                    <Link to={`/reports/templates/${report.templateId}`}>
                       <Badge variant="outline" className="text-xs font-mono hover:bg-accent">
                         {report.templateId}
                       </Badge>

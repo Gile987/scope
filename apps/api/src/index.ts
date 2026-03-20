@@ -2931,24 +2931,6 @@ app.post("/api/v1/reports/trigger", async (req: Request, res: Response, next: Ne
       .find({ deletedAt: { $exists: false } })
       .toArray();
 
-    if (templates.length === 0) {
-      // No templates defined — fall back to legacy behavior (create a single report without template)
-      const reportId = uuidv4();
-      const reportDoc: ReportDocument = {
-        _id: reportId,
-        requestId,
-        status: "pending",
-        logs: [],
-        createdAt: new Date(),
-      };
-      await reportCollection.insertOne(reportDoc);
-      const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
-      await reportQueueClient.sendMessage(messageContent);
-      console.log(`No templates defined — created legacy report ${reportId} for run ${requestId}`);
-      res.status(201).json({ triggered: 1, reports: [{ id: reportId, requestId, status: "pending" }] });
-      return;
-    }
-
     // Evaluate each template's trigger against the run
     const created: Array<{ id: string; requestId: string; templateId: string; status: string }> = [];
 
@@ -3006,52 +2988,36 @@ app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, nex
       .find({ deletedAt: { $exists: false } })
       .toArray();
 
-    const created: Array<{ reportId: string; requestId: string; templateId?: string }> = [];
+    const created: Array<{ reportId: string; requestId: string; templateId: string }> = [];
 
     for (const run of runs) {
-      if (templates.length === 0) {
-        // No templates — legacy single report per run
-        const reportId = uuidv4();
-        const reportDoc: ReportDocument = {
-          _id: reportId,
-          requestId: run._id,
-          status: "pending",
-          logs: [],
-          createdAt: new Date(),
-        };
-        await reportCollection.insertOne(reportDoc);
-        const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
-        await reportQueueClient.sendMessage(messageContent);
-        created.push({ reportId, requestId: run._id });
-      } else {
-        // Fetch task prompt for trigger evaluation
-        let taskPrompt: TaskPromptDocument | null = null;
-        if (run.taskPromptId) {
-          taskPrompt = await taskPromptCollection.findOne({ _id: run.taskPromptId });
-        }
+      // Fetch task prompt for trigger evaluation
+      let taskPrompt: TaskPromptDocument | null = null;
+      if (run.taskPromptId) {
+        taskPrompt = await taskPromptCollection.findOne({ _id: run.taskPromptId });
+      }
 
-        for (const template of templates) {
-          const triggerResult = evaluateTrigger(
-            template.trigger as any,
-            run as any,
-            taskPrompt as any
-          );
+      for (const template of templates) {
+        const triggerResult = evaluateTrigger(
+          template.trigger as any,
+          run as any,
+          taskPrompt as any
+        );
 
-          if (triggerResult) {
-            const reportId = uuidv4();
-            const reportDoc: ReportDocument = {
-              _id: reportId,
-              requestId: run._id,
-              templateId: template.id,
-              status: "pending",
-              logs: [],
-              createdAt: new Date(),
-            };
-            await reportCollection.insertOne(reportDoc);
-            const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
-            await reportQueueClient.sendMessage(messageContent);
-            created.push({ reportId, requestId: run._id, templateId: template.id });
-          }
+        if (triggerResult) {
+          const reportId = uuidv4();
+          const reportDoc: ReportDocument = {
+            _id: reportId,
+            requestId: run._id,
+            templateId: template.id,
+            status: "pending",
+            logs: [],
+            createdAt: new Date(),
+          };
+          await reportCollection.insertOne(reportDoc);
+          const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
+          await reportQueueClient.sendMessage(messageContent);
+          created.push({ reportId, requestId: run._id, templateId: template.id });
         }
       }
     }

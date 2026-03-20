@@ -92,7 +92,7 @@ export function ReportTemplateList() {
               <SelectItem value="promptFeature">Prompt Feature</SelectItem>
             </SelectContent>
           </Select>
-          <Link to="/report-templates/new">
+          <Link to="/reports/templates/new">
             <Button className="gap-1.5">
               <Plus className="h-4 w-4" /> New Template
             </Button>
@@ -135,7 +135,7 @@ export function ReportTemplateList() {
                   <TableRow key={t.id}>
                     <TableCell>
                       <Link
-                        to={`/report-templates/${t.id}`}
+                        to={`/reports/templates/${t.id}`}
                         className="font-mono text-sm font-medium hover:underline"
                       >
                         {t.id}
@@ -155,7 +155,7 @@ export function ReportTemplateList() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1 justify-end">
-                        <Link to={`/report-templates/${t.id}`}>
+                        <Link to={`/reports/templates/${t.id}`}>
                           <Button variant="ghost" size="icon" className="h-8 w-8">
                             <Eye className="h-4 w-4" />
                           </Button>

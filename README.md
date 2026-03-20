@@ -99,6 +99,23 @@ pnpm dev:coder-acp-copilot
 pnpm dev:coder-acp-claude-code
 ```
 
+### VS Code Shortcuts
+
+The repo includes `.vscode/launch.json` and `.vscode/tasks.json` for common dev workflows:
+
+| Shortcut | Action | What it runs |
+|----------|--------|-------------|
+| **F5** | Start Debugging | `GITHUB_TOKEN=$(gh auth token) pnpm docker:dev:copilot` |
+| **Run Task → Open Portal** | Open portal in browser | `pnpm open:portal` |
+
+**F5** injects your GitHub token automatically via `gh auth token` and starts Docker Compose with hot reload.
+
+To bind **Open Portal** to a key (e.g. F6), add this to your user keybindings (`Cmd+K Cmd+S` → JSON):
+
+```json
+{ "key": "f6", "command": "workbench.action.tasks.runTask", "args": "Open Portal" }
+```
+
 ### Hot Reload with Docker Compose
 
 The `docker:dev:*` commands use [Docker Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/) to sync source files into containers:
