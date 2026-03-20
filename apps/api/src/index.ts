@@ -601,6 +601,12 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       }
     }
 
+    // At least one criterion is required
+    if (!scenarioObj.criteria || !Array.isArray(scenarioObj.criteria) || scenarioObj.criteria.length === 0) {
+      res.status(400).json({ error: "At least one criterion is required in scenario.criteria" });
+      return;
+    }
+
     // Validate maxIterations if provided
     if (maxIterations !== undefined) {
       if (typeof maxIterations !== "number" || maxIterations < 1 || maxIterations > 50) {
