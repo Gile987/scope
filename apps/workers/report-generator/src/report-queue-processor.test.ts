@@ -363,3 +363,76 @@ describe("ReportQueueProcessor – session event logging", () => {
     expect(mockClientStop).toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// handleRequest – template validation
+// ---------------------------------------------------------------------------
+
+describe("ReportQueueProcessor – handleRequest template validation", () => {
+  let processor: ReportQueueProcessor;
+  let log: ReturnType<typeof vi.fn>;
+  let mockUpdateOne: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    capturedEventHandler = undefined;
+    log = vi.fn().mockResolvedValue(undefined);
+    processor = new ReportQueueProcessor(makeConfig());
+    mockUpdateOne = (processor as any).collection.updateOne;
+
+    // Reset fetch mock
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  function makeMessage() {
+    return {
+      messageId: "msg-1",
+      popReceipt: "pop-1",
+      messageText: "",
+      dequeueCount: 1,
+      expiresOn: new Date(),
+      insertedOn: new Date(),
+      nextVisibleOn: new Date(),
+    };
+  }
+
+  function makeReportDoc(overrides: Partial<import("shared").ReportDocument> = {}): import("shared").ReportDocument {
+    return {
+      _id: "report-1",
+      requestId: "req-1",
+      status: "pending",
+      logs: [],
+      createdAt: new Date(),
+      ...overrides,
+    } as import("shared").ReportDocument;
+  }
+
+  it("throws when report has no templateId", async () => {
+    const doc = makeReportDoc({ templateId: undefined });
+
+    await expect(
+      (processor as any).handleRequest(doc, makeMessage(), "pop-1", log)
+    ).rejects.toThrow("has no templateId");
+
+    // Should have set status to "generating" before the throw
+    expect(mockUpdateOne).toHaveBeenCalled();
+  });
+
+  it("throws when templateId points to a non-existent template", async () => {
+    const doc = makeReportDoc({ templateId: "nonexistent-template" });
+
+    // Mock fetch to return 404 (fetchReportTemplate returns null)
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    }));
+
+    await expect(
+      (processor as any).handleRequest(doc, makeMessage(), "pop-1", log)
+    ).rejects.toThrow("Report template 'nonexistent-template' not found");
+  });
+});
