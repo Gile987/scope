@@ -75,12 +75,21 @@ flowchart TD
 
 ## Queue Pattern
 
-Each worker type has a dedicated Azure Storage Queue. The API enqueues messages to the correct queue based on the target worker. KEDA monitors queue depth and scales workers from 0 to N.
+Each worker type has a dedicated Azure Storage Queue. The API resolves the target queue via **version-aware routing**: when a run is submitted, the API looks up the selected (or latest active) agent version and uses its registered `queueName` to route the message.
 
 ```
-queue-coder-acp-claude-code  →  coder-acp-claude-code pods (0→N)
-queue-coder-acp-copilot      →  coder-acp-copilot pods (0→N)
+AgentVersion.queueName  →  Azure Storage Queue  →  Worker pods (0→N via KEDA)
 ```
+
+Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-copilot`). When multi-version deployments are introduced, each version will have its own queue, and KEDA will scale each version independently.
+
+### Run submission flow
+
+1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**
+2. API resolves `agentVersion`: explicit selection → validate active; omitted → latest active by `createdAt`
+3. API resolves `model`: explicit → validate against `supportedModels`; omitted → `defaultModel`
+4. API looks up `AgentVersion.queueName` and routes message to that queue
+5. `agentVersion` and `model` are persisted on the `RequestDocument`
 
 ## Real-Time Log Streaming
 

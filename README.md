@@ -140,12 +140,36 @@ The CLI is the primary interface for interacting with Scope MT. Show available c
 pnpm cli --help
 ```
 
-It is organized into subcommand groups (`run`, `criteria`, …). Use `--help` at any level to discover options:
+It is organized into subcommand groups (`run`, `agent`, `criteria`, …). Use `--help` at any level to discover options:
 
 ```bash
 pnpm cli run --help
 pnpm cli run submit --help
+pnpm cli agent --help
+pnpm cli agent version list -i coder-acp-copilot
 pnpm cli criteria --help
+```
+
+### Submitting a run
+
+```bash
+# Submit with explicit model and agent version
+pnpm cli run submit -m "Create a Hello World API" -w coder-acp-copilot \
+  --model claude-sonnet-4 --agent-version copilot-0.0.415
+
+# Model and agent version are required; if omitted the API auto-selects:
+# - model: uses the agent's defaultModel (set by model scanner)
+# - agent version: uses the latest active version (by registration date)
+```
+
+### Managing agent versions
+
+```bash
+# List active versions for an agent
+pnpm cli agent version list -i coder-acp-copilot --status active
+
+# JSON output for scripting
+pnpm cli agent version list -i coder-acp-copilot -o json
 ```
 
 ## Configuration
