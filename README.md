@@ -1,6 +1,6 @@
-# Scope MT
+# Scope Core
 
-**Scope MT** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers, evaluates results using a criteria DAG, and provides real-time log streaming — all backed by MongoDB, Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
+**Scope Core** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers, evaluates results using a criteria DAG, and provides real-time log streaming — all backed by MongoDB, Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
 
 ## Components
 
@@ -194,14 +194,14 @@ The [`docs/`](docs/README.md) directory contains architecture and research docum
 
 ## Deployment
 
-Scope MT is a Kubernetes-native application deployed via [FluxCD](https://fluxcd.io/) GitOps. The `deploy/` directory contains Kustomize base manifests and environment overlays that FluxCD reconciles automatically.
+Scope Core is a Kubernetes-native application deployed via [FluxCD](https://fluxcd.io/) GitOps. The `deploy/` directory contains Kustomize base manifests and environment overlays that FluxCD reconciles automatically.
 
 Infrastructure provisioning (AKS cluster, Azure resources) is managed in the [scope-mt-infra](https://github.com/growth-ecosystems/scope-mt-infra) repository.
 
 ## Project Structure
 
 ```
-scope-mt-app/
+scope-core/
 ├── apps/
 │   ├── api/                          # REST API + SSE
 │   ├── cli/                          # CLI (commander + ink TUI)
