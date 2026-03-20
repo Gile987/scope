@@ -91,7 +91,7 @@ Monorepo foundation. Exports types (runs, iterations, criteria, scenarios, perso
 
 ## Configuration (`config/`)
 
-All benchmark definitions are YAML:
+Personas, scenarios (tasks), criteria, and prompt features are stored in **MongoDB** (source of truth). They can be exported/imported as YAML for portability and version control. The `config/` folder contains YAML examples of these data types.
 
 - `traits.yaml` — Evaluation trait dimensions (personality, experience, verbosity, type)
 - `personas/` — Reviewer personas combining traits (e.g. `demanding-senior.yaml`, `vibe-coder.yaml`)
