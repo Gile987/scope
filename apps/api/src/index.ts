@@ -3530,10 +3530,6 @@ app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunctio
       // Only update supportedModels if explicitly provided — prevents registration
       // jobs from wiping models set by the scanner
       const effectiveModels = supportedModels ?? existing.supportedModels;
-      // Auto-set defaultModel to latest (last alphabetically) if not provided and not already set
-      const autoDefault = (!defaultModel && !existing.defaultModel && effectiveModels.length > 0)
-        ? effectiveModels[effectiveModels.length - 1]
-        : undefined;
       await agentCollection.updateOne(
         { _id },
         {
@@ -3542,7 +3538,6 @@ app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunctio
             ...(description !== undefined ? { description } : {}),
             ...(supportedModels !== undefined ? { supportedModels } : {}),
             ...(defaultModel !== undefined ? { defaultModel } : {}),
-            ...(autoDefault ? { defaultModel: autoDefault } : {}),
             updatedAt: now,
           },
           $unset: { deletedAt: "" },
@@ -3937,11 +3932,18 @@ app.post("/api/v1/models/sync", async (req: Request, res: Response, next: NextFu
 
     const agent = await agentCollection.findOne({ _id: agentId });
     if (agent) {
-      // Auto-set defaultModel to latest (last alphabetically) if unset or no longer in list
+      // Auto-set defaultModel to the most recently published model if unset or stale
       const needsDefault = !agent.defaultModel || !activeModelIds.includes(agent.defaultModel);
-      const autoDefault = needsDefault && activeModelIds.length > 0
-        ? activeModelIds[activeModelIds.length - 1]
-        : undefined;
+      let autoDefault: string | undefined;
+      if (needsDefault && activeModels.length > 0) {
+        // Pick model with the most recent providerAvailableFrom, fallback to firstSeenAt
+        const sorted = [...activeModels].sort((a, b) => {
+          const dateA = a.providerAvailableFrom ?? a.firstSeenAt;
+          const dateB = b.providerAvailableFrom ?? b.firstSeenAt;
+          return new Date(dateB).getTime() - new Date(dateA).getTime();
+        });
+        autoDefault = sorted[0].modelId;
+      }
       await agentCollection.updateOne(
         { _id: agentId },
         { $set: {
