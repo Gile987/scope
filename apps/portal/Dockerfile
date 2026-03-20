@@ -5,8 +5,10 @@ RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 # Version information (passed as build args, used by Vite at build time)
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG GIT_BRANCH=unknown
 ENV GIT_COMMIT=$GIT_COMMIT
 ENV BUILD_TIME=$BUILD_TIME
+ENV GIT_BRANCH=$GIT_BRANCH
 
 WORKDIR /app
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
