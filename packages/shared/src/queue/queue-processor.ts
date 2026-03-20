@@ -14,6 +14,7 @@ import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
 import { BlobStorage } from "../storage/blob-storage.js";
+import { withRetry } from "../utils/retry.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
 import { JudgeClient } from "../judge/judge-client.js";
 import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
@@ -145,10 +146,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Update status to processing (preserve logs from handleRequest — MCP/skill resolution)
     const versionFields = this.getVersionFields();
-    await this.collection.updateOne(
+    await withRetry(() => this.collection.updateOne(
       { _id: requestId },
       { $set: { status: "processing", updatedAt: new Date(), ...versionFields } }
-    );
+    ));
 
     await log("info", `Starting processing with ${this.processor.workerName}`);
 
@@ -175,10 +176,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           }
           await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
           if (setupVideoUrls.length > 0) {
-            await this.collection.updateOne(
+            await withRetry(() => this.collection.updateOne(
               { _id: requestId },
               { $set: { setupVideoUrls, updatedAt: new Date() } }
-            );
+            ));
           }
         } catch (uploadError) {
           const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
@@ -246,7 +247,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     }
 
     // Update request with result and HAR URL
-    await this.collection.updateOne(
+    await withRetry(() => this.collection.updateOne(
       { _id: requestId },
       {
         $set: {
@@ -257,7 +258,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           updatedAt: new Date(),
         },
       }
-    );
+    ));
 
     console.log(`[${this.workerName}] Completed request ${requestId}`);
 
@@ -287,10 +288,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution)
     const versionFields = this.getVersionFields();
-    await this.collection.updateOne(
+    await withRetry(() => this.collection.updateOne(
       { _id: requestId },
       { $set: { status: "iterating", turns: [], updatedAt: new Date(), ...versionFields } }
-    );
+    ));
 
     // Extend queue message visibility for long-running multi-turn.
     // updateMessage returns a new pop receipt that must be used for subsequent operations.
@@ -337,20 +338,20 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       mcpServerConfigs,
       skillConfigs,
       onTurnComplete: async (turn: ConversationTurn) => {
-        // Persist each turn incrementally to MongoDB
-        await this.collection.updateOne(
+        // Persist each turn incrementally to MongoDB (retry on CosmosDB 429)
+        await withRetry(() => this.collection.updateOne(
           { _id: requestId },
           {
             $push: { turns: turn },
             $set: { updatedAt: new Date() },
           }
-        );
+        ));
       },
       onSetupVideosUploaded: async (setupVideoUrls: string[]) => {
-        await this.collection.updateOne(
+        await withRetry(() => this.collection.updateOne(
           { _id: requestId },
           { $set: { setupVideoUrls, updatedAt: new Date() } }
-        );
+        ));
       },
     });
 
@@ -365,7 +366,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       final: true,
     });
 
-    await this.collection.updateOne(
+    await withRetry(() => this.collection.updateOne(
       { _id: requestId },
       {
         $set: {
@@ -375,7 +376,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           ...(result.passed ? {} : { error: result.finalResult }),
         },
       }
-    );
+    ));
 
     console.log(
       `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
