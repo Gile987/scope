@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import { withRetry, isCosmosDb429, extractRetryAfterMs } from "./retry.js";
+import { withRetry, isCosmosDb429 } from "./retry.js";
 
 describe("isCosmosDb429", () => {
   it("returns true for TooManyRequests error", () => {
@@ -21,19 +21,6 @@ describe("isCosmosDb429", () => {
     expect(isCosmosDb429(new Error("Connection refused"))).toBe(false);
     expect(isCosmosDb429(null)).toBe(false);
     expect(isCosmosDb429(undefined)).toBe(false);
-  });
-});
-
-describe("extractRetryAfterMs", () => {
-  it("extracts RetryAfterMs from CosmosDB error message", () => {
-    const err = new Error(
-      "Error=16500, RetryAfterMs=9, Details='Response status code does not indicate success: TooManyRequests (429)'"
-    );
-    expect(extractRetryAfterMs(err)).toBe(9);
-  });
-
-  it("returns undefined when not present", () => {
-    expect(extractRetryAfterMs(new Error("some other error"))).toBeUndefined();
   });
 });
 

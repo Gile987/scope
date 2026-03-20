@@ -5,14 +5,13 @@
  * Retry utility for transient failures (e.g. CosmosDB 429 TooManyRequests).
  *
  * Delegates to cockatiel for exponential backoff with jitter.
- * Adds CosmosDB-specific error detection and RetryAfterMs awareness.
+ * Adds CosmosDB-specific error detection.
  */
 
 import {
   ExponentialBackoff,
   handleWhen,
   retry,
-  type IRetryContext,
 } from "cockatiel";
 
 export interface RetryOptions {
@@ -38,15 +37,6 @@ export function isCosmosDb429(error: unknown): boolean {
   if (!error) return false;
   const msg = error instanceof Error ? error.message : String(error);
   return msg.includes("TooManyRequests") || msg.includes("Request rate is large");
-}
-
-/**
- * Extracts the RetryAfterMs value from a CosmosDB 429 error message, if present.
- */
-export function extractRetryAfterMs(error: unknown): number | undefined {
-  const msg = error instanceof Error ? error.message : String(error);
-  const match = msg.match(/RetryAfterMs=(\d+)/);
-  return match ? parseInt(match[1], 10) : undefined;
 }
 
 /**
