@@ -9,6 +9,7 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { formatLogsAsText } from "@/lib/format-logs";
 import type { LogEvent } from "@/types";
 import { Check, Circle, Copy, Wifi, WifiOff } from "lucide-react";
+import { toast } from "sonner";
 
 const levelColors: Record<string, string> = {
   info: "text-blue-600 dark:text-blue-400",
@@ -51,8 +52,23 @@ export function LogViewer({
 
   const handleCopy = useCallback(async () => {
     if (logs.length === 0) return;
-    await navigator.clipboard.writeText(formatLogsAsText(logs));
+    const text = formatLogsAsText(logs);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Clipboard API can fail (non-HTTPS, iframe sandbox, permissions).
+      // Fall back to a hidden textarea + execCommand.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
     setCopied(true);
+    toast.success("Logs copied to clipboard");
     setTimeout(() => setCopied(false), 2000);
   }, [logs]);
 
