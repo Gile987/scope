@@ -315,7 +315,7 @@ export function SubmitRun() {
                   </Select>
                 </div>
               )}
-              {sortedVersions.length > 1 && (
+              {sortedVersions.length > 0 && (
                 <div className="space-y-2">
                   <Label htmlFor="agentVersion">Agent Version</Label>
                   <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion}>
