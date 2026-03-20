@@ -76,8 +76,6 @@ React 19 web UI with Vite, Tailwind CSS, Radix UI (shadcn/ui), TanStack Query, a
 
 Command-line interface built with Commander.js and Ink (React for terminals). Used for submitting runs, streaming logs, managing criteria, and CI/CD automation. Run `pnpm cli --help` to discover subcommands.
 
-> **CLI ↔ Portal parity**: Every feature available in the Portal must also be available in the CLI. The CLI is the primary interface for CI/CD and power users — it must never lag behind the Portal in capabilities.
-
 ### Token Manager (`apps/token-manager/`)
 
 Express service for centralized token storage, validation, and round-robin distribution. Integrates with Azure Key Vault (Lowkey Vault locally). Uses `packages/github-auth/` for GitHub OAuth/device-code auth.
