@@ -43,8 +43,11 @@ import { TaskPromptList } from "@/pages/TaskPromptList";
 import { TaskPromptDetail } from "@/pages/TaskPromptDetail";
 import { Admin } from "@/pages/Admin";
 import { FeatureRoute } from "@/components/FeatureRoute";
+import { useFavicon } from "@/hooks/useFavicon";
 
 export function App() {
+  useFavicon();
+
   return (
     <Routes>
       <Route element={<Layout />}>
