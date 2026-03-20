@@ -1,6 +1,6 @@
-# Scope MT Documentation
+# Scope Documentation
 
-Central documentation hub for the Scope MT platform — an AI coding agent benchmarking system.
+Central documentation hub for the Scope platform — an AI coding agent benchmarking system.
 
 ## Architecture & Design
 

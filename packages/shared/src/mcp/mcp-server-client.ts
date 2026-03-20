@@ -4,7 +4,7 @@
 import type { McpServerConfig, McpServerDocument } from '../types/mcp.js';
 
 /**
- * Client for resolving MCP server slugs via the Scope MT REST API.
+ * Client for resolving MCP server slugs via the Scope REST API.
  *
  * Used by queue processors at message-processing time to resolve
  * MCP server slugs stored on RequestDocuments into full McpServerConfig
