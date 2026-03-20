@@ -1,6 +1,6 @@
-# Scope MT
+# Scope
 
-Scope MT is a platform for benchmarking AI coding agents. It orchestrates multiple coding agents (GitHub Copilot, Claude Code, VS Code Web), sends them standardized tasks through configurable scenarios and personas, evaluates results using a criteria DAG with the Judge service, and tracks everything with real-time logging.
+Scope is a platform for benchmarking AI coding agents. It orchestrates multiple coding agents (GitHub Copilot, Claude Code, VS Code Web), sends them standardized tasks through configurable scenarios and personas, evaluates results using a criteria DAG with the Judge service, and tracks everything with real-time logging.
 
 For the full system architecture, see [docs/architecture/overview.md](docs/architecture/overview.md).
 
