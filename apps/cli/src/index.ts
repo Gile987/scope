@@ -98,7 +98,7 @@ run
   .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options) => {
     const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs, agentVersion } = options;
@@ -273,7 +273,7 @@ run
   .command("status")
   .description("Get status of a request")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -319,7 +319,7 @@ run
   .command("get")
   .description("Get full details of a run")
   .requiredOption("-i, --id <id>", "Run ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     await runGetAction({ id: options.id, url: options.url, output: options.output });
@@ -329,7 +329,7 @@ run
   .command("logs")
   .description("Stream logs for a request")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--from-start", "Include historical logs from start")
   .action(async (options) => {
     const { id } = options;
@@ -388,7 +388,7 @@ withOutputOption(
 run
   .command("list")
   .description("List all requests")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
   .option("--include-deleted", "Include soft-deleted runs")
 )
@@ -456,7 +456,7 @@ run
   .description("Run concurrent requests to all coders with a live TUI dashboard")
   .requiredOption("-m, --message <message>", "Message/prompt to send to all coders")
   .option("-c, --count <count>", "Number of requests to send to each coder", "1")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("-w, --workers <workers>", "Comma-separated list of workers", DEFAULT_WORKERS.join(","))
   .action((options) => {
     const { message, count, url, workers: workersStr } = options;
@@ -484,7 +484,7 @@ run
   .command("delete")
   .description("Soft-delete a run (can still be listed with --include-deleted)")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     const { id, url } = options;
     try {
@@ -510,7 +510,7 @@ run
   .option("-o, --output <path>", "Output file path (default: <id>.tar.gz)")
   .option("-e, --extract", "Extract the archive after downloading")
   .option("-d, --dir <path>", "Extraction directory (implies --extract)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     const { id, url } = options;
     const shouldExtract = options.extract || !!options.dir;
@@ -588,7 +588,7 @@ run
   .description("Upload a run archive to the API (previously downloaded via 'run download')")
   .argument("<path>", "Path to .tar.gz archive or extracted directory")
   .option("--dry-run", "Preview what would be uploaded without sending")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (inputPath: string, options) => {
     const { url, dryRun } = options;
 
@@ -705,7 +705,7 @@ criteria
   .command("list")
   .description("List all criteria")
   .option("-q, --query <search>", "Filter by ID or prompt text")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -758,7 +758,7 @@ criteria
   .command("get")
   .description("Get details of a single criterion")
   .requiredOption("-i, --id <id>", "Criterion ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -816,7 +816,7 @@ criteria
   .requiredOption("--id <id>", "Criterion ID (lowercase snake_case)")
   .requiredOption("--prompt <prompt>", "Evaluation prompt for the judge")
   .option("-d, --depends-on <ids...>", "IDs of parent criteria")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -853,7 +853,7 @@ criteria
   .requiredOption("-i, --id <id>", "Criterion ID")
   .option("--prompt <prompt>", "New evaluation prompt")
   .option("-d, --depends-on <ids...>", "New parent criteria IDs (replaces all)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -888,7 +888,7 @@ criteria
   .command("delete")
   .description("Delete a criterion (soft-delete; fails if other criteria depend on it)")
   .requiredOption("-i, --id <id>", "Criterion ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`, {
@@ -916,7 +916,7 @@ withOutputOption(
 criteria
   .command("graph")
   .description("Display the criteria dependency graph as ASCII")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -998,7 +998,7 @@ criteria
   .description("Import criteria from YAML file(s) into the database (upsert — won't overwrite existing)")
   .argument("<path>", "Path to a .yaml file or a directory of .yaml files")
   .option("--dry-run", "Preview what would be imported without sending to API")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (inputPath: string, options) => {
     try {
       const absPath = resolve(inputPath);
@@ -1148,7 +1148,7 @@ promptFeature
   .command("list")
   .description("List all prompt features")
   .option("-q, --query <search>", "Filter by ID or prompt text")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -1201,7 +1201,7 @@ promptFeature
   .command("get")
   .description("Get details of a single prompt feature")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -1259,7 +1259,7 @@ promptFeature
   .requiredOption("--id <id>", "Prompt feature ID (lowercase snake_case)")
   .requiredOption("--prompt <prompt>", "Detection prompt for the feature")
   .option("-d, --depends-on <ids...>", "IDs of parent features")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -1296,7 +1296,7 @@ promptFeature
   .requiredOption("-i, --id <id>", "Prompt feature ID")
   .option("--prompt <prompt>", "New detection prompt")
   .option("-d, --depends-on <ids...>", "New parent feature IDs (replaces all)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -1331,7 +1331,7 @@ promptFeature
   .command("delete")
   .description("Delete a prompt feature (soft-delete; fails if other features depend on it)")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/${options.id}`, {
@@ -1359,7 +1359,7 @@ withOutputOption(
 promptFeature
   .command("graph")
   .description("Display the prompt feature dependency graph as ASCII")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -1438,7 +1438,7 @@ promptFeature
   .description("Import prompt features from YAML file(s) into the database (upsert)")
   .argument("<path>", "Path to a .yaml file or a directory of .yaml files")
   .option("--dry-run", "Preview what would be imported without sending to API")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (inputPath: string, options) => {
     try {
       const absPath = resolve(inputPath);
@@ -1552,7 +1552,7 @@ promptFeature
   .option("-s, --scenario <path>", "Path to scenario YAML file (uses its task text)")
   .option("--model <model>", "LLM model to use for extraction")
   .option("--force", "Force re-extraction even if already extracted")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -1676,7 +1676,7 @@ report
   .command("generate")
   .description("Generate a report for a benchmark run")
   .requiredOption("-i, --id <requestId>", "Run ID to generate a report for")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--stream", "Stream report generation logs in real time", true)
   .option("--no-stream", "Do not stream logs after submission")
   .action(async (options) => {
@@ -1755,7 +1755,7 @@ report
   .command("get")
   .description("Get a report by ID")
   .requiredOption("-i, --id <reportId>", "Report ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 , ['markdown'])
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -1832,7 +1832,7 @@ report
   .command("list")
   .description("List all reports (optionally filter by run)")
   .option("-r, --run <requestId>", "Filter by run ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -1898,7 +1898,7 @@ report
   .command("logs")
   .description("Stream report generation logs")
   .requiredOption("-i, --id <reportId>", "Report ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--from-start", "Include historical logs from the beginning", false)
   .action(async (options) => {
     try {
@@ -1969,7 +1969,7 @@ withOutputOption(
 reportTemplate
   .command("list")
   .description("List all report templates")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -2025,7 +2025,7 @@ reportTemplate
   .command("get")
   .description("Get details of a single report template")
   .requiredOption("-i, --id <id>", "Report template ID (slug)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -2097,7 +2097,7 @@ reportTemplate
   .option("--trigger-type <type>", "Trigger type: always, criteria, taskPrompt, promptFeature")
   .option("--trigger-ids <ids...>", "Trigger IDs (criteria IDs, task prompt IDs, or feature IDs)")
   .option("--trigger-match <match>", "Trigger match mode: any or all (default: all)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -2158,7 +2158,7 @@ reportTemplate
   .option("--trigger-type <type>", "New trigger type: always, criteria, taskPrompt, promptFeature")
   .option("--trigger-ids <ids...>", "Trigger IDs")
   .option("--trigger-match <match>", "Trigger match mode: any or all")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -2213,7 +2213,7 @@ reportTemplate
   .command("delete")
   .description("Delete a report template (soft-delete)")
   .requiredOption("-i, --id <id>", "Report template ID (slug)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`, {
@@ -2238,7 +2238,7 @@ reportTemplate
   .description("Import report templates from a YAML file (upsert via create/update)")
   .argument("<path>", "Path to a .yaml file or directory of .yaml files")
   .option("--dry-run", "Preview what would be imported without sending to API")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (inputPath: string, options) => {
     try {
       const absPath = resolve(inputPath);
@@ -2439,7 +2439,7 @@ withOutputOption(
 agent
   .command("list")
   .description("List all coding agents")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -2476,7 +2476,7 @@ agent
   .command("get")
   .description("Get details of a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -2522,7 +2522,7 @@ agent
   .requiredOption("-i, --id <id>", "Agent ID")
   .option("--name <name>", "Display name")
   .option("--description <desc>", "Description")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -2554,7 +2554,7 @@ agent
   .command("delete")
   .description("Delete a coding agent (soft-delete)")
   .requiredOption("-i, --id <id>", "Agent ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`, {
@@ -2588,7 +2588,7 @@ agentModel
   .command("list")
   .description("List supported models for a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -2625,7 +2625,7 @@ agentModel
   .description("Add a supported model to a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
   .requiredOption("--model <model>", "Model name to add")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       // Fetch current agent
@@ -2664,7 +2664,7 @@ agentModel
   .description("Remove a supported model from a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
   .requiredOption("--model <model>", "Model name to remove")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const getResp = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`);
@@ -2708,7 +2708,7 @@ agentModel
   .description("Set the default model for a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
   .requiredOption("--model <model>", "Model name to set as default")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       // Verify the model is supported
@@ -2758,7 +2758,7 @@ agentVersion
   .description("List versions for a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
   .option("--status <status>", "Filter by status (active, retired)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -2823,7 +2823,7 @@ withOutputOption(
 mcpServer
   .command("list")
   .description("List all MCP servers")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -2861,7 +2861,7 @@ mcpServer
   .command("get")
   .description("Get details of an MCP server")
   .requiredOption("-i, --id <id>", "MCP server slug")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -2916,7 +2916,7 @@ mcpServer
   .requiredOption("--url <url>", "Server URL")
   .option("--description <desc>", "Description")
   .option("--header <header...>", "Headers in name:value format (repeatable)")
-  .option("-u, --api-url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --api-url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const headers = options.header?.map((h: string) => {
@@ -2964,7 +2964,7 @@ mcpServer
   .option("--url <url>", "Server URL")
   .option("--description <desc>", "Description")
   .option("--header <header...>", "Headers in name:value format (replaces all headers)")
-  .option("-u, --api-url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --api-url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -3008,7 +3008,7 @@ mcpServer
   .command("delete")
   .description("Delete an MCP server (soft-delete)")
   .requiredOption("-i, --id <id>", "MCP server slug")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/mcp/servers/${encodeURIComponent(options.id)}`, {
@@ -3041,7 +3041,7 @@ withOutputOption(
 skill
   .command("list")
   .description("List all imported skills")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -3080,7 +3080,7 @@ skill
   .description("Search skills (internal + skills.sh registry)")
   .requiredOption("-q, --query <query>", "Search query")
   .option("--limit <number>", "Maximum results", parseInt)
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -3121,7 +3121,7 @@ skill
   .command("get")
   .description("Get details of a skill")
   .requiredOption("-i, --id <id>", "Skill slug (e.g. vercel-labs/agent-skills/my-skill)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -3171,7 +3171,7 @@ skill
   .requiredOption("--name <displayName>", "Display name")
   .option("--description <desc>", "Description")
   .option("--origin <origin>", "Origin: skills-sh or manual", "manual")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -3204,7 +3204,7 @@ skill
   .command("delete")
   .description("Delete a skill (soft-delete)")
   .requiredOption("-i, --id <id>", "Skill slug")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}`, {
@@ -3227,7 +3227,7 @@ skill
   .command("resolve")
   .description("Resolve a skill from GitHub (fetch latest version and create a revision)")
   .requiredOption("-i, --id <id>", "Skill slug")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -3270,7 +3270,7 @@ skill
   .description("List revisions for a skill")
   .requiredOption("-i, --id <id>", "Skill slug")
   .option("--limit <number>", "Maximum results", parseInt)
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -3320,7 +3320,7 @@ insight
   .description("List all insights")
   .option("-q, --query <query>", "Search by keyword")
   .option("--blocked", "Show only blocked insights")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -3361,7 +3361,7 @@ insight
   .command("get")
   .description("Get details of an insight (renders markdown description)")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 , ['markdown'])
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -3422,7 +3422,7 @@ insight
   .requiredOption("--description <description>", "Markdown description")
   .option("--category <category>", "Category tag")
   .option("--tags <tags>", "Comma-separated tags")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -3459,7 +3459,7 @@ insight
   .option("--description <description>", "New markdown description")
   .option("--category <category>", "New category")
   .option("--tags <tags>", "New comma-separated tags")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -3492,7 +3492,7 @@ insight
   .command("delete")
   .description("Delete an insight (soft-delete)")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}`, {
@@ -3514,7 +3514,7 @@ insight
   .command("upvote")
   .description("Upvote an insight")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/upvote`, {
@@ -3537,7 +3537,7 @@ insight
   .command("downvote")
   .description("Downvote an insight")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/downvote`, {
@@ -3560,7 +3560,7 @@ insight
   .command("block")
   .description("Block an insight")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/block`, {
@@ -3582,7 +3582,7 @@ insight
   .command("unblock")
   .description("Unblock an insight")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/unblock`, {
@@ -3618,7 +3618,7 @@ taskPrompt
   .option("-s, --search <search>", "Filter by text content")
   .option("-l, --limit <n>", "Maximum number of results", "50")
   .option("--offset <n>", "Number of results to skip", "0")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -3679,7 +3679,7 @@ taskPrompt
   .command("get")
   .description("Get details of a single task prompt")
   .requiredOption("-i, --id <id>", "Task prompt ID (UUID)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -3760,7 +3760,7 @@ taskPrompt
   .description("Register a task prompt (idempotent — same text returns existing entity)")
   .option("-t, --text <text>", "Task prompt text")
   .option("-f, --file <path>", "Read task prompt text from file")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       let text = options.text;
@@ -3803,7 +3803,7 @@ taskPrompt
   .command("delete")
   .description("Soft-delete a task prompt")
   .requiredOption("-i, --id <id>", "Task prompt ID (UUID)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}`, {
@@ -3830,7 +3830,7 @@ taskPrompt
   .requiredOption("-i, --id <id>", "Task prompt ID (UUID)")
   .option("--model <model>", "LLM model to use for extraction")
   .option("--force", "Force re-extraction even if already extracted")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
