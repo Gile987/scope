@@ -107,7 +107,6 @@ interface CriteriaDocument {
 interface PromptFeatureDocument {
   id: string;
   prompt: string;
-  dependsOn?: string[];
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;
@@ -2219,7 +2218,7 @@ app.post("/api/v1/prompt-features/generate-prompt", async (req: Request, res: Re
 
     const allFeatures = await promptFeatureCollection
       .find({ deletedAt: { $exists: false } })
-      .project({ id: 1, prompt: 1, dependsOn: 1, _id: 0 })
+      .project({ id: 1, prompt: 1, _id: 0 })
       .toArray();
 
     const existingFeatures = currentId
@@ -2228,7 +2227,7 @@ app.post("/api/v1/prompt-features/generate-prompt", async (req: Request, res: Re
 
     const result = await generatePromptFeaturePrompt(
       behavior.trim(),
-      existingFeatures as { id: string; prompt: string; dependsOn?: string[] }[],
+      existingFeatures as { id: string; prompt: string }[],
     );
     console.log("[prompt-features/generate-prompt] LLM result:", JSON.stringify(result));
     res.json(result);
@@ -2261,21 +2260,6 @@ app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, nex
         errors.push(`Skipping '${trimmedId}': id must start with a lowercase letter and contain only [a-z0-9_]`);
         continue;
       }
-      // Validate dependsOn references exist
-      const deps = Array.isArray(config.dependsOn) ? config.dependsOn.map((d: any) => String(d).trim()) : [];
-      const missingDeps: string[] = [];
-      for (const depId of deps) {
-        const depExists = await promptFeatureCollection.findOne({ id: depId, deletedAt: { $exists: false } });
-        // Also check if the dep is being seeded in the same batch (by id)
-        const inBatch = features.some((f: any) => f.id && String(f.id).trim() === depId);
-        if (!depExists && !inBatch) {
-          missingDeps.push(depId);
-        }
-      }
-      if (missingDeps.length > 0) {
-        errors.push(`Skipping '${trimmedId}': dependencies not found: ${missingDeps.join(", ")}`);
-        continue;
-      }
       try {
         await promptFeatureCollection.updateOne(
           { id: trimmedId },
@@ -2283,7 +2267,6 @@ app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, nex
             $setOnInsert: {
               id: trimmedId,
               prompt: config.prompt.trim(),
-              dependsOn: deps,
               createdAt: new Date(),
             },
           },
@@ -2392,7 +2375,7 @@ app.post("/api/v1/task-prompts/:id/extract-features", async (req: Request, res: 
       .find({ deletedAt: { $exists: false } })
       .toArray();
 
-    const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn }));
+    const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt }));
     const { results, suggestedFeatures } = await extractPromptFeatures(taskPrompt.text, featureConfigs, model);
 
     // Store features on the task prompt entity
@@ -2432,7 +2415,7 @@ app.post("/api/v1/prompt-features/extract-from-text", async (req: Request, res: 
       .find({ deletedAt: { $exists: false } })
       .toArray();
 
-    const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn }));
+    const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt }));
     const { results, suggestedFeatures } = await extractPromptFeatures(text.trim(), featureConfigs, model);
 
     res.json({
@@ -2487,26 +2470,6 @@ app.get("/api/v1/prompt-features", async (_req: Request, res: Response, next: Ne
   }
 });
 
-// Get prompt feature DAG graph (nodes + edges)
-app.get("/api/v1/prompt-features/graph", async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const all = await promptFeatureCollection.find({ deletedAt: { $exists: false } }).toArray();
-    all.sort((a, b) => a.id.localeCompare(b.id));
-    const nodes = all.map(f => ({ id: f.id, prompt: f.prompt, dependsOn: f.dependsOn || [] }));
-    const edges: { source: string; target: string }[] = [];
-    for (const f of all) {
-      if (f.dependsOn) {
-        for (const parentId of f.dependsOn) {
-          edges.push({ source: parentId, target: f.id });
-        }
-      }
-    }
-    res.json({ nodes, edges });
-  } catch (error) {
-    next(error);
-  }
-});
-
 // Get single prompt feature by ID
 app.get("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -2517,15 +2480,7 @@ app.get("/api/v1/prompt-features/:id", async (req: Request, res: Response, next:
       return;
     }
 
-    const dependents = await promptFeatureCollection.find({
-      dependsOn: id,
-      deletedAt: { $exists: false },
-    }).toArray();
-
-    res.json({
-      ...feature,
-      dependents: dependents.map(d => d.id),
-    });
+    res.json(feature);
   } catch (error) {
     next(error);
   }
@@ -2534,7 +2489,7 @@ app.get("/api/v1/prompt-features/:id", async (req: Request, res: Response, next:
 // Create a new prompt feature
 app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id, prompt, dependsOn = [] } = req.body;
+    const { id, prompt } = req.body;
 
     if (!id || typeof id !== "string") {
       res.status(400).json({ error: "id is required and must be a string" });
@@ -2548,10 +2503,6 @@ app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: Ne
       res.status(400).json({ error: "prompt is required and must be a string" });
       return;
     }
-    if (!Array.isArray(dependsOn) || !dependsOn.every((d: unknown) => typeof d === "string")) {
-      res.status(400).json({ error: "dependsOn must be an array of strings" });
-      return;
-    }
 
     const existing = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
     if (existing) {
@@ -2559,18 +2510,9 @@ app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: Ne
       return;
     }
 
-    for (const depId of dependsOn) {
-      const dep = await promptFeatureCollection.findOne({ id: depId, deletedAt: { $exists: false } });
-      if (!dep) {
-        res.status(400).json({ error: `Dependency '${depId}' does not exist` });
-        return;
-      }
-    }
-
     const doc: PromptFeatureDocument = {
       id,
       prompt: prompt.trim(),
-      dependsOn,
       createdAt: new Date(),
     };
 
@@ -2585,7 +2527,7 @@ app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: Ne
 app.put("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { prompt, dependsOn } = req.body;
+    const { prompt } = req.body;
 
     const existing = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
     if (!existing) {
@@ -2601,24 +2543,6 @@ app.put("/api/v1/prompt-features/:id", async (req: Request, res: Response, next:
       }
       update.prompt = prompt.trim();
     }
-    if (dependsOn !== undefined) {
-      if (!Array.isArray(dependsOn) || !dependsOn.every((d: unknown) => typeof d === "string")) {
-        res.status(400).json({ error: "dependsOn must be an array of strings" });
-        return;
-      }
-      for (const depId of dependsOn) {
-        const dep = await promptFeatureCollection.findOne({ id: depId, deletedAt: { $exists: false } });
-        if (!dep) {
-          res.status(400).json({ error: `Dependency '${depId}' does not exist` });
-          return;
-        }
-      }
-      if (dependsOn.includes(id)) {
-        res.status(400).json({ error: "A prompt feature cannot depend on itself" });
-        return;
-      }
-      update.dependsOn = dependsOn;
-    }
 
     await promptFeatureCollection.updateOne(
       { id, deletedAt: { $exists: false } },
@@ -2632,7 +2556,7 @@ app.put("/api/v1/prompt-features/:id", async (req: Request, res: Response, next:
   }
 });
 
-// Delete a prompt feature (soft-delete, rejects if has dependents)
+// Delete a prompt feature (soft-delete)
 app.delete("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -2640,19 +2564,6 @@ app.delete("/api/v1/prompt-features/:id", async (req: Request, res: Response, ne
     const existing = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
     if (!existing) {
       res.status(404).json({ error: `Prompt feature '${id}' not found` });
-      return;
-    }
-
-    const dependents = await promptFeatureCollection.find({
-      dependsOn: id,
-      deletedAt: { $exists: false },
-    }).toArray();
-
-    if (dependents.length > 0) {
-      res.status(409).json({
-        error: `Cannot delete '${id}': other prompt features depend on it`,
-        dependents: dependents.map(d => d.id),
-      });
       return;
     }
 

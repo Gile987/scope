@@ -3,14 +3,12 @@
 
 import { Collection } from 'mongodb';
 import { PromptFeatureConfig, PromptFeatureDocument } from '../types/types.js';
-import { DependencyGraph } from '../graph/dependency-graph.js';
 
 /**
  * MongoDB-backed prompt feature store for CRUD operations on prompt feature definitions.
  *
- * Mirrors the CriteriaStore pattern — manages prompt features that describe
- * detectable characteristics in task prompts (as opposed to codebases).
- * Documents are soft-deleted (deletedAt) rather than removed.
+ * Manages prompt features that describe detectable characteristics in task prompts
+ * (as opposed to codebases). Documents are soft-deleted (deletedAt) rather than removed.
  */
 export class PromptFeatureStore {
   constructor(private collection: Collection<PromptFeatureDocument>) {}
@@ -28,13 +26,12 @@ export class PromptFeatureStore {
     return this.collection.findOne({ id, deletedAt: { $exists: false } });
   }
 
-  /** Create a new prompt feature. Validates uniqueness and dependency references. */
+  /** Create a new prompt feature. Validates uniqueness. */
   async create(input: {
     id: string;
     prompt: string;
-    dependsOn?: string[];
   }): Promise<PromptFeatureDocument> {
-    const { id, prompt, dependsOn = [] } = input;
+    const { id, prompt } = input;
 
     // Validate ID format
     if (!/^[a-z0-9_-]+$/.test(id)) {
@@ -49,20 +46,9 @@ export class PromptFeatureStore {
       throw new Error(`Prompt feature '${id}' already exists`);
     }
 
-    // Validate dependency references exist
-    if (dependsOn.length > 0) {
-      await this.validateDependencies(dependsOn);
-    }
-
-    // Validate no cycles would be introduced
-    if (dependsOn.length > 0) {
-      await this.validateNoCycles(id, dependsOn);
-    }
-
     const doc: PromptFeatureDocument = {
       id,
       prompt: prompt.trim(),
-      dependsOn,
       createdAt: new Date(),
     };
 
@@ -70,27 +56,18 @@ export class PromptFeatureStore {
     return doc;
   }
 
-  /** Update a prompt feature's prompt and/or dependencies */
+  /** Update a prompt feature's prompt */
   async update(
     id: string,
-    patch: { prompt?: string; dependsOn?: string[] }
+    patch: { prompt?: string }
   ): Promise<PromptFeatureDocument> {
     const existing = await this.get(id);
     if (!existing) {
       throw new Error(`Prompt feature '${id}' not found`);
     }
 
-    // Validate dependencies if changing them
-    if (patch.dependsOn !== undefined) {
-      if (patch.dependsOn.length > 0) {
-        await this.validateDependencies(patch.dependsOn);
-      }
-      await this.validateNoCycles(id, patch.dependsOn);
-    }
-
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (patch.prompt !== undefined) update.prompt = patch.prompt.trim();
-    if (patch.dependsOn !== undefined) update.dependsOn = patch.dependsOn;
 
     await this.collection.updateOne(
       { id, deletedAt: { $exists: false } },
@@ -100,95 +77,17 @@ export class PromptFeatureStore {
     return (await this.get(id))!;
   }
 
-  /**
-   * Soft-delete a prompt feature.
-   * Rejects if other active prompt features depend on this one.
-   */
+  /** Soft-delete a prompt feature. */
   async delete(id: string): Promise<void> {
     const existing = await this.get(id);
     if (!existing) {
       throw new Error(`Prompt feature '${id}' not found`);
     }
 
-    // Check for dependents
-    const dependents = await this.collection
-      .find({
-        dependsOn: id,
-        deletedAt: { $exists: false },
-      })
-      .toArray();
-
-    if (dependents.length > 0) {
-      const depIds = dependents.map((d) => d.id).join(', ');
-      throw new Error(
-        `Cannot delete '${id}': other prompt features depend on it: ${depIds}`
-      );
-    }
-
     await this.collection.updateOne(
       { id, deletedAt: { $exists: false } },
       { $set: { deletedAt: new Date() } }
     );
-  }
-
-  /**
-   * Resolve prompt feature IDs to PromptFeatureConfig objects, including all transitive ancestors.
-   */
-  async resolveWithAncestors(ids: string[]): Promise<PromptFeatureConfig[]> {
-    const collected = new Map<string, PromptFeatureConfig>();
-    const queue = [...ids];
-
-    while (queue.length > 0) {
-      const id = queue.shift()!;
-      if (collected.has(id)) continue;
-
-      const doc = await this.get(id);
-      if (!doc) {
-        const all = await this.getAll();
-        const availableIds = all.map((c) => c.id).join(', ');
-        throw new Error(
-          `Prompt feature '${id}' not found in store. Available: ${availableIds || 'none'}`
-        );
-      }
-
-      collected.set(id, { id: doc.id, prompt: doc.prompt, dependsOn: doc.dependsOn });
-
-      if (doc.dependsOn) {
-        for (const parentId of doc.dependsOn) {
-          if (!collected.has(parentId)) {
-            queue.push(parentId);
-          }
-        }
-      }
-    }
-
-    return Array.from(collected.values());
-  }
-
-  /**
-   * Get the full DAG as nodes + edges for visualization.
-   */
-  async getGraph(): Promise<{
-    nodes: PromptFeatureConfig[];
-    edges: { from: string; to: string }[];
-  }> {
-    const all = await this.getAll();
-    const nodes: PromptFeatureConfig[] = all.map((c) => ({
-      id: c.id,
-      prompt: c.prompt,
-      dependsOn: c.dependsOn,
-    }));
-
-    const edges: { from: string; to: string }[] = [];
-    for (const feature of all) {
-      if (feature.dependsOn) {
-        for (const parentId of feature.dependsOn) {
-          edges.push({ from: parentId, to: feature.id });
-        }
-      }
-    }
-
-    return { nodes, edges };
   }
 
   /**
@@ -203,54 +102,11 @@ export class PromptFeatureStore {
         await this.collection.insertOne({
           id: config.id,
           prompt: config.prompt,
-          dependsOn: config.dependsOn || [],
           createdAt: new Date(),
         } as any);
         inserted++;
       }
     }
     return inserted;
-  }
-
-  // --- Private helpers ---
-
-  /** Validate that all referenced dependency IDs exist in the store */
-  private async validateDependencies(dependsOn: string[]): Promise<void> {
-    for (const depId of dependsOn) {
-      const dep = await this.get(depId);
-      if (!dep) {
-        throw new Error(`Dependency '${depId}' does not exist`);
-      }
-    }
-  }
-
-  /** Validate that adding edges would not introduce a cycle */
-  private async validateNoCycles(
-    featureId: string,
-    dependsOn: string[]
-  ): Promise<void> {
-    // Build a temporary in-memory graph with the proposed change
-    const all = await this.getAll();
-    const configs: PromptFeatureConfig[] = all.map((c) => ({
-      id: c.id,
-      prompt: c.prompt,
-      dependsOn: c.id === featureId ? dependsOn : c.dependsOn,
-    }));
-
-    // If this is a new feature, add it
-    if (!configs.some((c) => c.id === featureId)) {
-      configs.push({ id: featureId, prompt: '(pending)', dependsOn });
-    }
-
-    try {
-      new DependencyGraph(configs);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('ycle')) {
-        throw new Error(
-          `Adding dependencies [${dependsOn.join(', ')}] to '${featureId}' would create a cycle`
-        );
-      }
-      throw error;
-    }
   }
 }

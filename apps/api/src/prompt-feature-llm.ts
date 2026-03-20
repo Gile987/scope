@@ -40,7 +40,6 @@ If no parents or children are appropriate, use empty arrays.`;
 export interface ExistingPromptFeature {
   id: string;
   prompt: string;
-  dependsOn?: string[];
 }
 
 export interface GeneratePromptFeatureResult {
@@ -60,8 +59,7 @@ function buildGenerateUserMessage(behavior: string, existing: ExistingPromptFeat
   if (existing.length > 0) {
     parts.push("EXISTING PROMPT FEATURES (use only these IDs for parent/children suggestions):");
     for (const f of existing) {
-      const deps = f.dependsOn?.length ? ` [parents: ${f.dependsOn.join(", ")}]` : "";
-      parts.push(`- ${f.id}: ${f.prompt}${deps}`);
+      parts.push(`- ${f.id}: ${f.prompt}`);
     }
     parts.push("");
   }

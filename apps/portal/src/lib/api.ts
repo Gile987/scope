@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, PromptFeatureGraphData, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -171,7 +171,7 @@ export const api = {
   },
 
   /** Create a new prompt feature */
-  createPromptFeature: (body: { id: string; prompt: string; dependsOn?: string[] }): Promise<PromptFeatureDocument> => {
+  createPromptFeature: (body: { id: string; prompt: string }): Promise<PromptFeatureDocument> => {
     return request("/prompt-features", {
       method: "POST",
       body: JSON.stringify(body),
@@ -179,7 +179,7 @@ export const api = {
   },
 
   /** Update an existing prompt feature */
-  updatePromptFeature: (id: string, body: { prompt?: string; dependsOn?: string[] }): Promise<PromptFeatureDocument> => {
+  updatePromptFeature: (id: string, body: { prompt?: string }): Promise<PromptFeatureDocument> => {
     return request(`/prompt-features/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
@@ -189,11 +189,6 @@ export const api = {
   /** Delete a prompt feature */
   deletePromptFeature: (id: string): Promise<{ id: string; deleted: boolean }> => {
     return request(`/prompt-features/${id}`, { method: "DELETE" });
-  },
-
-  /** Get the full prompt feature dependency graph */
-  getPromptFeatureGraph: (): Promise<PromptFeatureGraphData> => {
-    return request("/prompt-features/graph");
   },
 
   /** Generate a prompt feature prompt from a behavior description using AI */

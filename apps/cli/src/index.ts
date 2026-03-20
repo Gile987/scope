@@ -1136,7 +1136,7 @@ function mapYamlCriterion(
 
 const promptFeature = program
   .command("prompt-feature")
-  .description("Manage prompt features (CRUD, import, extract, graph)")
+  .description("Manage prompt features (CRUD, import, extract)")
   .action(() => {
     promptFeature.help();
   });
@@ -1164,7 +1164,7 @@ promptFeature
         process.exit(1);
       }
 
-      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
+      const items = await response.json() as Array<{ id: string; prompt: string }>;
       if (items.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No prompt features found."));
         return;
@@ -1178,7 +1178,6 @@ promptFeature
         { key: 'id', label: 'ID',
           tableFormatter: (f: any) => value(f.id),
         },
-        { key: 'dependsOn', label: 'Deps', formatter: (f: any) => String((f.dependsOn ?? []).length) },
         { key: 'prompt', label: 'Prompt', formatter: (f: any) => {
           const prompt = f.prompt.replace(/\n/g, ' ');
           return prompt.length > 60 ? prompt.substring(0, 60) + '…' : prompt;
@@ -1215,16 +1214,14 @@ promptFeature
       }
 
       const f = await response.json() as {
-        id: string; prompt: string; dependsOn?: string[];
-        dependents: string[]; createdAt: string; updatedAt?: string;
+        id: string; prompt: string;
+        createdAt: string; updatedAt?: string;
       };
 
       if (isMachineReadable(format)) {
         const fields: DisplayField[] = [
           { key: 'id', label: 'ID' },
           { key: 'prompt', label: 'Prompt' },
-          { key: 'dependsOn', label: 'Depends On', formatter: (item: any) => (item.dependsOn ?? []).join(', ') || '(none)' },
-          { key: 'dependents', label: 'Dependents', formatter: (item: any) => (item.dependents ?? []).join(', ') || '(none)' },
           { key: 'createdAt', label: 'Created' },
           { key: 'updatedAt', label: 'Updated' },
         ];
@@ -1236,14 +1233,6 @@ promptFeature
       console.log(`${label('Prompt:')}`);
       for (const line of f.prompt.trim().split('\n')) {
         console.log(`  ${line}`);
-      }
-      if ((f.dependsOn ?? []).length > 0) {
-        console.log(`${label('Depends on:')} ${f.dependsOn!.map(d => value(d)).join(', ')}`);
-      } else {
-        console.log(`${label('Depends on:')} ${dimTimestamp('(none — root feature)')}`);
-      }
-      if (f.dependents.length > 0) {
-        console.log(`${label('Dependents:')} ${f.dependents.map(d => value(d)).join(', ')}`);
       }
       console.log(`${label('Created:')}   ${value(f.createdAt)}`);
       if (f.updatedAt) console.log(`${label('Updated:')}   ${value(f.updatedAt)}`);
@@ -1258,7 +1247,6 @@ promptFeature
   .description("Create a new prompt feature")
   .requiredOption("--id <id>", "Prompt feature ID (lowercase snake_case)")
   .requiredOption("--prompt <prompt>", "Detection prompt for the feature")
-  .option("-d, --depends-on <ids...>", "IDs of parent features")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
@@ -1266,9 +1254,6 @@ promptFeature
         id: options.id,
         prompt: options.prompt,
       };
-      if (options.dependsOn && options.dependsOn.length > 0) {
-        body.dependsOn = options.dependsOn;
-      }
 
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features`, {
         method: "POST",
@@ -1295,16 +1280,14 @@ promptFeature
   .description("Update an existing prompt feature")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
   .option("--prompt <prompt>", "New detection prompt")
-  .option("-d, --depends-on <ids...>", "New parent feature IDs (replaces all)")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
       if (options.prompt !== undefined) body.prompt = options.prompt;
-      if (options.dependsOn !== undefined) body.dependsOn = options.dependsOn;
 
       if (Object.keys(body).length === 0) {
-        console.error(errorText("Error: provide --prompt and/or --depends-on"));
+        console.error(errorText("Error: provide --prompt"));
         process.exit(1);
       }
 
@@ -1329,7 +1312,7 @@ promptFeature
 
 promptFeature
   .command("delete")
-  .description("Delete a prompt feature (soft-delete; fails if other features depend on it)")
+  .description("Delete a prompt feature (soft-delete)")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
@@ -1340,93 +1323,11 @@ promptFeature
 
       if (!response.ok) {
         const error = await response.json();
-        if (error.dependents) {
-          console.error(errorText(`Cannot delete '${options.id}': depended on by ${error.dependents.join(', ')}`));
-        } else {
-          console.error(errorText("Error:"), error.error || JSON.stringify(error));
-        }
-        process.exit(1);
-      }
-
-      console.log(`${successText('Deleted prompt feature')} ${value(options.id)}`);
-    } catch (error) {
-      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
-      process.exit(1);
-    }
-  });
-
-withOutputOption(
-promptFeature
-  .command("graph")
-  .description("Display the prompt feature dependency graph as ASCII")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
-)
-  .action(async (options) => {
-    const format = (options.output || 'table') as OutputFormat;
-    try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/graph`);
-
-      if (!response.ok) {
-        const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
         process.exit(1);
       }
 
-      const graph = await response.json() as {
-        nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
-        edges: Array<{ source: string; target: string }>;
-      };
-
-      if (isMachineReadable(format)) {
-        console.log(format === 'json' ? JSON.stringify(graph, null, 2) : format === 'yaml' ? yamlStringify(graph).trimEnd() : JSON.stringify(graph));
-        return;
-      }
-
-      if (graph.nodes.length === 0) {
-        console.log(warnBanner("No prompt features in the graph."));
-        return;
-      }
-
-      console.log(label(`Prompt Feature DAG — ${graph.nodes.length} nodes, ${graph.edges.length} edges\n`));
-
-      const inDegree = new Map<string, number>();
-      const children = new Map<string, string[]>();
-      for (const n of graph.nodes) {
-        inDegree.set(n.id, 0);
-        children.set(n.id, []);
-      }
-      for (const e of graph.edges) {
-        inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1);
-        children.get(e.source)?.push(e.target);
-      }
-
-      const layers: string[][] = [];
-      let queue = graph.nodes.filter(n => (inDegree.get(n.id) ?? 0) === 0).map(n => n.id);
-      while (queue.length > 0) {
-        layers.push([...queue]);
-        const next: string[] = [];
-        for (const id of queue) {
-          for (const child of children.get(id) ?? []) {
-            const deg = (inDegree.get(child) ?? 1) - 1;
-            inDegree.set(child, deg);
-            if (deg === 0) next.push(child);
-          }
-        }
-        queue = next;
-      }
-
-      for (let i = 0; i < layers.length; i++) {
-        const layerNodes = layers[i];
-        const row = layerNodes.map(id => value(id)).join('  ');
-        console.log(`  ${dimTimestamp(`Layer ${i}:`)}  ${row}`);
-      }
-
-      if (graph.edges.length > 0) {
-        console.log(`\n  ${label('Edges:')}`);
-        for (const e of graph.edges) {
-          console.log(`    ${value(e.source)} ${styleText('gray', '→')} ${value(e.target)}`);
-        }
-      }
+      console.log(`${successText('Deleted prompt feature')} ${value(options.id)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -1504,9 +1405,7 @@ promptFeature
       console.log(`\n${label('Parsed:')} ${value(String(allFeatures.length))} prompt features`);
 
       for (const f of allFeatures) {
-        const deps = (f.dependsOn ?? []).length;
-        const depsStr = deps > 0 ? ` ${dimTimestamp(`(${deps} dep${deps > 1 ? 's' : ''})`)}` : '';
-        console.log(`  ${value(f.id)}${depsStr}`);
+        console.log(`  ${value(f.id)}`);
       }
 
       if (options.dryRun) {

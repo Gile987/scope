@@ -20,13 +20,6 @@ export interface PromptFeatureProvider {
   /** Get all prompt features */
   getAll(): Promise<PromptFeatureConfig[]>;
 
-  /**
-   * Resolve prompt feature IDs including transitive ancestors (BFS).
-   * Ensures the full DAG is available for DependencyGraph construction.
-   * Throws if any feature (leaf or ancestor) is missing.
-   */
-  resolveWithAncestors(ids: string[]): Promise<PromptFeatureConfig[]>;
-
   /** Check if a prompt feature exists */
   has(id: string): Promise<boolean>;
 

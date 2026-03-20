@@ -7,7 +7,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -18,7 +17,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X } from "lucide-react";
-import { PromptFeaturePicker } from "@/components/PromptFeaturePicker";
 import { formatDate } from "@/lib/utils";
 
 export function PromptFeatureDetail() {
@@ -34,40 +32,19 @@ export function PromptFeatureDetail() {
 
   const [editing, setEditing] = useState(false);
   const [prompt, setPrompt] = useState("");
-  const [editDependsOn, setEditDependsOn] = useState<string[]>([]);
 
   // AI Suggest state
   const [aiSuggestOpen, setAiSuggestOpen] = useState(false);
   const [behaviorInput, setBehaviorInput] = useState("");
   const [suggestedPrompt, setSuggestedPrompt] = useState<string | null>(null);
-  const [suggestedParents, setSuggestedParents] = useState<string[]>([]);
-  const [suggestedChildren, setSuggestedChildren] = useState<string[]>([]);
-  const [acceptedChildren, setAcceptedChildren] = useState<string[]>([]);
 
   const updateMutation = useMutation({
-    mutationFn: (body: { prompt?: string; dependsOn?: string[] }) =>
+    mutationFn: (body: { prompt?: string }) =>
       api.updatePromptFeature(id!, body),
-    onSuccess: async () => {
-      // Update accepted children to depend on this feature
-      for (const childId of acceptedChildren) {
-        try {
-          const child = await api.getPromptFeature(childId);
-          const existingDeps = child.dependsOn ?? [];
-          if (!existingDeps.includes(id!)) {
-            await api.updatePromptFeature(childId, {
-              dependsOn: [...existingDeps, id!],
-            });
-          }
-        } catch {
-          // Non-blocking
-        }
-      }
+    onSuccess: () => {
       setEditing(false);
       setAiSuggestOpen(false);
       setSuggestedPrompt(null);
-      setSuggestedParents([]);
-      setSuggestedChildren([]);
-      setAcceptedChildren([]);
       queryClient.invalidateQueries({ queryKey: ["prompt-feature", id] });
       queryClient.invalidateQueries({ queryKey: ["prompt-features"] });
     },
@@ -77,18 +54,9 @@ export function PromptFeatureDetail() {
     mutationFn: (behavior: string) => api.generatePromptFeaturePrompt(behavior, id),
     onSuccess: (data) => {
       setSuggestedPrompt(data.prompt);
-      setSuggestedParents(data.suggestedParents);
-      setSuggestedChildren(data.suggestedChildren);
-      setEditDependsOn((prev) => [
-        ...new Set([...prev, ...data.suggestedParents]),
-      ]);
-      setAcceptedChildren(data.suggestedChildren);
     },
     onError: () => {
       setSuggestedPrompt(null);
-      setSuggestedParents([]);
-      setSuggestedChildren([]);
-      setAcceptedChildren([]);
     },
   });
 
@@ -103,20 +71,15 @@ export function PromptFeatureDetail() {
   const startEditing = () => {
     if (!feature) return;
     setPrompt(feature.prompt);
-    setEditDependsOn(feature.dependsOn ?? []);
     setAiSuggestOpen(false);
     setBehaviorInput("");
     setSuggestedPrompt(null);
-    setSuggestedParents([]);
-    setSuggestedChildren([]);
-    setAcceptedChildren([]);
     setEditing(true);
   };
 
   const handleSave = () => {
     updateMutation.mutate({
       prompt: prompt.trim(),
-      dependsOn: editDependsOn.length > 0 ? editDependsOn : undefined,
     });
   };
 
@@ -186,19 +149,13 @@ export function PromptFeatureDetail() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete prompt feature?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will permanently delete <strong>{feature.id}</strong>.
-                  {feature.dependents.length > 0 && (
-                    <span className="block mt-2 text-destructive">
-                      Cannot delete: used by {feature.dependents.join(", ")}
-                    </span>
-                  )}
+                  This will permanently delete <strong>{feature.id}</strong>. This action cannot be undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => deleteMutation.mutate(feature.id)}
-                  disabled={feature.dependents.length > 0}
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 >
                   Delete
@@ -303,78 +260,6 @@ export function PromptFeatureDetail() {
                       </p>
                     </div>
                   )}
-
-                  {/* Suggested parents */}
-                  {suggestedParents.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">
-                        Parents{" "}
-                        <span className="font-normal text-muted-foreground">
-                          — this feature should depend on:
-                        </span>
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {suggestedParents.map((pid) => (
-                          <Badge
-                            key={pid}
-                            variant={editDependsOn.includes(pid) ? "secondary" : "outline"}
-                            className="gap-1.5 font-mono text-xs"
-                          >
-                            {editDependsOn.includes(pid) && <Check className="h-3 w-3" />}
-                            {pid}
-                            {editDependsOn.includes(pid) && (
-                              <X
-                                className="h-3 w-3 ml-0.5 cursor-pointer hover:text-destructive"
-                                onClick={() =>
-                                  setEditDependsOn((prev) => prev.filter((d) => d !== pid))
-                                }
-                              />
-                            )}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Suggested children */}
-                  {suggestedChildren.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">
-                        Children{" "}
-                        <span className="font-normal text-muted-foreground">
-                          — these features should depend on this one:
-                        </span>
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {suggestedChildren.map((cid) => (
-                          <Badge
-                            key={cid}
-                            variant={acceptedChildren.includes(cid) ? "secondary" : "outline"}
-                            className="gap-1.5 font-mono text-xs cursor-pointer"
-                            onClick={() => {
-                              setAcceptedChildren((prev) =>
-                                prev.includes(cid)
-                                  ? prev.filter((c) => c !== cid)
-                                  : [...prev, cid],
-                              );
-                            }}
-                          >
-                            {acceptedChildren.includes(cid) ? (
-                              <Check className="h-3 w-3" />
-                            ) : null}
-                            {cid}
-                            {acceptedChildren.includes(cid) && (
-                              <X className="h-3 w-3 ml-0.5 hover:text-destructive" />
-                            )}
-                          </Badge>
-                        ))}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Accepted children will be updated to depend on{" "}
-                        <span className="font-mono">{feature.id}</span> when you save
-                      </p>
-                    </div>
-                  )}
                 </div>
               )}
             </>
@@ -383,57 +268,6 @@ export function PromptFeatureDetail() {
           )}
         </CardContent>
       </Card>
-
-      {/* Dependencies */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Dependencies</CardTitle>
-          <CardDescription>
-            Features that must be detected before this one is evaluated
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {editing ? (
-            <PromptFeaturePicker
-              selected={editDependsOn}
-              onChange={setEditDependsOn}
-            />
-          ) : (feature.dependsOn ?? []).length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {feature.dependsOn!.map((dep) => (
-                <Link key={dep} to={`/prompt-features/${dep}`}>
-                  <Badge variant="secondary" className="font-mono cursor-pointer hover:bg-secondary/80">
-                    {dep}
-                  </Badge>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No dependencies (root feature)</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Dependents */}
-      {feature.dependents.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Dependents</CardTitle>
-            <CardDescription>Features that depend on this one</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {feature.dependents.map((dep) => (
-                <Link key={dep} to={`/prompt-features/${dep}`}>
-                  <Badge variant="outline" className="font-mono cursor-pointer hover:bg-accent">
-                    {dep}
-                  </Badge>
-                </Link>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Edit actions */}
       {editing && (
