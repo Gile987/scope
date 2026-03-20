@@ -160,7 +160,7 @@ export function RunDetail() {
               {run.agentVersion && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs">{run.agentVersion}</span>
+                  <span className="font-mono text-xs cursor-default" title={run.workerVersion ? `Worker: ${run.workerVersion}` : undefined}>{run.agentVersion}</span>
                 </>
               )}
               <Separator orientation="vertical" className="h-4" />
@@ -412,6 +412,39 @@ export function RunDetail() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Prompt Features card (if task prompt has features) */}
+            {(run.agentVersion || run.workerVersion) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Version Info</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  {run.agentVersion && (
+                    <div>
+                      <span className="text-muted-foreground">Agent Version:</span>{" "}
+                      <span className="font-mono font-medium">{run.agentVersion}</span>
+                    </div>
+                  )}
+                  {run.workerVersion && (
+                    <div>
+                      <span className="text-muted-foreground">Worker Version:</span>{" "}
+                      <span className="font-mono font-medium">{run.workerVersion}</span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-muted-foreground">Worker Type:</span>{" "}
+                    <span className="font-mono font-medium">{run.workerType}</span>
+                  </div>
+                  {run.model && (
+                    <div>
+                      <span className="text-muted-foreground">Model:</span>{" "}
+                      <span className="font-mono font-medium">{run.model}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Prompt Features card (if task prompt has features) */}
             {taskPrompt?.features && taskPrompt.features.length > 0 && (

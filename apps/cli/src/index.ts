@@ -97,10 +97,11 @@ run
   .option("--model <model>", "Model to use for the coding agent")
   .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
+  .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs, agentVersion } = options;
 
     try {
       // Resolve scenario + persona YAML if provided
@@ -156,6 +157,9 @@ run
       }
       if (skillSlugs && skillSlugs.length > 0) {
         body.skills = skillSlugs;
+      }
+      if (agentVersion) {
+        body.agentVersion = agentVersion;
       }
 
       const response = await fetch(`${normalizeUrl(url)}/api/v1/requests?worker=${worker}`, {
@@ -2731,6 +2735,64 @@ agentModel
         process.exit(1);
       }
       console.log(successText(`Default model for ${agentDoc._id} set to ${options.model}.`));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// ─── Agent version sub-commands ──────────────────────────────────────────────
+
+const agentVersion = agent
+  .command("version")
+  .description("Manage agent versions")
+  .action(() => {
+    agentVersion.help();
+  });
+
+configureHelp(agentVersion);
+
+withOutputOption(
+agentVersion
+  .command("list")
+  .description("List versions for a coding agent")
+  .requiredOption("-i, --id <id>", "Agent ID")
+  .option("--status <status>", "Filter by status (active, retired)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_MT_API_URL || "http://localhost:3100")
+)
+  .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
+    try {
+      const params = options.status ? `?status=${encodeURIComponent(options.status)}` : '';
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}/versions${params}`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const versions = await response.json() as Array<{
+        agentVersion: string;
+        workerVersion: string;
+        components: Record<string, string>;
+        queueName: string;
+        status: string;
+        createdAt: string;
+      }>;
+      if (versions.length === 0) {
+        if (!isMachineReadable(format)) console.log(warnBanner(`No versions found for agent ${options.id}.`));
+        return;
+      }
+      if (!isMachineReadable(format)) {
+        console.log(label(`${versions.length} version(s) for ${options.id}:\n`));
+      }
+      const displayFields: DisplayField[] = [
+        { key: 'agentVersion', label: 'Version', tableFormatter: (v: any) => value(v.agentVersion) },
+        { key: 'status', label: 'Status', formatter: (v: any) => v.status },
+        { key: 'components', label: 'Components', formatter: (v: any) => Object.entries(v.components || {}).map(([k, val]) => `${k}=${val}`).join(', ') },
+        { key: 'queueName', label: 'Queue' },
+        { key: 'createdAt', label: 'Created', formatter: (v: any) => new Date(v.createdAt).toLocaleString() },
+      ];
+      console.log(formatData(versions, displayFields, format));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

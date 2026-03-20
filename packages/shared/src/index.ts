@@ -15,6 +15,7 @@ export * from "./token-manager/index.js";
 export * from "./mcp/index.js";
 export * from "./skills/index.js";
 export * from "./agent-version.js";
+export * from "./resolve-agent-version.js";
 export * from "./devproxy/index.js";
 export * from "./har/index.js";
 export * from "./utils/index.js";

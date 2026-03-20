@@ -697,6 +697,7 @@ export function RunsList() {
               <TableHead className="w-[100px]">ID</TableHead>
               <TableHead>Task</TableHead>
               <TableHead className="w-[180px]">Worker</TableHead>
+              <TableHead>Version</TableHead>
               <TableHead>MCP</TableHead>
               <TableHead>Skills</TableHead>
               <TableHead className="w-[120px]">Status</TableHead>
@@ -728,6 +729,13 @@ export function RunsList() {
                   <span className="font-mono text-xs">{run.workerType}</span>
                   {run.model && (
                     <span className="block font-mono text-xs text-muted-foreground">{run.model}</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {run.agentVersion ? (
+                    <span className="font-mono text-xs">{run.agentVersion}</span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">–</span>
                   )}
                 </TableCell>
                 <TableCell>

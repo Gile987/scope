@@ -372,6 +372,9 @@ function VersionEntry({ version }: { version: AgentVersion }) {
         <p className="text-xs text-muted-foreground font-mono">
           Build: {version.gitCommit} · {version.buildTime}
         </p>
+        <p className="text-xs text-muted-foreground font-mono">
+          Queue: {version.queueName}
+        </p>
       </div>
       <span className="text-xs text-muted-foreground">{formatDate(version.createdAt)}</span>
     </div>
