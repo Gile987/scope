@@ -4,9 +4,16 @@
 /**
  * Retry utility for transient failures (e.g. CosmosDB 429 TooManyRequests).
  *
- * Uses exponential backoff with jitter. When the error includes a
- * `RetryAfterMs` hint from CosmosDB, it is respected as the minimum delay.
+ * Delegates to cockatiel for exponential backoff with jitter.
+ * Adds CosmosDB-specific error detection and RetryAfterMs awareness.
  */
+
+import {
+  ExponentialBackoff,
+  handleWhen,
+  retry,
+  type IRetryContext,
+} from "cockatiel";
 
 export interface RetryOptions {
   /** Maximum number of retry attempts (default: 5) */
@@ -44,6 +51,7 @@ export function extractRetryAfterMs(error: unknown): number | undefined {
 
 /**
  * Executes `fn` and retries on transient errors with exponential backoff + jitter.
+ * Backed by cockatiel's retry policy.
  */
 export async function withRetry<T>(
   fn: () => Promise<T>,
@@ -54,28 +62,13 @@ export async function withRetry<T>(
   const maxDelayMs = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
   const isRetryable = options?.isRetryable ?? isCosmosDb429;
 
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error;
-      if (attempt >= maxRetries || !isRetryable(error)) {
-        throw error;
-      }
+  const policy = retry(handleWhen((err) => isRetryable(err)), {
+    maxAttempts: maxRetries,
+    backoff: new ExponentialBackoff({
+      initialDelay: baseDelayMs,
+      maxDelay: maxDelayMs,
+    }),
+  });
 
-      // Exponential backoff: baseDelay * 2^attempt, capped at maxDelay
-      const exponentialDelay = baseDelayMs * Math.pow(2, attempt);
-      const cappedDelay = Math.min(exponentialDelay, maxDelayMs);
-      // Add jitter: 50%-100% of the computed delay
-      const jitteredDelay = cappedDelay * (0.5 + Math.random() * 0.5);
-      // Respect CosmosDB RetryAfterMs hint if present
-      const retryAfterMs = extractRetryAfterMs(error);
-      const delay = Math.max(jitteredDelay, retryAfterMs ?? 0);
-
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-  // Unreachable, but TypeScript needs it
-  throw lastError;
+  return policy.execute(() => fn());
 }
