@@ -17,7 +17,7 @@ interface AllCacheEntry {
 }
 
 /**
- * PromptFeatureProvider backed by the Scope MT REST API with LRU caching.
+ * PromptFeatureProvider backed by the Scope REST API with LRU caching.
  *
  * Uses native fetch() (Node 22 built-in). Prompt features are fetched from the API
  * on demand and cached with a configurable TTL and max-size LRU policy.

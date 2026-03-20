@@ -1,6 +1,6 @@
-# Scope MT
+# Scope Core
 
-**Scope MT** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers, evaluates results using a criteria DAG, and provides real-time log streaming — all backed by MongoDB, Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
+**Scope Core** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers, evaluates results using a criteria DAG, and provides real-time log streaming — all backed by MongoDB, Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
 
 ## Components
 
@@ -134,18 +134,42 @@ See [ENV_VARIABLES.md](ENV_VARIABLES.md) for a full reference of configurable en
 
 ## CLI
 
-The CLI is the primary interface for interacting with Scope MT. Show available commands with:
+The CLI is the primary interface for interacting with Scope. Show available commands with:
 
 ```bash
 pnpm cli --help
 ```
 
-It is organized into subcommand groups (`run`, `criteria`, …). Use `--help` at any level to discover options:
+It is organized into subcommand groups (`run`, `agent`, `criteria`, …). Use `--help` at any level to discover options:
 
 ```bash
 pnpm cli run --help
 pnpm cli run submit --help
+pnpm cli agent --help
+pnpm cli agent version list -i coder-acp-copilot
 pnpm cli criteria --help
+```
+
+### Submitting a run
+
+```bash
+# Submit with explicit model and agent version
+pnpm cli run submit -m "Create a Hello World API" -w coder-acp-copilot \
+  --model claude-sonnet-4 --agent-version copilot-0.0.415
+
+# Model and agent version are required; if omitted the API auto-selects:
+# - model: uses the agent's defaultModel (set by model scanner)
+# - agent version: uses the latest active version (by registration date)
+```
+
+### Managing agent versions
+
+```bash
+# List active versions for an agent
+pnpm cli agent version list -i coder-acp-copilot --status active
+
+# JSON output for scripting
+pnpm cli agent version list -i coder-acp-copilot -o json
 ```
 
 ## Configuration
@@ -170,14 +194,14 @@ The [`docs/`](docs/README.md) directory contains architecture and research docum
 
 ## Deployment
 
-Scope MT is a Kubernetes-native application deployed via [FluxCD](https://fluxcd.io/) GitOps. The `deploy/` directory contains Kustomize base manifests and environment overlays that FluxCD reconciles automatically.
+Scope Core is a Kubernetes-native application deployed via [FluxCD](https://fluxcd.io/) GitOps. The `deploy/` directory contains Kustomize base manifests and environment overlays that FluxCD reconciles automatically.
 
 Infrastructure provisioning (AKS cluster, Azure resources) is managed in the [scope-mt-infra](https://github.com/growth-ecosystems/scope-mt-infra) repository.
 
 ## Project Structure
 
 ```
-scope-mt-app/
+scope-core/
 ├── apps/
 │   ├── api/                          # REST API + SSE
 │   ├── cli/                          # CLI (commander + ink TUI)

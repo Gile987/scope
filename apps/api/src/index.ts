@@ -29,7 +29,7 @@ import {
 } from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
-import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult } from "shared";
+import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, resolveAgentVersion } from "shared";
 import { evaluateTrigger } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 
@@ -63,6 +63,7 @@ const port = parseInt(process.env.PORT || "3000", 10);
 // Version information (injected at build time)
 const GIT_COMMIT = process.env.GIT_COMMIT || "development";
 const BUILD_TIME = process.env.BUILD_TIME || new Date().toISOString();
+const SCOPE_ENVIRONMENT = process.env.SCOPE_ENVIRONMENT || "production";
 
 // Valid worker types
 const VALID_WORKERS = ["coder-acp-claude-code", "coder-acp-copilot"] as const;
@@ -89,6 +90,7 @@ let skillRevisionCollection: Collection<SkillRevisionDocument>;
 let skillRevisionStore: SkillRevisionStore;
 let skillResolver: SkillResolver;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
+const dynamicQueueClients: Map<string, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
 // Criteria document interface
@@ -506,6 +508,22 @@ async function initializeClients(): Promise<void> {
   console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}, report`);
 }
 
+// Get or create a QueueClient for a dynamically resolved queue name
+function getOrCreateQueueClient(queueName: string): QueueClient {
+  const existing = dynamicQueueClients.get(queueName);
+  if (existing) return existing;
+  let client: QueueClient;
+  if (storageConnectionString) {
+    client = new QueueClient(storageConnectionString, queueName);
+  } else {
+    const credential = new DefaultAzureCredential();
+    const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
+    client = new QueueClient(`${queueUrl}/${queueName}`, credential);
+  }
+  dynamicQueueClients.set(queueName, client);
+  return client;
+}
+
 // Health check endpoint (liveness probe — always returns 200)
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "healthy", version: GIT_COMMIT });
@@ -535,6 +553,7 @@ app.get("/about", (_req: Request, res: Response) => {
     name: "Multi-Worker API (MongoDB)",
     version: GIT_COMMIT,
     buildTime: BUILD_TIME,
+    environment: SCOPE_ENVIRONMENT,
     description: "API that routes requests to multiple workers via separate queues",
     workers: VALID_WORKERS,
   });
@@ -545,13 +564,14 @@ app.get("/api/v1/version", (_req: Request, res: Response) => {
   res.json({
     commit: GIT_COMMIT,
     buildTime: BUILD_TIME,
+    environment: SCOPE_ENVIRONMENT,
   });
 });
 
 // Submit a request
 app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, agentVersion: requestedAgentVersion } = req.body;
     const worker = req.query.worker as string;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
@@ -584,6 +604,12 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       }
     }
 
+    // At least one criterion is required
+    if (!scenarioObj.criteria || !Array.isArray(scenarioObj.criteria) || scenarioObj.criteria.length === 0) {
+      res.status(400).json({ error: "At least one criterion is required in scenario.criteria" });
+      return;
+    }
+
     // Validate maxIterations if provided
     if (maxIterations !== undefined) {
       if (typeof maxIterations !== "number" || maxIterations < 1 || maxIterations > 50) {
@@ -614,6 +640,29 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       if (!model && agentDoc.defaultModel) {
         model = agentDoc.defaultModel;
       }
+      if (!model) {
+        res.status(400).json({
+          error: `model is required for agent "${workerType}". Select one of supportedModels or set a defaultModel on the agent.`,
+          supportedModels: agentDoc.supportedModels,
+        });
+        return;
+      }
+    }
+
+    // Resolve agent version: explicit selection or latest active
+    let resolvedAgentVersion: string | undefined;
+    let versionQueueName: string | undefined;
+    if (agentDoc) {
+      const versionResult = resolveAgentVersion(agentDoc.versions, requestedAgentVersion);
+      if ("error" in versionResult) {
+        res.status(400).json({
+          error: `${versionResult.error} for agent "${workerType}"`,
+          activeVersions: versionResult.activeVersions,
+        });
+        return;
+      }
+      resolvedAgentVersion = versionResult.agentVersion;
+      versionQueueName = versionResult.queueName;
     }
 
     // Validate MCP server slugs if provided
@@ -710,7 +759,10 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
     };
 
     const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
-    const queueClient = queueClients.get(workerType)!;
+    // Use version-specific queue if resolved, otherwise fall back to static worker queue
+    const queueClient = versionQueueName
+      ? getOrCreateQueueClient(versionQueueName)
+      : queueClients.get(workerType)!;
 
     // Ensure a TaskPrompt entity exists for this task text (idempotent)
     const taskPrompt = await taskPromptStore.findOrCreate(scenario.task);
@@ -740,6 +792,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
           ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
+          ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
         };
         newDocs.push(requestDoc);
 
@@ -764,6 +817,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
         workerType,
         taskPromptId,
         ...(model ? { model } : {}),
+        ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
         status: "pending",
         mode,
         message: `${count} requests submitted successfully`,
@@ -791,6 +845,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
+      ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
     };
 
     // Store in MongoDB
@@ -807,6 +862,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       id: requestId,
       workerType,
       ...(model ? { model } : {}),
+      ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
       status: requestDoc.status,
       mode,
       message: "Request submitted successfully",
@@ -3461,15 +3517,16 @@ app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunctio
       res.status(400).json({ error: "name is required and must be a string" });
       return;
     }
-    if (!Array.isArray(supportedModels) || !supportedModels.every((m: unknown) => typeof m === "string")) {
-      res.status(400).json({ error: "supportedModels is required and must be an array of strings" });
+    // supportedModels is optional — if provided, must be a string array
+    if (supportedModels !== undefined && (!Array.isArray(supportedModels) || !supportedModels.every((m: unknown) => typeof m === "string"))) {
+      res.status(400).json({ error: "supportedModels must be an array of strings" });
       return;
     }
     if (defaultModel !== undefined && typeof defaultModel !== "string") {
       res.status(400).json({ error: "defaultModel must be a string" });
       return;
     }
-    if (defaultModel && supportedModels.length > 0 && !supportedModels.includes(defaultModel)) {
+    if (defaultModel && supportedModels && supportedModels.length > 0 && !supportedModels.includes(defaultModel)) {
       res.status(400).json({ error: "defaultModel must be one of supportedModels" });
       return;
     }
@@ -3479,13 +3536,16 @@ app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunctio
 
     if (existing) {
       // Upsert: update existing (un-delete if soft-deleted)
+      // Only update supportedModels if explicitly provided — prevents registration
+      // jobs from wiping models set by the scanner
+      const effectiveModels = supportedModels ?? existing.supportedModels;
       await agentCollection.updateOne(
         { _id },
         {
           $set: {
             name,
             ...(description !== undefined ? { description } : {}),
-            supportedModels,
+            ...(supportedModels !== undefined ? { supportedModels } : {}),
             ...(defaultModel !== undefined ? { defaultModel } : {}),
             updatedAt: now,
           },
@@ -3495,12 +3555,12 @@ app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunctio
       const updated = await agentCollection.findOne({ _id });
       res.json({ ...updated, id: updated!._id });
     } else {
-      // Create new
+      // Create new — default to empty supportedModels if not provided
       const agentDoc: CodingAgentDocument = {
         _id,
         name,
         ...(description ? { description } : {}),
-        supportedModels,
+        supportedModels: supportedModels ?? [],
         ...(defaultModel ? { defaultModel } : {}),
         createdAt: now,
       };
@@ -3881,9 +3941,25 @@ app.post("/api/v1/models/sync", async (req: Request, res: Response, next: NextFu
 
     const agent = await agentCollection.findOne({ _id: agentId });
     if (agent) {
+      // Auto-set defaultModel to the most recently published model if unset or stale
+      const needsDefault = !agent.defaultModel || !activeModelIds.includes(agent.defaultModel);
+      let autoDefault: string | undefined;
+      if (needsDefault && activeModels.length > 0) {
+        // Pick model with the most recent providerAvailableFrom, fallback to firstSeenAt
+        const sorted = [...activeModels].sort((a, b) => {
+          const dateA = a.providerAvailableFrom ?? a.firstSeenAt;
+          const dateB = b.providerAvailableFrom ?? b.firstSeenAt;
+          return new Date(dateB).getTime() - new Date(dateA).getTime();
+        });
+        autoDefault = sorted[0].modelId;
+      }
       await agentCollection.updateOne(
         { _id: agentId },
-        { $set: { supportedModels: activeModelIds, updatedAt: new Date() } },
+        { $set: {
+          supportedModels: activeModelIds,
+          ...(autoDefault ? { defaultModel: autoDefault } : {}),
+          updatedAt: new Date(),
+        } },
       );
     }
 

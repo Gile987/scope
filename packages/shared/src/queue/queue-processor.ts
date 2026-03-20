@@ -35,14 +35,14 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     this.processor = processor;
   }
 
-  /** Build agentVersion + workerVersion fields for stamping on request documents. */
+  /** Build workerVersion field for stamping on request documents.
+   *  agentVersion is set at submission time by the API — the worker only adds workerVersion. */
   private getVersionFields(): Record<string, string> {
     const agentVersion = this.processor.getAgentVersion?.();
     if (!agentVersion) return {};
     const gitCommit = process.env.GIT_COMMIT || "unknown";
     const buildTime = process.env.BUILD_TIME || "unknown";
     return {
-      agentVersion,
       workerVersion: `${agentVersion}-${buildTime}-${gitCommit}`,
     };
   }

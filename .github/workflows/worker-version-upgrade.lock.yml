@@ -27,7 +27,7 @@
 #
 # gh-aw-metadata: {"schema_version":"v2","frontmatter_hash":"13fe48cc8e60d0d7731e6de375888083f09ae4d1ce71efea49e10a14bbed63b1","compiler_version":"v0.60.0","strict":true}
 
-name: "Auto Version Update"
+name: "Worker Version Upgrade"
 "on":
   issues:
     # names: # Label filtering applied via job conditions
@@ -42,7 +42,7 @@ permissions: {}
 concurrency:
   group: "gh-aw-${{ github.workflow }}-${{ github.event.issue.number || github.run_id }}"
 
-run-name: "Auto Version Update"
+run-name: "Worker Version Upgrade"
 
 jobs:
   activation:
@@ -73,7 +73,7 @@ jobs:
           GH_AW_INFO_VERSION: ""
           GH_AW_INFO_AGENT_VERSION: "latest"
           GH_AW_INFO_CLI_VERSION: "v0.60.0"
-          GH_AW_INFO_WORKFLOW_NAME: "Auto Version Update"
+          GH_AW_INFO_WORKFLOW_NAME: "Worker Version Upgrade"
           GH_AW_INFO_EXPERIMENTAL: "false"
           GH_AW_INFO_SUPPORTS_TOOLS_ALLOWLIST: "true"
           GH_AW_INFO_STAGED: "false"
@@ -105,7 +105,7 @@ jobs:
       - name: Check workflow file timestamps
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_WORKFLOW_FILE: "auto-version-update.lock.yml"
+          GH_AW_WORKFLOW_FILE: "worker-version-upgrade.lock.yml"
         with:
           script: |
             const { setupGlobals } = require('/opt/gh-aw/actions/setup_globals.cjs');
@@ -182,7 +182,7 @@ jobs:
           </system>
           GH_AW_PROMPT_EOF
           cat << 'GH_AW_PROMPT_EOF'
-          {{#runtime-import .github/workflows/auto-version-update.md}}
+          {{#runtime-import .github/workflows/worker-version-upgrade.md}}
           GH_AW_PROMPT_EOF
           } > "$GH_AW_PROMPT"
       - name: Interpolate variables and render templates
@@ -266,7 +266,7 @@ jobs:
       GH_AW_SAFE_OUTPUTS: /opt/gh-aw/safeoutputs/outputs.jsonl
       GH_AW_SAFE_OUTPUTS_CONFIG_PATH: /opt/gh-aw/safeoutputs/config.json
       GH_AW_SAFE_OUTPUTS_TOOLS_PATH: /opt/gh-aw/safeoutputs/tools.json
-      GH_AW_WORKFLOW_ID_SANITIZED: autoversionupdate
+      GH_AW_WORKFLOW_ID_SANITIZED: workerversionupgrade
     outputs:
       checkout_pr_success: ${{ steps.checkout-pr.outputs.checkout_pr_success || 'true' }}
       detection_conclusion: ${{ steps.detection_conclusion.outputs.conclusion }}
@@ -754,7 +754,7 @@ jobs:
         if: always() && steps.detection_guard.outputs.run_detection == 'true'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          WORKFLOW_NAME: "Auto Version Update"
+          WORKFLOW_NAME: "Worker Version Upgrade"
           WORKFLOW_DESCRIPTION: "Automatically assigns Copilot coding agent to version update issues created\nby the check-worker-versions workflow. Copilot reads the issue body, updates\nthe versions.env file, runs integration tests, and opens a PR."
           HAS_PATCH: ${{ steps.collect_output.outputs.has_patch }}
         with:
@@ -854,7 +854,7 @@ jobs:
       contents: read
       issues: write
     concurrency:
-      group: "gh-aw-conclusion-auto-version-update"
+      group: "gh-aw-conclusion-worker-version-upgrade"
       cancel-in-progress: false
     outputs:
       noop_message: ${{ steps.noop.outputs.noop_message }}
@@ -884,7 +884,7 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
           GH_AW_NOOP_MAX: "1"
-          GH_AW_WORKFLOW_NAME: "Auto Version Update"
+          GH_AW_WORKFLOW_NAME: "Worker Version Upgrade"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -897,7 +897,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "Auto Version Update"
+          GH_AW_WORKFLOW_NAME: "Worker Version Upgrade"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -910,10 +910,10 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "Auto Version Update"
+          GH_AW_WORKFLOW_NAME: "Worker Version Upgrade"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
-          GH_AW_WORKFLOW_ID: "auto-version-update"
+          GH_AW_WORKFLOW_ID: "worker-version-upgrade"
           GH_AW_SECRET_VERIFICATION_RESULT: ${{ needs.activation.outputs.secret_verification_result }}
           GH_AW_CHECKOUT_PR_SUCCESS: ${{ needs.agent.outputs.checkout_pr_success }}
           GH_AW_INFERENCE_ACCESS_ERROR: ${{ needs.agent.outputs.inference_access_error }}
@@ -934,7 +934,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "Auto Version Update"
+          GH_AW_WORKFLOW_NAME: "Worker Version Upgrade"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
           GH_AW_NOOP_MESSAGE: ${{ steps.noop.outputs.noop_message }}
@@ -979,10 +979,10 @@ jobs:
       issues: write
     timeout-minutes: 15
     env:
-      GH_AW_CALLER_WORKFLOW_ID: "${{ github.repository }}/auto-version-update"
+      GH_AW_CALLER_WORKFLOW_ID: "${{ github.repository }}/worker-version-upgrade"
       GH_AW_ENGINE_ID: "copilot"
-      GH_AW_WORKFLOW_ID: "auto-version-update"
-      GH_AW_WORKFLOW_NAME: "Auto Version Update"
+      GH_AW_WORKFLOW_ID: "worker-version-upgrade"
+      GH_AW_WORKFLOW_NAME: "Worker Version Upgrade"
     outputs:
       assign_to_agent_assigned: ${{ steps.assign_to_agent.outputs.assigned }}
       assign_to_agent_assignment_error_count: ${{ steps.assign_to_agent.outputs.assignment_error_count }}

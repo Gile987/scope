@@ -20,6 +20,7 @@ export function VersionFooter() {
 
   const portalCommit = __GIT_COMMIT__;
   const portalBuildTime = __BUILD_TIME__;
+  const gitBranch = __GIT_BRANCH__;
 
   const formatDate = (iso: string) => {
     try {
@@ -37,6 +38,11 @@ export function VersionFooter() {
   return (
     <footer className="border-t bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
       <div className="flex flex-wrap justify-center gap-x-6 gap-y-1">
+        {gitBranch && (
+          <span>
+            Branch: <code className="font-mono">{gitBranch}</code>
+          </span>
+        )}
         <span>
           Portal: <code className="font-mono">{shortCommit(portalCommit)}</code>{" "}
           <span className="text-muted-foreground/70">({formatDate(portalBuildTime)})</span>

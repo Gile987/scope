@@ -45,6 +45,7 @@ export const api = {
     count?: number;
     mcpServers?: string[];
     skills?: string[];
+    agentVersion?: string;
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     return request(`/requests?worker=${encodeURIComponent(worker)}`, {
@@ -474,7 +475,7 @@ export const api = {
   // ─── Version ───────────────────────────────────────────────────────────────
 
   /** Get API version information (commit hash and build time) */
-  getVersion: (): Promise<{ commit: string; buildTime: string }> => {
+  getVersion: (): Promise<{ commit: string; buildTime: string; environment?: string }> => {
     return request("/version");
   },
 

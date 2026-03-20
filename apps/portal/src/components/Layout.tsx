@@ -163,7 +163,7 @@ export function Layout() {
         <div className="container flex h-14 items-center">
           <Link to="/" className="mr-4 flex items-center space-x-2 shrink-0">
             <Activity className="h-6 w-6" />
-            <span className="hidden font-bold sm:inline-block">Scope MT</span>
+            <span className="hidden font-bold sm:inline-block">Scope</span>
           </Link>
 
           {/* Priority+ nav: measured container (overflow-hidden) + separate More button */}

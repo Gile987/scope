@@ -46,6 +46,9 @@ export function SubmitRun() {
   // Skills
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
 
+  // Agent version
+  const [selectedAgentVersion, setSelectedAgentVersion] = useState<string>("");
+
   // Fetch agents from the API
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
@@ -71,6 +74,27 @@ export function SubmitRun() {
       setModel("");
     }
   }, [worker, selectedAgent?.defaultModel]);
+
+  // Fetch active versions for selected agent
+  const { data: agentVersions = [] } = useQuery({
+    queryKey: ["agent-versions", worker],
+    queryFn: () => api.listAgentVersions(worker, "active"),
+    enabled: !!worker,
+  });
+
+  // Sort versions by createdAt descending (latest first)
+  const sortedVersions = [...agentVersions].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  // When agent changes or versions load, auto-select latest version
+  useEffect(() => {
+    if (sortedVersions.length > 0) {
+      setSelectedAgentVersion(sortedVersions[0].agentVersion);
+    } else {
+      setSelectedAgentVersion("");
+    }
+  }, [worker, agentVersions.length]);
 
   // Optional persona
   const [personality, setPersonality] = useState<string>("");
@@ -143,6 +167,7 @@ export function SubmitRun() {
         : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
+      ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
     });
   };
 
@@ -216,12 +241,16 @@ export function SubmitRun() {
                     value={maxIterations}
                     onChange={(e) => setMaxIterations(e.target.value)}
                   />
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Info className="h-3.5 w-3.5 shrink-0" />
+                    Maximum number of back and forth turns between the coding agent and simulated user.
+                  </p>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="criteria">
-                  Criteria{" "}
+                  Criteria *{" "}
                   {version === "v2" ? (
                     <span className="text-muted-foreground font-normal">(select from registry)</span>
                   ) : (
@@ -275,7 +304,7 @@ export function SubmitRun() {
               </div>
               {selectedAgent && selectedAgent.supportedModels.length > 0 && (
                 <div className="space-y-2">
-                  <Label htmlFor="model">Model</Label>
+                  <Label htmlFor="model">Model *</Label>
                   <Select value={model} onValueChange={setModel}>
                     <SelectTrigger id="model">
                       <SelectValue placeholder="Select model" />
@@ -284,6 +313,23 @@ export function SubmitRun() {
                       {selectedAgent.supportedModels.map((m) => (
                         <SelectItem key={m} value={m}>
                           {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {sortedVersions.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="agentVersion">Agent Version *</Label>
+                  <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion}>
+                    <SelectTrigger id="agentVersion">
+                      <SelectValue placeholder="Select version" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sortedVersions.map((v, i) => (
+                        <SelectItem key={v.agentVersion} value={v.agentVersion}>
+                          {v.agentVersion}{i === 0 ? " (latest)" : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -372,9 +418,9 @@ export function SubmitRun() {
           <Card>
             <CardHeader>
               <CardTitle>
-                Persona <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+                User Persona <span className="text-muted-foreground font-normal text-sm">(optional)</span>
               </CardTitle>
-              <CardDescription>Configure the judge persona for evaluation style</CardDescription>
+              <CardDescription>Configure the simulated user persona — defines how the simulated user will behave and formulate feedback to the coding agent</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-4">
@@ -435,7 +481,7 @@ export function SubmitRun() {
 
           {/* Continue */}
           <div className="flex justify-end">
-            <Button type="button" onClick={handleContinue} disabled={!task.trim()} className="gap-1.5">
+            <Button type="button" onClick={handleContinue} disabled={!task.trim() || (selectedAgent && selectedAgent.supportedModels.length > 0 && !model) || (version === "v2" ? pickedCriteria.length === 0 : !criteriaText.trim())} className="gap-1.5">
               Continue <ArrowRight className="h-4 w-4" /> <KbdBadge />
             </Button>
           </div>
@@ -456,6 +502,12 @@ export function SubmitRun() {
                 <span className="whitespace-pre-wrap">{task.trim()}</span>
                 <span className="text-muted-foreground">Worker</span>
                 <span className="font-mono">{worker}</span>
+                {selectedAgentVersion && (
+                  <>
+                    <span className="text-muted-foreground">Agent Version</span>
+                    <span className="font-mono">{selectedAgentVersion}</span>
+                  </>
+                )}
                 <span className="text-muted-foreground">Max iterations</span>
                 <span>{maxIterations}</span>
                 <span className="text-muted-foreground">Occurrences</span>

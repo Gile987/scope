@@ -150,6 +150,7 @@ services:
       LLM_MODEL: ${LLM_MODEL:-gpt-4.1}
       GIT_COMMIT: ${GIT_COMMIT:-development}
       BUILD_TIME: ${BUILD_TIME:-}
+      SCOPE_ENVIRONMENT: ${SCOPE_ENVIRONMENT:-}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -184,7 +185,7 @@ services:
         # Upsert agent: coder-acp-copilot
         curl -sf -X POST "$$API_URL/api/v1/agents" \
           -H "Content-Type: application/json" \
-          -d '{"_id":"coder-acp-copilot","name":"Copilot (ACP)","description":"GitHub Copilot coding agent via ACP protocol","supportedModels":[]}'
+          -d '{"_id":"coder-acp-copilot","name":"Copilot (ACP)","description":"GitHub Copilot coding agent via ACP protocol"}'
 
         # Register dev version: coder-acp-copilot
         curl -sf -X POST "$$API_URL/api/v1/agents/coder-acp-copilot/versions" \
@@ -194,7 +195,7 @@ services:
         # Upsert agent: coder-acp-claude-code
         curl -sf -X POST "$$API_URL/api/v1/agents" \
           -H "Content-Type: application/json" \
-          -d '{"_id":"coder-acp-claude-code","name":"Claude Code (ACP)","description":"Anthropic Claude Code coding agent via ACP protocol","supportedModels":[]}'
+          -d '{"_id":"coder-acp-claude-code","name":"Claude Code (ACP)","description":"Anthropic Claude Code coding agent via ACP protocol"}'
 
         # Register dev version: coder-acp-claude-code
         curl -sf -X POST "$$API_URL/api/v1/agents/coder-acp-claude-code/versions" \
