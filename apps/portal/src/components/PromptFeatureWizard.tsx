@@ -321,9 +321,9 @@ export function PromptFeatureWizard({
           </Card>
 
           <Card>
-            <CardContent className=\"pt-6 space-y-4\">
-              <div className=\"space-y-2\">
-                <Label className=\"text-xs text-muted-foreground uppercase tracking-wide font-semibold\">
+            <CardContent className="pt-6 space-y-4">
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
                   {generateMutation.isPending
                     ? "Generating detection prompt…"
                     : aiGenerated
