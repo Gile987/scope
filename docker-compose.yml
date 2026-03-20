@@ -150,6 +150,7 @@ services:
       LLM_MODEL: ${LLM_MODEL:-gpt-4.1}
       GIT_COMMIT: ${GIT_COMMIT:-development}
       BUILD_TIME: ${BUILD_TIME:-}
+      SCOPE_ENVIRONMENT: ${SCOPE_ENVIRONMENT:-}
     depends_on:
       mongodb:
         condition: service_healthy

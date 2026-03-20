@@ -63,6 +63,7 @@ const port = parseInt(process.env.PORT || "3000", 10);
 // Version information (injected at build time)
 const GIT_COMMIT = process.env.GIT_COMMIT || "development";
 const BUILD_TIME = process.env.BUILD_TIME || new Date().toISOString();
+const SCOPE_ENVIRONMENT = process.env.SCOPE_ENVIRONMENT || "production";
 
 // Valid worker types
 const VALID_WORKERS = ["coder-acp-claude-code", "coder-acp-copilot"] as const;
@@ -535,6 +536,7 @@ app.get("/about", (_req: Request, res: Response) => {
     name: "Multi-Worker API (MongoDB)",
     version: GIT_COMMIT,
     buildTime: BUILD_TIME,
+    environment: SCOPE_ENVIRONMENT,
     description: "API that routes requests to multiple workers via separate queues",
     workers: VALID_WORKERS,
   });
@@ -545,6 +547,7 @@ app.get("/api/v1/version", (_req: Request, res: Response) => {
   res.json({
     commit: GIT_COMMIT,
     buildTime: BUILD_TIME,
+    environment: SCOPE_ENVIRONMENT,
   });
 });
 

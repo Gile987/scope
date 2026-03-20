@@ -474,7 +474,7 @@ export const api = {
   // ─── Version ───────────────────────────────────────────────────────────────
 
   /** Get API version information (commit hash and build time) */
-  getVersion: (): Promise<{ commit: string; buildTime: string }> => {
+  getVersion: (): Promise<{ commit: string; buildTime: string; environment?: string }> => {
     return request("/version");
   },
 
