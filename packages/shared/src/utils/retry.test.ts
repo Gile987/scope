@@ -77,4 +77,19 @@ describe("withRetry", () => {
     expect(result).toBe("ok");
     expect(fn).toHaveBeenCalledTimes(2);
   });
+
+  it("calls onRetry with error and attempt number", async () => {
+    const cosmos429 = new Error("TooManyRequests (429)");
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(cosmos429)
+      .mockRejectedValueOnce(cosmos429)
+      .mockResolvedValue("ok");
+
+    const onRetry = vi.fn();
+    await withRetry(fn, { baseDelayMs: 1, maxDelayMs: 5, onRetry });
+
+    expect(onRetry).toHaveBeenCalledTimes(2);
+    expect(onRetry).toHaveBeenCalledWith(cosmos429, expect.any(Number));
+  });
 });

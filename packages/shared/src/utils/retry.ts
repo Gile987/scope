@@ -23,6 +23,8 @@ export interface RetryOptions {
   maxDelayMs?: number;
   /** Predicate to decide if an error is retryable. Defaults to isCosmosDb429. */
   isRetryable?: (error: unknown) => boolean;
+  /** Called before each retry attempt. Useful for logging. */
+  onRetry?: (error: unknown, attempt: number) => void;
 }
 
 const DEFAULT_MAX_RETRIES = 5;
@@ -58,6 +60,16 @@ export async function withRetry<T>(
       initialDelay: baseDelayMs,
       maxDelay: maxDelayMs,
     }),
+  });
+
+  policy.onRetry((evt) => {
+    const error = 'error' in evt ? evt.error : undefined;
+    if (options?.onRetry) {
+      options.onRetry(error, evt.attempt);
+    } else {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[withRetry] Attempt ${evt.attempt} failed, retrying: ${msg.substring(0, 200)}`);
+    }
   });
 
   return policy.execute(() => fn());
