@@ -17,6 +17,7 @@ import {
 } from "shared";
 import { createReportTools } from "./tools.js";
 import { REPORT_SYSTEM_PROMPT } from "./prompt.js";
+import { withRetry } from "shared";
 
 /** Default user prompt used when no report template is configured */
 const DEFAULT_USER_PROMPT = (requestId: string) =>
@@ -89,7 +90,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     };
 
     // Update status to "generating" and set reporter
-    await this.collection.updateOne(
+    await withRetry(() => this.collection.updateOne(
       { _id: reportId } as any,
       {
         $set: {
@@ -98,7 +99,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
           updatedAt: new Date(),
         },
       } as any
-    );
+    ));
 
     await log("info", `Reporter: ${reporter.agentId}@${reporter.agentVersion}, model: ${reporter.model}`);
 
@@ -158,7 +159,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       );
 
       // --- Persist report content ---
-      await this.collection.updateOne(
+      await withRetry(() => this.collection.updateOne(
         { _id: reportId } as any,
         {
           $set: {
@@ -167,7 +168,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
             updatedAt: new Date(),
           },
         } as any
-      );
+      ));
 
       await log("info", `Report completed (${content.length} chars)`, { final: true });
     } finally {
