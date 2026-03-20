@@ -6,6 +6,7 @@ import { QueueClient, DequeuedMessageItem } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { LogEvent, BaseQueueProcessorConfig } from "../types/types.js";
 import { LogPublisher } from "../logging/log-publisher.js";
+import { withRetry } from "../utils/retry.js";
 
 /**
  * Generic queue processor that polls an Azure Storage Queue and processes messages.
@@ -202,7 +203,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
             { final: true }
           );
 
-          await this.collection.updateOne(
+          await withRetry(() => this.collection.updateOne(
             { _id: documentId } as any,
             {
               $set: {
@@ -211,7 +212,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
                 updatedAt: new Date(),
               },
             } as any
-          );
+          ));
         } catch (updateError) {
           console.error(`[${this.workerName}] Failed to update document as failed:`, updateError);
         }
