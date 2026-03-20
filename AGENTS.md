@@ -1,12 +1,12 @@
-# Scope Core — Agents
+# Scope MT
 
-Custom agents for the Scope MT platform — an AI coding agent benchmarking system built as a pnpm workspaces monorepo.
+Scope MT is a platform for benchmarking AI coding agents. It orchestrates multiple coding agents (GitHub Copilot, Claude Code, VS Code Web), sends them standardized tasks through configurable scenarios and personas, evaluates results using a criteria DAG with the Judge service, and tracks everything with real-time logging.
 
-For full system context, see [docs/architecture/overview.md](docs/architecture/overview.md).
+Built as a **pnpm workspaces monorepo** with TypeScript. For full system context, see [docs/architecture/overview.md](docs/architecture/overview.md).
 
 ## api
 
-Backend API expert for the Express.js REST server that orchestrates runs, streams logs via SSE, manages criteria CRUD, and routes tasks to workers through Azure Storage Queues.
+The Express.js REST server that orchestrates runs, streams logs via SSE, manages criteria CRUD, and routes tasks to workers through Azure Storage Queues.
 
 ### Instructions
 
