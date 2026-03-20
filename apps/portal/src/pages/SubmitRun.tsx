@@ -418,9 +418,9 @@ export function SubmitRun() {
           <Card>
             <CardHeader>
               <CardTitle>
-                Persona <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+                User Persona <span className="text-muted-foreground font-normal text-sm">(optional)</span>
               </CardTitle>
-              <CardDescription>Configure the judge persona for evaluation style</CardDescription>
+              <CardDescription>Configure the simulated user persona — defines how the simulated user will behave and formulate feedback to the coding agent</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-4">
