@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Open Portal",
+      "type": "shell",
+      "command": "pnpm open:portal",
+      "presentation": {
+        "reveal": "silent",
+        "close": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}
