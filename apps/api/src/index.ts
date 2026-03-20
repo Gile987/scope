@@ -3501,15 +3501,16 @@ app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunctio
       res.status(400).json({ error: "name is required and must be a string" });
       return;
     }
-    if (!Array.isArray(supportedModels) || !supportedModels.every((m: unknown) => typeof m === "string")) {
-      res.status(400).json({ error: "supportedModels is required and must be an array of strings" });
+    // supportedModels is optional — if provided, must be a string array
+    if (supportedModels !== undefined && (!Array.isArray(supportedModels) || !supportedModels.every((m: unknown) => typeof m === "string"))) {
+      res.status(400).json({ error: "supportedModels must be an array of strings" });
       return;
     }
     if (defaultModel !== undefined && typeof defaultModel !== "string") {
       res.status(400).json({ error: "defaultModel must be a string" });
       return;
     }
-    if (defaultModel && supportedModels.length > 0 && !supportedModels.includes(defaultModel)) {
+    if (defaultModel && supportedModels && supportedModels.length > 0 && !supportedModels.includes(defaultModel)) {
       res.status(400).json({ error: "defaultModel must be one of supportedModels" });
       return;
     }
@@ -3519,13 +3520,15 @@ app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunctio
 
     if (existing) {
       // Upsert: update existing (un-delete if soft-deleted)
+      // Only update supportedModels if explicitly provided — prevents registration
+      // jobs from wiping models set by the scanner
       await agentCollection.updateOne(
         { _id },
         {
           $set: {
             name,
             ...(description !== undefined ? { description } : {}),
-            supportedModels,
+            ...(supportedModels !== undefined ? { supportedModels } : {}),
             ...(defaultModel !== undefined ? { defaultModel } : {}),
             updatedAt: now,
           },
@@ -3535,12 +3538,12 @@ app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunctio
       const updated = await agentCollection.findOne({ _id });
       res.json({ ...updated, id: updated!._id });
     } else {
-      // Create new
+      // Create new — default to empty supportedModels if not provided
       const agentDoc: CodingAgentDocument = {
         _id,
         name,
         ...(description ? { description } : {}),
-        supportedModels,
+        supportedModels: supportedModels ?? [],
         ...(defaultModel ? { defaultModel } : {}),
         createdAt: now,
       };
