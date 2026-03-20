@@ -61,7 +61,7 @@ export function CreateReportTemplate() {
       api.createReportTemplate(body),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["report-templates"] });
-      navigate(`/report-templates/${data.id}`);
+      navigate(`/reports/templates/${data.id}`);
     },
   });
 
@@ -98,7 +98,7 @@ export function CreateReportTemplate() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link to="/report-templates" className="text-muted-foreground hover:text-foreground">
+        <Link to="/reports/templates" className="text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-5 w-5" />
         </Link>
         <div>
@@ -250,7 +250,7 @@ export function CreateReportTemplate() {
               {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Create Template
             </Button>
-            <Link to="/report-templates">
+            <Link to="/reports/templates">
               <Button variant="ghost">Cancel</Button>
             </Link>
           </div>

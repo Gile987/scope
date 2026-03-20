@@ -27,6 +27,7 @@ import { AccountList } from "@/pages/AccountList";
 import { CreateAccount } from "@/pages/CreateAccount";
 import { AccountDetail } from "@/pages/AccountDetail";
 import { SecretsLayout } from "@/components/SecretsLayout";
+import { ReportsLayout } from "@/components/ReportsLayout";
 import { AgentList } from "@/pages/AgentList";
 import { AgentDetail } from "@/pages/AgentDetail";
 import { McpServerList } from "@/pages/McpServerList";
@@ -55,11 +56,16 @@ export function App() {
         <Route path="/runs" element={<RunsList />} />
         <Route path="/runs/new" element={<SubmitRun />} />
         <Route path="/runs/:id" element={<RunDetail />} />
-        <Route path="/reports" element={<ReportsList />} />
-        <Route path="/reports/:id" element={<ReportDetail />} />
-        <Route path="/report-templates" element={<ReportTemplateList />} />
-        <Route path="/report-templates/new" element={<CreateReportTemplate />} />
-        <Route path="/report-templates/:id" element={<ReportTemplateDetail />} />
+        <Route path="/reports" element={<ReportsLayout />}>
+          <Route index element={<ReportsList />} />
+          <Route path=":id" element={<ReportDetail />} />
+          <Route path="templates" element={<ReportTemplateList />} />
+          <Route path="templates/new" element={<CreateReportTemplate />} />
+          <Route path="templates/:id" element={<ReportTemplateDetail />} />
+        </Route>
+        {/* Redirect old /report-templates URLs */}
+        <Route path="/report-templates" element={<Navigate to="/reports/templates" replace />} />
+        <Route path="/report-templates/:id" element={<Navigate to="/reports/templates" replace />} />
         <Route path="/insights" element={<InsightsList />} />
         <Route path="/insights/:id" element={<InsightDetail />} />
         <Route path="/criteria" element={<CriteriaList />} />
