@@ -86,6 +86,7 @@ services:
       target: dev
     environment:
       VITE_API_PROXY_TARGET: http://api:80
+      GIT_BRANCH: ${GIT_BRANCH:-}
     develop:
       watch:
         - action: sync
