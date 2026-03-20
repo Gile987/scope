@@ -477,7 +477,7 @@ export function SubmitRun() {
 
           {/* Continue */}
           <div className="flex justify-end">
-            <Button type="button" onClick={handleContinue} disabled={!task.trim()} className="gap-1.5">
+            <Button type="button" onClick={handleContinue} disabled={!task.trim() || (selectedAgent && selectedAgent.supportedModels.length > 0 && !model)} className="gap-1.5">
               Continue <ArrowRight className="h-4 w-4" /> <KbdBadge />
             </Button>
           </div>

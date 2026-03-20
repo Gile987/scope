@@ -631,6 +631,13 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       if (!model && agentDoc.defaultModel) {
         model = agentDoc.defaultModel;
       }
+      if (!model) {
+        res.status(400).json({
+          error: `model is required for agent "${workerType}". Select one of supportedModels or set a defaultModel on the agent.`,
+          supportedModels: agentDoc.supportedModels,
+        });
+        return;
+      }
     }
 
     // Resolve agent version: explicit selection or latest active
