@@ -2,6 +2,14 @@
 
 The sophisticated criteria system can be configured via environment variables in docker-compose or .env files.
 
+## CLI Configuration
+
+### SCOPE_API_URL
+**Default:** `http://localhost:3100`
+**Type:** URL string
+
+Base URL of the Scope API used by all CLI commands. Override this to point the CLI at a remote or Docker-hosted API instance.
+
 ## LLM Configuration (Criteria Prompt Generation)
 
 ### GITHUB_MODELS_API_KEY
