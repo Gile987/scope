@@ -173,7 +173,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
 
       console.log(`[${this.workerName}] Processing document ${documentId}`);
 
-      const doc = await this.collection.findOne({ _id: documentId } as any);
+      const doc = await withRetry(() => this.collection.findOne({ _id: documentId } as any));
 
       if (!doc) {
         console.error(`[${this.workerName}] Document ${documentId} not found`);

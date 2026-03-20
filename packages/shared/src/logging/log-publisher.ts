@@ -7,6 +7,7 @@ const Redis = require("ioredis");
 import { Collection } from "mongodb";
 import { circuitBreaker, handleAll, ConsecutiveBreaker, CircuitState } from "cockatiel";
 import { LogEvent, RequestDocument } from "../types/types.js";
+import { withRetry } from "../utils/retry.js";
 
 export interface RedisConfig {
   redisHost: string;
@@ -92,15 +93,15 @@ export class LogPublisher {
       // Silently ignore - circuit breaker handles logging state changes
     }
 
-    // Append to MongoDB for persistence
+    // Append to MongoDB for persistence (retry on CosmosDB 429)
     try {
-      await this.collection.updateOne(
+      await withRetry(() => this.collection.updateOne(
         { _id: requestId },
         {
           $push: { logs: logEvent },
           $set: { updatedAt: new Date() },
         }
-      );
+      ));
     } catch (error) {
       console.error(`Failed to persist log to MongoDB: ${error}`);
     }
