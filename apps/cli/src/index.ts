@@ -66,7 +66,7 @@ function withOutputOption(cmd: Command, extra?: string[]): Command {
 
 program
   .name("scope-mt")
-  .description("Scope MT — AI coding agent benchmarking CLI")
+  .description("Scope — AI coding agent benchmarking CLI")
   .version("1.0.0")
   .action(() => {
     program.help();

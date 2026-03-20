@@ -135,7 +135,7 @@ The LLM model used by the report-generator worker (via the Copilot SDK) to gener
 **Default:** `http://localhost:3001` (local), `http://api:80` (Docker)
 **Type:** URL string
 
-Base URL of the Scope MT API. The report-generator worker calls this to fetch run data (summary, turns, criteria trajectory) via REST tools during report generation.
+Base URL of the Scope API. The report-generator worker calls this to fetch run data (summary, turns, criteria trajectory) via REST tools during report generation.
 
 ### SESSION_TIMEOUT_MS
 **Default:** `300000` (5 minutes)

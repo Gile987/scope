@@ -1,6 +1,6 @@
 # System Overview
 
-Scope MT is a platform for benchmarking AI coding agents. It orchestrates multiple coding agents (Claude Code, GitHub Copilot, VS Code Web), sends them tasks through configurable scenarios and personas, judges the quality of their output, and tracks everything with real-time logging.
+Scope is a platform for benchmarking AI coding agents. It orchestrates multiple coding agents (Claude Code, GitHub Copilot, VS Code Web), sends them tasks through configurable scenarios and personas, judges the quality of their output, and tracks everything with real-time logging.
 
 The entire stack — application code, Azure infrastructure, and Kubernetes GitOps manifests — lives in a single monorepo.
 

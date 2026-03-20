@@ -134,7 +134,7 @@ See [ENV_VARIABLES.md](ENV_VARIABLES.md) for a full reference of configurable en
 
 ## CLI
 
-The CLI is the primary interface for interacting with Scope MT. Show available commands with:
+The CLI is the primary interface for interacting with Scope. Show available commands with:
 
 ```bash
 pnpm cli --help

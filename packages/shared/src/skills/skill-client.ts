@@ -4,7 +4,7 @@
 import type { SkillConfig, SkillRevisionDocument } from '../types/skill.js';
 
 /**
- * Client for resolving skill revision refs via the Scope MT REST API.
+ * Client for resolving skill revision refs via the Scope REST API.
  *
  * Used by queue processors at message-processing time to resolve
  * skill revision refs stored on RequestDocuments into SkillConfig

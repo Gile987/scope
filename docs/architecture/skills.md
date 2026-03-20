@@ -2,7 +2,7 @@
 
 > **Status:** Current as of February 2026.
 
-Skills are reusable instruction packages that enhance coding agents with domain-specific knowledge. Scope MT integrates the [Agent Skills specification](https://agentskills.io/specification) to let benchmarks include skills alongside scenarios, personas, and MCP servers.
+Skills are reusable instruction packages that enhance coding agents with domain-specific knowledge. Scope integrates the [Agent Skills specification](https://agentskills.io/specification) to let benchmarks include skills alongside scenarios, personas, and MCP servers.
 
 ## Overview
 

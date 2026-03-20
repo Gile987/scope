@@ -2,11 +2,11 @@
 
 > **Status:** Seed document — expand as the application evolves.
 
-This document describes the internal design of the Scope MT application layer (`scope-mt-app/`).
+This document describes the internal design of the Scope application layer (`scope-mt-app/`).
 
 ## Package Architecture
 
-Scope MT uses a **pnpm workspaces** monorepo. Packages share types and utilities via the `shared` package.
+Scope uses a **pnpm workspaces** monorepo. Packages share types and utilities via the `shared` package.
 
 ```mermaid
 flowchart LR
