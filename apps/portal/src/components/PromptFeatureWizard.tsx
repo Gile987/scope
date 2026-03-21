@@ -10,9 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Stepper } from "@/components/Stepper";
-import { PromptFeaturePicker } from "@/components/PromptFeaturePicker";
 import type { PromptFeatureDocument } from "@/types";
 import {
   ArrowLeft,
@@ -71,17 +69,11 @@ export function PromptFeatureWizard({
   const [id, setId] = useState(initialId);
   const [idManuallyEdited, setIdManuallyEdited] = useState(!!initialId);
   const [idEditMode, setIdEditMode] = useState(false);
-  const [dependsOn, setDependsOn] = useState<string[]>([]);
 
   // Step 2 fields
   const [prompt, setPrompt] = useState(initialPrompt);
   const [aiGenerated, setAiGenerated] = useState(false);
   const [aiModel, setAiModel] = useState("");
-
-  // AI-suggested dependencies
-  const [suggestedParents, setSuggestedParents] = useState<string[]>([]);
-  const [suggestedChildren, setSuggestedChildren] = useState<string[]>([]);
-  const [acceptedChildren, setAcceptedChildren] = useState<string[]>([]);
 
   // ID validation
   const idValid = useMemo(() => /^[a-z][a-z0-9_]*$/.test(id), [id]);
@@ -108,46 +100,17 @@ export function PromptFeatureWizard({
       if (!idManuallyEdited && data.suggestedId) {
         setId(data.suggestedId);
       }
-      if (data.suggestedParents?.length) {
-        setSuggestedParents(data.suggestedParents);
-        setDependsOn((prev) => [...new Set([...prev, ...data.suggestedParents])]);
-      } else {
-        setSuggestedParents([]);
-      }
-      if (data.suggestedChildren?.length) {
-        setSuggestedChildren(data.suggestedChildren);
-        setAcceptedChildren(data.suggestedChildren);
-      } else {
-        setSuggestedChildren([]);
-        setAcceptedChildren([]);
-      }
     },
     onError: () => {
       setPrompt("");
       setAiGenerated(false);
-      setSuggestedParents([]);
-      setSuggestedChildren([]);
-      setAcceptedChildren([]);
     },
   });
 
   // Create prompt feature mutation
   const createMutation = useMutation({
     mutationFn: api.createPromptFeature,
-    onSuccess: async (data) => {
-      for (const childId of acceptedChildren) {
-        try {
-          const child = await api.getPromptFeature(childId);
-          const existingDeps = child.dependsOn ?? [];
-          if (!existingDeps.includes(data.id)) {
-            await api.updatePromptFeature(childId, {
-              dependsOn: [...existingDeps, data.id],
-            });
-          }
-        } catch {
-          console.warn(`Failed to update child feature ${childId}`);
-        }
-      }
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["prompt-features"] });
       onCreated?.(data);
     },
@@ -165,7 +128,6 @@ export function PromptFeatureWizard({
     createMutation.mutate({
       id: id.trim(),
       prompt: prompt.trim(),
-      dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
     });
   };
 
@@ -177,9 +139,6 @@ export function PromptFeatureWizard({
 
   // Regenerate prompt
   const handleRegenerate = () => {
-    setSuggestedParents([]);
-    setSuggestedChildren([]);
-    setAcceptedChildren([]);
     generateMutation.mutate(behavior.trim());
   };
 
@@ -357,32 +316,6 @@ export function PromptFeatureWizard({
                     {id}
                   </Badge>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6 space-y-5">
-              <div className="space-y-3">
-                <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
-                  Parents
-                </Label>
-                <PromptFeaturePicker selected={dependsOn} onChange={setDependsOn} aiSuggested={suggestedParents} />
-                <p className="text-xs text-muted-foreground">
-                  Features that must be detected before this one is evaluated
-                </p>
-              </div>
-
-              <Separator />
-
-              <div className="space-y-3">
-                <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
-                  Children
-                </Label>
-                <PromptFeaturePicker selected={acceptedChildren} onChange={setAcceptedChildren} aiSuggested={suggestedChildren} />
-                <p className="text-xs text-muted-foreground">
-                  These features will be updated to depend on <span className="font-mono">{id || "this feature"}</span> after creation
-                </p>
               </div>
             </CardContent>
           </Card>

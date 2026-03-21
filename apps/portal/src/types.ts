@@ -128,18 +128,12 @@ export interface GeneratePromptResponse {
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
-  dependsOn?: string[];
 }
 
 export interface PromptFeatureDocument extends PromptFeatureConfig {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
-}
-
-export interface PromptFeatureGraphData {
-  nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
-  edges: Array<{ source: string; target: string }>;
 }
 
 export interface PromptFeatureResult {

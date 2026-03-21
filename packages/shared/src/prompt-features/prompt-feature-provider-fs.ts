@@ -11,8 +11,6 @@ import { PromptFeatureProvider } from './prompt-feature-provider.js';
  * PromptFeatureProvider backed by YAML files on the filesystem.
  *
  * Loads all prompt features eagerly on construction and serves from an in-memory Map.
- * Reads YAML files from a directory, supporting both `depends_on` (snake_case)
- * and `dependsOn` (camelCase) formats.
  */
 export class FileSystemPromptFeatureProvider implements PromptFeatureProvider {
   private registry: Map<string, PromptFeatureConfig>;
@@ -49,15 +47,9 @@ export class FileSystemPromptFeatureProvider implements PromptFeatureProvider {
           throw new Error(`Missing or invalid 'prompt' field in ${file}`);
         }
 
-        const dependsOn = data.depends_on || data.dependsOn || [];
-        if (!Array.isArray(dependsOn)) {
-          throw new Error(`'depends_on'/'dependsOn' must be an array in ${file}`);
-        }
-
         const feature: PromptFeatureConfig = {
           id: data.id.trim(),
           prompt: data.prompt.trim(),
-          dependsOn: dependsOn.map((d: any) => String(d).trim()),
         };
 
         if (this.registry.has(feature.id)) {
@@ -81,35 +73,6 @@ export class FileSystemPromptFeatureProvider implements PromptFeatureProvider {
 
   async getAll(): Promise<PromptFeatureConfig[]> {
     return Array.from(this.registry.values());
-  }
-
-  async resolveWithAncestors(ids: string[]): Promise<PromptFeatureConfig[]> {
-    const collected = new Map<string, PromptFeatureConfig>();
-    const queue = [...ids];
-
-    while (queue.length > 0) {
-      const id = queue.shift()!;
-      if (collected.has(id)) continue;
-
-      const feature = this.registry.get(id);
-      if (!feature) {
-        const availableIds = Array.from(this.registry.keys()).join(', ');
-        throw new Error(
-          `Prompt feature '${id}' not found in registry. Available: ${availableIds || 'none'}`
-        );
-      }
-      collected.set(id, feature);
-
-      if (feature.dependsOn) {
-        for (const parentId of feature.dependsOn) {
-          if (!collected.has(parentId)) {
-            queue.push(parentId);
-          }
-        }
-      }
-    }
-
-    return Array.from(collected.values());
   }
 
   async has(id: string): Promise<boolean> {

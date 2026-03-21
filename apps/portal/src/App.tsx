@@ -14,7 +14,6 @@ import { Statistics } from "@/pages/Statistics";
 import { PromptFeatureList } from "@/pages/PromptFeatureList";
 import { PromptFeatureDetail } from "@/pages/PromptFeatureDetail";
 import { CreatePromptFeature } from "@/pages/CreatePromptFeature";
-import { PromptFeatureGraphView } from "@/pages/PromptFeatureGraphView";
 import { ReportsList } from "@/pages/ReportsList";
 import { ReportDetail } from "@/pages/ReportDetail";
 import { ReportTemplateList } from "@/pages/ReportTemplateList";
@@ -75,7 +74,6 @@ export function App() {
         <Route path="/criteria/:id" element={<CriterionDetail />} />
         <Route path="/prompt-features" element={<PromptFeatureList />} />
         <Route path="/prompt-features/new" element={<CreatePromptFeature />} />
-        <Route path="/prompt-features/graph" element={<PromptFeatureGraphView />} />
         <Route path="/prompt-features/:id" element={<PromptFeatureDetail />} />
         <Route path="/task-prompts" element={<TaskPromptList />} />
         <Route path="/task-prompts/:id" element={<TaskPromptDetail />} />

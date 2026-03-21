@@ -379,7 +379,6 @@ export interface TaskPromptDocument {
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
-  dependsOn?: string[];  // Optional parent prompt feature IDs
 }
 
 /** Prompt feature document stored in MongoDB (extends PromptFeatureConfig with DB metadata) */

@@ -14,9 +14,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, Eye, Search, GitBranch, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Eye, Search, RefreshCw } from "lucide-react";
 import { truncate } from "@/lib/utils";
 
 export function PromptFeatureList() {
@@ -39,14 +38,9 @@ export function PromptFeatureList() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Prompt Features</h1>
-          <p className="text-muted-foreground">Manage prompt feature detection and their dependencies</p>
+          <p className="text-muted-foreground">Manage prompt feature detection</p>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/prompt-features/graph">
-            <Button variant="outline" className="gap-1.5">
-              <GitBranch className="h-4 w-4" /> Graph
-            </Button>
-          </Link>
           <Link to="/prompt-features/new">
             <Button className="gap-1.5">
               <Plus className="h-4 w-4" /> New Feature
@@ -85,7 +79,6 @@ export function PromptFeatureList() {
               <TableRow>
                 <TableHead className="w-[200px]">ID</TableHead>
                 <TableHead>Prompt</TableHead>
-                <TableHead className="w-[200px]">Dependencies</TableHead>
                 <TableHead className="w-[100px]" />
               </TableRow>
             </TableHeader>
@@ -104,15 +97,6 @@ export function PromptFeatureList() {
                     {truncate(f.prompt, 100)}
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {(f.dependsOn ?? []).map((dep) => (
-                        <Badge key={dep} variant="secondary" className="text-xs font-mono">
-                          {dep}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell>
                     <div className="flex items-center gap-1 justify-end">
                       <Link to={`/prompt-features/${f.id}`}>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -129,7 +113,7 @@ export function PromptFeatureList() {
                           <AlertDialogHeader>
                             <AlertDialogTitle>Delete prompt feature?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              This will delete <strong>{f.id}</strong>. Features with dependents cannot be deleted.
+                              This will delete <strong>{f.id}</strong>. This action cannot be undone.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
