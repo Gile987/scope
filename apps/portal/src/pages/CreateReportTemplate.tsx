@@ -161,9 +161,6 @@ export function CreateReportTemplate() {
               rows={8}
               className="font-mono text-sm"
             />
-            <p className="text-xs text-muted-foreground">
-              The report agent already knows which run to analyse. Use {"{{requestId}}"} in the prompt to reference the run ID explicitly.
-            </p>
           </div>
 
           <Separator />
