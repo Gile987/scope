@@ -30,7 +30,7 @@ import {
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, resolveAgentVersion } from "shared";
-import { evaluateTrigger } from "shared";
+import { evaluateTrigger, REPORT_SYSTEM_PROMPT } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 
 const require = createRequire(import.meta.url);
@@ -3037,6 +3037,11 @@ app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, nex
 // ============================================================
 // Report Template CRUD routes (/api/v1/report-templates)
 // ============================================================
+
+// Get the default system prompt used when no template override is set
+app.get("/api/v1/report-templates/default-system-prompt", (_req: Request, res: Response) => {
+  res.json({ content: REPORT_SYSTEM_PROMPT });
+});
 
 // List all report templates
 app.get("/api/v1/report-templates", async (req: Request, res: Response, next: NextFunction) => {

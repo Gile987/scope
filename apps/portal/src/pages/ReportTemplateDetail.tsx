@@ -24,10 +24,38 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Save, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Save, Trash2, Loader2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { TaskPromptIdPicker } from "@/components/TaskPromptIdPicker";
+
+function DefaultSystemPromptViewer() {
+  const [open, setOpen] = useState(false);
+  const { data } = useQuery({
+    queryKey: ["default-system-prompt"],
+    queryFn: () => api.getDefaultSystemPrompt(),
+    enabled: open,
+    staleTime: Infinity,
+  });
+
+  return (
+    <div>
+      <button
+        type="button"
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen(!open)}
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        View default system prompt
+      </button>
+      {open && data && (
+        <pre className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted p-3 text-xs font-mono whitespace-pre-wrap">
+          {data.content}
+        </pre>
+      )}
+    </div>
+  );
+}
 
 function triggerSummary(trigger?: ReportTrigger): string {
   if (!trigger) return "always (no trigger configured)";
@@ -241,6 +269,7 @@ export function ReportTemplateDetail() {
               {editSysMode !== "none" && (
                 <Textarea value={editSysContent} onChange={(e) => setEditSysContent(e.target.value)} rows={4} className="font-mono text-sm" placeholder="System prompt content..." />
               )}
+              <DefaultSystemPromptViewer />
             </div>
             <Separator />
             <div className="space-y-2">
