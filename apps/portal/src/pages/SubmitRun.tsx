@@ -96,12 +96,6 @@ export function SubmitRun() {
     }
   }, [worker, agentVersions.length]);
 
-  // Optional persona
-  const [personality, setPersonality] = useState<string>("");
-  const [experience, setExperience] = useState<string>("");
-  const [verbosity, setVerbosity] = useState<string>("");
-  const [userType, setUserType] = useState<string>("");
-
   // Task prompt entity state (created on "Continue" to step 2)
   const [taskPromptId, setTaskPromptId] = useState<string | null>(null);
 
@@ -143,8 +137,6 @@ export function SubmitRun() {
             .map((c) => c.trim())
             .filter(Boolean);
 
-    const hasPersona = personality || experience || verbosity || userType;
-
     submitMutation.mutate({
       scenario: {
         task: task.trim(),
@@ -155,16 +147,6 @@ export function SubmitRun() {
       ...(model ? { model } : {}),
       maxIterations: parseInt(maxIterations, 10) || undefined,
       ...(occurrences > 1 ? { count: occurrences } : {}),
-      ...(hasPersona
-        ? {
-            persona: {
-              personality: personality || "friendly",
-              experience: experience || "senior",
-              verbosity: verbosity || "moderate",
-              type: userType || "traditional",
-            },
-          }
-        : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
@@ -411,69 +393,6 @@ export function SubmitRun() {
             </CardHeader>
             <CardContent>
               <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} />
-            </CardContent>
-          </Card>
-
-          {/* Persona (optional) */}
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                User Persona <span className="text-muted-foreground font-normal text-sm">(optional)</span>
-              </CardTitle>
-              <CardDescription>Configure the simulated user persona — defines how the simulated user will behave and formulate feedback to the coding agent</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Personality</Label>
-                  <Select value={personality} onValueChange={setPersonality}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="friendly">Friendly</SelectItem>
-                      <SelectItem value="demanding">Demanding</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Experience</Label>
-                  <Select value={experience} onValueChange={setExperience}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="junior">Junior</SelectItem>
-                      <SelectItem value="senior">Senior</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Verbosity</Label>
-                  <Select value={verbosity} onValueChange={setVerbosity}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="brief">Brief</SelectItem>
-                      <SelectItem value="moderate">Moderate</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>User Type</Label>
-                  <Select value={userType} onValueChange={setUserType}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="traditional">Traditional</SelectItem>
-                      <SelectItem value="ai_assisted">AI Assisted</SelectItem>
-                      <SelectItem value="vibe">Vibe Coder</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
             </CardContent>
           </Card>
 
