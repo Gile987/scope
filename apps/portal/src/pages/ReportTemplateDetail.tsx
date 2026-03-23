@@ -224,7 +224,7 @@ export function ReportTemplateDetail() {
             <div className="space-y-2">
               <Label htmlFor="userPrompt">User Prompt</Label>
               <Textarea id="userPrompt" value={editUserPrompt} onChange={(e) => setEditUserPrompt(e.target.value)} rows={12} className="font-mono text-sm" />
-              <p className="text-xs text-muted-foreground">Use {"{{requestId}}"} as a placeholder for the run ID. The user prompt takes precedence over the default report structure.</p>
+              <p className="text-xs text-muted-foreground">The report agent already knows which run to analyse. Use {"{{requestId}}"} in the prompt to reference the run ID explicitly.</p>
             </div>
             <Separator />
             <div className="space-y-2">

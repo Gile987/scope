@@ -160,10 +160,9 @@ export function CreateReportTemplate() {
               onChange={(e) => setUserPrompt(e.target.value)}
               rows={8}
               className="font-mono text-sm"
-              placeholder="Generate a report for run {{requestId}}..."
             />
             <p className="text-xs text-muted-foreground">
-              Use {"{{requestId}}"} as a placeholder for the run ID. The user prompt takes precedence over the default report structure.
+              The report agent already knows which run to analyse. Use {"{{requestId}}"} in the prompt to reference the run ID explicitly.
             </p>
           </div>
 
