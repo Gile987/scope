@@ -16,8 +16,7 @@ import {
   TokenManagerClient,
 } from "shared";
 import { createReportTools } from "./tools.js";
-import { REPORT_SYSTEM_PROMPT } from "./prompt.js";
-import { withRetry } from "shared";
+import { REPORT_SYSTEM_PROMPT, withRetry } from "shared";
 
 export interface ReportQueueProcessorConfig extends BaseQueueProcessorConfig {
   /** The LLM model to use for report generation, e.g. "gpt-4.1" */
