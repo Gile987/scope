@@ -4,6 +4,9 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { api } from "@/lib/api";
 
 import { Button } from "@/components/ui/button";
@@ -40,9 +43,9 @@ function DefaultSystemPromptViewer() {
         View default system prompt
       </button>
       {open && data && (
-        <pre className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted p-3 text-xs font-mono whitespace-pre-wrap">
-          {data.content}
-        </pre>
+        <div className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted p-3 prose prose-sm dark:prose-invert max-w-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{data.content}</ReactMarkdown>
+        </div>
       )}
     </div>
   );

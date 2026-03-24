@@ -49,9 +49,9 @@ function DefaultSystemPromptViewer() {
         View default system prompt
       </button>
       {open && data && (
-        <pre className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted p-3 text-xs font-mono whitespace-pre-wrap">
-          {data.content}
-        </pre>
+        <div className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted p-3 prose prose-sm dark:prose-invert max-w-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{data.content}</ReactMarkdown>
+        </div>
       )}
     </div>
   );
