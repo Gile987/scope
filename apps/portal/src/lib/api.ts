@@ -423,6 +423,11 @@ export const api = {
 
   // ─── Report Templates ─────────────────────────────────────────────────────
 
+  /** Get the default system prompt used when no template override is set */
+  getDefaultSystemPrompt: (): Promise<{ content: string }> => {
+    return request("/report-templates/default-system-prompt");
+  },
+
   /** List all report templates */
   listReportTemplates: (): Promise<ReportTemplate[]> => {
     return request("/report-templates");

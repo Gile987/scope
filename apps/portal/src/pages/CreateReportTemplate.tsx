@@ -3,7 +3,10 @@
 
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { api } from "@/lib/api";
 
 import { Button } from "@/components/ui/button";
@@ -15,10 +18,38 @@ import { Separator } from "@/components/ui/separator";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { TaskPromptIdPicker } from "@/components/TaskPromptIdPicker";
+
+function DefaultSystemPromptViewer() {
+  const [open, setOpen] = useState(false);
+  const { data } = useQuery({
+    queryKey: ["default-system-prompt"],
+    queryFn: () => api.getDefaultSystemPrompt(),
+    enabled: open,
+    staleTime: Infinity,
+  });
+
+  return (
+    <div>
+      <button
+        type="button"
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen(!open)}
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        View default system prompt
+      </button>
+      {open && data && (
+        <div className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted p-3 prose prose-sm dark:prose-invert max-w-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{data.content}</ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Convert a name to a slug */
 function slugify(text: string): string {
@@ -187,6 +218,7 @@ export function CreateReportTemplate() {
                 placeholder={sysMode === "append" ? "Additional system instructions..." : "Complete system prompt..."}
               />
             )}
+            <DefaultSystemPromptViewer />
           </div>
 
           <Separator />
