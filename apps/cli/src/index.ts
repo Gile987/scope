@@ -455,7 +455,7 @@ run
   .command("demo")
   .description("Run concurrent requests to all coders with a live TUI dashboard")
   .requiredOption("-m, --message <message>", "Message/prompt to send to all coders")
-  .option("-c, --count <count>", "Number of requests to send to each coder", "1")
+  .option("-c, --count <count>", "Number of requests to send to each coder", "5")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("-w, --workers <workers>", "Comma-separated list of workers", DEFAULT_WORKERS.join(","))
   .action((options) => {
