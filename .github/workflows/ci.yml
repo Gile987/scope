@@ -167,8 +167,24 @@ jobs:
       - name: Build shared packages
         run: pnpm --filter shared --filter github-auth build
 
+      - name: Pre-build Docker test images
+        run: |
+          docker build \
+            --build-arg VSCODE_VERSION=$VSCODE_VERSION \
+            --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
+            .
+          docker build \
+            --target dev \
+            --build-arg VSCODE_VERSION=$VSCODE_VERSION \
+            --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
+            .
+
       - name: Run integration tests
         run: npx vitest run --config vitest.integration.config.ts --silent=false --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+        env:
+          GH_AUTH_USERNAME: ${{ secrets.GH_AUTH_USERNAME }}
+          GH_AUTH_PASSWORD: ${{ secrets.GH_AUTH_PASSWORD }}
+          GH_AUTH_TOTP_SECRET: ${{ secrets.GH_AUTH_TOTP_SECRET }}
 
       - name: Generate GitHub test summary from CTRF
         if: always()
