@@ -38,7 +38,7 @@ export function SubmitRun() {
   const [worker, setWorker] = useState<string>("coder-acp-copilot");
   const [model, setModel] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<string>("10");
-  const [occurrences, setOccurrences] = useState<number>(1);
+  const [occurrences, setOccurrences] = useState<number>(5);
 
   // MCP servers
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
