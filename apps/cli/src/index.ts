@@ -391,6 +391,7 @@ run
   .description("List all requests")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
+  .option("--submission-id <id>", "Filter by submission ID")
   .option("--include-deleted", "Include soft-deleted runs")
 )
   .action(async (options) => {
@@ -400,6 +401,9 @@ run
       const params = new URLSearchParams();
       if (options.worker) {
         params.set("worker", options.worker);
+      }
+      if (options.submissionId) {
+        params.set("submissionId", options.submissionId);
       }
       if (options.includeDeleted) {
         params.set("includeDeleted", "true");
