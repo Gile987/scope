@@ -1046,7 +1046,8 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
       filter.taskPromptId = taskPromptIdFilter;
     }
     if (submissionIdFilter) {
-      filter.submissionId = submissionIdFilter;
+      // Prefix-based matching: allow filtering by partial submission ID
+      filter.submissionId = { $regex: `^${submissionIdFilter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` };
     }
     if (!includeDeleted) {
       filter.deletedAt = { $exists: false };
