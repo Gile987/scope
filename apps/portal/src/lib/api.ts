@@ -20,11 +20,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   /** List all runs, optionally filtered by worker, task prompt, and/or MDP criteria state */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string; criteria?: string }): Promise<Run[]> => {
+  listRuns: (opts?: { worker?: string; taskPromptId?: string; criteria?: string; submissionId?: string }): Promise<Run[]> => {
     const params = new URLSearchParams();
     if (opts?.worker) params.set("worker", opts.worker);
     if (opts?.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
     if (opts?.criteria) params.set("criteria", opts.criteria);
+    if (opts?.submissionId) params.set("submissionId", opts.submissionId);
     const qs = params.toString();
     return request(`/requests${qs ? `?${qs}` : ""}`);
   },
