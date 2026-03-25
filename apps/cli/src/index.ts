@@ -176,6 +176,7 @@ run
 
       const result = await response.json();
       console.log(`${successText('Request submitted:')} ${value(result.id)}`);
+      if (result.submissionId) console.log(`${label('Submission:')} ${value(result.submissionId)}`);
       console.log(`${label('Worker:')} ${value(result.workerType)}`);
       if (result.model) console.log(`${label('Model:')} ${value(result.model)}`);
       console.log(`${label('Mode:')} ${value(result.mode || 'one-shot')}`);
