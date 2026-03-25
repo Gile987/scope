@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent } from "./har-parser.js";
+import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent, extractTokenUsage } from "./har-parser.js";
 import type { HarFile, ToolCall } from "./types.js";
 
 // Mock fs/promises for parseHarFile tests
@@ -680,5 +680,112 @@ describe("extractThinkingContent", () => {
     ]);
     const thinking = extractThinkingContent(har);
     expect(thinking).toBe("");
+  });
+});
+
+describe("extractTokenUsage", () => {
+  it("returns undefined when no usage data is present", () => {
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          choices: [{ message: { role: "assistant", content: "hello" } }],
+        },
+      }),
+    ]);
+    expect(extractTokenUsage(har)).toBeUndefined();
+  });
+
+  it("extracts OpenAI-format token usage from non-streaming response", () => {
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          choices: [{ message: { role: "assistant", content: "done" } }],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+          },
+        },
+      }),
+    ]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+    });
+  });
+
+  it("sums token usage across multiple HAR entries", () => {
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          choices: [{ message: { role: "assistant", content: "first" } }],
+          usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+        },
+      }),
+      makeEntry({
+        responseBody: {
+          choices: [{ message: { role: "assistant", content: "second" } }],
+          usage: { prompt_tokens: 200, completion_tokens: 80, total_tokens: 280 },
+        },
+      }),
+    ]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 300,
+      completionTokens: 130,
+      totalTokens: 430,
+    });
+  });
+
+  it("extracts Anthropic-format token usage (input_tokens / output_tokens)", () => {
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          content: [{ type: "text", text: "hello" }],
+          usage: {
+            input_tokens: 200,
+            output_tokens: 75,
+          },
+        },
+      }),
+    ]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 200,
+      completionTokens: 75,
+      totalTokens: 275,
+    });
+  });
+
+  it("extracts token usage from SSE streaming response (final chunk)", () => {
+    const sseBody = [
+      'data: {"choices":[{"delta":{"content":"hi"}}]}',
+      'data: {"choices":[{"delta":{"content":" there"}}],"usage":{"prompt_tokens":50,"completion_tokens":20,"total_tokens":70}}',
+      "data: [DONE]",
+    ].join("\n");
+
+    const har = makeHar([
+      makeEntry({ responseBody: sseBody }),
+    ]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 50,
+      completionTokens: 20,
+      totalTokens: 70,
+    });
+  });
+
+  it("returns undefined for empty HAR", () => {
+    const har = makeHar([]);
+    expect(extractTokenUsage(har)).toBeUndefined();
+  });
+
+  it("ignores entries without response bodies", () => {
+    const har = makeHar([
+      makeEntry({}),
+    ]);
+    expect(extractTokenUsage(har)).toBeUndefined();
   });
 });

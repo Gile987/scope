@@ -8,6 +8,13 @@ import type { ToolCall } from '../har/types.js';
 // Re-export ToolCall so consumers can import from types
 export type { ToolCall } from '../har/types.js';
 
+/** LLM token usage counters for a single interaction */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 // Multi-turn conversation turn (one coding + judge iteration)
 export interface ConversationTurn {
   iteration: number;
@@ -19,6 +26,7 @@ export interface ConversationTurn {
   criteriaResults?: CriterionResult[];  // Per-criterion breakdown from DAG evaluation
   harUrl?: string;         // Blob storage URL to the HAR file for this turn
   videoUrls?: string[];    // Blob storage URLs to session recording videos for this turn
+  tokenUsage?: TokenUsage;  // LLM token usage for this iteration
 }
 
 // Multi-turn configuration constants
@@ -122,6 +130,7 @@ export interface RequestDocument {
   harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
   videoUrls?: string[];            // Blob storage URLs to session recording videos (one-shot)
   setupVideoUrls?: string[];       // Blob storage URLs to setup-phase videos (e.g. TOTP login recording)
+  tokenUsage?: TokenUsage;          // LLM token usage for the run (one-shot) or aggregate across turns
 }
 
 // Log event for real-time streaming and persistence
@@ -153,6 +162,8 @@ export interface WorkerResult {
   harFilePath?: string;
   /** Paths to session recording video files on disk (for upload to blob storage) */
   videoFilePaths?: string[];
+  /** LLM token usage extracted from HAR or reported by the agent */
+  tokenUsage?: TokenUsage;
 }
 
 /** Log function signature used by worker processors. */
