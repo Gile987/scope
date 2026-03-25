@@ -72,6 +72,14 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   {new Date(turn.timestamp).toLocaleString()}
+                  {turn.tokenUsage && (
+                    <span
+                      className="font-mono"
+                      title={`Prompt: ${turn.tokenUsage.promptTokens.toLocaleString()} · Completion: ${turn.tokenUsage.completionTokens.toLocaleString()}`}
+                    >
+                      {turn.tokenUsage.totalTokens.toLocaleString()} tokens
+                    </span>
+                  )}
                   {turn.snapshotUrl && (
                     <Button
                       variant="ghost"
