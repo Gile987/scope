@@ -26,6 +26,8 @@ import { KbdBadge } from "@/components/KbdBadge";
 
 const STEPS = ["Configure", "Review & Submit"];
 
+const enableV1CriteriaType = import.meta.env.VITE_ENABLE_V1_SINGLE_SHOT_CRITERIA === "true";
+
 export function SubmitRun() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
@@ -200,19 +202,21 @@ export function SubmitRun() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="version">Criteria Version</Label>
-                  <Select value={version} onValueChange={(v) => setVersion(v as "v1" | "v2")}>
-                    <SelectTrigger id="version">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="v1">v1 — free-text prompts</SelectItem>
-                      <SelectItem value="v2">v2 — criteria IDs</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className={enableV1CriteriaType ? "grid grid-cols-2 gap-4" : "grid grid-cols-1 gap-4"}>
+                {enableV1CriteriaType && (
+                  <div className="space-y-2">
+                    <Label htmlFor="version">Criteria Version</Label>
+                    <Select value={version} onValueChange={(v) => setVersion(v as "v1" | "v2")}>
+                      <SelectTrigger id="version">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="v1">v1 — free-text prompts</SelectItem>
+                        <SelectItem value="v2">v2 — criteria IDs</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="maxIterations">Max Iterations</Label>
                   <Input
