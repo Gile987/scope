@@ -768,6 +768,9 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
     const taskPrompt = await taskPromptStore.findOrCreate(scenario.task);
     const taskPromptId = taskPrompt._id;
 
+    // Generate a submission ID to group all runs from this request
+    const submissionId = uuidv4();
+
     // Handle multiple runs (count > 1)
     if (count > 1) {
       const newIds: string[] = [];
@@ -793,6 +796,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+          submissionId,
         };
         newDocs.push(requestDoc);
 
@@ -814,6 +818,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       res.status(201).json({
         ids: newIds,
         count,
+        submissionId,
         workerType,
         taskPromptId,
         ...(model ? { model } : {}),
@@ -846,6 +851,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+      submissionId,
     };
 
     // Store in MongoDB
@@ -860,6 +866,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
 
     res.status(201).json({
       id: requestId,
+      submissionId,
       workerType,
       ...(model ? { model } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
