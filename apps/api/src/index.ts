@@ -1162,6 +1162,7 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
     const foundIds = new Set(originalRuns.map(r => r._id));
     const notFound = ids.filter(id => !foundIds.has(id));
 
+    const submissionId = uuidv4();
     const newIds: string[] = [];
     const newDocs: RequestDocument[] = [];
     const queueMessages: Array<{ workerType: WorkerType; message: string }> = [];
@@ -1190,6 +1191,7 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(effectiveSkillRevisions && effectiveSkillRevisions.length > 0 ? { skillRevisions: effectiveSkillRevisions } : {}),
+          submissionId,
         };
 
         newDocs.push(newDoc);
@@ -1219,6 +1221,7 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
       submitted: newIds.length,
       failed: notFound,
       newIds,
+      submissionId,
     });
   } catch (error) {
     next(error);
