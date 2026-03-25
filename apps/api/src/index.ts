@@ -1398,8 +1398,29 @@ app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next
     const gzip = createGzip();
     pack.pipe(gzip).pipe(res);
 
-    // Entry 1: run.yaml — the full run document
-    const yamlContent = yamlStringify(resource, { lineWidth: 120 });
+    // Helper: extract blob name from a snapshots container URL
+    const blobNameFromUrl = (url: string): string | null => {
+      const parsed = new URL(url);
+      const prefix = "/snapshots/";
+      const idx = parsed.pathname.indexOf(prefix);
+      return idx === -1 ? null : parsed.pathname.substring(idx + prefix.length);
+    };
+
+    // Build a copy of the resource with harUrl fields rewritten to relative paths
+    const archiveResource = JSON.parse(JSON.stringify(resource));
+    if (archiveResource.harUrl) {
+      archiveResource.harUrl = "run.har";
+    }
+    if (archiveResource.turns) {
+      for (const turn of archiveResource.turns) {
+        if (turn.harUrl) {
+          turn.harUrl = `iteration-${turn.iteration}.har`;
+        }
+      }
+    }
+
+    // Entry 1: run.yaml — the full run document (with relative HAR paths)
+    const yamlContent = yamlStringify(archiveResource, { lineWidth: 120 });
     const yamlBuf = Buffer.from(yamlContent, "utf-8");
     pack.entry({ name: `${id}/run.yaml`, size: yamlBuf.length }, yamlBuf);
 
@@ -1408,12 +1429,9 @@ app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next
       if (!turn.snapshotUrl) continue;
 
       try {
-        const snapshotUrl = new URL(turn.snapshotUrl);
-        const containerPrefix = "/snapshots/";
-        const containerIndex = snapshotUrl.pathname.indexOf(containerPrefix);
-        if (containerIndex === -1) continue;
+        const blobName = blobNameFromUrl(turn.snapshotUrl);
+        if (!blobName) continue;
 
-        const blobName = snapshotUrl.pathname.substring(containerIndex + containerPrefix.length);
         const blobClient = containerClient.getBlockBlobClient(blobName);
         const downloadResponse = await blobClient.download();
 
@@ -1431,6 +1449,54 @@ app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next
           continue;
         }
         throw blobError;
+      }
+    }
+
+    // Bundle HAR files into the archive
+    // Per-turn HAR files
+    for (const turn of resource.turns) {
+      if (!turn.harUrl) continue;
+
+      try {
+        const blobName = blobNameFromUrl(turn.harUrl);
+        if (!blobName) continue;
+
+        const blobClient = containerClient.getBlockBlobClient(blobName);
+        const downloadResponse = await blobClient.download();
+        if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
+
+        const entry = pack.entry({
+          name: `${id}/iteration-${turn.iteration}.har`,
+          size: downloadResponse.contentLength,
+        });
+        await pipeline(downloadResponse.readableStreamBody, entry);
+      } catch (blobError) {
+        if (blobError instanceof RestError && (blobError.statusCode === 404 || blobError.code === "ContainerNotFound" || blobError.code === "BlobNotFound")) {
+          continue;
+        }
+        throw blobError;
+      }
+    }
+
+    // Top-level HAR file (one-shot runs)
+    if (resource.harUrl) {
+      try {
+        const blobName = blobNameFromUrl(resource.harUrl);
+        if (blobName) {
+          const blobClient = containerClient.getBlockBlobClient(blobName);
+          const downloadResponse = await blobClient.download();
+          if (downloadResponse.readableStreamBody && downloadResponse.contentLength) {
+            const entry = pack.entry({
+              name: `${id}/run.har`,
+              size: downloadResponse.contentLength,
+            });
+            await pipeline(downloadResponse.readableStreamBody, entry);
+          }
+        }
+      } catch (blobError) {
+        if (!(blobError instanceof RestError && (blobError.statusCode === 404 || blobError.code === "ContainerNotFound" || blobError.code === "BlobNotFound"))) {
+          throw blobError;
+        }
       }
     }
 
@@ -1807,6 +1873,37 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       }
     }
 
+    // Upload bundled HAR files to blob storage
+    const harFiles = readdirSync(runDir).filter(name => name.endsWith(".har"));
+    for (const harFile of harFiles) {
+      const harPath = join(runDir, harFile);
+      const iterHarMatch = harFile.match(/^iteration-(\d+)\.har$/);
+
+      if (iterHarMatch) {
+        // Per-turn HAR: iteration-N.har
+        const iterNum = parseInt(iterHarMatch[1], 10);
+        const blobName = `${runDoc._id}/iteration-${iterNum}/capture.har`;
+        const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+        await blockBlobClient.uploadFile(harPath, {
+          blobHTTPHeaders: { blobContentType: "application/json" },
+          tags: { requestId: runDoc._id, iteration: String(iterNum) },
+        });
+        const turn = turns.find(t => t.iteration === iterNum);
+        if (turn) {
+          turn.harUrl = blockBlobClient.url;
+        }
+      } else if (harFile === "run.har") {
+        // Top-level HAR (one-shot runs)
+        const blobName = `${runDoc._id}/capture.har`;
+        const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+        await blockBlobClient.uploadFile(harPath, {
+          blobHTTPHeaders: { blobContentType: "application/json" },
+          tags: { requestId: runDoc._id },
+        });
+        runDoc.harUrl = blockBlobClient.url;
+      }
+    }
+
     // Prepare document for insertion
     const docToInsert: RequestDocument = {
       _id: runDoc._id,
@@ -1826,6 +1923,7 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       ...(runDoc.persona ? { persona: runDoc.persona } : {}),
       ...(runDoc.logs && Array.isArray(runDoc.logs) ? { logs: runDoc.logs } : {}),
       ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv4() }),
+      ...(runDoc.harUrl ? { harUrl: runDoc.harUrl } : {}),
     };
 
     // Insert into MongoDB
