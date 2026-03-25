@@ -440,6 +440,9 @@ run
               return s === 'completed' ? successText(s) : s === 'failed' ? errorText(s) : value(s);
             },
           },
+          { key: 'submissionId', label: 'Submission',
+            formatter: (req: any) => req.submissionId ? req.submissionId.substring(0, 8) : '–',
+          },
         ];
 
         console.log(formatData(requests, displayFields, format));
