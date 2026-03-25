@@ -255,6 +255,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           result: workerResult.response,
           ...(harUrl && { harUrl }),
           ...(videoUrls && videoUrls.length > 0 && { videoUrls }),
+          ...(workerResult.tokenUsage && { tokenUsage: workerResult.tokenUsage }),
           updatedAt: new Date(),
         },
       }
