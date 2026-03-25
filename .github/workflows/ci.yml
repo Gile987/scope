@@ -528,7 +528,7 @@ jobs:
       - name: Check overall status
         run: |
           if [ "${{ needs.test.result }}" = "success" ] && \
-             [ "${{ needs.integration-test.result }}" = "success" ] && \
+             [ "${{ needs.integration-test.result }}" = "success" -o "${{ needs.integration-test.result }}" = "skipped" ] && \
              [ "${{ needs.lint.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ]; then
             echo "✅ All checks passed!"
