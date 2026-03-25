@@ -71,7 +71,7 @@ export function useAllTurnsToolCalls(
       for (const t of turns) {
         if (t.toolCalls && t.toolCalls.length > 0) {
           for (const tc of t.toolCalls) {
-            out.push({ ...tc, _iteration: t.iteration });
+            out.push({ ...tc, timestamp: tc.timestamp ?? "", _iteration: t.iteration });
           }
         }
       }
