@@ -191,8 +191,8 @@ export function RunDetail() {
               {totalTokenUsage && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
-                  <span title={`Prompt: ${totalTokenUsage.promptTokens.toLocaleString()} · Completion: ${totalTokenUsage.completionTokens.toLocaleString()}`}>
-                    {totalTokenUsage.totalTokens.toLocaleString()} tokens
+                  <span className="font-mono text-xs">
+                    {totalTokenUsage.promptTokens.toLocaleString()}↑ · {totalTokenUsage.completionTokens.toLocaleString()}↓
                   </span>
                 </>
               )}
