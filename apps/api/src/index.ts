@@ -29,6 +29,7 @@ import {
 } from "./prompt-feature-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
+import { blobNameFromSnapshotsUrl, rewriteHarUrlsForArchive, detectBundledHarFiles, uploadBundledHarFiles } from "./archive-har.js";
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, resolveAgentVersion } from "shared";
 import { evaluateTrigger, REPORT_SYSTEM_PROMPT } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
@@ -1398,8 +1399,11 @@ app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next
     const gzip = createGzip();
     pack.pipe(gzip).pipe(res);
 
-    // Entry 1: run.yaml — the full run document
-    const yamlContent = yamlStringify(resource, { lineWidth: 120 });
+    // Build a copy of the resource with harUrl fields rewritten to relative paths
+    const archiveResource = rewriteHarUrlsForArchive(resource);
+
+    // Entry 1: run.yaml — the full run document (with relative HAR paths)
+    const yamlContent = yamlStringify(archiveResource, { lineWidth: 120 });
     const yamlBuf = Buffer.from(yamlContent, "utf-8");
     pack.entry({ name: `${id}/run.yaml`, size: yamlBuf.length }, yamlBuf);
 
@@ -1408,12 +1412,9 @@ app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next
       if (!turn.snapshotUrl) continue;
 
       try {
-        const snapshotUrl = new URL(turn.snapshotUrl);
-        const containerPrefix = "/snapshots/";
-        const containerIndex = snapshotUrl.pathname.indexOf(containerPrefix);
-        if (containerIndex === -1) continue;
+        const blobName = blobNameFromSnapshotsUrl(turn.snapshotUrl);
+        if (!blobName) continue;
 
-        const blobName = snapshotUrl.pathname.substring(containerIndex + containerPrefix.length);
         const blobClient = containerClient.getBlockBlobClient(blobName);
         const downloadResponse = await blobClient.download();
 
@@ -1427,6 +1428,32 @@ app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next
         await pipeline(downloadResponse.readableStreamBody, entry);
       } catch (blobError) {
         // Skip snapshots that fail to download (e.g. deleted blobs)
+        if (blobError instanceof RestError && (blobError.statusCode === 404 || blobError.code === "ContainerNotFound" || blobError.code === "BlobNotFound")) {
+          continue;
+        }
+        throw blobError;
+      }
+    }
+
+    // Bundle HAR files into the archive
+    const harEntries: Array<{ url: string; entryName: string }> = [];
+    for (const turn of resource.turns) {
+      if (turn.harUrl) harEntries.push({ url: turn.harUrl, entryName: `${id}/iteration-${turn.iteration}.har` });
+    }
+    if (resource.harUrl) harEntries.push({ url: resource.harUrl, entryName: `${id}/run.har` });
+
+    for (const { url, entryName } of harEntries) {
+      try {
+        const blobName = blobNameFromSnapshotsUrl(url);
+        if (!blobName) continue;
+
+        const blobClient = containerClient.getBlockBlobClient(blobName);
+        const downloadResponse = await blobClient.download();
+        if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
+
+        const entry = pack.entry({ name: entryName, size: downloadResponse.contentLength });
+        await pipeline(downloadResponse.readableStreamBody, entry);
+      } catch (blobError) {
         if (blobError instanceof RestError && (blobError.statusCode === 404 || blobError.code === "ContainerNotFound" || blobError.code === "BlobNotFound")) {
           continue;
         }
@@ -1807,6 +1834,19 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       }
     }
 
+    // Upload bundled HAR files to blob storage
+    const detectedHarFiles = detectBundledHarFiles(readdirSync(runDir));
+    const topLevelHarUrl = await uploadBundledHarFiles({
+      harFiles: detectedHarFiles,
+      runDir,
+      runId: runDoc._id,
+      turns,
+      containerClient,
+    });
+    if (topLevelHarUrl) {
+      runDoc.harUrl = topLevelHarUrl;
+    }
+
     // Prepare document for insertion
     const docToInsert: RequestDocument = {
       _id: runDoc._id,
@@ -1826,6 +1866,7 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       ...(runDoc.persona ? { persona: runDoc.persona } : {}),
       ...(runDoc.logs && Array.isArray(runDoc.logs) ? { logs: runDoc.logs } : {}),
       ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv4() }),
+      ...(runDoc.harUrl ? { harUrl: runDoc.harUrl } : {}),
     };
 
     // Insert into MongoDB
