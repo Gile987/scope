@@ -137,6 +137,10 @@ jobs:
 
   integration-test:
     name: Integration Tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
 
     strategy:
@@ -351,21 +355,28 @@ jobs:
   build-images:
     name: "Build image: ${{ matrix.image.name }}"
     if: >-
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.images != '') ||
-      ((github.event_name == 'push' || github.event_name == 'pull_request') && (
-        needs.detect-changes.outputs.api == 'true' ||
-        needs.detect-changes.outputs.judge == 'true' ||
-        needs.detect-changes.outputs.portal == 'true' ||
-        needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
-        needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
-        needs.detect-changes.outputs.token-manager == 'true' ||
-        needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
-        needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
-        needs.detect-changes.outputs.report-generator == 'true' ||
-        needs.detect-changes.outputs.db-migrations == 'true' ||
-        needs.detect-changes.outputs.shared == 'true' ||
-        needs.detect-changes.outputs.model-scanning == 'true'
-      ))
+      always() &&
+      !cancelled() &&
+      needs.test.result == 'success' &&
+      needs.build.result == 'success' &&
+      (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped') &&
+      (
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.images != '') ||
+        ((github.event_name == 'push' || github.event_name == 'pull_request') && (
+          needs.detect-changes.outputs.api == 'true' ||
+          needs.detect-changes.outputs.judge == 'true' ||
+          needs.detect-changes.outputs.portal == 'true' ||
+          needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
+          needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
+          needs.detect-changes.outputs.token-manager == 'true' ||
+          needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
+          needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
+          needs.detect-changes.outputs.report-generator == 'true' ||
+          needs.detect-changes.outputs.db-migrations == 'true' ||
+          needs.detect-changes.outputs.shared == 'true' ||
+          needs.detect-changes.outputs.model-scanning == 'true'
+        ))
+      )
     needs: [test, integration-test, build, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
