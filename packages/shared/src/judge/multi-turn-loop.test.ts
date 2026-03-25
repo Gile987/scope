@@ -13,9 +13,13 @@ vi.mock("../storage/blob-storage.js", () => ({
   })),
 }));
 
-// Mock HAR sanitizer
+// Mock HAR sanitizer — return a HarFile so extractToolCalls can process it.
+// extractToolCalls is NOT mocked — it uses the real implementation.
+const mockSanitizeHarFile = vi.fn();
+const mockExtractToolCalls = vi.fn().mockReturnValue([]);
 vi.mock("../har/har-parser.js", () => ({
-  sanitizeHarFile: vi.fn().mockResolvedValue(undefined),
+  sanitizeHarFile: (...args: unknown[]) => mockSanitizeHarFile(...args),
+  extractToolCalls: (...args: unknown[]) => mockExtractToolCalls(...args),
 }));
 
 // Mock JudgeClient
@@ -40,6 +44,8 @@ describe("runMultiTurnLoop — video upload", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUploadFile.mockReset();
+    mockSanitizeHarFile.mockReset().mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
+    mockExtractToolCalls.mockReset().mockReturnValue([]);
   });
 
   it("uploads video files and includes videoUrls in turn when worker returns videoFilePaths", async () => {
@@ -131,6 +137,8 @@ describe("runMultiTurnLoop — lifecycle hooks", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSanitizeHarFile.mockReset().mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
+    mockExtractToolCalls.mockReset().mockReturnValue([]);
   });
 
   function makeConfig(processor: any, overrides: Record<string, unknown> = {}) {
@@ -221,5 +229,105 @@ describe("runMultiTurnLoop — lifecycle hooks", () => {
     expect(processor.setup).toHaveBeenCalledTimes(1);
     expect(processor.teardown).toHaveBeenCalledTimes(1);
     expect(processor.processMessage).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("runMultiTurnLoop — tool call extraction", () => {
+  const mockLog = vi.fn().mockResolvedValue(undefined);
+  const mockOnTurnComplete = vi.fn().mockResolvedValue(undefined);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSanitizeHarFile.mockReset();
+    mockExtractToolCalls.mockReset();
+  });
+
+  function makeConfig(overrides: Record<string, unknown> = {}) {
+    return {
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi.fn(),
+      },
+      task: "Do something",
+      criteria: ["check"],
+      maxIterations: 1,
+      workspacePath: "/workspace",
+      judgeClient: { evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "OK" }) } as any,
+      blobStorage: {
+        uploadFile: vi.fn().mockResolvedValue("https://blob/har"),
+        uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
+      } as any,
+      requestId: "req1",
+      log: mockLog,
+      onTurnComplete: mockOnTurnComplete,
+      ...overrides,
+    };
+  }
+
+  it("extracts tool calls from HAR and stores them on the turn", async () => {
+    const harFile = { log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } };
+    mockSanitizeHarFile.mockResolvedValue(harFile);
+
+    const expectedToolCalls = [
+      { id: "tc_1", name: "read_file", arguments: { path: "/foo.ts" }, timestamp: "2026-03-25T14:00:00Z" },
+      { id: "tc_2", name: "write_file", arguments: { path: "/bar.ts" }, timestamp: "2026-03-25T14:01:00Z" },
+    ];
+    mockExtractToolCalls.mockReturnValue(expectedToolCalls);
+
+    const config = makeConfig();
+    (config.processor as any).processMessage.mockResolvedValue({
+      response: "done",
+      harFilePath: "/tmp/devproxy.har",
+    } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(true);
+    expect(result.turns[0].toolCalls).toEqual(expectedToolCalls);
+    expect(mockExtractToolCalls).toHaveBeenCalledWith(harFile);
+  });
+
+  it("does not include toolCalls when no HAR file is available", async () => {
+    const config = makeConfig();
+    (config.processor as any).processMessage.mockResolvedValue({
+      response: "done",
+    } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.turns[0].toolCalls).toBeUndefined();
+    expect(mockExtractToolCalls).not.toHaveBeenCalled();
+  });
+
+  it("does not include toolCalls when extraction returns empty array", async () => {
+    mockSanitizeHarFile.mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
+    mockExtractToolCalls.mockReturnValue([]);
+
+    const config = makeConfig();
+    (config.processor as any).processMessage.mockResolvedValue({
+      response: "done",
+      harFilePath: "/tmp/devproxy.har",
+    } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.turns[0].toolCalls).toBeUndefined();
+  });
+
+  it("logs warning but continues when tool call extraction fails", async () => {
+    mockSanitizeHarFile.mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
+    mockExtractToolCalls.mockImplementation(() => { throw new Error("parse error"); });
+
+    const config = makeConfig();
+    (config.processor as any).processMessage.mockResolvedValue({
+      response: "done",
+      harFilePath: "/tmp/devproxy.har",
+    } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(true);
+    expect(result.turns[0].toolCalls).toBeUndefined();
+    expect(mockLog).toHaveBeenCalledWith("warn", expect.stringContaining("Failed to extract tool calls"), expect.anything());
   });
 });

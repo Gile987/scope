@@ -64,7 +64,22 @@ export function useAllTurnsToolCalls(
   turns?: ConversationTurn[],
   topLevelHarUrl?: string,
 ): { allToolCalls: AggregatedToolCall[]; isLoading: boolean } {
-  // Build query descriptors: one per turn with harUrl + optional top-level (one-shot)
+  // Turns that already have pre-computed toolCalls don't need HAR fetching
+  const preComputed = useMemo(() => {
+    const out: AggregatedToolCall[] = [];
+    if (turns) {
+      for (const t of turns) {
+        if (t.toolCalls && t.toolCalls.length > 0) {
+          for (const tc of t.toolCalls) {
+            out.push({ ...tc, _iteration: t.iteration });
+          }
+        }
+      }
+    }
+    return out;
+  }, [turns]);
+
+  // Build query descriptors only for turns that need HAR extraction
   const queries = useMemo(() => {
     const q: { iteration: number | undefined; enabled: boolean }[] = [];
 
@@ -73,10 +88,10 @@ export function useAllTurnsToolCalls(
       q.push({ iteration: undefined, enabled: true });
     }
 
-    // Multi-turn: one query per turn with harUrl
+    // Multi-turn: one query per turn with harUrl but WITHOUT pre-computed toolCalls
     if (turns) {
       for (const t of turns) {
-        if (t.harUrl) {
+        if (t.harUrl && !(t.toolCalls && t.toolCalls.length > 0)) {
           q.push({ iteration: t.iteration, enabled: true });
         }
       }
@@ -100,7 +115,7 @@ export function useAllTurnsToolCalls(
   });
 
   const allToolCalls = useMemo(() => {
-    const out: AggregatedToolCall[] = [];
+    const out: AggregatedToolCall[] = [...preComputed];
     for (let i = 0; i < results.length; i++) {
       const har = results[i].data;
       if (!har) continue;
@@ -114,7 +129,7 @@ export function useAllTurnsToolCalls(
       }
     }
     return out;
-  }, [results, queries]);
+  }, [preComputed, results, queries]);
 
   const isLoading = results.some((r) => r.isLoading);
 

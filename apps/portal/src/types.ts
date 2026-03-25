@@ -37,6 +37,7 @@ export interface ConversationTurn {
   harUrl?: string;
   videoUrls?: string[];
   tokenUsage?: TokenUsage;
+  toolCalls?: ToolCall[];
 }
 
 export interface Scenario {
