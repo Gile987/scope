@@ -236,6 +236,7 @@ interface RequestDocument {
   setupVideoUrls?: string[];
   agentVersion?: string;          // Agent software version prefix (FK → AgentVersion.agentVersion)
   workerVersion?: string;          // Exact build that processed this run
+  submissionId?: string;           // Groups runs submitted together (UUID v4)
 }
 
 // Agent version entry — embedded in CodingAgentDocument.versions[]
@@ -767,6 +768,9 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
     const taskPrompt = await taskPromptStore.findOrCreate(scenario.task);
     const taskPromptId = taskPrompt._id;
 
+    // Generate a submission ID to group all runs from this request
+    const submissionId = uuidv4();
+
     // Handle multiple runs (count > 1)
     if (count > 1) {
       const newIds: string[] = [];
@@ -792,6 +796,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+          submissionId,
         };
         newDocs.push(requestDoc);
 
@@ -813,6 +818,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       res.status(201).json({
         ids: newIds,
         count,
+        submissionId,
         workerType,
         taskPromptId,
         ...(model ? { model } : {}),
@@ -845,6 +851,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+      submissionId,
     };
 
     // Store in MongoDB
@@ -859,6 +866,7 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
 
     res.status(201).json({
       id: requestId,
+      submissionId,
       workerType,
       ...(model ? { model } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
@@ -1027,6 +1035,7 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
     const workerFilter = req.query.worker as string;
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
+    const submissionIdFilter = req.query.submissionId as string;
     const includeDeleted = req.query.includeDeleted === "true";
     
     const filter: Record<string, unknown> = {};
@@ -1035,6 +1044,10 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
     }
     if (taskPromptIdFilter) {
       filter.taskPromptId = taskPromptIdFilter;
+    }
+    if (submissionIdFilter) {
+      // Prefix-based matching: allow filtering by partial submission ID
+      filter.submissionId = { $regex: `^${submissionIdFilter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` };
     }
     if (!includeDeleted) {
       filter.deletedAt = { $exists: false };
@@ -1154,6 +1167,7 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
     const foundIds = new Set(originalRuns.map(r => r._id));
     const notFound = ids.filter(id => !foundIds.has(id));
 
+    const submissionId = uuidv4();
     const newIds: string[] = [];
     const newDocs: RequestDocument[] = [];
     const queueMessages: Array<{ workerType: WorkerType; message: string }> = [];
@@ -1182,6 +1196,7 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(effectiveSkillRevisions && effectiveSkillRevisions.length > 0 ? { skillRevisions: effectiveSkillRevisions } : {}),
+          submissionId,
         };
 
         newDocs.push(newDoc);
@@ -1211,6 +1226,7 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
       submitted: newIds.length,
       failed: notFound,
       newIds,
+      submissionId,
     });
   } catch (error) {
     next(error);
@@ -1809,6 +1825,7 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
       ...(runDoc.persona ? { persona: runDoc.persona } : {}),
       ...(runDoc.logs && Array.isArray(runDoc.logs) ? { logs: runDoc.logs } : {}),
+      ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv4() }),
     };
 
     // Insert into MongoDB

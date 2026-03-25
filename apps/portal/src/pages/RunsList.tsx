@@ -29,6 +29,7 @@ export function RunsList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const taskPromptId = searchParams.get("taskPromptId") ?? undefined;
   const criteriaState = searchParams.get("criteria") ?? undefined;
+  const submissionId = searchParams.get("submissionId") ?? undefined;
   const [workerFilter, setWorkerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [taskFilter, setTaskFilter] = useState("all");
@@ -39,11 +40,12 @@ export function RunsList() {
   const queryClient = useQueryClient();
 
   const { data: runs = [], isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, taskPromptId, criteriaState],
+    queryKey: ["runs", workerFilter, taskPromptId, criteriaState, submissionId],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId,
       criteria: criteriaState,
+      submissionId,
     }),
     refetchInterval: 10_000,
   });
@@ -316,6 +318,28 @@ export function RunsList() {
             onClick={() => {
               const next = new URLSearchParams(searchParams);
               next.delete("taskPromptId");
+              setSearchParams(next);
+            }}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
+
+      {/* Submission ID filter indicator */}
+      {submissionId && (
+        <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2">
+          <span className="text-sm text-muted-foreground">Filtered by submission:</span>
+          <Badge variant="secondary" className="font-mono text-xs">
+            {formatId(submissionId)}
+          </Badge>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("submissionId");
               setSearchParams(next);
             }}
           >
@@ -695,6 +719,7 @@ export function RunsList() {
                 />
               </TableHead>
               <TableHead className="w-[100px]">ID</TableHead>
+              <TableHead className="w-[100px]">Submission</TableHead>
               <TableHead>Task</TableHead>
               <TableHead className="w-[180px]">Worker</TableHead>
               <TableHead>Version</TableHead>
@@ -721,6 +746,19 @@ export function RunsList() {
                   <Link to={`/runs/${run._id}`} className="text-primary hover:underline">
                     {formatId(run._id)}
                   </Link>
+                </TableCell>
+                <TableCell className="font-mono text-xs">
+                  {run.submissionId ? (
+                    <Link
+                      to={`/runs?submissionId=${run.submissionId}`}
+                      className="text-primary hover:underline"
+                      title={run.submissionId}
+                    >
+                      {formatId(run.submissionId)}
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground">–</span>
+                  )}
                 </TableCell>
                 <TableCell className="max-w-[300px]">
                   <span title={run.scenario?.task ?? "–"}>{truncate(run.scenario?.task ?? "–", 60)}</span>

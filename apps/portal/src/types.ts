@@ -81,6 +81,7 @@ export interface Run {
   harUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
+  submissionId?: string;
 }
 
 export const WORKER_TYPES = [

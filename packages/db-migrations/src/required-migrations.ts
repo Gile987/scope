@@ -16,4 +16,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "001-backfill-task-prompts.ts",
   "002-create-indexes.ts",
   "003-create-skill-indexes.ts",
+  "004-add-submission-id-index.ts",
 ];

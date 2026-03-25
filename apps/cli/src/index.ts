@@ -176,6 +176,7 @@ run
 
       const result = await response.json();
       console.log(`${successText('Request submitted:')} ${value(result.id)}`);
+      if (result.submissionId) console.log(`${label('Submission:')} ${value(result.submissionId)}`);
       console.log(`${label('Worker:')} ${value(result.workerType)}`);
       if (result.model) console.log(`${label('Model:')} ${value(result.model)}`);
       console.log(`${label('Mode:')} ${value(result.mode || 'one-shot')}`);
@@ -390,6 +391,7 @@ run
   .description("List all requests")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
+  .option("--submission-id <id>", "Filter by submission ID")
   .option("--include-deleted", "Include soft-deleted runs")
 )
   .action(async (options) => {
@@ -399,6 +401,9 @@ run
       const params = new URLSearchParams();
       if (options.worker) {
         params.set("worker", options.worker);
+      }
+      if (options.submissionId) {
+        params.set("submissionId", options.submissionId);
       }
       if (options.includeDeleted) {
         params.set("includeDeleted", "true");
@@ -438,6 +443,9 @@ run
               const s = req.status ?? 'unknown';
               return s === 'completed' ? successText(s) : s === 'failed' ? errorText(s) : value(s);
             },
+          },
+          { key: 'submissionId', label: 'Submission',
+            formatter: (req: any) => req.submissionId ? req.submissionId.substring(0, 8) : '–',
           },
         ];
 

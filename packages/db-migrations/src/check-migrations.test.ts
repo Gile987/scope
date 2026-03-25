@@ -34,6 +34,7 @@ describe("checkMigrations", () => {
       "001-backfill-task-prompts.ts",
       "002-create-indexes.ts",
       "003-create-skill-indexes.ts",
+      "004-add-submission-id-index.ts",
     ]);
     const result = await checkMigrations(db);
     expect(result.ready).toBe(true);
@@ -42,6 +43,7 @@ describe("checkMigrations", () => {
       "001-backfill-task-prompts.ts",
       "002-create-indexes.ts",
       "003-create-skill-indexes.ts",
+      "004-add-submission-id-index.ts",
     ]);
   });
 
@@ -49,7 +51,7 @@ describe("checkMigrations", () => {
     const db = makeMockDb(["001-backfill-task-prompts.ts"]);
     const result = await checkMigrations(db);
     expect(result.ready).toBe(false);
-    expect(result.pending).toEqual(["002-create-indexes.ts", "003-create-skill-indexes.ts"]);
+    expect(result.pending).toEqual(["002-create-indexes.ts", "003-create-skill-indexes.ts", "004-add-submission-id-index.ts"]);
     expect(result.applied).toEqual(["001-backfill-task-prompts.ts"]);
   });
 
@@ -61,6 +63,7 @@ describe("checkMigrations", () => {
       "001-backfill-task-prompts.ts",
       "002-create-indexes.ts",
       "003-create-skill-indexes.ts",
+      "004-add-submission-id-index.ts",
     ]);
     expect(result.applied).toEqual([]);
   });
@@ -70,6 +73,7 @@ describe("checkMigrations", () => {
       "001-backfill-task-prompts.ts",
       "002-create-indexes.ts",
       "003-create-skill-indexes.ts",
+      "004-add-submission-id-index.ts",
       "999-future-migration.ts",
     ]);
     const result = await checkMigrations(db);
@@ -82,6 +86,7 @@ describe("checkMigrations", () => {
       "001-backfill-task-prompts.ts",
       "002-create-indexes.ts",
       "003-create-skill-indexes.ts",
+      "004-add-submission-id-index.ts",
     ]);
     const result1 = await checkMigrations(db);
     const result2 = await checkMigrations(db);
