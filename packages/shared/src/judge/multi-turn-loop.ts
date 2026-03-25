@@ -5,6 +5,7 @@ import {
   ConversationTurn,
   CriterionResult,
   SetupResult,
+  TokenUsage,
   WorkerProcessor,
   WorkerProcessorOptions,
   LogEvent,
@@ -186,10 +187,12 @@ export async function runMultiTurnLoop(
     await iterLog("info", "Calling coding agent...");
     let codingResponse: string;
     let turnHarUrl: string | undefined;
+    let turnTokenUsage: TokenUsage | undefined;
     const turnVideoUrls: string[] = [];
     try {
       const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs });
       codingResponse = workerResult.response;
+      turnTokenUsage = workerResult.tokenUsage;
 
       // Upload HAR file to blob storage if available (sanitized to strip credentials)
       if (workerResult.harFilePath) {
@@ -387,6 +390,7 @@ export async function runMultiTurnLoop(
       criteriaResults,
       ...(turnHarUrl && { harUrl: turnHarUrl }),
       ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+      ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
     };
     turns.push(turn);
 

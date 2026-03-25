@@ -126,6 +126,23 @@ export function RunDetail() {
     + (run.videoUrls?.length ?? 0)
     + (run.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
 
+  // Compute aggregate token usage: for one-shot runs use run.tokenUsage,
+  // for multi-turn runs sum per-turn token usage
+  const totalTokenUsage = run.tokenUsage
+    ?? (run.turns?.some(t => t.tokenUsage)
+      ? run.turns!.reduce(
+          (acc, t) => {
+            if (!t.tokenUsage) return acc;
+            return {
+              promptTokens: acc.promptTokens + t.tokenUsage.promptTokens,
+              completionTokens: acc.completionTokens + t.tokenUsage.completionTokens,
+              totalTokens: acc.totalTokens + t.tokenUsage.totalTokens,
+            };
+          },
+          { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+        )
+      : undefined);
+
   return (
     <div className="space-y-6">
       {/* Back link + header */}
@@ -169,6 +186,14 @@ export function RunDetail() {
                 <>
                   <Separator orientation="vertical" className="h-4" />
                   <span>Max {run.maxIterations} iterations</span>
+                </>
+              )}
+              {totalTokenUsage && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <span className="font-mono text-xs">
+                    {totalTokenUsage.promptTokens.toLocaleString()}↑ · {totalTokenUsage.completionTokens.toLocaleString()}↓
+                  </span>
                 </>
               )}
               {run.mcpServers && run.mcpServers.length > 0 && (

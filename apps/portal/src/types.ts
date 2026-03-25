@@ -5,6 +5,12 @@
 
 export type RunStatus = "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface CriterionResult {
   criterionId: string;
   passed: boolean;
@@ -30,6 +36,7 @@ export interface ConversationTurn {
   criteriaResults?: CriterionResult[];
   harUrl?: string;
   videoUrls?: string[];
+  tokenUsage?: TokenUsage;
 }
 
 export interface Scenario {
@@ -82,6 +89,7 @@ export interface Run {
   videoUrls?: string[];
   setupVideoUrls?: string[];
   submissionId?: string;
+  tokenUsage?: TokenUsage;
 }
 
 export const WORKER_TYPES = [

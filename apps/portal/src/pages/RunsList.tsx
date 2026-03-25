@@ -728,6 +728,7 @@ export function RunsList() {
               <TableHead className="w-[120px]">Status</TableHead>
               <TableHead className="w-[100px]">Report</TableHead>
               <TableHead className="w-[80px]">Turns</TableHead>
+              <TableHead className="w-[120px]">Tokens</TableHead>
               <TableHead className="w-[160px]">Created</TableHead>
               <TableHead className="w-[100px] text-right">Actions</TableHead>
             </TableRow>
@@ -820,6 +821,27 @@ export function RunsList() {
                 </TableCell>
                 <TableCell className="text-center">
                   {run.turns?.length ?? "–"}
+                </TableCell>
+                <TableCell className="font-mono text-xs">
+                  {(() => {
+                    const usage = run.tokenUsage
+                      ?? (run.turns?.some(t => t.tokenUsage)
+                        ? run.turns!.reduce(
+                            (acc, t) => {
+                              if (!t.tokenUsage) return acc;
+                              return {
+                                promptTokens: acc.promptTokens + t.tokenUsage.promptTokens,
+                                completionTokens: acc.completionTokens + t.tokenUsage.completionTokens,
+                                totalTokens: acc.totalTokens + t.tokenUsage.totalTokens,
+                              };
+                            },
+                            { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+                          )
+                        : undefined);
+                    return usage
+                      ? <>{usage.promptTokens.toLocaleString()}↑ · {usage.completionTokens.toLocaleString()}↓</>
+                      : <span className="text-muted-foreground">–</span>;
+                  })()}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {formatDate(run.createdAt)}

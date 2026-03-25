@@ -15,6 +15,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import type { HarFile, HarEntry, HarNameValue, ToolCall } from "./types.js";
+import type { TokenUsage } from "../types/types.js";
 
 /**
  * Header names whose values must be redacted before HAR files are
@@ -358,4 +359,88 @@ export function extractThinkingContent(har: HarFile): string {
   }
 
   return parts.join("");
+}
+
+/**
+ * Extract LLM token usage from a parsed HAR file.
+ *
+ * Scans response bodies for `usage` objects containing token counts
+ * (OpenAI / GitHub Models format: prompt_tokens, completion_tokens, total_tokens;
+ *  Anthropic format: input_tokens, output_tokens).
+ *
+ * Sums usage across all matching responses in the HAR.
+ * Returns undefined if no token usage data is found.
+ */
+export function extractTokenUsage(har: HarFile): TokenUsage | undefined {
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let totalTokens = 0;
+  let found = false;
+
+  for (const entry of har.log.entries) {
+    const body = getResponseBody(entry);
+    if (!body) continue;
+
+    // Try non-streaming JSON response first
+    try {
+      const json = JSON.parse(body);
+      if (accumulateUsage(json)) {
+        found = true;
+      }
+      continue;
+    } catch {
+      // Not a single JSON object — try SSE streaming
+    }
+
+    // SSE streaming: look for the final chunk which typically carries usage
+    const lines = body.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data: ") || trimmed === "data: [DONE]") continue;
+      try {
+        const json = JSON.parse(trimmed.slice(6));
+        if (accumulateUsage(json)) {
+          found = true;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  if (!found) return undefined;
+
+  return { promptTokens, completionTokens, totalTokens };
+
+  function accumulateUsage(json: Record<string, unknown>): boolean {
+    const usage = json.usage as Record<string, unknown> | undefined;
+    if (!usage || typeof usage !== "object") return false;
+
+    // OpenAI / GitHub Models format
+    if (typeof usage.prompt_tokens === "number") {
+      promptTokens += usage.prompt_tokens;
+      completionTokens += (usage.completion_tokens as number) ?? 0;
+      totalTokens += (usage.total_tokens as number) ?? (usage.prompt_tokens + ((usage.completion_tokens as number) ?? 0));
+      return true;
+    }
+
+    // Anthropic format
+    if (typeof usage.input_tokens === "number") {
+      promptTokens += usage.input_tokens;
+      completionTokens += (usage.output_tokens as number) ?? 0;
+      totalTokens += usage.input_tokens + ((usage.output_tokens as number) ?? 0);
+      return true;
+    }
+
+    return false;
+  }
+}
+
+/**
+ * Parse a HAR file from disk and extract token usage.
+ * Convenience wrapper combining parseHarFile + extractTokenUsage.
+ */
+export async function extractTokenUsageFromFile(filePath: string): Promise<TokenUsage | undefined> {
+  const har = await parseHarFile(filePath);
+  return extractTokenUsage(har);
 }
