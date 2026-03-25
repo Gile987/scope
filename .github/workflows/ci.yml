@@ -172,32 +172,23 @@ jobs:
         with:
           driver: docker-container
 
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          restore-keys: docker-
-
       - name: Pre-build Docker test images
         run: |
           docker buildx build \
             --build-arg VSCODE_VERSION=$VSCODE_VERSION \
             --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-            --cache-from type=local,src=/tmp/.buildx-cache \
-            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
             --load \
             .
           docker buildx build \
             --target dev \
             --build-arg VSCODE_VERSION=$VSCODE_VERSION \
             --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-            --cache-from type=local,src=/tmp/.buildx-cache \
-            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
             --load \
             .
-          # Rotate cache to avoid unbounded growth
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Run integration tests
         run: npx vitest run --config vitest.integration.config.ts --silent=false --shard=${{ matrix.shard }}/${{ strategy.job-total }}
