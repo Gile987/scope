@@ -177,16 +177,16 @@ jobs:
           docker buildx build \
             --build-arg VSCODE_VERSION=$VSCODE_VERSION \
             --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-            --cache-from type=gha \
-            --cache-to type=gha,mode=max \
+            --cache-from type=gha,url=$ACTIONS_CACHE_URL,token=$ACTIONS_RUNTIME_TOKEN \
+            --cache-to type=gha,mode=max,url=$ACTIONS_CACHE_URL,token=$ACTIONS_RUNTIME_TOKEN \
             --load \
             .
           docker buildx build \
             --target dev \
             --build-arg VSCODE_VERSION=$VSCODE_VERSION \
             --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-            --cache-from type=gha \
-            --cache-to type=gha,mode=max \
+            --cache-from type=gha,url=$ACTIONS_CACHE_URL,token=$ACTIONS_RUNTIME_TOKEN \
+            --cache-to type=gha,mode=max,url=$ACTIONS_CACHE_URL,token=$ACTIONS_RUNTIME_TOKEN \
             --load \
             .
 
