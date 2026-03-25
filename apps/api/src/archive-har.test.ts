@@ -37,7 +37,7 @@ describe("rewriteHarUrlsForArchive", () => {
   it("leaves turns without harUrl unchanged", () => {
     const resource = {
       turns: [
-        { iteration: 1, snapshotUrl: "https://example.com/snap" },
+        { iteration: 1, snapshotUrl: "https://example.com/snap", harUrl: undefined as string | undefined },
         { iteration: 2, harUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-2/capture.har" },
       ],
     };
@@ -47,7 +47,9 @@ describe("rewriteHarUrlsForArchive", () => {
   });
 
   it("handles resource with no harUrl at all", () => {
-    const resource = { turns: [{ iteration: 1 }] };
+    const resource: { harUrl?: string; turns: Array<{ iteration: number; harUrl?: string }> } = {
+      turns: [{ iteration: 1 }],
+    };
     const result = rewriteHarUrlsForArchive(resource);
     expect(result.harUrl).toBeUndefined();
     expect(result.turns![0].harUrl).toBeUndefined();
@@ -145,9 +147,9 @@ describe("uploadBundledHarFiles", () => {
 
   it("uploads per-turn HAR files and sets harUrl on matching turns", async () => {
     const { client, uploaded } = makeMockContainerClient();
-    const turns = [
-      { iteration: 1, codingAgentResponse: "", judgeFeedback: "", snapshotUrl: "", passed: false },
-      { iteration: 2, codingAgentResponse: "", judgeFeedback: "", snapshotUrl: "", passed: false },
+    const turns: Array<{ iteration: number; harUrl?: string }> = [
+      { iteration: 1 },
+      { iteration: 2 },
     ];
 
     const topLevelUrl = await uploadBundledHarFiles({
@@ -189,7 +191,7 @@ describe("uploadBundledHarFiles", () => {
 
   it("handles both per-turn and top-level HAR files together", async () => {
     const { client, uploaded } = makeMockContainerClient();
-    const turns = [{ iteration: 1, codingAgentResponse: "", judgeFeedback: "", snapshotUrl: "", passed: false }];
+    const turns: Array<{ iteration: number; harUrl?: string }> = [{ iteration: 1 }];
 
     const topLevelUrl = await uploadBundledHarFiles({
       harFiles: [
