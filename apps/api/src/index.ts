@@ -1035,6 +1035,7 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
     const workerFilter = req.query.worker as string;
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
+    const submissionIdFilter = req.query.submissionId as string;
     const includeDeleted = req.query.includeDeleted === "true";
     
     const filter: Record<string, unknown> = {};
@@ -1043,6 +1044,9 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
     }
     if (taskPromptIdFilter) {
       filter.taskPromptId = taskPromptIdFilter;
+    }
+    if (submissionIdFilter) {
+      filter.submissionId = submissionIdFilter;
     }
     if (!includeDeleted) {
       filter.deletedAt = { $exists: false };
