@@ -236,6 +236,7 @@ interface RequestDocument {
   setupVideoUrls?: string[];
   agentVersion?: string;          // Agent software version prefix (FK → AgentVersion.agentVersion)
   workerVersion?: string;          // Exact build that processed this run
+  submissionId?: string;           // Groups runs submitted together (UUID v4)
 }
 
 // Agent version entry — embedded in CodingAgentDocument.versions[]
