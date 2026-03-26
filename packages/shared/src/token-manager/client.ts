@@ -7,6 +7,7 @@ import {
   AccountType,
   TOKEN_CAPABILITY_ENV_VARS,
   TokenCapability,
+  TokenType,
 } from "./types.js";
 
 /**
@@ -76,6 +77,66 @@ export class TokenManagerClient {
     }
 
     return result.value;
+  }
+
+  /**
+   * Acquire a token with full metadata (including tokenType).
+   * Use this when the caller needs to know the token type to set the correct env var.
+   */
+  async acquireTokenFull(capability: TokenCapability, preferredTokenType?: TokenType): Promise<AcquireTokenResponse> {
+    // Env var fallback — local dev / Docker Compose
+    // Check CLAUDE_CODE_OAUTH_TOKEN first for claude-code-cli capability
+    if (capability === "claude-code-cli" && process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+      return {
+        value: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+        tokenId: "env",
+        tokenType: "anthropic-oauth",
+        capability,
+      };
+    }
+    const envVar = TOKEN_CAPABILITY_ENV_VARS[capability];
+    const envValue = process.env[envVar];
+    if (envValue) {
+      return {
+        value: envValue,
+        tokenId: "env",
+        tokenType: capability === "claude-code-cli" ? "anthropic-api-key" : "github-oauth",
+        capability,
+      };
+    }
+
+    if (!this.baseUrl) {
+      throw new Error(
+        `No token available for capability '${capability}': ` +
+          `env var '${envVar}' is not set and TOKEN_MANAGER_URL is not configured`
+      );
+    }
+
+    const url = `${this.baseUrl}/api/v1/tokens/acquire`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ capability, ...(preferredTokenType ? { tokenType: preferredTokenType } : {}) }),
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "unknown error");
+      throw new Error(
+        `Token acquisition failed for capability '${capability}' (HTTP ${response.status}): ${errorBody}`
+      );
+    }
+
+    const result = (await response.json()) as AcquireTokenResponse;
+
+    if (!result.value) {
+      throw new Error(
+        `Invalid token response for capability '${capability}': no value returned`
+      );
+    }
+
+    return result;
   }
 
   /**

@@ -75,10 +75,23 @@ describe("deriveCapabilities", () => {
     });
   });
   describe("anthropic-api-key", () => {
-    it("returns claude-code-cli", () => {
+    it("returns claude-code-cli and anthropic-api", () => {
       expect(deriveCapabilities("anthropic-api-key", validResult)).toEqual([
         "claude-code-cli",
+        "anthropic-api",
       ]);
+    });
+  });
+
+  describe("anthropic-oauth", () => {
+    it("returns only claude-code-cli (no anthropic-api)", () => {
+      expect(deriveCapabilities("anthropic-oauth", validResult)).toEqual([
+        "claude-code-cli",
+      ]);
+    });
+
+    it("returns empty array for non-valid status", () => {
+      expect(deriveCapabilities("anthropic-oauth", invalidResult)).toEqual([]);
     });
   });
 });

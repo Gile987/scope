@@ -135,6 +135,18 @@ describe("validateToken", () => {
       expect(result.error).toMatch(/Connection refused/);
     });
   });
+
+  describe("anthropic-oauth", () => {
+    it("returns valid without calling API (structural check)", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const result = await validateToken("anthropic-oauth", "oauth-token-test");
+
+      expect(result.status).toBe("valid");
+      expect(result.capabilities).toContain("claude-code-cli");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
   describe("dispatcher", () => {
     it("calls correct validator for each type", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({

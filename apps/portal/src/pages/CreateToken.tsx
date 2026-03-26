@@ -75,6 +75,14 @@ const TOKEN_INSTRUCTIONS: Record<TokenType, { steps: string[]; link?: { label: s
     ],
     link: { label: "Open Anthropic Console", url: "https://console.anthropic.com/settings/keys" },
   },
+  "anthropic-oauth": {
+    steps: [
+      "Set up a Claude Code subscription (Max or Team plan)",
+      "Authenticate via 'claude login' in the CLI",
+      "Copy the OAuth token from ~/.claude/credentials.json",
+    ],
+    note: "OAuth tokens from Claude Code subscriptions use Bearer authentication. The token format varies (not sk-ant-).",
+  },
 };
 
 const TOKEN_TYPES: TokenType[] = [
@@ -83,6 +91,7 @@ const TOKEN_TYPES: TokenType[] = [
   "github-oauth",
   "github-oauth-cookie-state",
   "anthropic-api-key",
+  "anthropic-oauth",
 ];
 
 /** Expected prefix per token type for surface-level validation. */
@@ -92,6 +101,7 @@ const TOKEN_PREFIXES: Record<TokenType, { prefix: string; description: string }>
   "github-oauth": { prefix: "gho_", description: "gho_ or ghu_" }, // also ghu_ for user tokens
   "github-oauth-cookie-state": { prefix: "{", description: "JSON object" },
   "anthropic-api-key": { prefix: "sk-ant-", description: "sk-ant-" },
+  "anthropic-oauth": { prefix: "", description: "(any format — OAuth token)" },
 };
 
 /** Check if the token value matches the expected prefix for the selected type. */
@@ -105,6 +115,11 @@ function validateTokenPrefix(tokenType: TokenType, tokenValue: string): string |
   if (tokenType === "github-oauth") {
     if (trimmed.startsWith("gho_") || trimmed.startsWith("ghu_")) return null;
     return `Expected prefix: ${expected.description}`;
+  }
+
+  // Special case: anthropic-oauth has no fixed prefix
+  if (tokenType === "anthropic-oauth") {
+    return null;
   }
 
   if (!trimmed.startsWith(expected.prefix)) {
