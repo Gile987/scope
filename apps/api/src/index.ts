@@ -1749,7 +1749,8 @@ apiRoute(app, registry, {
     }
 
     if (!isLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      return;
     }
 
     const allCriteria = await criteriaCollection
