@@ -37,8 +37,10 @@ import { blobNameFromSnapshotsUrl, rewriteHarUrlsForArchive, detectBundledHarFil
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, resolveAgentVersion } from "shared";
 import { evaluateTrigger, REPORT_SYSTEM_PROMPT } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
-import { generateOpenAPIDocument } from "./openapi/index.js";
+import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
+import { registerFeatureFlagRoutes } from "./routes/feature-flags.js";
+import type { RouteContext } from "./route-context.js";
 
 const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
@@ -531,12 +533,7 @@ function getOrCreateQueueClient(queueName: string): QueueClient {
   return client;
 }
 
-// --- OpenAPI documentation ---
-const openapiDocument = generateOpenAPIDocument();
-app.get("/openapi.json", (_req: Request, res: Response) => {
-  res.json(openapiDocument);
-});
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiDocument));
+// --- OpenAPI documentation (lazy — Swagger UI mounted in main() after all routes register) ---
 
 // Health check endpoint (liveness probe — always returns 200)
 app.get("/health", (_req: Request, res: Response) => {
@@ -4899,45 +4896,7 @@ app.post("/api/v1/reports/:id/insights", async (req: Request, res: Response, nex
   }
 });
 
-// ─── Feature Flags ────────────────────────────────────────────────────────────
-
-// GET /api/v1/feature-flags — list all feature flags
-app.get("/api/v1/feature-flags", async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const flags = await featureFlagCollection.find({}).toArray();
-    res.json(flags);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// PUT /api/v1/feature-flags/:key — update a feature flag
-app.put("/api/v1/feature-flags/:key", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { key } = req.params;
-    const { enabled } = req.body;
-
-    if (typeof enabled !== "boolean") {
-      res.status(400).json({ error: "'enabled' must be a boolean" });
-      return;
-    }
-
-    const result = await featureFlagCollection.findOneAndUpdate(
-      { key },
-      { $set: { enabled, updatedAt: new Date() } },
-      { returnDocument: "after" }
-    );
-
-    if (!result) {
-      res.status(404).json({ error: `Feature flag '${key}' not found` });
-      return;
-    }
-
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-});
+// ─── Feature Flags (migrated to routes/feature-flags.ts) ─────────────────────
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -4947,6 +4906,44 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 async function main(): Promise<void> {
   await initializeClients();
+
+  // Build the RouteContext for unified route modules
+  const ctx: RouteContext = {
+    app,
+    registry,
+    db,
+    requestCollection: collection,
+    criteriaCollection,
+    promptFeatureCollection,
+    promptFeatureExtractionCollection,
+    reportCollection,
+    reportTemplateCollection,
+    agentCollection,
+    modelCollection,
+    mcpServerCollection,
+    insightsCollection,
+    taskPromptCollection,
+    featureFlagCollection,
+    skillCollection,
+    skillRevisionCollection,
+    taskPromptStore,
+    skillRevisionStore,
+    skillResolver,
+    queueClients,
+    reportQueueClient,
+    getOrCreateQueueClient,
+    validWorkers: VALID_WORKERS,
+  };
+
+  // Register unified route modules (apiRoute-based)
+  registerFeatureFlagRoutes(ctx);
+
+  // Generate OpenAPI document (after all routes are registered)
+  const openapiDocument = generateOpenAPIDocument();
+  app.get("/openapi.json", (_req: Request, res: Response) => {
+    res.json(openapiDocument);
+  });
+  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiDocument));
 
   app.listen(port, () => {
     console.log(`API server listening on port ${port}`);

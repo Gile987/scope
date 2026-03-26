@@ -2,7 +2,18 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect } from "vitest";
-import { generateOpenAPIDocument } from "./index.js";
+import express from "express";
+import { generateOpenAPIDocument, registry } from "./index.js";
+import { registerFeatureFlagRoutes } from "../routes/feature-flags.js";
+
+// Register apiRoute()-based routes so they appear in the OpenAPI doc.
+// These need an Express app + the registry; we use a throwaway app since
+// we only care about the registry side-effect here, not the Express handlers.
+const testApp = express();
+registerFeatureFlagRoutes({
+  app: testApp,
+  registry,
+} as any);
 
 describe("OpenAPI document generation", () => {
   const doc = generateOpenAPIDocument();

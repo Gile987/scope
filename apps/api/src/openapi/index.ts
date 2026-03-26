@@ -17,6 +17,6 @@ import "./routes/skills.js";
 import "./routes/skill-revisions.js";
 import "./routes/tokens.js";
 import "./routes/accounts.js";
-import "./routes/feature-flags.js";
+// feature-flags: migrated to src/routes/feature-flags.ts (uses apiRoute())
 
 export { registry, generateOpenAPIDocument } from "./registry.js";
