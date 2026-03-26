@@ -1749,13 +1749,7 @@ apiRoute(app, registry, {
     }
 
     if (!isLlmAvailable()) {
-      res
-        .status(503)
-        .json({
-          error:
-            "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY",
-        });
-      return;
+      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
     }
 
     const allCriteria = await criteriaCollection
@@ -2025,9 +2019,7 @@ apiRoute(app, registry, {
         deletedAt: { $exists: false },
       });
       if (!dep) {
-        res
-          .status(400)
-          .json({ error: `Dependency '${depId}' does not exist` });
+        res.status(400).json({ error: `Dependency '${depId}' does not exist` });
         return;
       }
     }
@@ -2082,17 +2074,13 @@ apiRoute(app, registry, {
           deletedAt: { $exists: false },
         });
         if (!dep) {
-          res
-            .status(400)
-            .json({ error: `Dependency '${depId}' does not exist` });
+          res.status(400).json({ error: `Dependency '${depId}' does not exist` });
           return;
         }
       }
       // Self-reference check
       if (dependsOn.includes(id)) {
-        res
-          .status(400)
-          .json({ error: "A criterion cannot depend on itself" });
+        res.status(400).json({ error: "A criterion cannot depend on itself" });
         return;
       }
       update.dependsOn = dependsOn;
