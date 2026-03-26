@@ -11,7 +11,7 @@ import "./routes/reports.js";
 import "./routes/report-templates.js";
 import "./routes/insights.js";
 import "./routes/agents.js";
-import "./routes/models.js";
+// models: migrated to src/routes/models.ts (uses apiRoute())
 import "./routes/mcp-servers.js";
 import "./routes/skills.js";
 import "./routes/skill-revisions.js";

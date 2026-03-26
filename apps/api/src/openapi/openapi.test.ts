@@ -5,15 +5,15 @@ import { describe, it, expect } from "vitest";
 import express from "express";
 import { generateOpenAPIDocument, registry } from "./index.js";
 import { registerFeatureFlagRoutes } from "../routes/feature-flags.js";
+import { registerModelRoutes } from "../routes/models.js";
 
 // Register apiRoute()-based routes so they appear in the OpenAPI doc.
 // These need an Express app + the registry; we use a throwaway app since
 // we only care about the registry side-effect here, not the Express handlers.
 const testApp = express();
-registerFeatureFlagRoutes({
-  app: testApp,
-  registry,
-} as any);
+const testCtx = { app: testApp, registry } as any;
+registerFeatureFlagRoutes(testCtx);
+registerModelRoutes(testCtx);
 
 describe("OpenAPI document generation", () => {
   const doc = generateOpenAPIDocument();
