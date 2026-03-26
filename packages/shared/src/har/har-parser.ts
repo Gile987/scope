@@ -90,8 +90,9 @@ export async function parseHarFile(filePath: string): Promise<HarFile> {
 /**
  * Extract tool calls from a parsed HAR file.
  *
- * Scans HTTP request/response bodies for OpenAI-style chat completions
- * containing tool_calls in assistant messages and tool role responses.
+ * Scans HTTP request/response bodies for tool calls in both:
+ * - OpenAI-style chat completions (choices[].message.tool_calls)
+ * - Anthropic Messages API (content[].type === "tool_use")
  */
 export function extractToolCalls(har: HarFile): ToolCall[] {
   const toolCalls: Map<string, ToolCall> = new Map();
@@ -102,6 +103,7 @@ export function extractToolCalls(har: HarFile): ToolCall[] {
     const responseBody = getResponseBody(entry);
     if (responseBody) {
       extractToolCallsFromBody(responseBody, entry.startedDateTime, toolCalls);
+      extractAnthropicToolCallsFromBody(responseBody, entry.startedDateTime, toolCalls);
     }
 
     // Process request bodies for tool role messages (responses to tool calls)
@@ -289,8 +291,98 @@ function processChoices(
 }
 
 /**
+ * Extract tool_use blocks from Anthropic Messages API responses.
+ *
+ * Handles both non-streaming and streaming formats:
+ * - Non-streaming: JSON with content[].type === "tool_use"
+ * - Streaming: SSE events with content_block_start (tool_use) and
+ *   content_block_delta (input_json_delta) for incremental input
+ */
+function extractAnthropicToolCallsFromBody(
+  body: string,
+  timestamp: string,
+  toolCalls: Map<string, ToolCall>,
+): void {
+  // Try non-streaming format first
+  try {
+    const json = JSON.parse(body);
+    if (Array.isArray(json.content)) {
+      for (const block of json.content) {
+        if (block.type === "tool_use" && block.id && !toolCalls.has(block.id)) {
+          toolCalls.set(block.id, {
+            id: block.id,
+            name: block.name || "unknown",
+            arguments: typeof block.input === "object" && block.input !== null
+              ? block.input
+              : {},
+            timestamp,
+          });
+        }
+      }
+      return;
+    }
+  } catch {
+    // Not a single JSON object — try streaming
+  }
+
+  // Handle Anthropic SSE streaming format
+  // Events: content_block_start (type: tool_use), content_block_delta (type: input_json_delta)
+  const lines = body.split("\n");
+  const partialCalls: Map<number, { id: string; name: string; inputJson: string }> = new Map();
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data: ")) continue;
+
+    try {
+      const json = JSON.parse(trimmed.slice(6));
+
+      if (json.type === "content_block_start" && json.content_block?.type === "tool_use") {
+        const idx = json.index ?? partialCalls.size;
+        partialCalls.set(idx, {
+          id: json.content_block.id || `anthropic-${idx}`,
+          name: json.content_block.name || "unknown",
+          inputJson: "",
+        });
+      }
+
+      if (json.type === "content_block_delta" && json.delta?.type === "input_json_delta") {
+        const idx = json.index ?? 0;
+        const partial = partialCalls.get(idx);
+        if (partial && typeof json.delta.partial_json === "string") {
+          partial.inputJson += json.delta.partial_json;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // Convert accumulated partial calls to ToolCall objects
+  for (const [, partial] of partialCalls) {
+    if (!toolCalls.has(partial.id)) {
+      let parsedArgs: Record<string, unknown> = {};
+      try {
+        parsedArgs = JSON.parse(partial.inputJson);
+      } catch {
+        parsedArgs = partial.inputJson ? { _raw: partial.inputJson } : {};
+      }
+      toolCalls.set(partial.id, {
+        id: partial.id,
+        name: partial.name,
+        arguments: parsedArgs,
+        timestamp,
+      });
+    }
+  }
+}
+
+/**
  * Extract tool role messages from request bodies.
  * These contain the responses to tool calls, matched by tool_call_id.
+ *
+ * Handles both OpenAI format (role: "tool", tool_call_id) and
+ * Anthropic format (content[].type === "tool_result", tool_use_id).
  */
 function extractToolResponsesFromBody(
   body: string,
@@ -298,15 +390,29 @@ function extractToolResponsesFromBody(
 ): void {
   try {
     const json = JSON.parse(body);
-    const messages = json.messages;
-    if (!Array.isArray(messages)) return;
 
-    for (const msg of messages) {
-      if (msg.role === "tool" && msg.tool_call_id && msg.content) {
-        const content = typeof msg.content === "string"
-          ? msg.content
-          : JSON.stringify(msg.content);
-        toolResponses.set(msg.tool_call_id, content);
+    // OpenAI format: messages[].role === "tool"
+    const messages = json.messages;
+    if (Array.isArray(messages)) {
+      for (const msg of messages) {
+        if (msg.role === "tool" && msg.tool_call_id && msg.content) {
+          const content = typeof msg.content === "string"
+            ? msg.content
+            : JSON.stringify(msg.content);
+          toolResponses.set(msg.tool_call_id, content);
+        }
+
+        // Anthropic format: messages[].content[].type === "tool_result"
+        if (msg.role === "user" && Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if (block.type === "tool_result" && block.tool_use_id) {
+              const content = typeof block.content === "string"
+                ? block.content
+                : block.content != null ? JSON.stringify(block.content) : "";
+              toolResponses.set(block.tool_use_id, content);
+            }
+          }
+        }
       }
     }
   } catch {
@@ -317,10 +423,10 @@ function extractToolResponsesFromBody(
 /**
  * Extract thinking/reasoning content from a parsed HAR file.
  *
- * Scans SSE streaming responses for `reasoning_text` fields in
- * `choices[].delta` and concatenates them into a single string.
- * These fields contain the model's chain-of-thought reasoning
- * (e.g. Copilot extended thinking).
+ * Scans responses for thinking/reasoning content in both:
+ * - OpenAI-style: SSE with choices[].delta.reasoning_text
+ * - Anthropic non-streaming: content[].type === "thinking"
+ * - Anthropic streaming: SSE content_block_delta with thinking delta
  */
 export function extractThinkingContent(har: HarFile): string {
   const parts: string[] = [];
@@ -329,6 +435,22 @@ export function extractThinkingContent(har: HarFile): string {
     const body = getResponseBody(entry);
     if (!body) continue;
 
+    // Try non-streaming Anthropic format: content[].type === "thinking"
+    try {
+      const json = JSON.parse(body);
+      if (Array.isArray(json.content)) {
+        for (const block of json.content) {
+          if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking) {
+            parts.push(block.thinking);
+          }
+        }
+        continue;
+      }
+    } catch {
+      // Not a single JSON object — try streaming
+    }
+
+    // Streaming formats (OpenAI SSE + Anthropic SSE)
     const lines = body.split("\n");
     for (const line of lines) {
       const trimmed = line.trim();
@@ -336,20 +458,26 @@ export function extractThinkingContent(har: HarFile): string {
 
       try {
         const json = JSON.parse(trimmed.slice(6));
+
+        // OpenAI-style: choices[].delta.reasoning_text
         const choices = json.choices;
-        if (!Array.isArray(choices)) continue;
-
-        for (const choice of choices) {
-          const delta = choice.delta;
-          if (!delta) continue;
-
-          // OpenAI-style reasoning_text field (used by Copilot)
-          if (typeof delta.reasoning_text === "string" && delta.reasoning_text) {
-            parts.push(delta.reasoning_text);
+        if (Array.isArray(choices)) {
+          for (const choice of choices) {
+            const delta = choice.delta;
+            if (!delta) continue;
+            if (typeof delta.reasoning_text === "string" && delta.reasoning_text) {
+              parts.push(delta.reasoning_text);
+            }
+            if (typeof delta.thinking === "string" && delta.thinking) {
+              parts.push(delta.thinking);
+            }
           }
-          // Also check for 'thinking' field (Anthropic-style, via proxy)
-          if (typeof delta.thinking === "string" && delta.thinking) {
-            parts.push(delta.thinking);
+        }
+
+        // Anthropic streaming: content_block_delta with thinking type
+        if (json.type === "content_block_delta" && json.delta?.type === "thinking_delta") {
+          if (typeof json.delta.thinking === "string" && json.delta.thinking) {
+            parts.push(json.delta.thinking);
           }
         }
       } catch {
