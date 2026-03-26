@@ -37,6 +37,8 @@ import { blobNameFromSnapshotsUrl, rewriteHarUrlsForArchive, detectBundledHarFil
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, resolveAgentVersion } from "shared";
 import { evaluateTrigger, REPORT_SYSTEM_PROMPT } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
+import { generateOpenAPIDocument } from "./openapi/index.js";
+import swaggerUi from "swagger-ui-express";
 
 const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
@@ -528,6 +530,13 @@ function getOrCreateQueueClient(queueName: string): QueueClient {
   dynamicQueueClients.set(queueName, client);
   return client;
 }
+
+// --- OpenAPI documentation ---
+const openapiDocument = generateOpenAPIDocument();
+app.get("/openapi.json", (_req: Request, res: Response) => {
+  res.json(openapiDocument);
+});
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiDocument));
 
 // Health check endpoint (liveness probe — always returns 200)
 app.get("/health", (_req: Request, res: Response) => {

@@ -104,3 +104,18 @@ Criteria are reusable evaluation rules stored in the database and optionally def
 - **Traits** — reusable labels for filtering and composition (e.g., `has_azure`, `has_node`)
 
 See [`ENV_VARIABLES.md`](../../scope-mt-app/ENV_VARIABLES.md) for related configuration options.
+
+## OpenAPI Documentation
+
+The REST API exposes an auto-generated **OpenAPI 3.1** spec built with [Zod](https://zod.dev/) schemas and [`@asteasolutions/zod-to-openapi`](https://github.com/asteasolutions/zod-to-openapi).
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /openapi.json` | Raw OpenAPI 3.1 specification (JSON) |
+| `GET /api-docs` | Interactive Swagger UI |
+
+### Schema organization
+
+Zod schemas live in `packages/shared/src/schemas/` (16 files, ~78 schemas) so they can be reused by the API, CLI, and workers. Each entity has separate **input** (what the client sends) and **response** (what the API returns) schemas.
+
+OpenAPI route registrations live in `apps/api/src/openapi/routes/` — one file per resource group. The registry and generator are in `apps/api/src/openapi/registry.ts`.

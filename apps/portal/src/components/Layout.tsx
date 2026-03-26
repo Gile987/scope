@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch } from "lucide-react";
+import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch, Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet, SheetContent, SheetTrigger, SheetTitle,
@@ -239,6 +239,18 @@ export function Layout() {
 
           {/* Spacer on very small screens */}
           <div className="flex-1 sm:hidden" />
+
+          {/* API Documentation link (served by API server, not React Router) */}
+          <a
+            href="/api-docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 ml-4 p-2 flex items-center gap-1.5 text-sm font-medium transition-colors hover:text-foreground/80 text-foreground/60"
+            title="API Documentation"
+          >
+            <Plug className="h-4 w-4" />
+            <span className="hidden sm:inline">API</span>
+          </a>
 
           {/* Admin gear icon */}
           <Link

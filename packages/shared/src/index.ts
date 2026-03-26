@@ -19,3 +19,4 @@ export * from "./resolve-agent-version.js";
 export * from "./devproxy/index.js";
 export * from "./har/index.js";
 export * from "./utils/index.js";
+export * from "./schemas/index.js";
