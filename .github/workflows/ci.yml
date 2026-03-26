@@ -77,7 +77,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build shared packages
-        run: pnpm --filter shared --filter github-auth build
+        run: pnpm turbo run build --filter=shared --filter=github-auth
 
       - name: Run tests with coverage
         run: pnpm test:coverage
@@ -169,7 +169,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build shared packages
-        run: pnpm --filter shared --filter github-auth build
+        run: pnpm turbo run build --filter=shared --filter=github-auth
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.0.0
@@ -292,7 +292,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: pnpm build
+        run: pnpm turbo run build
 
   # ---------------------------------------------------------------------------
   # Detect which images changed (runs in parallel with CI jobs)
