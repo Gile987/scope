@@ -13,10 +13,10 @@ export function generateOpenAPIDocument() {
   return generator.generateDocument({
     openapi: "3.1.0",
     info: {
-      title: "Scope MT API",
+      title: "Scope API",
       version: "1.0.0",
       description:
-        "REST API for the Scope MT platform — benchmarking AI coding agents",
+        "REST API for the Scope platform — benchmarking AI coding agents",
     },
     servers: [{ url: "/", description: "Current server" }],
   });
