@@ -230,6 +230,14 @@ export const api = {
     return request(`/task-prompts/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
+  /** AI-generate a task prompt from a description or create a variation */
+  generateTaskPrompt: (opts: { description?: string; existingPrompt?: string }): Promise<{ taskPrompt: string }> => {
+    return request("/task-prompts/generate", {
+      method: "POST",
+      body: JSON.stringify(opts),
+    });
+  },
+
   /** Extract prompt features for a task prompt entity */
   extractTaskPromptFeatures: (id: string, opts?: { model?: string; force?: boolean }): Promise<TaskPromptFeatureExtractionResult> => {
     const url = opts?.force ? `/task-prompts/${encodeURIComponent(id)}/extract-features?force=true` : `/task-prompts/${encodeURIComponent(id)}/extract-features`;
