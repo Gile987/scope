@@ -24,7 +24,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video } from "lucide-react";
-import { formatDate, formatId } from "@/lib/utils";
+import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -188,6 +188,17 @@ export function RunDetail() {
                   <span>Max {run.maxIterations} iterations</span>
                 </>
               )}
+              {(() => {
+                const totalDuration = run.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+                return totalDuration ? (
+                  <>
+                    <Separator orientation="vertical" className="h-4" />
+                    <span className="font-mono text-xs" title={`${totalDuration.toLocaleString()}ms total`}>
+                      {formatDuration(totalDuration)}
+                    </span>
+                  </>
+                ) : null;
+              })()}
               {totalTokenUsage && (
                 <>
                   <Separator orientation="vertical" className="h-4" />

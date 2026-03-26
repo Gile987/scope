@@ -37,6 +37,8 @@ export interface ConversationTurn {
   harUrl?: string;
   videoUrls?: string[];
   tokenUsage?: TokenUsage;
+  startedAt?: string;
+  durationMs?: number;
 }
 
 export interface Scenario {
@@ -204,6 +206,12 @@ export interface TaskWorkerGroup {
     min: number;
     max: number;
   } | null;  // null if no passed runs
+  durationStats: {
+    mean: number;
+    stdDev: number;
+    min: number;
+    max: number;
+  } | null;  // Per-iteration duration in ms (null if no timing data)
 }
 
 export interface AnalysisResponse {

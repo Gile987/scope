@@ -11,6 +11,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { formatDuration } from "@/lib/utils";
 import type { ConversationTurn } from "@/types";
 import { useState } from "react";
 
@@ -71,6 +72,11 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
 
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {turn.durationMs != null && (
+                    <span className="font-mono" title={`${turn.durationMs.toLocaleString()}ms`}>
+                      {formatDuration(turn.durationMs)}
+                    </span>
+                  )}
                   {new Date(turn.timestamp).toLocaleString()}
                   {turn.tokenUsage && (
                     <span className="font-mono">
