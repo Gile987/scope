@@ -27,6 +27,10 @@ import {
   generatePromptFeaturePrompt,
   extractPromptFeatures,
 } from "./prompt-feature-llm.js";
+import {
+  isTaskPromptLlmAvailable,
+  generateTaskPrompt,
+} from "./task-prompt-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
 import { blobNameFromSnapshotsUrl, rewriteHarUrlsForArchive, detectBundledHarFiles, uploadBundledHarFiles } from "./archive-har.js";
@@ -2345,6 +2349,45 @@ app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, nex
 // ==========================================
 // Task Prompt endpoints
 // ==========================================
+
+// POST /api/v1/task-prompts/generate — AI-generate a task prompt from a description or variation
+app.post("/api/v1/task-prompts/generate", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { description, existingPrompt } = req.body;
+    if ((!description || typeof description !== "string" || !description.trim()) &&
+        (!existingPrompt || typeof existingPrompt !== "string" || !existingPrompt.trim())) {
+      return res.status(400).json({ error: "Body must contain a non-empty 'description' and/or 'existingPrompt' string" });
+    }
+
+    if (!isTaskPromptLlmAvailable()) {
+      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+    }
+
+    // Fetch recent task prompts as context (avoid duplicates)
+    const recentPrompts = await taskPromptCollection
+      .find({ deletedAt: { $exists: false } })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .project({ text: 1, _id: 0 })
+      .toArray();
+    const existingTexts = recentPrompts.map((p: any) => p.text);
+
+    const result = await generateTaskPrompt(
+      {
+        description: description?.trim(),
+        existingPrompt: existingPrompt?.trim(),
+      },
+      existingTexts,
+    );
+    console.log("[task-prompts/generate] LLM result:", JSON.stringify(result));
+    res.json(result);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not configured")) {
+      return res.status(503).json({ error: err.message });
+    }
+    next(err);
+  }
+});
 
 // GET /api/v1/task-prompts — list all task prompts (paginated, optional search)
 app.get("/api/v1/task-prompts", async (req: Request, res: Response, next: NextFunction) => {
