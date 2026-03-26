@@ -748,6 +748,7 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
                       <th className="text-left p-3 font-medium">Iteration</th>
                       <th className="text-left p-3 font-medium">Tool</th>
                       <th className="text-left p-3 font-medium">Arguments</th>
+                      <th className="text-left p-3 font-medium">Response</th>
                       <th className="text-left p-3 font-medium">Time</th>
                     </tr>
                   </thead>
@@ -766,6 +767,15 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
                           <pre className="text-xs text-muted-foreground max-w-md truncate">
                             {JSON.stringify(tc.arguments)}
                           </pre>
+                        </td>
+                        <td className="p-3">
+                          {tc.response ? (
+                            <pre className="text-xs text-muted-foreground max-w-md truncate">
+                              {tc.response}
+                            </pre>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">–</span>
+                          )}
                         </td>
                         <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
                           {tc.timestamp ? new Date(tc.timestamp).toLocaleTimeString() : "–"}
