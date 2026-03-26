@@ -49,7 +49,7 @@ export const PromptFeatureExtractionResponseSchema = z
   .object({
     _id: z.string().optional(),
     taskText: z.string(),
-    taskTextHash: z.string().optional(),
+    taskTextHash: z.string(),
     promptFeatureResults: z.array(PromptFeatureResultSchema),
     suggestedFeatures: z.array(SuggestedPromptFeatureSchema).optional(),
     extractedAt: z.coerce.date(),

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import type { z } from "zod";
 import type { Collection, Db } from "mongodb";
 import type { QueueClient } from "@azure/storage-queue";
 import type { BlobServiceClient } from "@azure/storage-blob";
@@ -13,81 +14,40 @@ import type {
   SkillResolver,
   SkillDocument,
   SkillRevisionDocument,
+  // Zod response schemas → inferred types replace hand-written interfaces
+  CriteriaResponseSchema,
+  PromptFeatureResponseSchema,
+  PromptFeatureExtractionResponseSchema,
+  InsightReferenceSchema,
+  LogEventSchema,
+  ReportResponseSchema,
+  InsightResponseSchema,
+  AgentVersionSchema,
+  AgentResponseSchema,
+  ModelResponseSchema,
+  McpServerResponseSchema,
+  FeatureFlagResponseSchema,
 } from "shared";
 
-// ─── Document interfaces ─────────────────────────────────────────────────────
-// These are the local document types currently defined in index.ts.
-// They will migrate to shared Zod schemas over time (z.infer<>).
+// ─── Document types (inferred from Zod schemas) ─────────────────────────────
 
-export interface CriteriaDocument {
-  id: string;
-  prompt: string;
-  dependsOn?: string[];
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
+export type CriteriaDocument = z.infer<typeof CriteriaResponseSchema>;
+export type PromptFeatureDocument = z.infer<typeof PromptFeatureResponseSchema>;
+export type PromptFeatureExtractionDocument = z.infer<typeof PromptFeatureExtractionResponseSchema>;
+export type InsightReference = z.infer<typeof InsightReferenceSchema>;
+export type LogEvent = z.infer<typeof LogEventSchema>;
+export type ReportDocument = z.infer<typeof ReportResponseSchema>;
+export type InsightDocument = z.infer<typeof InsightResponseSchema>;
+export type AgentVersion = z.infer<typeof AgentVersionSchema>;
+export type CodingAgentDocument = z.infer<typeof AgentResponseSchema>;
+export type ModelDocument = z.infer<typeof ModelResponseSchema>;
+export type McpServerDocument = z.infer<typeof McpServerResponseSchema>;
+export type FeatureFlagDocument = z.infer<typeof FeatureFlagResponseSchema>;
 
-export interface PromptFeatureDocument {
-  id: string;
-  prompt: string;
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-export interface PromptFeatureExtractionDocument {
-  _id?: string;
-  taskText: string;
-  taskTextHash: string;
-  promptFeatureResults: Array<{
-    featureId: string;
-    detected: boolean;
-    evaluated: boolean;
-  }>;
-  suggestedFeatures?: Array<{
-    suggestedId: string;
-    behavior: string;
-    prompt: string;
-  }>;
-  extractedAt: Date;
-  model?: string;
-}
-
-export interface InsightReference {
-  insightId: string;
-  referencedAt: Date;
-  isNew: boolean;
-}
-
-export interface LogEvent {
-  timestamp: string;
-  level: "info" | "warn" | "error" | "debug";
-  source?: string;
-  message: string;
-  data?: Record<string, unknown>;
-}
-
-export interface ReportDocument {
-  _id: string;
-  requestId: string;
-  templateId?: string;
-  reporter?: {
-    id: string;
-    name: string;
-    gitHash: string;
-    model: string;
-    agentId: string;
-    agentVersion: string;
-  };
-  content?: string;
-  status: "pending" | "generating" | "completed" | "failed";
-  error?: string;
-  logs: LogEvent[];
-  insightReferences?: InsightReference[];
-  createdAt: Date;
-  updatedAt?: Date;
-}
+// ─── Types not yet migrated to z.infer<> (schema mismatches to resolve) ──────
+// RequestDocument: schema turns[] has extra fields (criteriaResults, tokenUsage, etc.)
+// ReportTemplateDocument: schema has both _id and id, interface only has id
+// These will be migrated once the Request and ReportTemplate route groups move.
 
 export type ReportTrigger =
   | { type: "always" }
@@ -109,23 +69,6 @@ export interface ReportTemplateDocument {
     content: string;
   };
   trigger?: ReportTrigger;
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-export interface InsightDocument {
-  _id: string;
-  title: string;
-  description: string;
-  category?: string;
-  tags?: string[];
-  upvotes: number;
-  downvotes: number;
-  blocked: boolean;
-  referenceCount: number;
-  createdBy: "agent" | "user";
-  sourceReportId?: string;
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;
@@ -176,62 +119,6 @@ export interface RequestDocument {
   agentVersion?: string;
   workerVersion?: string;
   submissionId?: string;
-}
-
-export interface AgentVersion {
-  agentVersion: string;
-  workerVersion: string;
-  components: Record<string, string>;
-  gitCommit: string;
-  buildTime: string;
-  imageTag: string;
-  queueName: string;
-  status: "active" | "retired";
-  createdAt: Date;
-}
-
-export interface CodingAgentDocument {
-  _id: string;
-  name: string;
-  description?: string;
-  supportedModels: string[];
-  defaultModel?: string;
-  versions?: AgentVersion[];
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-export interface ModelDocument {
-  _id: string;
-  modelId: string;
-  provider: string;
-  agentId: string;
-  firstSeenAt: Date;
-  lastSeenAt: Date;
-  disappearedAt?: Date;
-  providerAvailableFrom?: Date;
-  providerEndOfLife?: Date;
-  metadata?: Record<string, unknown>;
-}
-
-export interface McpServerDocument {
-  _id: string;
-  name: string;
-  type: "sse" | "http";
-  url: string;
-  headers?: Array<{ name: string; value: string }>;
-  description?: string;
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-export interface FeatureFlagDocument {
-  key: string;
-  label: string;
-  enabled: boolean;
-  updatedAt: Date;
 }
 
 export const VALID_WORKERS = [
