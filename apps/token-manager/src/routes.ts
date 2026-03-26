@@ -24,6 +24,7 @@ const VALID_TYPES: TokenType[] = [
   "github-oauth",
   "github-oauth-cookie-state",
   "anthropic-api-key",
+  "anthropic-oauth",
 ];
 const VALID_CAPABILITIES: TokenCapability[] = [
   "github-models",
