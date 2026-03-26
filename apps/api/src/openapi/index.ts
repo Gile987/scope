@@ -12,7 +12,7 @@ import "./routes/report-templates.js";
 import "./routes/insights.js";
 import "./routes/agents.js";
 // models: migrated to src/routes/models.ts (uses apiRoute())
-import "./routes/mcp-servers.js";
+// mcp-servers: migrated to src/routes/mcp-servers.ts (uses apiRoute())
 import "./routes/skills.js";
 import "./routes/skill-revisions.js";
 import "./routes/tokens.js";

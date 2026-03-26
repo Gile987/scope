@@ -6,6 +6,7 @@ import express from "express";
 import { generateOpenAPIDocument, registry } from "./index.js";
 import { registerFeatureFlagRoutes } from "../routes/feature-flags.js";
 import { registerModelRoutes } from "../routes/models.js";
+import { registerMcpServerRoutes } from "../routes/mcp-servers.js";
 
 // Register apiRoute()-based routes so they appear in the OpenAPI doc.
 // These need an Express app + the registry; we use a throwaway app since
@@ -14,6 +15,7 @@ const testApp = express();
 const testCtx = { app: testApp, registry } as any;
 registerFeatureFlagRoutes(testCtx);
 registerModelRoutes(testCtx);
+registerMcpServerRoutes(testCtx);
 
 describe("OpenAPI document generation", () => {
   const doc = generateOpenAPIDocument();

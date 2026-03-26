@@ -41,6 +41,7 @@ import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
 import { registerFeatureFlagRoutes } from "./routes/feature-flags.js";
 import { registerModelRoutes } from "./routes/models.js";
+import { registerMcpServerRoutes } from "./routes/mcp-servers.js";
 import type { RouteContext } from "./route-context.js";
 
 const require = createRequire(import.meta.url);
@@ -3780,170 +3781,8 @@ app.patch("/api/v1/agents/:id/versions/:agentVersion", async (req: Request, res:
 // ============================================================
 
 // ============================================================
-// MCP Server CRUD routes (/api/v1/mcp/servers)
+// MCP Server CRUD routes — migrated to routes/mcp-servers.ts
 // ============================================================
-
-const VALID_MCP_TRANSPORT_TYPES = ["sse", "http"] as const;
-
-// List MCP servers
-app.get("/api/v1/mcp/servers", async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const servers = await mcpServerCollection
-      .find({ deletedAt: { $exists: false } })
-      .toArray();
-    servers.sort((a, b) => a._id.localeCompare(b._id));
-    res.json(servers.map((s) => ({ ...s, id: s._id })));
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get MCP server by slug
-app.get("/api/v1/mcp/servers/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const server = await mcpServerCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!server) {
-      res.status(404).json({ error: "MCP server not found" });
-      return;
-    }
-    res.json({ ...server, id: server._id });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Create MCP server
-app.post("/api/v1/mcp/servers", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { _id, name, type, url, headers, description } = req.body;
-
-    if (!_id || typeof _id !== "string") {
-      res.status(400).json({ error: "_id (slug) is required and must be a string" });
-      return;
-    }
-    if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(_id) && !/^[a-z0-9]$/.test(_id)) {
-      res.status(400).json({ error: "_id must be a lowercase slug (letters, numbers, hyphens)" });
-      return;
-    }
-    if (!name || typeof name !== "string") {
-      res.status(400).json({ error: "name is required and must be a string" });
-      return;
-    }
-    if (!type || !VALID_MCP_TRANSPORT_TYPES.includes(type)) {
-      res.status(400).json({ error: `type is required and must be one of: ${VALID_MCP_TRANSPORT_TYPES.join(", ")}` });
-      return;
-    }
-    if (!url || typeof url !== "string") {
-      res.status(400).json({ error: "url is required and must be a string" });
-      return;
-    }
-    if (headers !== undefined) {
-      if (!Array.isArray(headers) || !headers.every((h: unknown) => typeof h === "object" && h !== null && typeof (h as Record<string, unknown>).name === "string" && typeof (h as Record<string, unknown>).value === "string")) {
-        res.status(400).json({ error: "headers must be an array of { name: string, value: string }" });
-        return;
-      }
-    }
-
-    const now = new Date();
-    const existing = await mcpServerCollection.findOne({ _id });
-
-    if (existing) {
-      // Upsert: un-delete if soft-deleted, update fields
-      await mcpServerCollection.updateOne(
-        { _id },
-        {
-          $set: {
-            name,
-            type,
-            url,
-            ...(headers !== undefined ? { headers } : {}),
-            ...(description !== undefined ? { description } : {}),
-            updatedAt: now,
-          },
-          $unset: { deletedAt: "" },
-        }
-      );
-      const updated = await mcpServerCollection.findOne({ _id });
-      res.json({ ...updated, id: updated!._id });
-    } else {
-      const serverDoc: McpServerDocument = {
-        _id,
-        name,
-        type,
-        url,
-        ...(headers ? { headers } : {}),
-        ...(description ? { description } : {}),
-        createdAt: now,
-      };
-      await mcpServerCollection.insertOne(serverDoc);
-      res.status(201).json({ ...serverDoc, id: serverDoc._id });
-    }
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Update MCP server
-app.put("/api/v1/mcp/servers/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const { name, type, url, headers, description } = req.body;
-
-    const existing = await mcpServerCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "MCP server not found" });
-      return;
-    }
-
-    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-    if (name !== undefined) updateFields.name = name;
-    if (type !== undefined) {
-      if (!VALID_MCP_TRANSPORT_TYPES.includes(type)) {
-        res.status(400).json({ error: `type must be one of: ${VALID_MCP_TRANSPORT_TYPES.join(", ")}` });
-        return;
-      }
-      updateFields.type = type;
-    }
-    if (url !== undefined) updateFields.url = url;
-    if (headers !== undefined) {
-      if (!Array.isArray(headers) || !headers.every((h: unknown) => typeof h === "object" && h !== null && typeof (h as Record<string, unknown>).name === "string" && typeof (h as Record<string, unknown>).value === "string")) {
-        res.status(400).json({ error: "headers must be an array of { name: string, value: string }" });
-        return;
-      }
-      updateFields.headers = headers;
-    }
-    if (description !== undefined) updateFields.description = description;
-
-    await mcpServerCollection.updateOne({ _id: id }, { $set: updateFields });
-    const updated = await mcpServerCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Delete MCP server (soft-delete)
-app.delete("/api/v1/mcp/servers/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-
-    const existing = await mcpServerCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "MCP server not found" });
-      return;
-    }
-
-    await mcpServerCollection.updateOne(
-      { _id: id },
-      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
-    );
-
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
-});
 
 // =====================================================================
 // Skills API
@@ -4759,6 +4598,7 @@ async function main(): Promise<void> {
   // Register unified route modules (apiRoute-based)
   registerFeatureFlagRoutes(ctx);
   registerModelRoutes(ctx);
+  registerMcpServerRoutes(ctx);
 
   // Generate OpenAPI document (after all routes are registered)
   const openapiDocument = generateOpenAPIDocument();
