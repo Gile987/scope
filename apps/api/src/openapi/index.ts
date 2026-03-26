@@ -4,7 +4,7 @@
 // Import all route registrations (side effects)
 import "./routes/health.js";
 import "./routes/requests.js";
-import "./routes/criteria.js";
+// criteria: migrated to src/routes/criteria.ts (uses apiRoute())
 import "./routes/prompt-features.js";
 import "./routes/task-prompts.js";
 import "./routes/reports.js";
