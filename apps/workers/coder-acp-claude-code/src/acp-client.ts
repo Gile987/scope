@@ -32,7 +32,7 @@ export interface ACPSessionResult {
 /**
  * ACP Client implementation that handles permission requests and session updates
  */
-class ACPClientHandler implements acp.Client {
+export class ACPClientHandler implements acp.Client {
   private responseChunks: string[] = [];
   private onLog: (message: string) => void;
   private workspacePath: string;
@@ -96,8 +96,15 @@ class ACPClientHandler implements acp.Client {
   }
 
   private resolvePath(filePath: string): string {
-    if (isAbsolute(filePath)) return filePath;
-    return resolve(this.workspacePath, filePath);
+    const fullPath = isAbsolute(filePath)
+      ? resolve(filePath)
+      : resolve(this.workspacePath, filePath);
+    if (!fullPath.startsWith(this.workspacePath + "/") && fullPath !== this.workspacePath) {
+      throw new Error(
+        `Path traversal blocked: "${filePath}" resolves outside workspace "${this.workspacePath}"`
+      );
+    }
+    return fullPath;
   }
 
   async writeTextFile(
