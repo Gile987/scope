@@ -101,19 +101,19 @@ describe("computeAnalysis – durationStats", () => {
     };
   }
 
-  it("computes durationStats from passed runs", () => {
+  it("computes durationStats as total run duration across passed runs", () => {
     const runs = [
-      makeRunWithDurations([10000, 20000], true),   // 2 turns, both with durations
-      makeRunWithDurations([15000], true),           // 1 turn
+      makeRunWithDurations([10000, 20000], true),   // total = 30000
+      makeRunWithDurations([15000], true),           // total = 15000
     ];
     const result = computeAnalysis(runs, kValues);
     expect(result.groups).toHaveLength(1);
     const ds = result.groups[0].durationStats;
     expect(ds).not.toBeNull();
-    // Values: 10000, 20000, 15000 → mean = 15000
-    expect(ds!.mean).toBe(15000);
-    expect(ds!.min).toBe(10000);
-    expect(ds!.max).toBe(20000);
+    // Run totals: 30000, 15000 → mean = 22500
+    expect(ds!.mean).toBe(22500);
+    expect(ds!.min).toBe(15000);
+    expect(ds!.max).toBe(30000);
   });
 
   it("returns null durationStats when no passed runs", () => {

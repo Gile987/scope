@@ -30,7 +30,7 @@ export interface TaskWorkerGroup {
     stdDev: number;
     min: number;
     max: number;
-  } | null;  // Per-iteration duration in ms (null if no timing data)
+  } | null;  // Total run duration in ms (null if no timing data)
 }
 
 export interface AnalysisResponse {
@@ -254,19 +254,22 @@ export function computeAnalysis(
       };
     }
 
-    // Duration stats: collect durationMs from all turns of passed runs
+    // Duration stats: total run duration (sum of iteration durations) across passed runs
     let durationStats: TaskWorkerGroup['durationStats'] = null;
-    const durations = passedRuns
-      .flatMap(r => (r.turns || []))
-      .map(t => t.durationMs)
+    const runDurations = passedRuns
+      .map(r => {
+        const turns = r.turns || [];
+        const turnDurations = turns.map(t => t.durationMs).filter((d): d is number => d != null);
+        return turnDurations.length > 0 ? turnDurations.reduce((a, b) => a + b, 0) : null;
+      })
       .filter((d): d is number => d != null);
-    if (durations.length > 0) {
-      const mean = durations.reduce((a, b) => a + b, 0) / durations.length;
+    if (runDurations.length > 0) {
+      const mean = runDurations.reduce((a, b) => a + b, 0) / runDurations.length;
       durationStats = {
         mean,
-        stdDev: stdDev(durations),
-        min: Math.min(...durations),
-        max: Math.max(...durations),
+        stdDev: stdDev(runDurations),
+        min: Math.min(...runDurations),
+        max: Math.max(...runDurations),
       };
     }
 

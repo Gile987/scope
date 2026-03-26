@@ -211,7 +211,7 @@ export interface TaskWorkerGroup {
     stdDev: number;
     min: number;
     max: number;
-  } | null;  // Per-iteration duration in ms (null if no timing data)
+  } | null;  // Total run duration in ms (null if no timing data)
 }
 
 export interface AnalysisResponse {

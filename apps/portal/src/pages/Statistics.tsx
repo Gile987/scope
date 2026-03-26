@@ -361,7 +361,7 @@ function DurationStatsTable({ data }: { data: AnalysisResponse }) {
       <CardHeader>
         <CardTitle>Duration Statistics</CardTitle>
         <CardDescription>
-          Per-iteration duration for successful runs
+          Total run duration for successful runs
         </CardDescription>
       </CardHeader>
       <CardContent>
