@@ -36,14 +36,44 @@ import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp
 import { blobNameFromSnapshotsUrl, rewriteHarUrlsForArchive, detectBundledHarFiles, uploadBundledHarFiles } from "./archive-har.js";
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, resolveAgentVersion } from "shared";
 import { evaluateTrigger, REPORT_SYSTEM_PROMPT } from "shared";
+import {
+  CreateCriteriaInputSchema,
+  UpdateCriteriaInputSchema,
+  CriteriaResponseSchema,
+  CriteriaGraphSchema,
+  ModelResponseSchema,
+  ListModelsQuerySchema,
+  McpServerResponseSchema,
+  UpdateMcpServerInputSchema,
+  McpTransportTypeSchema,
+  McpServerHeaderSchema,
+  FeatureFlagResponseSchema,
+  UpdateFeatureFlagInputSchema,
+} from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
-import { registerFeatureFlagRoutes } from "./routes/feature-flags.js";
-import { registerModelRoutes } from "./routes/models.js";
-import { registerMcpServerRoutes } from "./routes/mcp-servers.js";
-import { registerCriteriaRoutes } from "./routes/criteria.js";
-import type { RouteContext } from "./route-context.js";
+import { z } from "zod";
+import { apiRoute } from "./openapi/api-route.js";
+import { VALID_WORKERS } from "./route-context.js";
+import type {
+  CriteriaDocument,
+  PromptFeatureDocument,
+  PromptFeatureExtractionDocument,
+  InsightReference,
+  LogEvent,
+  ReportDocument,
+  ReportTrigger,
+  ReportTemplateDocument,
+  InsightDocument,
+  RequestDocument,
+  AgentVersion,
+  CodingAgentDocument,
+  ModelDocument,
+  McpServerDocument,
+  FeatureFlagDocument,
+  WorkerType,
+} from "./route-context.js";
 
 const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
@@ -77,10 +107,6 @@ const GIT_COMMIT = process.env.GIT_COMMIT || "development";
 const BUILD_TIME = process.env.BUILD_TIME || new Date().toISOString();
 const SCOPE_ENVIRONMENT = process.env.SCOPE_ENVIRONMENT || "production";
 
-// Valid worker types
-const VALID_WORKERS = ["coder-acp-claude-code", "coder-acp-copilot"] as const;
-type WorkerType = (typeof VALID_WORKERS)[number];
-
 // MongoDB clients
 let mongoClient: MongoClient;
 let db: Db;
@@ -104,213 +130,6 @@ let skillResolver: SkillResolver;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 const dynamicQueueClients: Map<string, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
-
-// Criteria document interface
-interface CriteriaDocument {
-  id: string;
-  prompt: string;
-  dependsOn?: string[];
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-// Prompt feature document interfaces
-interface PromptFeatureDocument {
-  id: string;
-  prompt: string;
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-interface PromptFeatureExtractionDocument {
-  _id?: string;
-  taskText: string;
-  taskTextHash: string;
-  promptFeatureResults: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
-  suggestedFeatures?: Array<{ suggestedId: string; behavior: string; prompt: string }>;
-  extractedAt: Date;
-  model?: string;
-}
-
-// Insight reference interface (embedded in ReportDocument)
-interface InsightReference {
-  insightId: string;
-  referencedAt: Date;
-  isNew: boolean;
-}
-
-// Report document interface
-interface ReportDocument {
-  _id: string;
-  requestId: string;
-  templateId?: string;  // FK → report-templates.id (which template generated this report)
-  reporter?: {
-    id: string;
-    name: string;
-    gitHash: string;
-    model: string;
-    agentId: string;
-    agentVersion: string;
-  };
-  content?: string;
-  status: "pending" | "generating" | "completed" | "failed";
-  error?: string;
-  logs: LogEvent[];
-  insightReferences?: InsightReference[];
-  createdAt: Date;
-  updatedAt?: Date;
-}
-
-// Report trigger types (discriminated union)
-type ReportTrigger =
-  | { type: "always" }
-  | { type: "criteria"; criteriaIds: string[]; match?: "any" | "all" }
-  | { type: "taskPrompt"; taskPromptIds: string[] }
-  | { type: "promptFeature"; featureIds: string[]; match?: "any" | "all" };
-
-// Report template document interface
-interface ReportTemplateDocument {
-  id: string;                // Human-readable slug (e.g. "default", "failure-analysis")
-  name: string;              // Display name
-  description?: string;
-  userPrompt: string;        // REQUIRED — the agent instruction
-  systemPrompt?: {           // OPTIONAL — customize base system prompt
-    mode: "append" | "override";
-    content: string;
-  };
-  trigger?: ReportTrigger;   // OPTIONAL — omit = "always"
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-// Insight document interface
-interface InsightDocument {
-  _id: string;
-  title: string;
-  /** Markdown-formatted detailed observation */
-  description: string;
-  category?: string;
-  tags?: string[];
-  upvotes: number;
-  downvotes: number;
-  blocked: boolean;
-  referenceCount: number;
-  createdBy: "agent" | "user";
-  sourceReportId?: string;
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-// Log event interface
-interface LogEvent {
-  timestamp: string;
-  level: "info" | "warn" | "error" | "debug";
-  source?: string;
-  message: string;
-  data?: Record<string, unknown>;
-}
-
-// Request document interface
-interface RequestDocument {
-  _id: string;
-  scenario: { task: string; criteria: string[]; version?: 'v1' | 'v2' };
-  workerType: WorkerType;
-  model?: string;
-  status: "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
-  result?: string;
-  error?: string;
-  logs?: LogEvent[];
-  maxIterations?: number;
-  turns?: Array<{
-    iteration: number;
-    codingAgentResponse: string;
-    judgeFeedback: string;
-    snapshotUrl: string;
-    passed: boolean;
-    timestamp: Date;
-    harUrl?: string;
-    videoUrls?: string[];
-  }>;
-  personaInstructions?: string;
-  persona?: { personality: string; experience: string; verbosity: string; type: string };
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-  taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → task-prompts._id)
-  mcpServers?: string[];          // MCP server slugs selected for this run
-  skillRevisions?: string[];      // Human-readable skill revision refs (source/skillName@commitHash)
-  harUrl?: string;
-  videoUrls?: string[];
-  setupVideoUrls?: string[];
-  agentVersion?: string;          // Agent software version prefix (FK → AgentVersion.agentVersion)
-  workerVersion?: string;          // Exact build that processed this run
-  submissionId?: string;           // Groups runs submitted together (UUID v4)
-}
-
-// Agent version entry — embedded in CodingAgentDocument.versions[]
-interface AgentVersion {
-  agentVersion: string;
-  workerVersion: string;
-  components: Record<string, string>;
-  gitCommit: string;
-  buildTime: string;
-  imageTag: string;
-  queueName: string;
-  status: "active" | "retired";
-  createdAt: Date;
-}
-
-// Coding agent document interface
-interface CodingAgentDocument {
-  _id: string;
-  name: string;
-  description?: string;
-  supportedModels: string[];
-  defaultModel?: string;
-  versions?: AgentVersion[];
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-// Model document interface — tracks lifecycle of scanned models
-interface ModelDocument {
-  _id: string;                     // Compound: "{agentId}:{modelId}"
-  modelId: string;                 // Model identifier (e.g. "gpt-4.1")
-  provider: string;                // Provider identifier (e.g. "github-copilot", "anthropic")
-  agentId: string;                 // Which coding agent this model was discovered for
-  firstSeenAt: Date;               // First time our scanner discovered this model
-  lastSeenAt: Date;                // Last scan where this model was still present
-  disappearedAt?: Date;            // Set when model no longer returned by provider
-  providerAvailableFrom?: Date;    // Provider-reported availability date
-  providerEndOfLife?: Date;        // Provider-reported planned end-of-life
-  metadata?: Record<string, unknown>; // Additional provider-specific metadata
-}
-
-// MCP server document interface
-interface McpServerDocument {
-  _id: string;                    // Slug identifier
-  name: string;
-  type: "sse" | "http";
-  url: string;
-  headers?: Array<{ name: string; value: string }>;
-  description?: string;
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-// Feature flag document interface
-interface FeatureFlagDocument {
-  key: string;
-  label: string;
-  enabled: boolean;
-  updatedAt: Date;
-}
 
 // Queue message interface
 interface QueueMessage {
@@ -1905,7 +1724,438 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
   }
 });
 
-// --- Criteria — migrated to routes/criteria.ts ---
+// --- Criteria seed & CRUD (apiRoute) ---
+
+// POST /api/v1/criteria/generate-prompt — AI-generate a criteria prompt
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/criteria/generate-prompt",
+  tags: ["Criteria"],
+  summary: "Generate criterion prompt from behavior",
+  body: z.object({
+    behavior: z.string(),
+    currentId: z.string().optional(),
+  }),
+  response: z.object({ prompt: z.string() }),
+  errorResponses: {
+    400: { description: "Empty behavior string" },
+    503: { description: "LLM not configured" },
+  },
+  handler: async (req, res, next) => {
+    const { behavior, currentId } = req.body;
+    if (!behavior.trim()) {
+      res.status(400).json({ error: "Body must contain a non-empty 'behavior' string" });
+      return;
+    }
+
+    if (!isLlmAvailable()) {
+      res
+        .status(503)
+        .json({
+          error:
+            "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY",
+        });
+      return;
+    }
+
+    const allCriteria = await criteriaCollection
+      .find({ deletedAt: { $exists: false } })
+      .project({ id: 1, prompt: 1, dependsOn: 1, _id: 0 })
+      .toArray();
+
+    const existingCriteria = currentId
+      ? allCriteria.filter((c: any) => c.id !== currentId)
+      : allCriteria;
+
+    try {
+      const result = await generateCriteriaPrompt(
+        behavior.trim(),
+        existingCriteria as { id: string; prompt: string; dependsOn?: string[] }[],
+      );
+      console.log("[generate-prompt] LLM result:", JSON.stringify(result));
+      res.json(result);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("not configured")) {
+        res.status(503).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  },
+});
+
+// POST /api/v1/criteria/seed — bulk seed criteria from a JSON array
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/criteria/seed",
+  tags: ["Criteria"],
+  summary: "Seed criteria in bulk",
+  body: z.object({
+    criteria: z.array(CreateCriteriaInputSchema),
+  }),
+  response: z.object({
+    seeded: z.number(),
+    errors: z.array(z.string()),
+  }),
+  handler: async (req, res) => {
+    const { criteria } = req.body;
+    let seeded = 0;
+    const errors: string[] = [];
+
+    for (const config of criteria) {
+      if (!config.id || !config.prompt) {
+        errors.push("Skipping entry without id or prompt");
+        continue;
+      }
+      try {
+        await criteriaCollection.updateOne(
+          { id: config.id.trim() },
+          {
+            $setOnInsert: {
+              id: config.id.trim(),
+              prompt: config.prompt.trim(),
+              dependsOn: Array.isArray(config.dependsOn)
+                ? config.dependsOn.map((d: any) => String(d).trim())
+                : [],
+              createdAt: new Date(),
+            },
+          },
+          { upsert: true },
+        );
+        seeded++;
+      } catch (err) {
+        errors.push(`Failed to seed ${config.id}: ${err}`);
+      }
+    }
+
+    res.json({ seeded, errors });
+  },
+});
+
+// GET /api/v1/criteria — list all criteria (with optional ?q= search)
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/criteria",
+  tags: ["Criteria"],
+  summary: "List criteria",
+  query: z.object({ q: z.string().optional() }),
+  response: z.array(CriteriaResponseSchema),
+  handler: async (req, res) => {
+    const q = req.query.q;
+    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    if (q) {
+      filter.$or = [
+        { id: { $regex: q, $options: "i" } },
+        { prompt: { $regex: q, $options: "i" } },
+      ];
+    }
+    const criteria = await criteriaCollection.find(filter).toArray();
+    criteria.sort((a, b) => a.id.localeCompare(b.id));
+    res.json(criteria);
+  },
+});
+
+// GET /api/v1/criteria/mdp — MDP state-transition graph across all runs
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/criteria/mdp",
+  tags: ["Criteria"],
+  summary: "Compute MDP transitions",
+  query: z.object({
+    criteria: z.string().optional(),
+    features: z.string().optional(),
+    since: z.string().optional(),
+    worker: z.string().optional(),
+    taskPromptId: z.string().optional(),
+  }),
+  response: z.object({}).passthrough(),
+  handler: async (req, res) => {
+    const selectedCriteria = req.query.criteria
+      ? req.query.criteria.split(",").map((c) => c.trim()).filter(Boolean)
+      : undefined;
+    const selectedFeatures = req.query.features
+      ? req.query.features.split(",").map((f) => f.trim()).filter(Boolean)
+      : undefined;
+    const sinceDate = req.query.since ? new Date(req.query.since) : undefined;
+
+    const mdpFilter: Record<string, unknown> = {
+      status: { $in: ["completed", "failed", "exhausted"] },
+      deletedAt: { $exists: false },
+    };
+    if (req.query.worker) mdpFilter.workerType = req.query.worker;
+    if (req.query.taskPromptId) mdpFilter.taskPromptId = req.query.taskPromptId;
+    if (sinceDate && !isNaN(sinceDate.getTime())) {
+      mdpFilter.updatedAt = { $gt: sinceDate };
+    }
+
+    const runs = await collection
+      .find(mdpFilter)
+      .project({
+        _id: 1,
+        scenario: 1,
+        status: 1,
+        turns: 1,
+        updatedAt: 1,
+        taskPromptId: 1,
+      })
+      .toArray();
+
+    // Batch-lookup task prompts for their features
+    const taskPromptIds = [
+      ...new Set(runs.map((r) => r.taskPromptId).filter(Boolean)),
+    ] as string[];
+    const taskPromptFeatures = new Map<
+      string,
+      Array<{ featureId: string; detected: boolean; evaluated: boolean }>
+    >();
+    if (taskPromptIds.length > 0) {
+      const taskPrompts = await taskPromptCollection
+        .find({ _id: { $in: taskPromptIds } })
+        .project({ _id: 1, features: 1 })
+        .toArray();
+      for (const tp of taskPrompts) {
+        if (tp.features && tp.features.length > 0) {
+          taskPromptFeatures.set(tp._id, tp.features);
+        }
+      }
+    }
+
+    const mdpRuns: MdpAnalyzableRun[] = runs.map((r) => ({
+      scenario: r.scenario,
+      status: r.status,
+      turns: r.turns,
+      updatedAt: r.updatedAt,
+      promptFeatures: r.taskPromptId
+        ? taskPromptFeatures.get(r.taskPromptId)
+        : undefined,
+    }));
+
+    const mdpResult = computeMdp(mdpRuns, selectedCriteria, selectedFeatures);
+    res.json(mdpResult);
+  },
+});
+
+// GET /api/v1/criteria/graph — criteria DAG (nodes + edges)
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/criteria/graph",
+  tags: ["Criteria"],
+  summary: "Get criteria DAG",
+  response: CriteriaGraphSchema,
+  handler: async (_req, res) => {
+    const all = await criteriaCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+    all.sort((a, b) => a.id.localeCompare(b.id));
+    const nodes = all.map((c) => ({
+      id: c.id,
+      prompt: c.prompt,
+      dependsOn: c.dependsOn || [],
+    }));
+    const edges: { source: string; target: string }[] = [];
+    for (const c of all) {
+      if (c.dependsOn) {
+        for (const parentId of c.dependsOn) {
+          edges.push({ source: parentId, target: c.id });
+        }
+      }
+    }
+    res.json({ nodes, edges });
+  },
+});
+
+// GET /api/v1/criteria/:id — get single criterion
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/criteria/:id",
+  tags: ["Criteria"],
+  summary: "Get criterion",
+  params: z.object({ id: z.string() }),
+  response: CriteriaResponseSchema,
+  errorResponses: {
+    404: { description: "Criterion not found" },
+  },
+  handler: async (req, res) => {
+    const { id } = req.params;
+    const criterion = await criteriaCollection.findOne({
+      id,
+      deletedAt: { $exists: false },
+    });
+    if (!criterion) {
+      res.status(404).json({ error: `Criteria '${id}' not found` });
+      return;
+    }
+
+    const dependents = await criteriaCollection
+      .find({ dependsOn: id, deletedAt: { $exists: false } })
+      .toArray();
+
+    res.json({ ...criterion, dependents: dependents.map((d) => d.id) });
+  },
+});
+
+// POST /api/v1/criteria — create a new criterion
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/criteria",
+  tags: ["Criteria"],
+  summary: "Create criterion",
+  body: CreateCriteriaInputSchema,
+  response: CriteriaResponseSchema,
+  errorResponses: {
+    409: { description: "Criterion already exists" },
+  },
+  handler: async (req, res) => {
+    const { id, prompt, dependsOn = [] } = req.body;
+
+    // Check for duplicates
+    const existing = await criteriaCollection.findOne({
+      id,
+      deletedAt: { $exists: false },
+    });
+    if (existing) {
+      res.status(409).json({ error: `Criteria '${id}' already exists` });
+      return;
+    }
+
+    // Validate dependency references
+    for (const depId of dependsOn) {
+      const dep = await criteriaCollection.findOne({
+        id: depId,
+        deletedAt: { $exists: false },
+      });
+      if (!dep) {
+        res
+          .status(400)
+          .json({ error: `Dependency '${depId}' does not exist` });
+        return;
+      }
+    }
+
+    const doc: CriteriaDocument = {
+      id,
+      prompt: prompt.trim(),
+      dependsOn,
+      createdAt: new Date(),
+    };
+
+    await criteriaCollection.insertOne(doc as any);
+    res.status(201).json(doc);
+  },
+});
+
+// PUT /api/v1/criteria/:id — update a criterion
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/criteria/:id",
+  tags: ["Criteria"],
+  summary: "Update criterion",
+  params: z.object({ id: z.string() }),
+  body: UpdateCriteriaInputSchema,
+  response: CriteriaResponseSchema,
+  errorResponses: {
+    404: { description: "Criterion not found" },
+    400: { description: "Invalid dependency reference or self-reference" },
+  },
+  handler: async (req, res) => {
+    const { id } = req.params;
+    const { prompt, dependsOn } = req.body;
+
+    const existing = await criteriaCollection.findOne({
+      id,
+      deletedAt: { $exists: false },
+    });
+    if (!existing) {
+      res.status(404).json({ error: `Criteria '${id}' not found` });
+      return;
+    }
+
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (prompt !== undefined) {
+      update.prompt = prompt.trim();
+    }
+    if (dependsOn !== undefined) {
+      // Validate dependency references
+      for (const depId of dependsOn) {
+        const dep = await criteriaCollection.findOne({
+          id: depId,
+          deletedAt: { $exists: false },
+        });
+        if (!dep) {
+          res
+            .status(400)
+            .json({ error: `Dependency '${depId}' does not exist` });
+          return;
+        }
+      }
+      // Self-reference check
+      if (dependsOn.includes(id)) {
+        res
+          .status(400)
+          .json({ error: "A criterion cannot depend on itself" });
+        return;
+      }
+      update.dependsOn = dependsOn;
+    }
+
+    await criteriaCollection.updateOne(
+      { id, deletedAt: { $exists: false } },
+      { $set: update },
+    );
+
+    const updated = await criteriaCollection.findOne({
+      id,
+      deletedAt: { $exists: false },
+    });
+    res.json(updated);
+  },
+});
+
+// DELETE /api/v1/criteria/:id — soft-delete (rejects if has dependents)
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/criteria/:id",
+  tags: ["Criteria"],
+  summary: "Soft-delete criterion",
+  params: z.object({ id: z.string() }),
+  response: z.object({ id: z.string(), deleted: z.boolean() }),
+  errorResponses: {
+    404: { description: "Criterion not found" },
+    409: { description: "Criterion has dependents" },
+  },
+  handler: async (req, res) => {
+    const { id } = req.params;
+
+    const existing = await criteriaCollection.findOne({
+      id,
+      deletedAt: { $exists: false },
+    });
+    if (!existing) {
+      res.status(404).json({ error: `Criteria '${id}' not found` });
+      return;
+    }
+
+    // Check for dependents
+    const dependents = await criteriaCollection
+      .find({ dependsOn: id, deletedAt: { $exists: false } })
+      .toArray();
+
+    if (dependents.length > 0) {
+      res.status(409).json({
+        error: `Cannot delete '${id}': other criteria depend on it`,
+        dependents: dependents.map((d) => d.id),
+      });
+      return;
+    }
+
+    await criteriaCollection.updateOne(
+      { id, deletedAt: { $exists: false } },
+      { $set: { deletedAt: new Date() } },
+    );
+
+    res.json({ id, deleted: true });
+  },
+});
 
 // --- Prompt Feature CRUD & extraction ---
 
@@ -3412,12 +3662,357 @@ app.patch("/api/v1/agents/:id/versions/:agentVersion", async (req: Request, res:
 });
 
 // ============================================================
-// Models routes — migrated to routes/models.ts
+// Models routes (/api/v1/models) — lifecycle-tracked model scanning (apiRoute)
 // ============================================================
 
+const ModelSyncRequestSchema = z.object({
+  agentId: z.string(),
+  provider: z.string(),
+  models: z.array(
+    z.object({
+      id: z.string(),
+      providerAvailableFrom: z.string().optional(),
+      providerEndOfLife: z.string().optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
+    }),
+  ),
+  scannedAt: z.string(),
+});
+
+// GET /api/v1/models — list models (filterable by agentId and/or provider)
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/models",
+  tags: ["Models"],
+  summary: "List models",
+  query: ListModelsQuerySchema,
+  response: z.array(ModelResponseSchema),
+  handler: async (req, res) => {
+    const filter: Record<string, unknown> = {};
+    if (req.query.agentId) filter.agentId = req.query.agentId;
+    if (req.query.provider) filter.provider = req.query.provider;
+
+    const models = await modelCollection
+      .find(filter)
+      .sort({ modelId: 1 })
+      .toArray();
+    res.json(models);
+  },
+});
+
+// GET /api/v1/models/:id — get a single model by compound ID (agentId:modelId)
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/models/:id",
+  tags: ["Models"],
+  summary: "Get model",
+  params: z.object({ id: z.string() }),
+  response: ModelResponseSchema,
+  handler: async (req, res) => {
+    const model = await modelCollection.findOne({ _id: req.params.id });
+    if (!model) {
+      res.status(404).json({ error: "Model not found" });
+      return;
+    }
+    res.json(model);
+  },
+});
+
+// POST /api/v1/models/sync — bulk upsert with lifecycle reconciliation
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/models/sync",
+  tags: ["Models"],
+  summary: "Sync models from provider",
+  body: ModelSyncRequestSchema,
+  response: z.object({
+    added: z.array(z.string()),
+    removed: z.array(z.string()),
+    unchanged: z.array(z.string()),
+  }),
+  handler: async (req, res) => {
+    const { agentId, provider, models, scannedAt } = req.body;
+    const now = new Date(scannedAt);
+    const scannedModelIds = new Set<string>();
+
+    const added: string[] = [];
+    const unchanged: string[] = [];
+
+    // Upsert each scanned model
+    for (const model of models) {
+      if (!model.id) continue;
+      scannedModelIds.add(model.id);
+
+      const compoundId = `${agentId}:${model.id}`;
+      const existing = await modelCollection.findOne({ _id: compoundId });
+
+      if (existing) {
+        const updateFields: Record<string, unknown> = { lastSeenAt: now };
+        if (existing.disappearedAt) {
+          updateFields.disappearedAt = undefined;
+        }
+        if (model.providerAvailableFrom) {
+          updateFields.providerAvailableFrom = new Date(model.providerAvailableFrom);
+        }
+        if (model.providerEndOfLife) {
+          updateFields.providerEndOfLife = new Date(model.providerEndOfLife);
+        }
+        if (model.metadata) {
+          updateFields.metadata = model.metadata;
+        }
+
+        const unsetFields: Record<string, "" | true | 1> = {};
+        if (existing.disappearedAt) {
+          unsetFields.disappearedAt = "";
+        }
+
+        await modelCollection.updateOne(
+          { _id: compoundId },
+          {
+            $set: updateFields,
+            ...(Object.keys(unsetFields).length > 0 ? { $unset: unsetFields } : {}),
+          },
+        );
+        unchanged.push(model.id);
+      } else {
+        const doc: ModelDocument = {
+          _id: compoundId,
+          modelId: model.id,
+          provider,
+          agentId,
+          firstSeenAt: now,
+          lastSeenAt: now,
+          ...(model.providerAvailableFrom
+            ? { providerAvailableFrom: new Date(model.providerAvailableFrom) }
+            : {}),
+          ...(model.providerEndOfLife
+            ? { providerEndOfLife: new Date(model.providerEndOfLife) }
+            : {}),
+          ...(model.metadata ? { metadata: model.metadata } : {}),
+        };
+        await modelCollection.insertOne(doc);
+        added.push(model.id);
+      }
+    }
+
+    // Mark disappeared models
+    const existingModels = await modelCollection
+      .find({ agentId, provider, disappearedAt: { $exists: false } })
+      .toArray();
+
+    const removed: string[] = [];
+    for (const existing of existingModels) {
+      if (!scannedModelIds.has(existing.modelId)) {
+        await modelCollection.updateOne(
+          { _id: existing._id },
+          { $set: { disappearedAt: now } },
+        );
+        removed.push(existing.modelId);
+      }
+    }
+
+    // Update agent's supportedModels with active (non-disappeared) models
+    const activeModels = await modelCollection
+      .find({ agentId, disappearedAt: { $exists: false } })
+      .toArray();
+    const activeModelIds = activeModels.map((m) => m.modelId).sort();
+
+    const agent = await agentCollection.findOne({ _id: agentId });
+    if (agent) {
+      const needsDefault =
+        !agent.defaultModel || !activeModelIds.includes(agent.defaultModel);
+      let autoDefault: string | undefined;
+      if (needsDefault && activeModels.length > 0) {
+        const sorted = [...activeModels].sort((a, b) => {
+          const dateA = a.providerAvailableFrom ?? a.firstSeenAt;
+          const dateB = b.providerAvailableFrom ?? b.firstSeenAt;
+          return new Date(dateB).getTime() - new Date(dateA).getTime();
+        });
+        autoDefault = sorted[0].modelId;
+      }
+      await agentCollection.updateOne(
+        { _id: agentId },
+        {
+          $set: {
+            supportedModels: activeModelIds,
+            ...(autoDefault ? { defaultModel: autoDefault } : {}),
+            updatedAt: new Date(),
+          },
+        },
+      );
+    }
+
+    const report = { added, removed, unchanged };
+    console.log(
+      `Model sync for ${agentId}/${provider}: +${added.length} -${removed.length} =${unchanged.length}`,
+    );
+    res.json(report);
+  },
+});
+
 // ============================================================
-// MCP Server CRUD routes — migrated to routes/mcp-servers.ts
+// MCP Server CRUD routes (/api/v1/mcp/servers) (apiRoute)
 // ============================================================
+
+const CreateMcpServerBodySchema = z.object({
+  _id: z
+    .string()
+    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/),
+  name: z.string(),
+  type: McpTransportTypeSchema,
+  url: z.string(),
+  headers: z.array(McpServerHeaderSchema).optional(),
+  description: z.string().optional(),
+});
+
+// GET /api/v1/mcp/servers — list MCP servers
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/mcp/servers",
+  tags: ["MCP Servers"],
+  summary: "List MCP servers",
+  response: z.array(McpServerResponseSchema),
+  handler: async (_req, res) => {
+    const servers = await mcpServerCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+    servers.sort((a, b) => a._id.localeCompare(b._id));
+    res.json(servers.map((s) => ({ ...s, id: s._id })));
+  },
+});
+
+// GET /api/v1/mcp/servers/:id — get MCP server by slug
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/mcp/servers/:id",
+  tags: ["MCP Servers"],
+  summary: "Get MCP server",
+  params: z.object({ id: z.string() }),
+  response: McpServerResponseSchema,
+  handler: async (req, res) => {
+    const server = await mcpServerCollection.findOne({
+      _id: req.params.id,
+      deletedAt: { $exists: false },
+    });
+    if (!server) {
+      res.status(404).json({ error: "MCP server not found" });
+      return;
+    }
+    res.json({ ...server, id: server._id });
+  },
+});
+
+// POST /api/v1/mcp/servers — create MCP server (upserts if soft-deleted)
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/mcp/servers",
+  tags: ["MCP Servers"],
+  summary: "Create MCP server",
+  body: CreateMcpServerBodySchema,
+  response: McpServerResponseSchema,
+  handler: async (req, res) => {
+    const { _id, name, type, url, headers, description } = req.body;
+    const now = new Date();
+    const existing = await mcpServerCollection.findOne({ _id });
+
+    if (existing) {
+      // Upsert: un-delete if soft-deleted, update fields
+      await mcpServerCollection.updateOne(
+        { _id },
+        {
+          $set: {
+            name,
+            type,
+            url,
+            ...(headers !== undefined ? { headers } : {}),
+            ...(description !== undefined ? { description } : {}),
+            updatedAt: now,
+          },
+          $unset: { deletedAt: "" },
+        },
+      );
+      const updated = await mcpServerCollection.findOne({ _id });
+      res.json({ ...updated, id: updated!._id });
+    } else {
+      const serverDoc: McpServerDocument = {
+        _id,
+        name,
+        type,
+        url,
+        ...(headers ? { headers } : {}),
+        ...(description ? { description } : {}),
+        createdAt: now,
+      };
+      await mcpServerCollection.insertOne(serverDoc);
+      res.status(201).json({ ...serverDoc, id: serverDoc._id });
+    }
+  },
+});
+
+// PUT /api/v1/mcp/servers/:id — update MCP server
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/mcp/servers/:id",
+  tags: ["MCP Servers"],
+  summary: "Update MCP server",
+  params: z.object({ id: z.string() }),
+  body: UpdateMcpServerInputSchema,
+  response: McpServerResponseSchema,
+  handler: async (req, res) => {
+    const { id } = req.params;
+    const { name, type, url, headers, description } = req.body;
+
+    const existing = await mcpServerCollection.findOne({
+      _id: id,
+      deletedAt: { $exists: false },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "MCP server not found" });
+      return;
+    }
+
+    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+    if (name !== undefined) updateFields.name = name;
+    if (type !== undefined) updateFields.type = type;
+    if (url !== undefined) updateFields.url = url;
+    if (headers !== undefined) updateFields.headers = headers;
+    if (description !== undefined) updateFields.description = description;
+
+    await mcpServerCollection.updateOne({ _id: id }, { $set: updateFields });
+    const updated = await mcpServerCollection.findOne({ _id: id });
+    res.json({ ...updated, id: updated!._id });
+  },
+});
+
+// DELETE /api/v1/mcp/servers/:id — soft-delete MCP server
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/mcp/servers/:id",
+  tags: ["MCP Servers"],
+  summary: "Delete MCP server",
+  params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }),
+  successStatus: 204,
+  handler: async (req, res) => {
+    const { id } = req.params;
+
+    const existing = await mcpServerCollection.findOne({
+      _id: id,
+      deletedAt: { $exists: false },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "MCP server not found" });
+      return;
+    }
+
+    await mcpServerCollection.updateOne(
+      { _id: id },
+      { $set: { deletedAt: new Date(), updatedAt: new Date() } },
+    );
+
+    res.status(204).send();
+  },
+});
 
 // =====================================================================
 // Skills API
@@ -4191,7 +4786,45 @@ app.post("/api/v1/reports/:id/insights", async (req: Request, res: Response, nex
   }
 });
 
-// ─── Feature Flags (migrated to routes/feature-flags.ts) ─────────────────────
+// ─── Feature Flags (apiRoute) ─────────────────────────────────────────────────
+
+// GET /api/v1/feature-flags — list all feature flags
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/feature-flags",
+  tags: ["Feature Flags"],
+  summary: "List feature flags",
+  response: z.array(FeatureFlagResponseSchema),
+  handler: async (_req, res) => {
+    const flags = await featureFlagCollection.find({}).toArray();
+    res.json(flags);
+  },
+});
+
+// PUT /api/v1/feature-flags/:key — update a feature flag
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/feature-flags/:key",
+  tags: ["Feature Flags"],
+  summary: "Update feature flag",
+  params: z.object({ key: z.string() }),
+  body: UpdateFeatureFlagInputSchema,
+  response: FeatureFlagResponseSchema,
+  handler: async (req, res) => {
+    const result = await featureFlagCollection.findOneAndUpdate(
+      { key: req.params.key },
+      { $set: { enabled: req.body.enabled, updatedAt: new Date() } },
+      { returnDocument: "after" },
+    );
+
+    if (!result) {
+      res.status(404).json({ error: `Feature flag '${req.params.key}' not found` });
+      return;
+    }
+
+    res.json(result);
+  },
+});
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -4202,41 +4835,7 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 async function main(): Promise<void> {
   await initializeClients();
 
-  // Build the RouteContext for unified route modules
-  const ctx: RouteContext = {
-    app,
-    registry,
-    db,
-    requestCollection: collection,
-    criteriaCollection,
-    promptFeatureCollection,
-    promptFeatureExtractionCollection,
-    reportCollection,
-    reportTemplateCollection,
-    agentCollection,
-    modelCollection,
-    mcpServerCollection,
-    insightsCollection,
-    taskPromptCollection,
-    featureFlagCollection,
-    skillCollection,
-    skillRevisionCollection,
-    taskPromptStore,
-    skillRevisionStore,
-    skillResolver,
-    queueClients,
-    reportQueueClient,
-    getOrCreateQueueClient,
-    validWorkers: VALID_WORKERS,
-  };
-
-  // Register unified route modules (apiRoute-based)
-  registerFeatureFlagRoutes(ctx);
-  registerModelRoutes(ctx);
-  registerMcpServerRoutes(ctx);
-  registerCriteriaRoutes(ctx);
-
-  // Generate OpenAPI document (after all routes are registered)
+  // Mount OpenAPI docs (after all routes are registered)
   const openapiDocument = generateOpenAPIDocument();
   app.get("/openapi.json", (_req: Request, res: Response) => {
     res.json(openapiDocument);

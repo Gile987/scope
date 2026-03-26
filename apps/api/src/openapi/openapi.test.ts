@@ -3,21 +3,135 @@
 
 import { describe, it, expect } from "vitest";
 import express from "express";
+import { z } from "zod";
 import { generateOpenAPIDocument, registry } from "./index.js";
-import { registerFeatureFlagRoutes } from "../routes/feature-flags.js";
-import { registerModelRoutes } from "../routes/models.js";
-import { registerMcpServerRoutes } from "../routes/mcp-servers.js";
-import { registerCriteriaRoutes } from "../routes/criteria.js";
+import { apiRoute } from "./api-route.js";
+import {
+  CreateCriteriaInputSchema,
+  UpdateCriteriaInputSchema,
+  CriteriaResponseSchema,
+  CriteriaGraphSchema,
+  ModelResponseSchema,
+  ListModelsQuerySchema,
+  McpServerResponseSchema,
+  UpdateMcpServerInputSchema,
+  McpTransportTypeSchema,
+  McpServerHeaderSchema,
+  FeatureFlagResponseSchema,
+  UpdateFeatureFlagInputSchema,
+} from "shared";
 
 // Register apiRoute()-based routes so they appear in the OpenAPI doc.
 // These need an Express app + the registry; we use a throwaway app since
 // we only care about the registry side-effect here, not the Express handlers.
 const testApp = express();
-const testCtx = { app: testApp, registry } as any;
-registerFeatureFlagRoutes(testCtx);
-registerModelRoutes(testCtx);
-registerMcpServerRoutes(testCtx);
-registerCriteriaRoutes(testCtx);
+const noop = () => {};
+
+// Feature flags
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/feature-flags", tags: ["Feature Flags"],
+  summary: "List feature flags", response: z.array(FeatureFlagResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "put", path: "/api/v1/feature-flags/:key", tags: ["Feature Flags"],
+  summary: "Update feature flag", params: z.object({ key: z.string() }),
+  body: UpdateFeatureFlagInputSchema, response: FeatureFlagResponseSchema, handler: noop,
+});
+
+// Models
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/models", tags: ["Models"],
+  summary: "List models", query: ListModelsQuerySchema,
+  response: z.array(ModelResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/models/:id", tags: ["Models"],
+  summary: "Get model", params: z.object({ id: z.string() }),
+  response: ModelResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/models/sync", tags: ["Models"],
+  summary: "Sync models from provider",
+  body: z.object({ agentId: z.string(), provider: z.string(), models: z.array(z.object({ id: z.string() })), scannedAt: z.string() }),
+  response: z.object({ added: z.array(z.string()), removed: z.array(z.string()), unchanged: z.array(z.string()) }),
+  handler: noop,
+});
+
+// MCP Servers
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/mcp/servers", tags: ["MCP Servers"],
+  summary: "List MCP servers", response: z.array(McpServerResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/mcp/servers/:id", tags: ["MCP Servers"],
+  summary: "Get MCP server", params: z.object({ id: z.string() }),
+  response: McpServerResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/mcp/servers", tags: ["MCP Servers"],
+  summary: "Create MCP server",
+  body: z.object({ _id: z.string(), name: z.string(), type: McpTransportTypeSchema, url: z.string(), headers: z.array(McpServerHeaderSchema).optional(), description: z.string().optional() }),
+  response: McpServerResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "put", path: "/api/v1/mcp/servers/:id", tags: ["MCP Servers"],
+  summary: "Update MCP server", params: z.object({ id: z.string() }),
+  body: UpdateMcpServerInputSchema, response: McpServerResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "delete", path: "/api/v1/mcp/servers/:id", tags: ["MCP Servers"],
+  summary: "Delete MCP server", params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }), successStatus: 204, handler: noop,
+});
+
+// Criteria
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/criteria/generate-prompt", tags: ["Criteria"],
+  summary: "Generate criterion prompt from behavior",
+  body: z.object({ behavior: z.string(), currentId: z.string().optional() }),
+  response: z.object({ prompt: z.string() }), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/criteria/seed", tags: ["Criteria"],
+  summary: "Seed criteria in bulk",
+  body: z.object({ criteria: z.array(CreateCriteriaInputSchema) }),
+  response: z.object({ seeded: z.number(), errors: z.array(z.string()) }), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/criteria", tags: ["Criteria"],
+  summary: "List criteria", query: z.object({ q: z.string().optional() }),
+  response: z.array(CriteriaResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/criteria/mdp", tags: ["Criteria"],
+  summary: "Compute MDP transitions",
+  query: z.object({ criteria: z.string().optional(), features: z.string().optional(), since: z.string().optional(), worker: z.string().optional(), taskPromptId: z.string().optional() }),
+  response: z.object({}).passthrough(), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/criteria/graph", tags: ["Criteria"],
+  summary: "Get criteria DAG", response: CriteriaGraphSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/criteria/:id", tags: ["Criteria"],
+  summary: "Get criterion", params: z.object({ id: z.string() }),
+  response: CriteriaResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/criteria", tags: ["Criteria"],
+  summary: "Create criterion", body: CreateCriteriaInputSchema,
+  response: CriteriaResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "put", path: "/api/v1/criteria/:id", tags: ["Criteria"],
+  summary: "Update criterion", params: z.object({ id: z.string() }),
+  body: UpdateCriteriaInputSchema, response: CriteriaResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "delete", path: "/api/v1/criteria/:id", tags: ["Criteria"],
+  summary: "Soft-delete criterion", params: z.object({ id: z.string() }),
+  response: z.object({ id: z.string(), deleted: z.boolean() }), handler: noop,
+});
 
 describe("OpenAPI document generation", () => {
   const doc = generateOpenAPIDocument();

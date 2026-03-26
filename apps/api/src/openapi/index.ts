@@ -4,19 +4,19 @@
 // Import all route registrations (side effects)
 import "./routes/health.js";
 import "./routes/requests.js";
-// criteria: migrated to src/routes/criteria.ts (uses apiRoute())
+// criteria: registered via apiRoute() in index.ts
 import "./routes/prompt-features.js";
 import "./routes/task-prompts.js";
 import "./routes/reports.js";
 import "./routes/report-templates.js";
 import "./routes/insights.js";
 import "./routes/agents.js";
-// models: migrated to src/routes/models.ts (uses apiRoute())
-// mcp-servers: migrated to src/routes/mcp-servers.ts (uses apiRoute())
+// models: registered via apiRoute() in index.ts
+// mcp-servers: registered via apiRoute() in index.ts
 import "./routes/skills.js";
 import "./routes/skill-revisions.js";
 import "./routes/tokens.js";
 import "./routes/accounts.js";
-// feature-flags: migrated to src/routes/feature-flags.ts (uses apiRoute())
+// feature-flags: registered via apiRoute() in index.ts
 
 export { registry, generateOpenAPIDocument } from "./registry.js";
