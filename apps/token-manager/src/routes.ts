@@ -317,8 +317,17 @@ export function createTokenRouter(
         return;
       }
 
+      // If a preferred tokenType was requested, try those first
+      let pool = tokens;
+      if (body.tokenType) {
+        const preferred = tokens.filter((t) => t.type === body.tokenType);
+        if (preferred.length > 0) {
+          pool = preferred;
+        }
+      }
+
       // Round-robin selection
-      const selected = roundRobin.next(body.capability, tokens);
+      const selected = roundRobin.next(body.capability, pool);
 
       // Increment acquire count (fire-and-forget)
       collection
@@ -336,6 +345,7 @@ export function createTokenRouter(
       const response: AcquireTokenResponse = {
         value,
         tokenId: selected._id,
+        tokenType: selected.type,
         capability: body.capability,
         expiresAt: selected.expiresAt,
       };

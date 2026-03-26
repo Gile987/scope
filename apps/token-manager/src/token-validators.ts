@@ -154,35 +154,13 @@ async function validateAnthropicKey(
 }
 
 async function validateAnthropicOAuth(
-  token: string
+  _token: string
 ): Promise<TokenValidationResult> {
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/models", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "anthropic-version": "2023-06-01",
-      },
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (response.status === 401) {
-      return { status: "invalid", error: "Authentication failed" };
-    }
-
-    if (!response.ok) {
-      return {
-        status: "error",
-        error: `Anthropic API returned ${response.status}`,
-      };
-    }
-
-    return { status: "valid" };
-  } catch (err) {
-    return {
-      status: "error",
-      error: `Anthropic OAuth validation failed: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
+  // OAuth tokens from Claude Code subscriptions cannot be validated against
+  // the Anthropic REST API — the API rejects them with "OAuth authentication
+  // is currently not supported". Accept structurally (like cookie-state).
+  // The token will be validated implicitly when Claude Code CLI uses it.
+  return { status: "valid" };
 }
 
 async function validateGitHubOAuthCookieState(

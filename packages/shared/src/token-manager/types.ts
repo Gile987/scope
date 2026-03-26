@@ -70,6 +70,7 @@ export interface TokenDocument {
 export interface AcquireTokenResponse {
   value: string;
   tokenId: string;
+  tokenType: TokenType;
   capability: TokenCapability;
   expiresAt?: Date;
 }
@@ -117,6 +118,8 @@ export interface UpdateTokenRequest {
  */
 export interface AcquireTokenRequest {
   capability: TokenCapability;
+  /** Optional: prefer tokens of this type. Falls back to any type if none available. */
+  tokenType?: TokenType;
 }
 
 /**
