@@ -79,3 +79,52 @@ describe("computeAnalysis – taskPromptId grouping", () => {
     expect(workers).toEqual(["agent-a", "agent-b"]);
   });
 });
+
+describe("computeAnalysis – durationStats", () => {
+  const kValues = [1];
+
+  function makeRunWithDurations(
+    durations: (number | undefined)[],
+    passed: boolean
+  ): AnalyzableRun {
+    return {
+      scenario: { task: "Task X", criteria: ["c1"] },
+      taskPromptId: computeTaskPromptId("Task X"),
+      workerType: "agent-a",
+      status: "completed",
+      turns: durations.map((d, i) => ({
+        iteration: i + 1,
+        passed: i === durations.length - 1 ? passed : false,
+        criteriaResults: [],
+        durationMs: d,
+      })),
+    };
+  }
+
+  it("computes durationStats from passed runs", () => {
+    const runs = [
+      makeRunWithDurations([10000, 20000], true),   // 2 turns, both with durations
+      makeRunWithDurations([15000], true),           // 1 turn
+    ];
+    const result = computeAnalysis(runs, kValues);
+    expect(result.groups).toHaveLength(1);
+    const ds = result.groups[0].durationStats;
+    expect(ds).not.toBeNull();
+    // Values: 10000, 20000, 15000 → mean = 15000
+    expect(ds!.mean).toBe(15000);
+    expect(ds!.min).toBe(10000);
+    expect(ds!.max).toBe(20000);
+  });
+
+  it("returns null durationStats when no passed runs", () => {
+    const runs = [makeRunWithDurations([10000], false)];
+    const result = computeAnalysis(runs, kValues);
+    expect(result.groups[0].durationStats).toBeNull();
+  });
+
+  it("returns null durationStats when passed runs have no durationMs", () => {
+    const runs = [makeRunWithDurations([undefined], true)];
+    const result = computeAnalysis(runs, kValues);
+    expect(result.groups[0].durationStats).toBeNull();
+  });
+});

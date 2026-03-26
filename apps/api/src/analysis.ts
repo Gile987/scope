@@ -25,6 +25,12 @@ export interface TaskWorkerGroup {
     min: number;
     max: number;
   } | null;  // null if no passed runs
+  durationStats: {
+    mean: number;
+    stdDev: number;
+    min: number;
+    max: number;
+  } | null;  // Per-iteration duration in ms (null if no timing data)
 }
 
 export interface AnalysisResponse {
@@ -64,6 +70,7 @@ export interface AnalyzableRun {
     iteration: number;
     passed: boolean;
     criteriaResults?: CriterionResult[];
+    durationMs?: number;
   }>;
 }
 
@@ -247,6 +254,22 @@ export function computeAnalysis(
       };
     }
 
+    // Duration stats: collect durationMs from all turns of passed runs
+    let durationStats: TaskWorkerGroup['durationStats'] = null;
+    const durations = passedRuns
+      .flatMap(r => (r.turns || []))
+      .map(t => t.durationMs)
+      .filter((d): d is number => d != null);
+    if (durations.length > 0) {
+      const mean = durations.reduce((a, b) => a + b, 0) / durations.length;
+      durationStats = {
+        mean,
+        stdDev: stdDev(durations),
+        min: Math.min(...durations),
+        max: Math.max(...durations),
+      };
+    }
+
     groups.push({
       task,
       taskPromptId,
@@ -258,6 +281,7 @@ export function computeAnalysis(
       passAtK,
       successAtT,
       iterationStats,
+      durationStats,
     });
   }
 
