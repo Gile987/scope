@@ -24,7 +24,7 @@ export type TokenType =
  * Workers acquire tokens by capability, not by type.
  */
 export type TokenCapability =
-  "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
+  "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
 
 /**
  * Validation status of a token.
@@ -132,6 +132,7 @@ export const TOKEN_CAPABILITY_ENV_VARS: Record<TokenCapability, string> = {
   "copilot-models": "GITHUB_TOKEN",
   "github-models": "GITHUB_TOKEN",
   "claude-code-cli": "ANTHROPIC_API_KEY",
+  "anthropic-api": "ANTHROPIC_API_KEY",
 };
 
 /**

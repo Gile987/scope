@@ -405,7 +405,7 @@ export type TokenType =
   | "anthropic-oauth";
 
 export type TokenCapability =
-  "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
+  "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
 
 export type TokenValidationStatus =
   | "valid"
@@ -473,7 +473,8 @@ export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
   "copilot-models": "Copilot Models",
   "copilot-sdk": "Copilot SDK",
   "copilot-cli": "Copilot CLI",
-  "claude-code-cli": "Claude Code CLI"
+  "claude-code-cli": "Claude Code CLI",
+  "anthropic-api": "Anthropic API"
 };
 
 export const TOKEN_CAPABILITY_DESCRIPTIONS: Record<TokenCapability, string> = {
@@ -481,7 +482,8 @@ export const TOKEN_CAPABILITY_DESCRIPTIONS: Record<TokenCapability, string> = {
   "copilot-models": "List models available via the Copilot API (OAuth only, PATs rejected)",
   "copilot-sdk": "Use the Copilot SDK to make LLM requests programmatically",
   "copilot-cli": "Run GitHub Copilot in the CLI for code suggestions",
-  "claude-code-cli": "Run Claude Code as an agentic coding assistant"
+  "claude-code-cli": "Run Claude Code as an agentic coding assistant",
+  "anthropic-api": "Access the Anthropic REST API (model scanning, direct API calls)"
 };
 
 /**
@@ -495,12 +497,12 @@ export const TOKEN_TYPE_EXPECTED_CAPABILITIES: Record<TokenType, TokenCapability
   "github-pat-fine-grained": ["github-models"],
   "github-oauth": ["github-models", "copilot-models", "copilot-sdk", "copilot-cli"],
   "github-oauth-cookie-state": [],
-  "anthropic-api-key": ["claude-code-cli"],
+  "anthropic-api-key": ["claude-code-cli", "anthropic-api"],
   "anthropic-oauth": ["claude-code-cli"],
 };
 
 export const ALL_CAPABILITIES: TokenCapability[] = [
-  "github-models", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli"
+  "github-models", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli", "anthropic-api"
 ];
 
 // Account types

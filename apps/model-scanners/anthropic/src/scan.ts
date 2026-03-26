@@ -2,23 +2,8 @@
 // Licensed under the MIT License.
 
 import type { ScanResult, ScannedModel } from "model-scanning";
-import type { TokenType } from "shared";
 
 const ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models";
-
-/** Build the correct auth headers based on token type. */
-function buildAuthHeaders(token: string, tokenType: TokenType): Record<string, string> {
-  if (tokenType === "anthropic-oauth") {
-    return {
-      Authorization: `Bearer ${token}`,
-      "anthropic-version": "2023-06-01",
-    };
-  }
-  return {
-    "x-api-key": token,
-    "anthropic-version": "2023-06-01",
-  };
-}
 
 /**
  * Scan models available from the Anthropic API.
@@ -26,7 +11,7 @@ function buildAuthHeaders(token: string, tokenType: TokenType): Record<string, s
  * Calls GET https://api.anthropic.com/v1/models and handles pagination.
  * Permissive: only validates the `id` field on each model, ignores unknown fields.
  */
-export async function scanAnthropicModels(token: string, tokenType: TokenType = "anthropic-api-key"): Promise<ScanResult> {
+export async function scanAnthropicModels(token: string): Promise<ScanResult> {
   const models: ScannedModel[] = [];
   let hasMore = true;
   let afterId: string | undefined;
@@ -39,7 +24,10 @@ export async function scanAnthropicModels(token: string, tokenType: TokenType = 
     }
 
     const response = await fetch(url.toString(), {
-      headers: buildAuthHeaders(token, tokenType),
+      headers: {
+        "x-api-key": token,
+        "anthropic-version": "2023-06-01",
+      },
       signal: AbortSignal.timeout(30_000),
     });
 

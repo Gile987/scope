@@ -31,7 +31,8 @@ const VALID_CAPABILITIES: TokenCapability[] = [
   "copilot-models",
   "copilot-sdk",
   "copilot-cli",
-  "claude-code-cli"
+  "claude-code-cli",
+  "anthropic-api"
 ];
 
 export function createTokenRouter(
