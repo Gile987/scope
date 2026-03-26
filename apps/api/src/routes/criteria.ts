@@ -33,6 +33,10 @@ export function registerCriteriaRoutes(ctx: RouteContext): void {
       currentId: z.string().optional(),
     }),
     response: z.object({ prompt: z.string() }),
+    errorResponses: {
+      400: { description: "Empty behavior string" },
+      503: { description: "LLM not configured" },
+    },
     handler: async (req, res, next) => {
       const { behavior, currentId } = req.body;
       if (!behavior.trim()) {
@@ -264,6 +268,9 @@ export function registerCriteriaRoutes(ctx: RouteContext): void {
     summary: "Get criterion",
     params: z.object({ id: z.string() }),
     response: CriteriaResponseSchema,
+    errorResponses: {
+      404: { description: "Criterion not found" },
+    },
     handler: async (req, res) => {
       const { id } = req.params;
       const criterion = await criteriaCollection.findOne({
@@ -291,8 +298,10 @@ export function registerCriteriaRoutes(ctx: RouteContext): void {
     summary: "Create criterion",
     body: CreateCriteriaInputSchema,
     response: CriteriaResponseSchema,
+    errorResponses: {
+      409: { description: "Criterion already exists" },
+    },
     handler: async (req, res) => {
-      const { id, prompt, dependsOn = [] } = req.body;
 
       // Check for duplicates
       const existing = await criteriaCollection.findOne({
@@ -339,8 +348,11 @@ export function registerCriteriaRoutes(ctx: RouteContext): void {
     params: z.object({ id: z.string() }),
     body: UpdateCriteriaInputSchema,
     response: CriteriaResponseSchema,
+    errorResponses: {
+      404: { description: "Criterion not found" },
+      400: { description: "Invalid dependency reference or self-reference" },
+    },
     handler: async (req, res) => {
-      const { id } = req.params;
       const { prompt, dependsOn } = req.body;
 
       const existing = await criteriaCollection.findOne({
@@ -401,8 +413,11 @@ export function registerCriteriaRoutes(ctx: RouteContext): void {
     summary: "Soft-delete criterion",
     params: z.object({ id: z.string() }),
     response: z.object({ id: z.string(), deleted: z.boolean() }),
+    errorResponses: {
+      404: { description: "Criterion not found" },
+      409: { description: "Criterion has dependents" },
+    },
     handler: async (req, res) => {
-      const { id } = req.params;
 
       const existing = await criteriaCollection.findOne({
         id,

@@ -45,6 +45,18 @@ export interface ApiRouteConfig<
   successStatus?: number;
 
   /**
+   * Additional error/non-success responses to document in the OpenAPI spec.
+   * Keys are HTTP status codes; values describe the response.
+   *
+   * @example
+   * errorResponses: {
+   *   404: { description: "Not found" },
+   *   503: { description: "LLM unavailable", schema: z.object({ error: z.string() }) },
+   * }
+   */
+  errorResponses?: Record<number, { description: string; schema?: ZodType }>;
+
+  /**
    * When true, the handler manages the response directly (SSE, binary, etc.).
    * Body/query/params are still validated, but response is not documented as JSON.
    */
@@ -125,6 +137,7 @@ export function apiRoute<
     response,
     responseDescription,
     successStatus,
+    errorResponses,
     rawResponse,
     handler,
   } = config;
@@ -157,6 +170,14 @@ export function apiRoute<
       description: responseDescription ?? "Success",
       content: { "application/json": { schema: response } },
     };
+  }
+
+  if (errorResponses) {
+    for (const [code, { description: desc, schema }] of Object.entries(errorResponses)) {
+      responses[code] = schema
+        ? { description: desc, content: { "application/json": { schema } } }
+        : { description: desc };
+    }
   }
 
   registry.registerPath({

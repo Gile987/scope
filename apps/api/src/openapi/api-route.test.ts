@@ -201,6 +201,83 @@ describe("apiRoute — OpenAPI registration", () => {
     expect(resp.content).toBeUndefined();
     expect(resp.description).toBe("Server-sent event stream");
   });
+
+  it("registers errorResponses with description only", () => {
+    apiRoute(app, registry, {
+      method: "get",
+      path: "/api/v1/items/:id",
+      tags: ["Items"],
+      summary: "Get item",
+      params: z.object({ id: z.string() }),
+      response: z.object({ id: z.string() }),
+      errorResponses: {
+        404: { description: "Item not found" },
+      },
+      handler: async (_req, res) => {
+        res.json({ id: "1" });
+      },
+    });
+
+    const doc = generateDoc(registry);
+    const route = doc.paths?.["/api/v1/items/{id}"]?.get;
+    expect(route?.responses?.["200"]).toBeDefined();
+    expect(route?.responses?.["404"]).toBeDefined();
+    const r404 = route?.responses?.["404"] as Record<string, unknown>;
+    expect(r404.description).toBe("Item not found");
+    expect(r404.content).toBeUndefined();
+  });
+
+  it("registers errorResponses with schema", () => {
+    apiRoute(app, registry, {
+      method: "post",
+      path: "/api/v1/generate",
+      tags: ["AI"],
+      summary: "Generate content",
+      body: z.object({ prompt: z.string() }),
+      response: z.object({ text: z.string() }),
+      errorResponses: {
+        503: {
+          description: "LLM unavailable",
+          schema: z.object({ error: z.string() }),
+        },
+      },
+      handler: async (_req, res) => {
+        res.json({ text: "ok" });
+      },
+    });
+
+    const doc = generateDoc(registry);
+    const route = doc.paths?.["/api/v1/generate"]?.post;
+    expect(route?.responses?.["201"]).toBeDefined();
+    expect(route?.responses?.["503"]).toBeDefined();
+    const r503 = route?.responses?.["503"] as Record<string, unknown>;
+    expect(r503.description).toBe("LLM unavailable");
+    expect(r503.content).toBeDefined();
+  });
+
+  it("registers multiple errorResponses", () => {
+    apiRoute(app, registry, {
+      method: "delete",
+      path: "/api/v1/resources/:id",
+      tags: ["Resources"],
+      summary: "Delete resource",
+      params: z.object({ id: z.string() }),
+      response: z.object({ deleted: z.boolean() }),
+      errorResponses: {
+        404: { description: "Resource not found" },
+        409: { description: "Resource in use", schema: z.object({ error: z.string() }) },
+      },
+      handler: async (_req, res) => {
+        res.json({ deleted: true });
+      },
+    });
+
+    const doc = generateDoc(registry);
+    const route = doc.paths?.["/api/v1/resources/{id}"]?.delete;
+    expect(route?.responses?.["200"]).toBeDefined();
+    expect(route?.responses?.["404"]).toBeDefined();
+    expect(route?.responses?.["409"]).toBeDefined();
+  });
 });
 
 // ─── apiRoute — Express handler + validation ─────────────────────────────────
