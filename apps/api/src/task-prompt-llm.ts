@@ -19,7 +19,7 @@ A task prompt is a detailed instruction given to a coding agent (like GitHub Cop
 - Technology-aware when appropriate (e.g., "Use TypeScript, Node.js, and PostgreSQL")
 - Concise but complete — typically 1-4 sentences
 
-Given a short description of what the user wants, write a complete, benchmark-quality task prompt.
+Given a short description of what the user wants, write a complete, benchmark-quality task prompt. If no description is provided, invent a creative and interesting task that would be a good benchmark for a coding agent — vary the domain, technology, and complexity. Do NOT repeat tasks from the existing list.
 
 Here are examples of good task prompts:
 - "Create a Hello World Node.js/Express REST API"
@@ -51,7 +51,7 @@ export function isTaskPromptLlmAvailable(): boolean {
   return isGitHubModelsTokenAvailable();
 }
 
-function buildGenerateUserMessage(description: string, existingPrompts: string[]): string {
+function buildGenerateUserMessage(description: string | undefined, existingPrompts: string[]): string {
   const parts: string[] = [];
 
   if (existingPrompts.length > 0) {
@@ -62,7 +62,11 @@ function buildGenerateUserMessage(description: string, existingPrompts: string[]
     parts.push("");
   }
 
-  parts.push(`DESCRIPTION:\n${description}`);
+  if (description) {
+    parts.push(`DESCRIPTION:\n${description}`);
+  } else {
+    parts.push("Generate a creative and interesting benchmark task prompt. Choose a different domain, technology, or problem type than the existing prompts.");
+  }
   return parts.join("\n");
 }
 
@@ -82,10 +86,6 @@ export async function generateTaskPrompt(
 ): Promise<GenerateTaskPromptResult> {
   const { description, existingPrompt } = opts;
 
-  if (!description && !existingPrompt) {
-    throw new Error("Either 'description' or 'existingPrompt' must be provided");
-  }
-
   const token = await acquireGitHubModelsToken();
   const llm = ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token));
 
@@ -95,7 +95,7 @@ export async function generateTaskPrompt(
   const systemPrompt = isVariation ? VARIATION_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT;
   const userMessage = isVariation
     ? buildVariationUserMessage(existingPrompt!, description)
-    : buildGenerateUserMessage(description!, existingPrompts);
+    : buildGenerateUserMessage(description, existingPrompts);
 
   const response = await llm.path("/chat/completions").post({
     body: {

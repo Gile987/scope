@@ -2354,10 +2354,6 @@ app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, nex
 app.post("/api/v1/task-prompts/generate", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { description, existingPrompt } = req.body;
-    if ((!description || typeof description !== "string" || !description.trim()) &&
-        (!existingPrompt || typeof existingPrompt !== "string" || !existingPrompt.trim())) {
-      return res.status(400).json({ error: "Body must contain a non-empty 'description' and/or 'existingPrompt' string" });
-    }
 
     if (!isTaskPromptLlmAvailable()) {
       return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });

@@ -119,9 +119,11 @@ export function SubmitRun() {
         existingPrompt: task.trim(),
         ...(generateDescription.trim() && { description: generateDescription.trim() }),
       });
-    } else if (generateDescription.trim()) {
-      // From-scratch mode: generate from description
-      generateMutation.mutate({ description: generateDescription.trim() });
+    } else {
+      // From-scratch mode: generate from description (or surprise me if empty)
+      generateMutation.mutate({
+        ...(generateDescription.trim() && { description: generateDescription.trim() }),
+      });
     }
   };
 
@@ -245,7 +247,7 @@ export function SubmitRun() {
                     <Label className="text-xs">
                       {task.trim()
                         ? "How should the variation differ? (optional)"
-                        : "Describe what you want the task to be about"}
+                        : "Describe what you want, or leave empty for a surprise (optional)"}
                     </Label>
                     <div className="flex gap-2">
                       <Input
@@ -268,10 +270,7 @@ export function SubmitRun() {
                         type="button"
                         size="sm"
                         onClick={handleGenerate}
-                        disabled={
-                          generateMutation.isPending ||
-                          (!task.trim() && !generateDescription.trim())
-                        }
+                        disabled={generateMutation.isPending}
                       >
                         {generateMutation.isPending ? (
                           <Loader2 className="h-4 w-4 animate-spin" />

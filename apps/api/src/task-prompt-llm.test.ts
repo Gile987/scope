@@ -68,10 +68,34 @@ describe("task-prompt-llm", () => {
       expect(userMsg).toContain("a todo list API");
     });
 
-    it("throws when neither description nor existingPrompt provided", async () => {
-      await expect(generateTaskPrompt({ })).rejects.toThrow(
-        "Either 'description' or 'existingPrompt' must be provided",
+    it("generates a random task prompt with no input (surprise me)", async () => {
+      mockPost.mockResolvedValueOnce({
+        status: "200",
+        body: {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                taskPrompt: "Build a real-time chat application using WebSockets and Redis",
+              }),
+            },
+          }],
+        },
+      });
+
+      const result = await generateTaskPrompt(
+        {},
+        ["Create a Hello World Express API"],
       );
+
+      expect(result.taskPrompt).toBe(
+        "Build a real-time chat application using WebSockets and Redis",
+      );
+
+      // Verify the user message asks for a creative task
+      const callBody = mockPost.mock.calls[0][0].body;
+      const userMsg = callBody.messages[1].content;
+      expect(userMsg).toContain("creative and interesting");
+      expect(userMsg).not.toContain("DESCRIPTION:");
     });
   });
 
