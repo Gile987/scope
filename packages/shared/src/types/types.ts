@@ -27,6 +27,8 @@ export interface ConversationTurn {
   harUrl?: string;         // Blob storage URL to the HAR file for this turn
   videoUrls?: string[];    // Blob storage URLs to session recording videos for this turn
   tokenUsage?: TokenUsage;  // LLM token usage for this iteration
+  startedAt?: Date;        // When this iteration began
+  durationMs?: number;     // Wall-clock duration of this iteration in milliseconds
 }
 
 // Multi-turn configuration constants
