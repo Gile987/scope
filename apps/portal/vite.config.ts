@@ -48,6 +48,26 @@ export default defineConfig({
         target: process.env.VITE_API_PROXY_TARGET || "http://localhost:3100",
         changeOrigin: true,
       },
+      "/openapi.json": {
+        target: process.env.VITE_API_PROXY_TARGET || "http://localhost:3100",
+        changeOrigin: true,
+      },
+      "/api-docs": {
+        target: process.env.VITE_API_PROXY_TARGET || "http://localhost:3100",
+        changeOrigin: true,
+      },
+      "/health": {
+        target: process.env.VITE_API_PROXY_TARGET || "http://localhost:3100",
+        changeOrigin: true,
+      },
+      "/ready": {
+        target: process.env.VITE_API_PROXY_TARGET || "http://localhost:3100",
+        changeOrigin: true,
+      },
+      "/about": {
+        target: process.env.VITE_API_PROXY_TARGET || "http://localhost:3100",
+        changeOrigin: true,
+      },
     },
   },
 });
