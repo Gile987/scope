@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download } from "lucide-react";
-import { formatDate, formatId, truncate } from "@/lib/utils";
+import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent } from "@/types";
 
@@ -728,6 +728,7 @@ export function RunsList() {
               <TableHead className="w-[120px]">Status</TableHead>
               <TableHead className="w-[100px]">Report</TableHead>
               <TableHead className="w-[80px]">Turns</TableHead>
+              <TableHead className="w-[100px]">Duration</TableHead>
               <TableHead className="w-[120px]">Tokens</TableHead>
               <TableHead className="w-[160px]">Created</TableHead>
               <TableHead className="w-[100px] text-right">Actions</TableHead>
@@ -821,6 +822,12 @@ export function RunsList() {
                 </TableCell>
                 <TableCell className="text-center">
                   {run.turns?.length ?? "–"}
+                </TableCell>
+                <TableCell className="font-mono text-xs">
+                  {(() => {
+                    const totalDuration = run.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+                    return totalDuration ? formatDuration(totalDuration) : <span className="text-muted-foreground">–</span>;
+                  })()}
                 </TableCell>
                 <TableCell className="font-mono text-xs">
                   {(() => {

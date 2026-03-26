@@ -20,6 +20,7 @@ import {
 } from "recharts";
 import { BarChart3, TrendingUp, CheckCircle, Clock, RefreshCw } from "lucide-react";
 import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
+import { formatDuration } from "@/lib/utils";
 import type { AnalysisResponse, TaskWorkerGroup } from "@/types";
 
 // Color palette for chart lines (distinct colors for different groups)
@@ -338,6 +339,75 @@ function IterationStatsTable({ data }: { data: AnalysisResponse }) {
   );
 }
 
+// Duration statistics table
+function DurationStatsTable({ data }: { data: AnalysisResponse }) {
+  const { groups } = data;
+
+  const groupsWithStats = groups.filter(g => g.durationStats !== null);
+
+  if (groupsWithStats.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Duration Statistics</CardTitle>
+          <CardDescription>No duration data available</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Duration Statistics</CardTitle>
+        <CardDescription>
+          Total run duration for successful runs
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="max-w-[200px]">Task</TableHead>
+              <TableHead>Worker</TableHead>
+              <TableHead className="text-center">Mean</TableHead>
+              <TableHead className="text-center">Std Dev</TableHead>
+              <TableHead className="text-center">Min</TableHead>
+              <TableHead className="text-center">Max</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {groupsWithStats.map((group) => (
+              <TableRow key={getGroupKey(group)}>
+                <TableCell className="font-medium max-w-[200px] truncate" title={group.task}>
+                  {truncateTask(group.task)}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="font-mono text-xs">
+                    {group.workerType}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-center font-mono">
+                  {formatDuration(group.durationStats!.mean)}
+                </TableCell>
+                <TableCell className="text-center font-mono text-muted-foreground">
+                  ±{formatDuration(group.durationStats!.stdDev)}
+                </TableCell>
+                <TableCell className="text-center font-mono">
+                  {formatDuration(group.durationStats!.min)}
+                </TableCell>
+                <TableCell className="text-center font-mono">
+                  {formatDuration(group.durationStats!.max)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
 // Loading skeleton
 function StatisticsSkeleton() {
   return (
@@ -426,6 +496,7 @@ export function Statistics() {
           {import.meta.env.VITE_SHOW_PASS_AT_K === "true" && <PassAtKTable data={data} />}
           <SuccessAtTChart data={data} />
           <IterationStatsTable data={data} />
+          <DurationStatsTable data={data} />
         </>
       )}
     </div>

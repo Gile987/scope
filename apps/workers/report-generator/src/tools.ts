@@ -69,6 +69,8 @@ export function createReportTools(
           iteration: turn.iteration,
           passed: turn.passed,
           timestamp: turn.timestamp,
+          startedAt: turn.startedAt,
+          durationMs: turn.durationMs,
           criteriaResults: (turn.criteriaResults || []).map((cr: any) => ({
             criterionId: cr.criterionId,
             passed: cr.passed,
@@ -111,6 +113,8 @@ export function createReportTools(
           iteration: turn.iteration,
           passed: turn.passed,
           timestamp: turn.timestamp,
+          startedAt: turn.startedAt,
+          durationMs: turn.durationMs,
           codingAgentResponse: turn.codingAgentResponse,
           judgeFeedback: turn.judgeFeedback,
           criteriaResults: turn.criteriaResults || [],
@@ -124,7 +128,7 @@ export function createReportTools(
 
   const getCriteriaTrajectory = defineTool("get_criteria_trajectory", {
     description:
-      "Get the pass/fail trajectory for each criterion across all turns. Useful for spotting regressions and flip-flops.",
+      "Get the pass/fail trajectory for each criterion across all turns, including iteration duration. Useful for spotting regressions and flip-flops.",
     parameters: {
       type: "object",
       properties: {},
@@ -147,7 +151,7 @@ export function createReportTools(
         }
 
         // Build trajectory per criterion
-        const trajectory: Record<string, { iteration: number; passed: boolean; evaluated: boolean }[]> = {};
+        const trajectory: Record<string, { iteration: number; passed: boolean; evaluated: boolean; durationMs?: number }[]> = {};
         for (const id of criterionIds) {
           trajectory[id] = turns.map((turn: any) => {
             const cr = (turn.criteriaResults || []).find((c: any) => c.criterionId === id);
@@ -155,6 +159,7 @@ export function createReportTools(
               iteration: turn.iteration,
               passed: cr?.passed ?? false,
               evaluated: cr?.evaluated ?? false,
+              durationMs: turn.durationMs,
             };
           });
         }

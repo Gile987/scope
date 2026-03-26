@@ -179,6 +179,8 @@ export async function runMultiTurnLoop(
       };
     }
 
+    const iterationStartedAt = new Date();
+
     await iterLog("info", `--- Iteration ${iteration}/${maxIterations} ---`, {
       promptLength: nextPrompt.length,
       iterationHeader: true,
@@ -275,6 +277,8 @@ export async function runMultiTurnLoop(
         snapshotUrl: "",
         passed: false,
         timestamp: new Date(),
+        startedAt: iterationStartedAt,
+        durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(errorVideoUrls.length > 0 && { videoUrls: errorVideoUrls }),
       };
       turns.push(partialTurn);
@@ -314,6 +318,8 @@ export async function runMultiTurnLoop(
         snapshotUrl: "",
         passed: false,
         timestamp: new Date(),
+        startedAt: iterationStartedAt,
+        durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(turnHarUrl && { harUrl: turnHarUrl }),
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
       };
@@ -360,6 +366,8 @@ export async function runMultiTurnLoop(
         snapshotUrl,
         passed: false,
         timestamp: new Date(),
+        startedAt: iterationStartedAt,
+        durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(turnHarUrl && { harUrl: turnHarUrl }),
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
       };
@@ -400,6 +408,8 @@ export async function runMultiTurnLoop(
       snapshotUrl,
       passed: judgePassed,
       timestamp: new Date(),
+      startedAt: iterationStartedAt,
+      durationMs: Date.now() - iterationStartedAt.getTime(),
       criteriaResults,
       ...(turnHarUrl && { harUrl: turnHarUrl }),
       ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
