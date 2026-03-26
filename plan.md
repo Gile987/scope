@@ -1,132 +1,100 @@
-# Plan: Agent version registry + self-registration (#288)
+# Plan: Add support for Claude Code Subscriptions OAuth token
 
-**Branch:** `feat/agent-version-registry`  
-**Base:** `main`  
-**Depends on:** #287 (version-aware image tags — provides `versions.env` + `GIT_COMMIT` in Dockerfiles)
+**Issue:** https://github.com/growth-ecosystems/scope-core/issues/199
+**Branch:** `feat/claude-oauth-token`
+**Base:** `main`
 
-## Overview
+## Context
 
-Make agent versions first-class: workers register on startup, portal shows deployed versions, runs track which version processed them.
+Currently, only Anthropic API Keys (`sk-ant-*`) are supported for authenticating with the Anthropic API. The scope01 account has been set up for Claude Code subscriptions OAuth tokens, which use a different authentication mechanism (Bearer tokens via `Authorization` header instead of `x-api-key` header).
 
-## Implementation Steps
+This feature adds a new token type `anthropic-oauth` alongside the existing `anthropic-api-key`, enabling the system to work with both authentication methods.
 
-### Step 1 — Data model types
+## Requirements (from issue)
 
-**Files:** `packages/shared/src/types/types.ts`
+- [ ] Should support the Anthropic model scanner
+- [ ] Should support the Claude Code worker
 
-- Add `AgentVersion` interface:
-  ```typescript
-  interface AgentVersion {
-    agentVersion: string;                  // "copilot-0.0.415" (PK — one entry per software version)
-    workerVersion: string;                 // "copilot-0.0.415-20260318T163740Z-44d16d6" (latest deployed build)
-    components: Record<string, string>;    // { COPILOT_CLI_VERSION: "0.0.415" }
-    gitCommit: string;
-    buildTime: string;                     // ISO 8601 build timestamp
-    imageTag: string;
-    queueName: string;
-    status: "active" | "retired";
-    createdAt: Date;
-  }
-  ```
-- Add `versions?: AgentVersion[]` to `CodingAgentDocument`
-- Update `agentVersion` semantic on `RequestDocument`: now derived from `versions.env` component prefix (e.g. `copilot-0.0.415`, `vscode-1.111.0-copilot-0.39.0`). FK → `AgentVersion.agentVersion`
-- Add `workerVersion?: string` to `RequestDocument` — records the exact build that processed the run (e.g. `copilot-0.0.415-20260318T163740Z-44d16d6`)
+## Architecture
 
-**Tests:** Unit tests for type validation/guards if any utility functions are added.
+### Auth Difference
 
-### Step 2 — API endpoints for agent versions
+| | API Key (`sk-ant-*`) | OAuth Token |
+|---|---|---|
+| **Header** | `x-api-key: <key>` | `Authorization: Bearer <token>` |
+| **Prefix** | `sk-ant-` | (varies) |
+| **Env var for Claude Code** | `ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY` (Claude Code handles both) |
 
-**Files:** `apps/api/src/index.ts`
+Claude Code CLI accepts OAuth tokens through the same `ANTHROPIC_API_KEY` environment variable — it auto-detects the token format. The key difference is how the token authenticates against the Anthropic REST API (model scanner, validation).
 
-Add three new endpoints after existing agent routes:
+## Changes
 
-| Method | Path | Behavior |
-|--------|------|----------|
-| `GET` | `/api/v1/agents/:id/versions` | List versions, optional `?status=active` filter |
-| `POST` | `/api/v1/agents/:id/versions` | Register/upsert version by `agentVersion` (PK). If exists, update `workerVersion`/`gitCommit`/`buildTime`; otherwise `$push` |
-| `PATCH` | `/api/v1/agents/:id/versions/:agentVersion` | Update status (e.g. retire) |
+### 1. Shared types (`packages/shared/src/token-manager/types.ts`)
 
-- `POST` upserts by `agentVersion`: same software version with a new build updates the existing entry (new `workerVersion`, `gitCommit`, `buildTime`)
-- Input validation for required fields (`agentVersion`, `workerVersion`, `components`, `gitCommit`, `buildTime`, `imageTag`, `queueName`)
+- Add `"anthropic-oauth"` to the `TokenType` union
+- The capability remains the same: `"claude-code-cli"`
+- The env var fallback remains: `ANTHROPIC_API_KEY`
 
-**Tests:** API endpoint tests (integration-style using supertest or similar existing pattern).
+### 2. Capability derivation (`packages/shared/src/token-manager/capabilities.ts`)
 
-### Step 3 — Worker self-registration on startup
+- Add `case "anthropic-oauth": return ["claude-code-cli"]` — same capabilities as API key
 
-**Files:**
-- `deploy/base/workers/register-version-copilot.yaml` — K8s Job using worker image
-- `deploy/base/workers/register-version-claude-code.yaml` — K8s Job using worker image
-- `deploy/base/workers/register-version-vscode-web.yaml` — K8s Job using worker image
-- `deploy/base/workers/kustomization.yaml` — add new jobs
+### 3. Token validation (`apps/token-manager/src/token-validators.ts`)
 
-Workers scale to zero via KEDA, so startup self-registration would never fire. Instead, dedicated K8s Jobs run on each deployment:
+- Add `case "anthropic-oauth"` to the `validateToken` switch
+- New `validateAnthropicOAuth(token)` function that:
+  - Calls `GET https://api.anthropic.com/v1/models` with `Authorization: Bearer <token>` header (instead of `x-api-key`)
+  - Returns the same `TokenValidationResult` shape
 
-1. Job uses the **worker image** (so it has baked-in env vars: component versions, `GIT_COMMIT`, `BUILD_TIME`)
-2. Job waits for API to be ready (`/health` check)
-3. Calls `POST /api/v1/agents/:id/versions` with version info
-4. FluxCD `force: enabled` annotation ensures Job is deleted+recreated when image tag changes
-5. `ttlSecondsAfterFinished: 3600` for auto-cleanup
+### 4. Anthropic model scanner (`apps/model-scanners/anthropic/src/scan.ts`)
 
-**Requirements:**
-- Update existing `getAgentVersion()` implementations: change from returning `@github/copilot@0.0.415` (CLI binary) to returning the component version prefix (e.g. `copilot-0.0.415`, `vscode-1.111.0-copilot-0.39.0`)
-- Add `getComponentVersions()` to each WorkerProcessor (used for stamping request documents)
+- Accept an optional `tokenType` parameter (defaults to `"anthropic-api-key"`)
+- When `tokenType === "anthropic-oauth"`, use `Authorization: Bearer <token>` header
+- When `tokenType === "anthropic-api-key"`, use `x-api-key: <token>` header (current behavior)
 
-### Step 4 — Set `workerVersion` at job pickup
+### 5. Anthropic model scanner entry point (`apps/model-scanners/anthropic/src/index.ts`)
 
-**Files:** `packages/shared/src/queue/queue-processor.ts`
+- Pass the token type through to `scanAnthropicModels()` so it uses the correct auth header
 
-In `processOneShot` (and `processMultiTurn` if applicable), when updating status to `"processing"`:
-- `agentVersion` — already set via `getAgentVersion()` (now returns version prefix, e.g. `copilot-0.0.415`)
-- `workerVersion` — **new field**, built from `<agentVersion>-<BUILD_TIME>-<GIT_COMMIT>` matching image tag:
-  ```typescript
-  workerVersion: this.processor.getWorkerVersion?.() ?? undefined
-  ```
-  e.g. `copilot-0.0.415-20260318T163740Z-44d16d6`
+### 6. Claude Code worker (`apps/workers/coder-acp-claude-code/src/index.ts`)
 
-### Step 5 — Portal types + API client
+- No changes needed — Claude Code CLI accepts both API keys and OAuth tokens via `ANTHROPIC_API_KEY`
+- The token manager already handles capability-based acquisition; as long as `anthropic-oauth` derives `claude-code-cli`, the worker will acquire whichever token is available
 
-**Files:**
-- `apps/portal/src/types.ts` — add `AgentVersion` interface, update `CodingAgent`
-- `apps/portal/src/lib/api.ts` — add methods:
-  - `listAgentVersions(agentId: string, status?: string): Promise<AgentVersion[]>`
-  - `registerAgentVersion(agentId: string, version: AgentVersion): Promise<AgentVersion>`
-  - `updateAgentVersionStatus(agentId: string, agentVersion: string, status: string): Promise<AgentVersion>`
+### 7. Portal — CreateToken page (`apps/portal/src/pages/CreateToken.tsx`)
 
-### Step 6 — Portal UI — agent versions display
+- Add `"anthropic-oauth"` to `TOKEN_TYPES` array
+- Add instructions for obtaining an OAuth token
+- Add prefix validation (or skip prefix check for OAuth tokens since format varies)
 
-**Files:** `apps/portal/src/pages/AgentDetail.tsx`
+### 8. Portal — types (`apps/portal/src/types.ts`)
 
-- Add a "Versions" section to the agent detail view
-- List active versions with component details and creation time
-- Show retired versions dimmed/collapsed
-- Display component breakdown (e.g. "VS Code 1.111.0, Copilot Chat 0.39.0")
+- Add `"anthropic-oauth"` to the `TokenType` union
+- Add `"anthropic-oauth": "Anthropic OAuth"` to `TOKEN_TYPE_LABELS`
+- Add `"anthropic-oauth": ["claude-code-cli"]` to `TOKEN_TYPE_EXPECTED_CAPABILITIES`
 
-### Step 7 — Tests
+### 9. Tests
 
-- **Type tests**: Validate `AgentVersion` shape
-- **API tests**: Test version CRUD endpoints (list, register, update status, filtering)
-- **Worker registration tests**: Mock HTTP call, verify registration payload
-- **Queue processor tests**: Verify `workerVersion` is set on request document
+- `packages/shared/src/token-manager/capabilities.test.ts` — add test for `anthropic-oauth` deriving `claude-code-cli`
+- `apps/token-manager/src/token-validators.test.ts` (if exists) — add test for OAuth validation
+- `apps/model-scanners/anthropic/src/scan.test.ts` (if exists) — add test for Bearer auth header
 
-## Notes
+## File Change Summary
 
-- **`agentVersion`** = version prefix from `versions.env` components (e.g. `copilot-0.0.415`, `vscode-1.111.0-copilot-0.39.0`) — identifies the agent software version
-- **`workerVersion`** = `<agentVersion>-<timestamp>-<sha>` (e.g. `copilot-0.0.415-20260318T163740Z-44d16d6`) — matches the Docker image tag format from PR #297, identifies the exact deployed build
-- `AgentVersion.agentVersion` = PK, one entry per software version in the agent's `versions[]` array
-- `AgentVersion.workerVersion` = latest deployed build of that version (updated on each deploy with same component versions)
-- `RequestDocument.agentVersion` = FK → `AgentVersion.agentVersion`
-- `RequestDocument.workerVersion` = exact build that processed the run
-- This is a **breaking change** to `agentVersion` semantics: previously `@github/copilot@0.0.415` (CLI binary), now component version prefix. Existing data is unaffected (old values remain as-is), but new runs will use the new format.
-- Registration is best-effort: if the API is unavailable, the worker starts anyway
-- `versions.env`, `GIT_COMMIT`, and `BUILD_TIME` env vars are provided by #287 (PR #297, now merged)
+| File | Change |
+|------|--------|
+| `packages/shared/src/token-manager/types.ts` | Add `"anthropic-oauth"` to `TokenType` |
+| `packages/shared/src/token-manager/capabilities.ts` | Add `"anthropic-oauth"` case |
+| `packages/shared/src/token-manager/capabilities.test.ts` | Add test |
+| `apps/token-manager/src/token-validators.ts` | Add OAuth validator |
+| `apps/model-scanners/anthropic/src/scan.ts` | Support Bearer auth header |
+| `apps/model-scanners/anthropic/src/index.ts` | Pass token type to scan |
+| `apps/portal/src/types.ts` | Add type, label, capabilities |
+| `apps/portal/src/pages/CreateToken.tsx` | Add UI for OAuth token type |
+| `apps/workers/coder-acp-claude-code/src/index.ts` | No changes needed |
 
-## Image tag → workerVersion mapping
+## Out of Scope
 
-PR #297 established these image tag formats per worker:
-
-| Worker | Image tag format | Example |
-|--------|-----------------|--------|
-| `coder-acp-copilot` | `copilot-<ver>-<ts>-<sha>` | `copilot-0.0.415-20260318T163740Z-44d16d6` |
-| `coder-acp-claude-code` | `claude-code-acp-<ver>-sdk-<sdk-ver>-<ts>-<sha>` | `claude-code-acp-0.16.0-sdk-0.2.34-20260318T163730Z-44d16d6` |
-
-`workerVersion` uses the same format. `agentVersion` is the prefix before the timestamp.
+- Automated OAuth token refresh/rotation (no key-updater for Anthropic yet)
+- OAuth flow UI in the portal (tokens are pasted manually, same as API keys)
+- Changes to the `TOKEN_CAPABILITY_ENV_VARS` mapping (already correct)
