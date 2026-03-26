@@ -39,6 +39,7 @@ export interface ConversationTurn {
   tokenUsage?: TokenUsage;
   startedAt?: string;
   durationMs?: number;
+  toolCalls?: ToolCall[];
 }
 
 export interface Scenario {

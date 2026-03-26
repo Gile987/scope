@@ -29,6 +29,7 @@ export interface ConversationTurn {
   tokenUsage?: TokenUsage;  // LLM token usage for this iteration
   startedAt?: Date;        // When this iteration began
   durationMs?: number;     // Wall-clock duration of this iteration in milliseconds
+  toolCalls?: ToolCall[];   // Tool calls extracted from HAR (computed at iteration completion)
 }
 
 // Multi-turn configuration constants

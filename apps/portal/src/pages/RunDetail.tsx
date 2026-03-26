@@ -697,6 +697,20 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
 
 import type { ConversationTurn } from "@/types";
 
+/** Truncated text cell that expands on click when content overflows. */
+function ExpandableCell({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      className={`cursor-pointer ${expanded ? "whitespace-pre-wrap break-all" : "truncate max-w-sm"} ${className}`}
+      onClick={() => setExpanded(!expanded)}
+      title={expanded ? "Click to collapse" : "Click to expand"}
+    >
+      {children}
+    </div>
+  );
+}
+
 function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: ConversationTurn[]; harUrl?: string }) {
   const { allToolCalls, isLoading } = useAllTurnsToolCalls(runId, turns, harUrl);
 
@@ -759,6 +773,7 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
                       <th className="text-left p-3 font-medium">Iteration</th>
                       <th className="text-left p-3 font-medium">Tool</th>
                       <th className="text-left p-3 font-medium">Arguments</th>
+                      <th className="text-left p-3 font-medium">Response</th>
                       <th className="text-left p-3 font-medium">Time</th>
                     </tr>
                   </thead>
@@ -774,9 +789,32 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
                           </span>
                         </td>
                         <td className="p-3">
-                          <pre className="text-xs text-muted-foreground max-w-md truncate">
-                            {JSON.stringify(tc.arguments)}
-                          </pre>
+                          <table className="text-xs border-collapse">
+                            <tbody>
+                              {Object.entries(tc.arguments).map(([key, val]) => (
+                                <tr key={key} className="border-b border-border/50 last:border-0">
+                                  <td className="pr-2 py-1 text-foreground/70 font-medium whitespace-nowrap align-top border-r border-border/50">{key}</td>
+                                  <td className="pl-2 py-1 font-mono text-muted-foreground"><ExpandableCell>{typeof val === "string" ? val : JSON.stringify(val)}</ExpandableCell></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                        <td className="p-3 text-xs font-mono text-muted-foreground">
+                          {tc.response ? (
+                            <ExpandableCell className="max-w-md">{tc.response}</ExpandableCell>
+                          ) : (
+                            <span>–</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {tc.response ? (
+                            <pre className="text-xs text-muted-foreground max-w-md truncate">
+                              {tc.response}
+                            </pre>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">–</span>
+                          )}
                         </td>
                         <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
                           {tc.timestamp ? new Date(tc.timestamp).toLocaleTimeString() : "–"}

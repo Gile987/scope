@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen } from "lucide-react";
+import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles } from "lucide-react";
 import { WORKER_TYPES, type CodingAgent, type McpServerDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
@@ -97,6 +97,35 @@ export function SubmitRun() {
       setSelectedAgentVersion("");
     }
   }, [worker, agentVersions.length]);
+
+  // AI generation state
+  const [showGenerate, setShowGenerate] = useState(false);
+  const [generateDescription, setGenerateDescription] = useState("");
+
+  const generateMutation = useMutation({
+    mutationFn: (opts: { description?: string; existingPrompt?: string }) =>
+      api.generateTaskPrompt(opts),
+    onSuccess: (data) => {
+      setTask(data.taskPrompt);
+      setShowGenerate(false);
+      setGenerateDescription("");
+    },
+  });
+
+  const handleGenerate = () => {
+    if (task.trim()) {
+      // Variation mode: use existing task, optional guidance from description
+      generateMutation.mutate({
+        existingPrompt: task.trim(),
+        ...(generateDescription.trim() && { description: generateDescription.trim() }),
+      });
+    } else {
+      // From-scratch mode: generate from description (or surprise me if empty)
+      generateMutation.mutate({
+        ...(generateDescription.trim() && { description: generateDescription.trim() }),
+      });
+    }
+  };
 
   // Task prompt entity state (created on "Continue" to step 2)
   const [taskPromptId, setTaskPromptId] = useState<string | null>(null);
@@ -196,10 +225,69 @@ export function SubmitRun() {
                   rows={3}
                   required
                 />
-                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Info className="h-3.5 w-3.5 shrink-0" />
-                  New task prompts are automatically added to the task prompt library.
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Info className="h-3.5 w-3.5 shrink-0" />
+                    New task prompts are automatically added to the task prompt library.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    onClick={() => setShowGenerate(!showGenerate)}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {task.trim() ? "Generate Variation" : "Generate with AI"}
+                  </Button>
+                </div>
+
+                {showGenerate && (
+                  <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+                    <Label className="text-xs">
+                      {task.trim()
+                        ? "How should the variation differ? (optional)"
+                        : "Describe what you want, or leave empty for a surprise (optional)"}
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder={
+                          task.trim()
+                            ? "e.g., use Python instead, add database support…"
+                            : "e.g., A REST API with database and tests"
+                        }
+                        value={generateDescription}
+                        onChange={(e) => setGenerateDescription(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleGenerate();
+                          }
+                        }}
+                        disabled={generateMutation.isPending}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleGenerate}
+                        disabled={generateMutation.isPending}
+                      >
+                        {generateMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                    {generateMutation.isError && (
+                      <p className="text-xs text-destructive">
+                        {generateMutation.error instanceof Error
+                          ? generateMutation.error.message
+                          : "Generation failed"}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className={enableV1CriteriaType ? "grid grid-cols-2 gap-4" : "grid grid-cols-1 gap-4"}>
