@@ -764,14 +764,16 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
                           </span>
                         </td>
                         <td className="p-3">
-                          <div className="text-xs text-muted-foreground max-w-md space-y-0.5">
-                            {Object.entries(tc.arguments).map(([key, val]) => (
-                              <div key={key} className="truncate">
-                                <span className="font-medium text-foreground/70">{key}:</span>{" "}
-                                <span className="font-mono">{typeof val === "string" ? val : JSON.stringify(val)}</span>
-                              </div>
-                            ))}
-                          </div>
+                          <table className="text-xs">
+                            <tbody>
+                              {Object.entries(tc.arguments).map(([key, val]) => (
+                                <tr key={key}>
+                                  <td className="pr-2 py-0.5 text-foreground/70 font-medium whitespace-nowrap align-top">{key}</td>
+                                  <td className="py-0.5 font-mono text-muted-foreground max-w-sm truncate">{typeof val === "string" ? val : JSON.stringify(val)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         </td>
                         <td className="p-3">
                           {tc.response ? (
