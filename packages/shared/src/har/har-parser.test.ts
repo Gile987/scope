@@ -429,8 +429,195 @@ describe("extractToolCalls", () => {
 });
 
 // ---------------------------------------------------------------------------
-// sanitizeHar
+// extractToolCalls — Anthropic Messages API
 // ---------------------------------------------------------------------------
+
+describe("extractToolCalls (Anthropic)", () => {
+  describe("non-streaming responses", () => {
+    it("extracts tool_use blocks from Anthropic response", () => {
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: {
+            id: "msg_123",
+            type: "message",
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_01A",
+                name: "read_file",
+                input: { path: "/src/index.ts" },
+              },
+            ],
+            stop_reason: "tool_use",
+          },
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({
+        id: "toolu_01A",
+        name: "read_file",
+        arguments: { path: "/src/index.ts" },
+      });
+    });
+
+    it("extracts multiple tool_use blocks from a single response", () => {
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: {
+            type: "message",
+            content: [
+              { type: "text", text: "I'll read and write files." },
+              { type: "tool_use", id: "toolu_01", name: "read_file", input: { path: "a.ts" } },
+              { type: "tool_use", id: "toolu_02", name: "write_file", input: { path: "b.ts", content: "x" } },
+            ],
+          },
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(2);
+      expect(calls.map((c) => c.name)).toEqual(["read_file", "write_file"]);
+    });
+
+    it("ignores non-tool_use content blocks", () => {
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: {
+            type: "message",
+            content: [
+              { type: "text", text: "Hello!" },
+              { type: "thinking", thinking: "Let me think..." },
+            ],
+          },
+        }),
+      ]);
+
+      expect(extractToolCalls(har)).toHaveLength(0);
+    });
+  });
+
+  describe("streaming responses (SSE)", () => {
+    it("accumulates tool calls from content_block_start and input_json_delta", () => {
+      const sseBody = [
+        'data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[]}}',
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_stream_01","name":"bash"}}',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"command\\""}}',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":": \\"ls -la\\"}"}}',
+        'data: {"type":"content_block_stop","index":0}',
+        'data: {"type":"message_stop"}',
+      ].join("\n");
+
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: sseBody,
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({
+        id: "toolu_stream_01",
+        name: "bash",
+        arguments: { command: "ls -la" },
+      });
+    });
+
+    it("handles multiple parallel streaming tool calls", () => {
+      const sseBody = [
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_a","name":"read"}}',
+        'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_b","name":"write"}}',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\": \\"x.ts\\"}"}}',
+        'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\": \\"y.ts\\"}"}}',
+      ].join("\n");
+
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: sseBody,
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(2);
+      expect(calls.map((c) => c.id)).toContain("toolu_a");
+      expect(calls.map((c) => c.id)).toContain("toolu_b");
+    });
+  });
+
+  describe("tool responses (tool_result)", () => {
+    it("matches tool_result blocks to tool_use calls by tool_use_id", () => {
+      const har = makeHar([
+        // Response with tool_use
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: {
+            type: "message",
+            content: [
+              { type: "tool_use", id: "toolu_match", name: "bash", input: { command: "pwd" } },
+            ],
+          },
+        }),
+        // Follow-up request with tool_result
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          requestBody: {
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "tool_result", tool_use_id: "toolu_match", content: "/workspace" },
+                ],
+              },
+            ],
+          },
+          responseBody: { type: "message", content: [{ type: "text", text: "Got it." }] },
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].response).toBe("/workspace");
+    });
+
+    it("handles tool_result with object content", () => {
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: {
+            type: "message",
+            content: [
+              { type: "tool_use", id: "toolu_obj", name: "search", input: { query: "test" } },
+            ],
+          },
+        }),
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          requestBody: {
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "tool_result", tool_use_id: "toolu_obj", content: [{ type: "text", text: "found 3 results" }] },
+                ],
+              },
+            ],
+          },
+          responseBody: { type: "message", content: [] },
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls[0].response).toBe(JSON.stringify([{ type: "text", text: "found 3 results" }]));
+    });
+  });
+});
 
 /** Helper to build a HAR entry with explicit headers. */
 function makeEntryWithHeaders(opts: {
@@ -680,6 +867,41 @@ describe("extractThinkingContent", () => {
     ]);
     const thinking = extractThinkingContent(har);
     expect(thinking).toBe("");
+  });
+
+  it("extracts thinking from non-streaming Anthropic response", () => {
+    const har = makeHar([
+      makeEntry({
+        url: "https://api.anthropic.com/v1/messages",
+        responseBody: {
+          type: "message",
+          content: [
+            { type: "thinking", thinking: "Let me analyze this step by step." },
+            { type: "text", text: "Here's my answer." },
+          ],
+        },
+      }),
+    ]);
+    const thinking = extractThinkingContent(har);
+    expect(thinking).toBe("Let me analyze this step by step.");
+  });
+
+  it("extracts thinking from Anthropic streaming thinking_delta", () => {
+    const sseBody = [
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Step 1: "}}',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"analyze input."}}',
+      'data: {"type":"content_block_stop","index":0}',
+    ].join("\n");
+
+    const har = makeHar([
+      makeEntry({
+        url: "https://api.anthropic.com/v1/messages",
+        responseBody: sseBody,
+      }),
+    ]);
+    const thinking = extractThinkingContent(har);
+    expect(thinking).toBe("Step 1: analyze input.");
   });
 });
 

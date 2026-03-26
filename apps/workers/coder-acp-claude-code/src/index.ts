@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -42,6 +42,25 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     });
     
     try {
+      // DevProxy integration — start recording if enabled
+      let devProxy: DevProxyClient | null = null;
+      if (DevProxyClient.isEnabled()) {
+        devProxy = new DevProxyClient();
+        try {
+          await log("info", "DevProxy enabled — waiting for sidecar to be ready...");
+          await devProxy.waitForReady();
+          const certPath = process.env.NODE_EXTRA_CA_CERTS || "/tmp/dev-proxy-ca.crt";
+          await devProxy.downloadCertificate(certPath);
+          await log("info", "DevProxy CA cert installed", { certPath });
+          await devProxy.startRecording();
+          await log("info", "DevProxy recording started");
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          await log("warn", `DevProxy setup failed, continuing without HAR capture: ${msg}`);
+          devProxy = null;
+        }
+      }
+
       // Acquire token dynamically (env var fallback or Token Manager)
       // Prefer OAuth tokens over API keys
       const tokenResponse = await tokenClient.acquireTokenFull("claude-code-cli", "anthropic-oauth");
@@ -59,6 +78,19 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       if (options?.model) {
         env.ANTHROPIC_MODEL = options.model;
       }
+      // When DevProxy is active, ensure the subprocess routes through the proxy
+      if (devProxy) {
+        const existingNodeOptions = process.env.NODE_OPTIONS || "";
+        env.NODE_OPTIONS = [existingNodeOptions, "--use-env-proxy"].filter(Boolean).join(" ");
+        env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+      } else if (!DevProxyClient.isEnabled()) {
+        // DevProxy not configured — clear proxy vars so subprocess makes direct calls
+        env.HTTP_PROXY = "";
+        env.HTTPS_PROXY = "";
+        env.http_proxy = "";
+        env.https_proxy = "";
+        env.NODE_EXTRA_CA_CERTS = "";
+      }
       const result = await runACPSession(message, {
         command: "claude-code-acp",
         args: [],
@@ -74,8 +106,34 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         stopReason: result.stopReason,
         responseLength: result.response.length 
       });
+
+      const response = result.response || `[${this.workerName}] No response from Claude Code`;
+
+      // DevProxy integration — stop recording and extract tool calls
+      if (devProxy) {
+        try {
+          await devProxy.stopRecording();
+          await log("info", "DevProxy recording stopped");
+
+          const harFilePath = await devProxy.getLatestHarFile();
+          if (harFilePath) {
+            const har = await parseHarFile(harFilePath);
+            const toolCalls = extractToolCalls(har);
+            await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
+              toolCallCount: toolCalls.length,
+              toolNames: toolCalls.map((tc) => tc.name),
+            });
+            return { response, harFilePath };
+          } else {
+            await log("warn", "No HAR file found after DevProxy recording");
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          await log("warn", `DevProxy post-processing failed: ${msg}`);
+        }
+      }
       
-      return { response: result.response || `[${this.workerName}] No response from Claude Code` };
+      return { response };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await log("error", `Claude Code processing failed: ${errorMessage}`);

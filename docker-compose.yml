@@ -327,7 +327,55 @@ services:
       WORKER_NAME: coder-acp-claude-code
       QUEUE_NAME: queue-coder-acp-claude-code
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    depends_on: *worker-deps
+      # DevProxy integration (enabled by default when using claude-code profile)
+      DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
+      DEV_PROXY_API_URL: http://devproxy-claude-code:18897
+      DEV_PROXY_HAR_DIR: /har-output
+      HTTP_PROXY: http://devproxy-claude-code:18000
+      HTTPS_PROXY: http://devproxy-claude-code:18000
+      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-claude-code"
+      NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
+    volumes:
+      - claude_har_output:/har-output
+    depends_on:
+      <<: *worker-deps
+      devproxy-claude-code:
+        condition: service_healthy
+      devproxy-claude-code-init:
+        condition: service_completed_successfully
+
+  # DevProxy sidecar for Claude Code worker (HAR capture)
+  devproxy-claude-code:
+    image: ghcr.io/dotnet/dev-proxy:2.1.0
+    profiles: [claude-code]
+    user: "1000:1000"
+    working_dir: /har-output
+    command: ["--config-file", "/config/devproxyrc.json", "--record"]
+    volumes:
+      - ./apps/workers/coder-acp-claude-code/devproxy-config.json:/config/devproxyrc.json:ro
+      - claude_har_output:/har-output
+      - claude_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
+    ports:
+      - "${DEVPROXY_CLAUDE_API_PORT:-18801}:18897"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:18897/proxy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      devproxy-claude-code-init:
+        condition: service_completed_successfully
+
+  # Init service: fix ownership on shared volumes so UID 1000 containers can
+  # read/write. Equivalent of the K8s initContainer in coder-acp-claude-code.yaml.
+  devproxy-claude-code-init:
+    image: busybox:1.37
+    profiles: [claude-code]
+    command: ["sh", "-c", "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'"]
+    volumes:
+      - claude_har_output:/har-output
+      - claude_devproxy_cert:/certs
 
   # GitHub Copilot worker (via ACP)
   coder-acp-copilot:
@@ -421,6 +469,8 @@ volumes:
   lowkey_vault_data:
   copilot_har_output:
   copilot_devproxy_cert:
+  claude_har_output:
+  claude_devproxy_cert:
 
 networks:
   default:
