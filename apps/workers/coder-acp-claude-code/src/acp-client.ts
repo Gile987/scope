@@ -10,6 +10,8 @@
 
 import { spawn, ChildProcess } from "node:child_process";
 import { Duplex } from "node:stream";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname, resolve, isAbsolute } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import type { McpServerConfig } from "shared";
 
@@ -33,9 +35,11 @@ export interface ACPSessionResult {
 class ACPClientHandler implements acp.Client {
   private responseChunks: string[] = [];
   private onLog: (message: string) => void;
+  private workspacePath: string;
 
-  constructor(onLog: (message: string) => void) {
+  constructor(onLog: (message: string) => void, workspacePath: string) {
     this.onLog = onLog;
+    this.workspacePath = workspacePath;
   }
 
   getResponse(): string {
@@ -91,20 +95,32 @@ class ACPClientHandler implements acp.Client {
     }
   }
 
+  private resolvePath(filePath: string): string {
+    if (isAbsolute(filePath)) return filePath;
+    return resolve(this.workspacePath, filePath);
+  }
+
   async writeTextFile(
     params: acp.WriteTextFileRequest
   ): Promise<acp.WriteTextFileResponse> {
-    this.onLog(`Write file: ${params.path}`);
+    const fullPath = this.resolvePath(params.path);
+    this.onLog(`Write file: ${params.path} (${params.content.length} chars)`);
+    mkdirSync(dirname(fullPath), { recursive: true });
+    writeFileSync(fullPath, params.content, "utf-8");
     return {};
   }
 
   async readTextFile(
     params: acp.ReadTextFileRequest
   ): Promise<acp.ReadTextFileResponse> {
+    const fullPath = this.resolvePath(params.path);
     this.onLog(`Read file: ${params.path}`);
-    return {
-      content: "",
-    };
+    try {
+      const content = readFileSync(fullPath, "utf-8");
+      return { content };
+    } catch {
+      return { content: "" };
+    }
   }
 }
 
@@ -157,7 +173,8 @@ export async function runACPSession(
     })
   );
 
-  const clientHandler = new ACPClientHandler(onLog);
+  const workspacePath = cwd || "/workspace";
+  const clientHandler = new ACPClientHandler(onLog, workspacePath);
   const connection = new acp.ClientSideConnection(
     (_agent) => clientHandler,
     acpStream
