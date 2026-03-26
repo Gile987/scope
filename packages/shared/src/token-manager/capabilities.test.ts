@@ -81,4 +81,16 @@ describe("deriveCapabilities", () => {
       ]);
     });
   });
+
+  describe("anthropic-oauth", () => {
+    it("returns claude-code-cli", () => {
+      expect(deriveCapabilities("anthropic-oauth", validResult)).toEqual([
+        "claude-code-cli",
+      ]);
+    });
+
+    it("returns empty array for non-valid status", () => {
+      expect(deriveCapabilities("anthropic-oauth", invalidResult)).toEqual([]);
+    });
+  });
 });

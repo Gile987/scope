@@ -181,6 +181,43 @@ describe("scanAnthropicModels", () => {
     ).toBe("2023-06-01");
   });
 
+  it("should send Bearer header for anthropic-oauth token type", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [], has_more: false }),
+        { status: 200 },
+      ),
+    );
+
+    await scanAnthropicModels("my-oauth-token", "anthropic-oauth");
+
+    const [, init] = fetchSpy.mock.calls[0];
+    expect((init?.headers as Record<string, string>)["Authorization"]).toBe(
+      "Bearer my-oauth-token",
+    );
+    expect((init?.headers as Record<string, string>)["x-api-key"]).toBeUndefined();
+    expect(
+      (init?.headers as Record<string, string>)["anthropic-version"],
+    ).toBe("2023-06-01");
+  });
+
+  it("should default to x-api-key header when no token type specified", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [], has_more: false }),
+        { status: 200 },
+      ),
+    );
+
+    await scanAnthropicModels("my-api-key");
+
+    const [, init] = fetchSpy.mock.calls[0];
+    expect((init?.headers as Record<string, string>)["x-api-key"]).toBe(
+      "my-api-key",
+    );
+    expect((init?.headers as Record<string, string>)["Authorization"]).toBeUndefined();
+  });
+
   it("should throw on 401 response", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("Unauthorized", { status: 401 }),

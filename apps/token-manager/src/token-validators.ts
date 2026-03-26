@@ -26,6 +26,9 @@ export async function validateToken(
     case "anthropic-api-key":
       result = await validateAnthropicKey(value);
       break;
+    case "anthropic-oauth":
+      result = await validateAnthropicOAuth(value);
+      break;
     case "github-oauth-cookie-state":
       result = await validateGitHubOAuthCookieState(value);
       break;
@@ -146,6 +149,38 @@ async function validateAnthropicKey(
     return {
       status: "error",
       error: `Anthropic key validation failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+async function validateAnthropicOAuth(
+  token: string
+): Promise<TokenValidationResult> {
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/models", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "anthropic-version": "2023-06-01",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (response.status === 401) {
+      return { status: "invalid", error: "Authentication failed" };
+    }
+
+    if (!response.ok) {
+      return {
+        status: "error",
+        error: `Anthropic API returned ${response.status}`,
+      };
+    }
+
+    return { status: "valid" };
+  } catch (err) {
+    return {
+      status: "error",
+      error: `Anthropic OAuth validation failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }

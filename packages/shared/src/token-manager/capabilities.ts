@@ -20,6 +20,7 @@ import type { TokenCapability, TokenType, TokenValidationResult } from "./types.
  * | github-pat-fine-grained  | has `models:read`      | github-models                                         |
  * | github-oauth             | (always)               | github-models, copilot-models, copilot-sdk, copilot-cli |
  * | anthropic-api-key        | (always)               | claude-code-cli                                       |
+ * | anthropic-oauth          | (always)               | claude-code-cli                                       |
  */
 export function deriveCapabilities(
   type: TokenType,
@@ -57,6 +58,7 @@ export function deriveCapabilities(
       return [];
 
     case "anthropic-api-key":
+    case "anthropic-oauth":
       return ["claude-code-cli"];
 
     default:

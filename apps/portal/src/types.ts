@@ -401,7 +401,8 @@ export type TokenType =
   | "github-pat-fine-grained"
   | "github-oauth"
   | "github-oauth-cookie-state"
-  | "anthropic-api-key";
+  | "anthropic-api-key"
+  | "anthropic-oauth";
 
 export type TokenCapability =
   "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
@@ -464,6 +465,7 @@ export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
   "github-oauth": "GitHub OAuth",
   "github-oauth-cookie-state": "GitHub OAuth Cookie State",
   "anthropic-api-key": "Anthropic API Key",
+  "anthropic-oauth": "Anthropic OAuth (Subscription)",
 };
 
 export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
@@ -494,6 +496,7 @@ export const TOKEN_TYPE_EXPECTED_CAPABILITIES: Record<TokenType, TokenCapability
   "github-oauth": ["github-models", "copilot-models", "copilot-sdk", "copilot-cli"],
   "github-oauth-cookie-state": [],
   "anthropic-api-key": ["claude-code-cli"],
+  "anthropic-oauth": ["claude-code-cli"],
 };
 
 export const ALL_CAPABILITIES: TokenCapability[] = [

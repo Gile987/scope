@@ -135,6 +135,61 @@ describe("validateToken", () => {
       expect(result.error).toMatch(/Connection refused/);
     });
   });
+
+  describe("anthropic-oauth", () => {
+    it("returns valid for 200 response", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+      } as Response);
+
+      const result = await validateToken("anthropic-oauth", "oauth-token-test");
+
+      expect(result.status).toBe("valid");
+      expect(result.capabilities).toContain("claude-code-cli");
+    });
+
+    it("sends Bearer authorization header", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+      } as Response);
+
+      await validateToken("anthropic-oauth", "my-oauth-token");
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://api.anthropic.com/v1/models",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: "Bearer my-oauth-token",
+          }),
+        })
+      );
+    });
+
+    it("returns invalid for 401 response", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: false,
+        status: 401,
+      } as Response);
+
+      const result = await validateToken("anthropic-oauth", "bad-token");
+
+      expect(result.status).toBe("invalid");
+      expect(result.error).toMatch(/Authentication failed/);
+    });
+
+    it("returns error on network failure", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(
+        new Error("Network timeout")
+      );
+
+      const result = await validateToken("anthropic-oauth", "token");
+
+      expect(result.status).toBe("error");
+      expect(result.error).toMatch(/Network timeout/);
+    });
+  });
   describe("dispatcher", () => {
     it("calls correct validator for each type", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
