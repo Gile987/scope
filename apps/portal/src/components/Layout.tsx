@@ -245,10 +245,11 @@ export function Layout() {
             href="/api-docs"
             target="_blank"
             rel="noopener noreferrer"
-            className="shrink-0 ml-4 p-2 transition-colors hover:text-foreground/80 text-foreground/60"
+            className="shrink-0 ml-4 p-2 flex items-center gap-1.5 text-sm font-medium transition-colors hover:text-foreground/80 text-foreground/60"
             title="API Documentation"
           >
-            <Plug className="h-5 w-5" />
+            <Plug className="h-4 w-4" />
+            <span className="hidden sm:inline">API</span>
           </a>
 
           {/* Admin gear icon */}
