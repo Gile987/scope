@@ -14,7 +14,8 @@ import {
 import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
-import { sanitizeHarFile } from "../har/har-parser.js";
+import { sanitizeHarFile, extractToolCalls } from "../har/har-parser.js";
+import type { ToolCall } from "../har/types.js";
 import { JudgeClient } from "./judge-client.js";
 
 export interface MultiTurnConfig {
@@ -188,6 +189,7 @@ export async function runMultiTurnLoop(
     let codingResponse: string;
     let turnHarUrl: string | undefined;
     let turnTokenUsage: TokenUsage | undefined;
+    let turnToolCalls: ToolCall[] | undefined;
     const turnVideoUrls: string[] = [];
     try {
       const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs });
@@ -197,7 +199,7 @@ export async function runMultiTurnLoop(
       // Upload HAR file to blob storage if available (sanitized to strip credentials)
       if (workerResult.harFilePath) {
         try {
-          await sanitizeHarFile(workerResult.harFilePath, workerResult.harFilePath);
+          const sanitizedHar = await sanitizeHarFile(workerResult.harFilePath, workerResult.harFilePath);
           const harBlobName = `${requestId}/iteration-${iteration}/devproxy.har`;
           turnHarUrl = await blobStorage.uploadFile(
             workerResult.harFilePath,
@@ -205,6 +207,17 @@ export async function runMultiTurnLoop(
             "application/json"
           );
           await iterLog("info", "HAR file uploaded", { harUrl: turnHarUrl });
+
+          // Extract tool calls from the sanitized HAR so they are persisted on the turn
+          try {
+            turnToolCalls = extractToolCalls(sanitizedHar);
+            if (turnToolCalls.length > 0) {
+              await iterLog("info", `Extracted ${turnToolCalls.length} tool call(s) from HAR`);
+            }
+          } catch (extractError) {
+            const msg = extractError instanceof Error ? extractError.message : String(extractError);
+            await iterLog("warn", `Failed to extract tool calls from HAR: ${msg}`);
+          }
         } catch (uploadError) {
           const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
           await iterLog("warn", `Failed to upload HAR file: ${msg}`);
@@ -391,6 +404,7 @@ export async function runMultiTurnLoop(
       ...(turnHarUrl && { harUrl: turnHarUrl }),
       ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
       ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
+      ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
     };
     turns.push(turn);
 
