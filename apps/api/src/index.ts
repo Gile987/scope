@@ -55,6 +55,9 @@ import {
   UpdateAgentInputSchema,
   RegisterAgentVersionInputSchema,
   PatchAgentVersionInputSchema,
+  CreateReportTemplateInputSchema,
+  UpdateReportTemplateInputSchema,
+  ReportTemplateResponseSchema,
 } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -3066,164 +3069,109 @@ app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, nex
 // ============================================================
 
 // Get the default system prompt used when no template override is set
-app.get("/api/v1/report-templates/default-system-prompt", (_req: Request, res: Response) => {
-  res.json({ content: REPORT_SYSTEM_PROMPT });
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/report-templates/default-system-prompt",
+  tags: ["Report Templates"],
+  summary: "Get default system prompt",
+  response: z.object({ content: z.string() }),
+  handler: (_req, res) => {
+    res.json({ content: REPORT_SYSTEM_PROMPT });
+  },
 });
 
 // List all report templates
-app.get("/api/v1/report-templates", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const q = req.query.q as string | undefined;
-    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
-    if (q) {
-      filter.$or = [
-        { id: { $regex: q, $options: "i" } },
-        { name: { $regex: q, $options: "i" } },
-        { description: { $regex: q, $options: "i" } },
-      ];
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/report-templates",
+  tags: ["Report Templates"],
+  summary: "List report templates",
+  query: z.object({ q: z.string().optional() }),
+  response: z.array(ReportTemplateResponseSchema),
+  handler: async (req, res, next) => {
+    try {
+      const q = req.query.q as string | undefined;
+      const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+      if (q) {
+        filter.$or = [
+          { id: { $regex: q, $options: "i" } },
+          { name: { $regex: q, $options: "i" } },
+          { description: { $regex: q, $options: "i" } },
+        ];
+      }
+      const templates = await reportTemplateCollection.find(filter).toArray();
+      templates.sort((a, b) => a.id.localeCompare(b.id));
+      res.json(templates);
+    } catch (error) {
+      next(error);
     }
-    const templates = await reportTemplateCollection.find(filter).toArray();
-    templates.sort((a, b) => a.id.localeCompare(b.id));
-    res.json(templates);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Get single report template by ID
-app.get("/api/v1/report-templates/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const template = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
-    if (!template) {
-      res.status(404).json({ error: `Report template '${id}' not found` });
-      return;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/report-templates/:id",
+  tags: ["Report Templates"],
+  summary: "Get report template",
+  params: z.object({ id: z.string() }),
+  response: ReportTemplateResponseSchema,
+  errorResponses: {
+    404: { description: "Report template not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const template = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+      if (!template) {
+        res.status(404).json({ error: `Report template '${id}' not found` });
+        return;
+      }
+      res.json(template);
+    } catch (error) {
+      next(error);
     }
-    res.json(template);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Create a report template
-app.post("/api/v1/report-templates", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id, name, description, userPrompt, systemPrompt, trigger } = req.body;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/report-templates",
+  tags: ["Report Templates"],
+  summary: "Create report template",
+  body: CreateReportTemplateInputSchema,
+  response: ReportTemplateResponseSchema,
+  errorResponses: {
+    409: { description: "Report template already exists" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id, name, description, userPrompt, systemPrompt, trigger } = req.body;
 
-    if (!id || typeof id !== "string") {
-      res.status(400).json({ error: "id is required and must be a string" });
-      return;
-    }
-    if (!/^[a-z][a-z0-9_-]*$/.test(id)) {
-      res.status(400).json({ error: "id must start with a lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores" });
-      return;
-    }
-    if (!name || typeof name !== "string") {
-      res.status(400).json({ error: "name is required and must be a string" });
-      return;
-    }
-    if (!userPrompt || typeof userPrompt !== "string") {
-      res.status(400).json({ error: "userPrompt is required and must be a string" });
-      return;
-    }
-
-    // Validate systemPrompt if provided
-    if (systemPrompt !== undefined) {
-      if (!systemPrompt || typeof systemPrompt !== "object") {
-        res.status(400).json({ error: "systemPrompt must be an object with 'mode' and 'content'" });
+      if (!id || typeof id !== "string") {
+        res.status(400).json({ error: "id is required and must be a string" });
         return;
       }
-      if (!["append", "override"].includes(systemPrompt.mode)) {
-        res.status(400).json({ error: "systemPrompt.mode must be 'append' or 'override'" });
+      if (!/^[a-z][a-z0-9_-]*$/.test(id)) {
+        res.status(400).json({ error: "id must start with a lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores" });
         return;
       }
-      if (!systemPrompt.content || typeof systemPrompt.content !== "string") {
-        res.status(400).json({ error: "systemPrompt.content is required and must be a string" });
+      if (!name || typeof name !== "string") {
+        res.status(400).json({ error: "name is required and must be a string" });
         return;
       }
-    }
-
-    // Validate trigger if provided
-    if (trigger !== undefined) {
-      const triggerError = validateTrigger(trigger);
-      if (triggerError) {
-        res.status(400).json({ error: triggerError });
+      if (!userPrompt || typeof userPrompt !== "string") {
+        res.status(400).json({ error: "userPrompt is required and must be a string" });
         return;
       }
-    }
 
-    // Check for duplicate id
-    const existing = await reportTemplateCollection.findOne({ id });
-    if (existing && !existing.deletedAt) {
-      res.status(409).json({ error: `Report template '${id}' already exists` });
-      return;
-    }
-
-    const now = new Date();
-
-    if (existing && existing.deletedAt) {
-      // Un-delete: update the soft-deleted document
-      await reportTemplateCollection.updateOne(
-        { id },
-        {
-          $set: {
-            name,
-            ...(description !== undefined ? { description } : {}),
-            userPrompt,
-            ...(systemPrompt !== undefined ? { systemPrompt } : {}),
-            ...(trigger !== undefined ? { trigger } : {}),
-            updatedAt: now,
-          },
-          $unset: { deletedAt: "" },
+      // Validate systemPrompt if provided
+      if (systemPrompt !== undefined) {
+        if (!systemPrompt || typeof systemPrompt !== "object") {
+          res.status(400).json({ error: "systemPrompt must be an object with 'mode' and 'content'" });
+          return;
         }
-      );
-      const updated = await reportTemplateCollection.findOne({ id });
-      res.status(201).json(updated);
-    } else {
-      const templateDoc: ReportTemplateDocument = {
-        id,
-        name,
-        ...(description ? { description } : {}),
-        userPrompt,
-        ...(systemPrompt ? { systemPrompt } : {}),
-        ...(trigger ? { trigger } : {}),
-        createdAt: now,
-      };
-      await reportTemplateCollection.insertOne(templateDoc as any);
-      res.status(201).json(templateDoc);
-    }
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Update a report template
-app.put("/api/v1/report-templates/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const { name, description, userPrompt, systemPrompt, trigger } = req.body;
-
-    const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: `Report template '${id}' not found` });
-      return;
-    }
-
-    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-    if (name !== undefined) updateFields.name = name;
-    if (description !== undefined) updateFields.description = description;
-    if (userPrompt !== undefined) {
-      if (typeof userPrompt !== "string" || !userPrompt.trim()) {
-        res.status(400).json({ error: "userPrompt must be a non-empty string" });
-        return;
-      }
-      updateFields.userPrompt = userPrompt;
-    }
-    if (systemPrompt !== undefined) {
-      if (systemPrompt === null) {
-        // Allow removing systemPrompt by setting to null
-        updateFields.systemPrompt = undefined;
-      } else {
         if (!["append", "override"].includes(systemPrompt.mode)) {
           res.status(400).json({ error: "systemPrompt.mode must be 'append' or 'override'" });
           return;
@@ -3232,51 +3180,167 @@ app.put("/api/v1/report-templates/:id", async (req: Request, res: Response, next
           res.status(400).json({ error: "systemPrompt.content is required and must be a string" });
           return;
         }
-        updateFields.systemPrompt = systemPrompt;
       }
-    }
-    if (trigger !== undefined) {
-      if (trigger === null) {
-        // Allow removing trigger (reverts to "always" behavior)
-        updateFields.trigger = undefined;
-      } else {
+
+      // Validate trigger if provided
+      if (trigger !== undefined) {
         const triggerError = validateTrigger(trigger);
         if (triggerError) {
           res.status(400).json({ error: triggerError });
           return;
         }
-        updateFields.trigger = trigger;
       }
-    }
 
-    await reportTemplateCollection.updateOne({ id }, { $set: updateFields });
-    const updated = await reportTemplateCollection.findOne({ id });
-    res.json(updated);
-  } catch (error) {
-    next(error);
-  }
+      // Check for duplicate id
+      const existing = await reportTemplateCollection.findOne({ id });
+      if (existing && !existing.deletedAt) {
+        res.status(409).json({ error: `Report template '${id}' already exists` });
+        return;
+      }
+
+      const now = new Date();
+
+      if (existing && existing.deletedAt) {
+        // Un-delete: update the soft-deleted document
+        await reportTemplateCollection.updateOne(
+          { id },
+          {
+            $set: {
+              name,
+              ...(description !== undefined ? { description } : {}),
+              userPrompt,
+              ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+              ...(trigger !== undefined ? { trigger } : {}),
+              updatedAt: now,
+            },
+            $unset: { deletedAt: "" },
+          }
+        );
+        const updated = await reportTemplateCollection.findOne({ id });
+        res.status(201).json(updated);
+      } else {
+        const templateDoc: ReportTemplateDocument = {
+          id,
+          name,
+          ...(description ? { description } : {}),
+          userPrompt,
+          ...(systemPrompt ? { systemPrompt } : {}),
+          ...(trigger ? { trigger } : {}),
+          createdAt: now,
+        };
+        await reportTemplateCollection.insertOne(templateDoc as any);
+        res.status(201).json(templateDoc);
+      }
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// Update a report template
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/report-templates/:id",
+  tags: ["Report Templates"],
+  summary: "Update report template",
+  params: z.object({ id: z.string() }),
+  body: UpdateReportTemplateInputSchema,
+  response: ReportTemplateResponseSchema,
+  errorResponses: {
+    404: { description: "Report template not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { name, description, userPrompt, systemPrompt, trigger } = req.body;
+
+      const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: `Report template '${id}' not found` });
+        return;
+      }
+
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+      if (name !== undefined) updateFields.name = name;
+      if (description !== undefined) updateFields.description = description;
+      if (userPrompt !== undefined) {
+        if (typeof userPrompt !== "string" || !userPrompt.trim()) {
+          res.status(400).json({ error: "userPrompt must be a non-empty string" });
+          return;
+        }
+        updateFields.userPrompt = userPrompt;
+      }
+      if (systemPrompt !== undefined) {
+        if (systemPrompt === null) {
+          // Allow removing systemPrompt by setting to null
+          updateFields.systemPrompt = undefined;
+        } else {
+          if (!["append", "override"].includes(systemPrompt.mode)) {
+            res.status(400).json({ error: "systemPrompt.mode must be 'append' or 'override'" });
+            return;
+          }
+          if (!systemPrompt.content || typeof systemPrompt.content !== "string") {
+            res.status(400).json({ error: "systemPrompt.content is required and must be a string" });
+            return;
+          }
+          updateFields.systemPrompt = systemPrompt;
+        }
+      }
+      if (trigger !== undefined) {
+        if (trigger === null) {
+          // Allow removing trigger (reverts to "always" behavior)
+          updateFields.trigger = undefined;
+        } else {
+          const triggerError = validateTrigger(trigger);
+          if (triggerError) {
+            res.status(400).json({ error: triggerError });
+            return;
+          }
+          updateFields.trigger = trigger;
+        }
+      }
+
+      await reportTemplateCollection.updateOne({ id }, { $set: updateFields });
+      const updated = await reportTemplateCollection.findOne({ id });
+      res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Delete a report template (soft-delete)
-app.delete("/api/v1/report-templates/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/report-templates/:id",
+  tags: ["Report Templates"],
+  summary: "Delete report template",
+  params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }),
+  successStatus: 204,
+  errorResponses: {
+    404: { description: "Report template not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
 
-    const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: `Report template '${id}' not found` });
-      return;
+      const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: `Report template '${id}' not found` });
+        return;
+      }
+
+      await reportTemplateCollection.updateOne(
+        { id },
+        { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+      );
+
+      res.status(204).send();
+    } catch (error) {
+      next(error);
     }
-
-    await reportTemplateCollection.updateOne(
-      { id },
-      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
-    );
-
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 /**

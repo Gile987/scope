@@ -25,6 +25,9 @@ import {
   UpdateAgentInputSchema,
   RegisterAgentVersionInputSchema,
   PatchAgentVersionInputSchema,
+  CreateReportTemplateInputSchema,
+  UpdateReportTemplateInputSchema,
+  ReportTemplateResponseSchema,
 } from "shared";
 
 // Register apiRoute()-based routes so they appear in the OpenAPI doc.
@@ -198,6 +201,37 @@ apiRoute(testApp, registry, {
   method: "patch", path: "/api/v1/agents/:id/versions/:agentVersion", tags: ["Agents"],
   summary: "Patch agent version", params: z.object({ id: z.string(), agentVersion: z.string() }),
   body: PatchAgentVersionInputSchema, response: AgentVersionSchema, handler: noop,
+});
+
+// Report Templates
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/report-templates/default-system-prompt", tags: ["Report Templates"],
+  summary: "Get default system prompt", response: z.object({ content: z.string() }), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/report-templates", tags: ["Report Templates"],
+  summary: "List report templates", query: z.object({ q: z.string().optional() }),
+  response: z.array(ReportTemplateResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/report-templates/:id", tags: ["Report Templates"],
+  summary: "Get report template", params: z.object({ id: z.string() }),
+  response: ReportTemplateResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/report-templates", tags: ["Report Templates"],
+  summary: "Create report template", body: CreateReportTemplateInputSchema,
+  response: ReportTemplateResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "put", path: "/api/v1/report-templates/:id", tags: ["Report Templates"],
+  summary: "Update report template", params: z.object({ id: z.string() }),
+  body: UpdateReportTemplateInputSchema, response: ReportTemplateResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "delete", path: "/api/v1/report-templates/:id", tags: ["Report Templates"],
+  summary: "Delete report template", params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }), successStatus: 204, handler: noop,
 });
 
 describe("OpenAPI document generation", () => {
