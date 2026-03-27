@@ -9,7 +9,7 @@ import "./routes/task-prompts.js";
 import "./routes/reports.js";
 import "./routes/report-templates.js";
 import "./routes/insights.js";
-import "./routes/agents.js";
+// agents: registered via apiRoute() in index.ts
 // models: registered via apiRoute() in index.ts
 // mcp-servers: registered via apiRoute() in index.ts
 import "./routes/skills.js";

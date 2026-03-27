@@ -19,6 +19,12 @@ import {
   McpServerHeaderSchema,
   FeatureFlagResponseSchema,
   UpdateFeatureFlagInputSchema,
+  AgentResponseSchema,
+  AgentVersionSchema,
+  CreateAgentInputSchema,
+  UpdateAgentInputSchema,
+  RegisterAgentVersionInputSchema,
+  PatchAgentVersionInputSchema,
 } from "shared";
 
 // Register apiRoute()-based routes so they appear in the OpenAPI doc.
@@ -150,6 +156,48 @@ apiRoute(testApp, registry, {
   method: "delete", path: "/api/v1/criteria/:id", tags: ["Criteria"],
   summary: "Soft-delete criterion", params: z.object({ id: z.string() }),
   response: z.object({ id: z.string(), deleted: z.boolean() }), handler: noop,
+});
+
+// Agents
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/agents", tags: ["Agents"],
+  summary: "List agents", response: z.array(AgentResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/agents/:id", tags: ["Agents"],
+  summary: "Get agent", params: z.object({ id: z.string() }),
+  response: AgentResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/agents", tags: ["Agents"],
+  summary: "Create or update agent (upsert)", body: CreateAgentInputSchema,
+  response: AgentResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "put", path: "/api/v1/agents/:id", tags: ["Agents"],
+  summary: "Update agent", params: z.object({ id: z.string() }),
+  body: UpdateAgentInputSchema, response: AgentResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "delete", path: "/api/v1/agents/:id", tags: ["Agents"],
+  summary: "Delete agent", params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }), successStatus: 204, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/agents/:id/versions", tags: ["Agents"],
+  summary: "List agent versions", params: z.object({ id: z.string() }),
+  query: z.object({ status: z.string().optional() }),
+  response: z.array(AgentVersionSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/agents/:id/versions", tags: ["Agents"],
+  summary: "Register agent version (upsert)", params: z.object({ id: z.string() }),
+  body: RegisterAgentVersionInputSchema, response: AgentVersionSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "patch", path: "/api/v1/agents/:id/versions/:agentVersion", tags: ["Agents"],
+  summary: "Patch agent version", params: z.object({ id: z.string(), agentVersion: z.string() }),
+  body: PatchAgentVersionInputSchema, response: AgentVersionSchema, handler: noop,
 });
 
 describe("OpenAPI document generation", () => {
