@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls, extractTokenUsage } from "shared";
-// NOTE: extractToolCalls is used for server-side logging only; tool calls are NOT stored in the DB
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -123,37 +122,17 @@ class CopilotProcessor implements WorkerProcessor {
       });
 
       const response = result.response || `[${this.workerName}] No response from Copilot`;
-
-      // DevProxy integration — stop recording and extract tool calls
+      const { harFilePath, tokenUsage } = devProxy
+        ? await devProxy.stopAndCollectHar(log)
+        : { harFilePath: null, tokenUsage: undefined };
+      return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }) };
+    } catch (error) {
       if (devProxy) {
-        try {
-          await devProxy.stopRecording();
-          await log("info", "DevProxy recording stopped");
-
-          const harFilePath = await devProxy.getLatestHarFile();
-          if (harFilePath) {
-            const har = await parseHarFile(harFilePath);
-            const toolCalls = extractToolCalls(har);
-            await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
-              toolCallCount: toolCalls.length,
-              toolNames: toolCalls.map((tc) => tc.name),
-            });
-            const tokenUsage = extractTokenUsage(har);
-            if (tokenUsage) {
-              await log("info", `Token usage: ${tokenUsage.promptTokens} prompt, ${tokenUsage.completionTokens} completion, ${tokenUsage.totalTokens} total`);
-            }
-            return { response, harFilePath, tokenUsage };
-          } else {
-            await log("warn", "No HAR file found after DevProxy recording");
-          }
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          await log("warn", `DevProxy post-processing failed: ${msg}`);
+        const { harFilePath } = await devProxy.stopAndCollectHar(log);
+        if (harFilePath) {
+          (error as any).harFilePath = harFilePath;
         }
       }
-
-      return { response };
-    } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await log("error", `Copilot processing failed: ${errorMessage}`);
       throw error;

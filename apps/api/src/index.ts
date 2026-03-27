@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import express, { Request, Response, NextFunction } from "express";
+import express, { type Express, Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { MongoClient, Db, Collection } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
@@ -114,7 +114,7 @@ const Redis = require("ioredis");
 
 dotenv.config();
 
-const app = express();
+const app: Express = express();
 app.use(cors());
 app.use(express.json());
 
@@ -5709,7 +5709,63 @@ async function main(): Promise<void> {
   });
 }
 
-main().catch((error) => {
-  console.error("Failed to start server:", error);
-  process.exit(1);
-});
+// ─── Test support ────────────────────────────────────────────────────────────
+// Allows tests to inject mock dependencies without starting the server.
+
+export { app };
+
+export interface TestDependencies {
+  db?: Db;
+  collection?: Collection<RequestDocument>;
+  criteriaCollection?: Collection<CriteriaDocument>;
+  promptFeatureCollection?: Collection<PromptFeatureDocument>;
+  promptFeatureExtractionCollection?: Collection<PromptFeatureExtractionDocument>;
+  reportCollection?: Collection<ReportDocument>;
+  agentCollection?: Collection<CodingAgentDocument>;
+  modelCollection?: Collection<ModelDocument>;
+  mcpServerCollection?: Collection<McpServerDocument>;
+  insightsCollection?: Collection<InsightDocument>;
+  taskPromptCollection?: Collection<TaskPromptDocument>;
+  taskPromptStore?: TaskPromptStore;
+  featureFlagCollection?: Collection<FeatureFlagDocument>;
+  reportTemplateCollection?: Collection<ReportTemplateDocument>;
+  skillCollection?: Collection<SkillDocument>;
+  skillRevisionCollection?: Collection<SkillRevisionDocument>;
+  skillRevisionStore?: SkillRevisionStore;
+  skillResolver?: SkillResolver;
+  queueClients?: Map<WorkerType, QueueClient>;
+  reportQueueClient?: QueueClient;
+}
+
+/** @internal — used by tests only to inject mock dependencies */
+export function _injectTestDependencies(deps: TestDependencies): void {
+  if (deps.db) db = deps.db;
+  if (deps.collection) collection = deps.collection;
+  if (deps.criteriaCollection) criteriaCollection = deps.criteriaCollection;
+  if (deps.promptFeatureCollection) promptFeatureCollection = deps.promptFeatureCollection;
+  if (deps.promptFeatureExtractionCollection) promptFeatureExtractionCollection = deps.promptFeatureExtractionCollection;
+  if (deps.reportCollection) reportCollection = deps.reportCollection;
+  if (deps.agentCollection) agentCollection = deps.agentCollection;
+  if (deps.modelCollection) modelCollection = deps.modelCollection;
+  if (deps.mcpServerCollection) mcpServerCollection = deps.mcpServerCollection;
+  if (deps.insightsCollection) insightsCollection = deps.insightsCollection;
+  if (deps.taskPromptCollection) taskPromptCollection = deps.taskPromptCollection;
+  if (deps.taskPromptStore) taskPromptStore = deps.taskPromptStore;
+  if (deps.featureFlagCollection) featureFlagCollection = deps.featureFlagCollection;
+  if (deps.reportTemplateCollection) reportTemplateCollection = deps.reportTemplateCollection;
+  if (deps.skillCollection) skillCollection = deps.skillCollection;
+  if (deps.skillRevisionCollection) skillRevisionCollection = deps.skillRevisionCollection;
+  if (deps.skillRevisionStore) skillRevisionStore = deps.skillRevisionStore;
+  if (deps.skillResolver) skillResolver = deps.skillResolver;
+  if (deps.queueClients) queueClients.clear(), deps.queueClients.forEach((v, k) => queueClients.set(k, v));
+  if (deps.reportQueueClient) reportQueueClient = deps.reportQueueClient;
+}
+
+// ─── Start server (skipped in test environment) ──────────────────────────────
+
+if (!process.env.VITEST) {
+  main().catch((error) => {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+  });
+}
