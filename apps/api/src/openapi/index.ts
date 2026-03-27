@@ -4,7 +4,7 @@
 // Import all route registrations (side effects)
 import "./routes/requests.js";
 // criteria: registered via apiRoute() in index.ts
-import "./routes/prompt-features.js";
+// prompt-features: registered via apiRoute() in index.ts
 import "./routes/task-prompts.js";
 import "./routes/reports.js";
 // report-templates: registered via apiRoute() in index.ts

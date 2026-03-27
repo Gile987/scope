@@ -62,6 +62,11 @@ import {
   CreateInsightInputSchema,
   UpdateInsightInputSchema,
   ReportResponseSchema,
+  CreatePromptFeatureInputSchema,
+  UpdatePromptFeatureInputSchema,
+  PromptFeatureResponseSchema,
+  PromptFeatureResultSchema,
+  SuggestedPromptFeatureSchema,
 } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -2204,15 +2209,30 @@ apiRoute(app, registry, {
 // --- Prompt Feature CRUD & extraction ---
 
 // POST /api/v1/prompt-features/generate-prompt — AI-generate a prompt feature prompt from a behavior description
-app.post("/api/v1/prompt-features/generate-prompt", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/prompt-features/generate-prompt",
+  tags: ["Prompt Features"],
+  summary: "Generate prompt feature from behavior",
+  body: z.object({
+    behavior: z.string(),
+    currentId: z.string().optional(),
+  }),
+  response: z.object({ prompt: z.string() }),
+  errorResponses: {
+    400: { description: "Empty behavior string" },
+    503: { description: "LLM not configured" },
+  },
+  handler: async (req, res, next) => {
     const { behavior, currentId } = req.body;
     if (!behavior || typeof behavior !== "string" || !behavior.trim()) {
-      return res.status(400).json({ error: "Body must contain a non-empty 'behavior' string" });
+      res.status(400).json({ error: "Body must contain a non-empty 'behavior' string" });
+      return;
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      return;
     }
 
     const allFeatures = await promptFeatureCollection
@@ -2224,27 +2244,38 @@ app.post("/api/v1/prompt-features/generate-prompt", async (req: Request, res: Re
       ? allFeatures.filter((f: any) => f.id !== currentId)
       : allFeatures;
 
-    const result = await generatePromptFeaturePrompt(
-      behavior.trim(),
-      existingFeatures as { id: string; prompt: string }[],
-    );
-    console.log("[prompt-features/generate-prompt] LLM result:", JSON.stringify(result));
-    res.json(result);
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("not configured")) {
-      return res.status(503).json({ error: err.message });
+    try {
+      const result = await generatePromptFeaturePrompt(
+        behavior.trim(),
+        existingFeatures as { id: string; prompt: string }[],
+      );
+      console.log("[prompt-features/generate-prompt] LLM result:", JSON.stringify(result));
+      res.json(result);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("not configured")) {
+        res.status(503).json({ error: err.message });
+        return;
+      }
+      next(err);
     }
-    next(err);
-  }
+  },
 });
 
 // POST /api/v1/prompt-features/seed — bulk seed prompt features from a JSON array
-app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/prompt-features/seed",
+  tags: ["Prompt Features"],
+  summary: "Seed prompt features in bulk",
+  body: z.object({
+    features: z.array(CreatePromptFeatureInputSchema),
+  }),
+  response: z.object({
+    seeded: z.number(),
+    errors: z.array(z.string()),
+  }),
+  handler: async (req, res) => {
     const { features } = req.body;
-    if (!Array.isArray(features)) {
-      return res.status(400).json({ error: "Body must contain a 'features' array" });
-    }
 
     let seeded = 0;
     const errors: string[] = [];
@@ -2278,9 +2309,7 @@ app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, nex
     }
 
     res.json({ seeded, errors });
-  } catch (err) {
-    next(err);
-  }
+  },
 });
 
 // ==========================================
@@ -2434,15 +2463,34 @@ app.post("/api/v1/task-prompts/:id/extract-features", async (req: Request, res: 
 });
 
 // POST /api/v1/prompt-features/extract-from-text — extract features from raw text without persisting
-app.post("/api/v1/prompt-features/extract-from-text", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/prompt-features/extract-from-text",
+  tags: ["Prompt Features"],
+  summary: "Extract features from text",
+  body: z.object({
+    text: z.string(),
+    model: z.string().optional(),
+  }),
+  response: z.object({
+    features: z.array(PromptFeatureResultSchema),
+    suggestedFeatures: z.array(SuggestedPromptFeatureSchema).optional(),
+    cached: z.boolean(),
+  }),
+  errorResponses: {
+    400: { description: "Empty text string" },
+    503: { description: "LLM not configured" },
+  },
+  handler: async (req, res, next) => {
     const { text, model } = req.body;
     if (!text || typeof text !== "string" || !text.trim()) {
-      return res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
+      res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
+      return;
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      return;
     }
 
     const allFeatures = await promptFeatureCollection
@@ -2450,19 +2498,22 @@ app.post("/api/v1/prompt-features/extract-from-text", async (req: Request, res: 
       .toArray();
 
     const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt }));
-    const { results, suggestedFeatures } = await extractPromptFeatures(text.trim(), featureConfigs, model);
+    try {
+      const { results, suggestedFeatures } = await extractPromptFeatures(text.trim(), featureConfigs, model);
 
-    res.json({
-      features: results,
-      suggestedFeatures: suggestedFeatures.length > 0 ? suggestedFeatures : undefined,
-      cached: false,
-    });
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("not configured")) {
-      return res.status(503).json({ error: err.message });
+      res.json({
+        features: results,
+        suggestedFeatures: suggestedFeatures.length > 0 ? suggestedFeatures : undefined,
+        cached: false,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("not configured")) {
+        res.status(503).json({ error: err.message });
+        return;
+      }
+      next(err);
     }
-    next(err);
-  }
+  },
 });
 
 // PATCH /api/v1/task-prompts/:id/features/:featureId — toggle a feature's detected flag
@@ -2486,9 +2537,15 @@ app.patch("/api/v1/task-prompts/:id/features/:featureId", async (req: Request, r
 });
 
 // List all prompt features (with optional search)
-app.get("/api/v1/prompt-features", async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const q = _req.query.q as string | undefined;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/prompt-features",
+  tags: ["Prompt Features"],
+  summary: "List features",
+  query: z.object({ q: z.string().optional() }),
+  response: z.array(PromptFeatureResponseSchema),
+  handler: async (req, res) => {
+    const q = req.query.q;
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (q) {
       filter.$or = [
@@ -2499,14 +2556,21 @@ app.get("/api/v1/prompt-features", async (_req: Request, res: Response, next: Ne
     const features = await promptFeatureCollection.find(filter).toArray();
     features.sort((a, b) => a.id.localeCompare(b.id));
     res.json(features);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Get single prompt feature by ID
-app.get("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/prompt-features/:id",
+  tags: ["Prompt Features"],
+  summary: "Get feature",
+  params: z.object({ id: z.string() }),
+  response: PromptFeatureResponseSchema,
+  errorResponses: {
+    404: { description: "Feature not found" },
+  },
+  handler: async (req, res) => {
     const { id } = req.params;
     const feature = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
     if (!feature) {
@@ -2515,14 +2579,23 @@ app.get("/api/v1/prompt-features/:id", async (req: Request, res: Response, next:
     }
 
     res.json(feature);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Create a new prompt feature
-app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/prompt-features",
+  tags: ["Prompt Features"],
+  summary: "Create feature",
+  body: CreatePromptFeatureInputSchema,
+  response: PromptFeatureResponseSchema,
+  successStatus: 201,
+  errorResponses: {
+    400: { description: "Invalid input" },
+    409: { description: "Feature already exists" },
+  },
+  handler: async (req, res) => {
     const { id, prompt } = req.body;
 
     if (!id || typeof id !== "string") {
@@ -2552,14 +2625,23 @@ app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: Ne
 
     await promptFeatureCollection.insertOne(doc as any);
     res.status(201).json(doc);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Update a prompt feature
-app.put("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/prompt-features/:id",
+  tags: ["Prompt Features"],
+  summary: "Update feature",
+  params: z.object({ id: z.string() }),
+  body: UpdatePromptFeatureInputSchema,
+  response: PromptFeatureResponseSchema,
+  errorResponses: {
+    400: { description: "Invalid input" },
+    404: { description: "Feature not found" },
+  },
+  handler: async (req, res) => {
     const { id } = req.params;
     const { prompt } = req.body;
 
@@ -2585,14 +2667,21 @@ app.put("/api/v1/prompt-features/:id", async (req: Request, res: Response, next:
 
     const updated = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
     res.json(updated);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Delete a prompt feature (soft-delete)
-app.delete("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/prompt-features/:id",
+  tags: ["Prompt Features"],
+  summary: "Soft-delete feature",
+  params: z.object({ id: z.string() }),
+  response: z.object({ id: z.string(), deleted: z.boolean() }),
+  errorResponses: {
+    404: { description: "Feature not found" },
+  },
+  handler: async (req, res) => {
     const { id } = req.params;
 
     const existing = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
@@ -2607,9 +2696,7 @@ app.delete("/api/v1/prompt-features/:id", async (req: Request, res: Response, ne
     );
 
     res.json({ id, deleted: true });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // ==================== Report Endpoints ====================
