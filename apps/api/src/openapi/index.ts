@@ -6,7 +6,7 @@ import "./routes/requests.js";
 // criteria: registered via apiRoute() in index.ts
 // prompt-features: registered via apiRoute() in index.ts
 // task-prompts: registered via apiRoute() in index.ts
-import "./routes/reports.js";
+// reports: registered via apiRoute() in index.ts
 // report-templates: registered via apiRoute() in index.ts
 // insights: registered via apiRoute() in index.ts
 // agents: registered via apiRoute() in index.ts

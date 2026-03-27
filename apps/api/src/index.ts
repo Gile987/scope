@@ -62,6 +62,11 @@ import {
   CreateInsightInputSchema,
   UpdateInsightInputSchema,
   ReportResponseSchema,
+  CreateReportInputSchema,
+  BulkCreateReportsInputSchema,
+  BulkReportStatusInputSchema,
+  TriggerReportsInputSchema,
+  BulkTriggerReportsInputSchema,
   CreatePromptFeatureInputSchema,
   UpdatePromptFeatureInputSchema,
   PromptFeatureResponseSchema,
@@ -2801,422 +2806,445 @@ apiRoute(app, registry, {
 
 // Create a report for a run (POST /api/v1/reports)
 // Accepts optional templateId to associate the report with a report template.
-app.post("/api/v1/reports", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { requestId, templateId } = req.body;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports",
+  tags: ["Reports"],
+  summary: "Create report",
+  body: CreateReportInputSchema,
+  response: ReportResponseSchema,
+  successStatus: 201,
+  errorResponses: {
+    400: { description: "Invalid input" },
+    404: { description: "Run or template not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestId, templateId } = req.body;
 
-    if (!requestId || typeof requestId !== "string") {
-      res.status(400).json({ error: "requestId is required and must be a string" });
-      return;
-    }
-
-    // Verify the run exists
-    const run = await collection.findOne({ _id: requestId });
-    if (!run) {
-      res.status(404).json({ error: `Run ${requestId} not found` });
-      return;
-    }
-
-    // Verify the template exists (if specified)
-    if (templateId) {
-      const template = await reportTemplateCollection.findOne({ id: templateId, deletedAt: { $exists: false } });
-      if (!template) {
-        res.status(404).json({ error: `Report template '${templateId}' not found` });
+      if (!requestId || typeof requestId !== "string") {
+        res.status(400).json({ error: "requestId is required and must be a string" });
         return;
       }
-    }
 
-    const reportId = uuidv4();
+      // Verify the run exists
+      const run = await collection.findOne({ _id: requestId });
+      if (!run) {
+        res.status(404).json({ error: `Run ${requestId} not found` });
+        return;
+      }
 
-    const reportDoc: ReportDocument = {
-      _id: reportId,
-      requestId,
-      ...(templateId ? { templateId } : {}),
-      status: "pending",
-      logs: [],
-      createdAt: new Date(),
-    };
+      // Verify the template exists (if specified)
+      if (templateId) {
+        const template = await reportTemplateCollection.findOne({ id: templateId, deletedAt: { $exists: false } });
+        if (!template) {
+          res.status(404).json({ error: `Report template '${templateId}' not found` });
+          return;
+        }
+      }
 
-    await reportCollection.insertOne(reportDoc);
-
-    // Queue the report for processing
-    const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
-    await reportQueueClient.sendMessage(messageContent);
-
-    console.log(`Created report ${reportId} for run ${requestId}${templateId ? ` (template: ${templateId})` : ""} and queued for processing`);
-
-    res.status(201).json({
-      id: reportId,
-      requestId,
-      ...(templateId ? { templateId } : {}),
-      status: "pending",
-      message: "Report generation queued",
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// List all reports (GET /api/v1/reports)
-app.get("/api/v1/reports", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const requestIdFilter = req.query.requestId as string;
-    const filter: Record<string, unknown> = {};
-    if (requestIdFilter) {
-      filter.requestId = requestIdFilter;
-    }
-
-    const reports = await reportCollection
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    // Enrich reports with the task from their associated run
-    const requestIds = [...new Set(reports.map(r => r.requestId))];
-    const runs = requestIds.length > 0
-      ? await collection.find({ _id: { $in: requestIds } as any }, { projection: { _id: 1, "scenario.task": 1 } }).toArray()
-      : [];
-    const taskByRequestId = new Map(runs.map(r => [r._id, r.scenario?.task]));
-
-    res.json(reports.map(r => ({ ...r, id: r._id, task: taskByRequestId.get(r.requestId) })));
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Bulk create reports for multiple runs (POST /api/v1/reports/bulk-create)
-app.post("/api/v1/reports/bulk-create", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { requestIds } = req.body as { requestIds?: string[] };
-
-    if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
-      res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
-      return;
-    }
-
-    // Verify all runs exist
-    const runs = await collection.find({ _id: { $in: requestIds } as any }).toArray();
-    const foundIds = new Set(runs.map(r => r._id));
-    const notFound = requestIds.filter(id => !foundIds.has(id));
-
-    // Create reports only for runs that exist
-    const validIds = requestIds.filter(id => foundIds.has(id));
-    const created: { reportId: string; requestId: string }[] = [];
-
-    for (const requestId of validIds) {
       const reportId = uuidv4();
+
       const reportDoc: ReportDocument = {
         _id: reportId,
         requestId,
+        ...(templateId ? { templateId } : {}),
         status: "pending",
         logs: [],
         createdAt: new Date(),
       };
+
       await reportCollection.insertOne(reportDoc);
 
+      // Queue the report for processing
       const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
       await reportQueueClient.sendMessage(messageContent);
 
-      created.push({ reportId, requestId });
+      console.log(`Created report ${reportId} for run ${requestId}${templateId ? ` (template: ${templateId})` : ""} and queued for processing`);
+
+      res.status(201).json({
+        id: reportId,
+        requestId,
+        ...(templateId ? { templateId } : {}),
+        status: "pending",
+        message: "Report generation queued",
+      });
+    } catch (error) {
+      next(error);
     }
-
-    console.log(`Bulk created ${created.length} reports for ${validIds.length} runs`);
-
-    res.status(201).json({
-      created: created.length,
-      reports: created,
-      notFound,
-    });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
-// Bulk report status (POST /api/v1/reports/bulk-status)
-app.post("/api/v1/reports/bulk-status", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { requestIds } = req.body as { requestIds?: string[] };
-
-    if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
-      res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
-      return;
-    }
-
-    // Find the latest report for each requestId
-    const reports = await reportCollection
-      .find({ requestId: { $in: requestIds } })
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    // Build a map of requestId → latest report status
-    const statusMap: Record<string, { reportId: string; status: string }> = {};
-    for (const report of reports) {
-      if (!statusMap[report.requestId]) {
-        statusMap[report.requestId] = {
-          reportId: report._id,
-          status: report.status,
-        };
-      }
-    }
-
-    res.json(statusMap);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get a single report (GET /api/v1/reports/:id)
-app.get("/api/v1/reports/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-
-    const report = await reportCollection.findOne({ _id: id });
-
-    if (!report) {
-      res.status(404).json({ error: "Report not found" });
-      return;
-    }
-
-    res.json({ ...report, id: report._id });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Stream report logs via SSE (GET /api/v1/reports/:id/logs)
-app.get("/api/v1/reports/:id/logs", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const fromStart = req.query.fromStart === "true";
-
-    const report = await reportCollection.findOne({ _id: id });
-
-    if (!report) {
-      res.status(404).json({ error: "Report not found" });
-      return;
-    }
-
-    // Set SSE headers
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
-
-    // Replay existing logs if requested
-    if (fromStart && report.logs && report.logs.length > 0) {
-      for (const log of report.logs) {
-        res.write(`data: ${JSON.stringify(log)}\n\n`);
-      }
-    }
-
-    // If report already completed/failed, send done and close
-    if (report.status === "completed" || report.status === "failed") {
-      res.write(`event: done\ndata: {"status":"${report.status}"}\n\n`);
-      res.end();
-      return;
-    }
-
-    // Live streaming via Redis + Change Streams (same pattern as requests)
-    let cleaned = false;
-    let changeStream: ReturnType<typeof reportCollection.watch> | null = null;
-    let redisSubscribed = false;
-
-    const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
-    let inactivityTimer: ReturnType<typeof setTimeout>;
-
-    const resetInactivityTimer = () => {
-      clearTimeout(inactivityTimer);
-      inactivityTimer = setTimeout(() => {
-        res.write(`event: timeout\ndata: {"message":"Stream timeout after 5 minutes of inactivity"}\n\n`);
-        client.cleanup();
-      }, INACTIVITY_TIMEOUT_MS);
-    };
-
-    const heartbeat = setInterval(() => {
-      if (!cleaned) {
-        res.write(`:\n\n`);
-      }
-    }, 30_000);
-
-    const client: SSEClient = {
-      res,
-      onActivity: resetInactivityTimer,
-      cleanup: () => {
-        if (!cleaned) {
-          cleaned = true;
-          clearTimeout(inactivityTimer);
-          clearInterval(heartbeat);
-          if (changeStream) {
-            changeStream.close().catch(err => console.error("Error closing report change stream:", err));
-          }
-          if (redisSubscribed) {
-            unsubscribeClient(id, client);
-          }
-          res.end();
-        }
-      },
-    };
-
-    resetInactivityTimer();
-
-    if (redisHost) {
-      try {
-        await subscribeClient(id, client);
-        redisSubscribed = true;
-      } catch (err) {
-        console.error(`Redis subscription failed for report ${id}, using Change Streams only:`, err);
-      }
-    }
-
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/reports",
+  tags: ["Reports"],
+  summary: "List reports",
+  query: z.object({ requestId: z.string().optional() }),
+  response: z.array(ReportResponseSchema),
+  handler: async (req, res, next) => {
     try {
-      changeStream = reportCollection.watch(
-        [{ $match: { "documentKey._id": id, operationType: "update" } }],
-        { fullDocument: "updateLookup" }
-      );
+      const requestIdFilter = req.query.requestId as string;
+      const filter: Record<string, unknown> = {};
+      if (requestIdFilter) {
+        filter.requestId = requestIdFilter;
+      }
 
-      changeStream.on("change", (change) => {
-        if (change.operationType === "update" && change.fullDocument) {
-          const doc = change.fullDocument;
-          if (doc.status === "completed" || doc.status === "failed") {
-            res.write(`event: done\ndata: {"status":"${doc.status}"}\n\n`);
-            client.cleanup();
-          }
-        }
-      });
+      const reports = await reportCollection
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .toArray();
 
-      changeStream.on("error", (err) => {
-        console.error(`Report change stream error for ${id}:`, err);
-      });
-    } catch (err) {
-      console.error(`Failed to create change stream for report ${id}:`, err);
+      // Enrich reports with the task from their associated run
+      const requestIds = [...new Set(reports.map(r => r.requestId))];
+      const runs = requestIds.length > 0
+        ? await collection.find({ _id: { $in: requestIds } as any }, { projection: { _id: 1, "scenario.task": 1 } }).toArray()
+        : [];
+      const taskByRequestId = new Map(runs.map(r => [r._id, r.scenario?.task]));
+
+      res.json(reports.map(r => ({ ...r, id: r._id, task: taskByRequestId.get(r.requestId) })));
+    } catch (error) {
+      next(error);
     }
-
-    req.on("close", () => client.cleanup());
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
-// Get reports for a specific run (GET /api/v1/requests/:id/reports)
-app.get("/api/v1/requests/:id/reports", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/bulk-create",
+  tags: ["Reports"],
+  summary: "Bulk create reports",
+  body: BulkCreateReportsInputSchema,
+  response: z.array(ReportResponseSchema),
+  successStatus: 201,
+  errorResponses: {
+    400: { description: "Invalid input" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestIds } = req.body as { requestIds?: string[] };
 
-    // Verify the run exists
-    const run = await collection.findOne({ _id: id });
-    if (!run) {
-      res.status(404).json({ error: "Run not found" });
-      return;
-    }
+      if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+        res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+        return;
+      }
 
-    const reports = await reportCollection
-      .find({ requestId: id })
-      .sort({ createdAt: -1 })
-      .toArray();
+      // Verify all runs exist
+      const runs = await collection.find({ _id: { $in: requestIds } as any }).toArray();
+      const foundIds = new Set(runs.map(r => r._id));
+      const notFound = requestIds.filter(id => !foundIds.has(id));
 
-    res.json(reports.map(r => ({ ...r, id: r._id })));
-  } catch (error) {
-    next(error);
-  }
-});
+      // Create reports only for runs that exist
+      const validIds = requestIds.filter(id => foundIds.has(id));
+      const created: { reportId: string; requestId: string }[] = [];
 
-// POST /api/v1/reports/trigger — evaluate all report templates' triggers for a completed run
-// Called by coding agent workers after a run completes. Creates a report per matching template.
-app.post("/api/v1/reports/trigger", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { requestId } = req.body;
-
-    if (!requestId || typeof requestId !== "string") {
-      res.status(400).json({ error: "requestId is required and must be a string" });
-      return;
-    }
-
-    // Fetch the completed run
-    const run = await collection.findOne({ _id: requestId });
-    if (!run) {
-      res.status(404).json({ error: `Run ${requestId} not found` });
-      return;
-    }
-
-    // Fetch task prompt document (needed for promptFeature trigger evaluation)
-    let taskPrompt: TaskPromptDocument | null = null;
-    if (run.taskPromptId) {
-      taskPrompt = await taskPromptCollection.findOne({ _id: run.taskPromptId });
-    }
-
-    // Load all active report templates
-    const templates = await reportTemplateCollection
-      .find({ deletedAt: { $exists: false } })
-      .toArray();
-
-    // Evaluate each template's trigger against the run
-    const created: Array<{ id: string; requestId: string; templateId: string; status: string }> = [];
-
-    for (const template of templates) {
-      // Cast the run to the shared RequestDocument shape for evaluateTrigger
-      const triggerResult = evaluateTrigger(
-        template.trigger as any,
-        run as any,
-        taskPrompt as any
-      );
-
-      if (triggerResult) {
+      for (const requestId of validIds) {
         const reportId = uuidv4();
         const reportDoc: ReportDocument = {
           _id: reportId,
           requestId,
-          templateId: template.id,
           status: "pending",
           logs: [],
           createdAt: new Date(),
         };
         await reportCollection.insertOne(reportDoc);
+
         const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
         await reportQueueClient.sendMessage(messageContent);
 
-        created.push({ id: reportId, requestId, templateId: template.id, status: "pending" });
-        console.log(`Trigger matched template '${template.id}' — created report ${reportId} for run ${requestId}`);
+        created.push({ reportId, requestId });
       }
-    }
 
-    console.log(`Trigger evaluation for run ${requestId}: ${created.length}/${templates.length} templates matched`);
-    res.status(201).json({ triggered: created.length, reports: created });
-  } catch (error) {
-    next(error);
-  }
+      console.log(`Bulk created ${created.length} reports for ${validIds.length} runs`);
+
+      res.status(201).json({
+        created: created.length,
+        reports: created,
+        notFound,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
-// POST /api/v1/reports/bulk-trigger — evaluate report templates for multiple runs at once
-app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { requestIds } = req.body as { requestIds?: string[] };
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/bulk-status",
+  tags: ["Reports"],
+  summary: "Bulk get report statuses",
+  body: BulkReportStatusInputSchema,
+  response: z.array(ReportResponseSchema),
+  errorResponses: {
+    400: { description: "Invalid input" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestIds } = req.body as { requestIds?: string[] };
 
-    if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
-      res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
-      return;
+      if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+        res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+        return;
+      }
+
+      // Find the latest report for each requestId
+      const reports = await reportCollection
+        .find({ requestId: { $in: requestIds } })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      // Build a map of requestId → latest report status
+      const statusMap: Record<string, { reportId: string; status: string }> = {};
+      for (const report of reports) {
+        if (!statusMap[report.requestId]) {
+          statusMap[report.requestId] = {
+            reportId: report._id,
+            status: report.status,
+          };
+        }
+      }
+
+      res.json(statusMap);
+    } catch (error) {
+      next(error);
     }
+  },
+});
 
-    // Fetch runs
-    const runs = await collection.find({ _id: { $in: requestIds } as any }).toArray();
-    const foundIds = new Set(runs.map(r => r._id));
-    const notFound = requestIds.filter(id => !foundIds.has(id));
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/reports/:id",
+  tags: ["Reports"],
+  summary: "Get report",
+  params: z.object({ id: z.string() }),
+  response: ReportResponseSchema,
+  errorResponses: {
+    404: { description: "Report not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
 
-    // Load all active templates
-    const templates = await reportTemplateCollection
-      .find({ deletedAt: { $exists: false } })
-      .toArray();
+      const report = await reportCollection.findOne({ _id: id });
 
-    const created: Array<{ reportId: string; requestId: string; templateId: string }> = [];
+      if (!report) {
+        res.status(404).json({ error: "Report not found" });
+        return;
+      }
 
-    for (const run of runs) {
-      // Fetch task prompt for trigger evaluation
+      res.json({ ...report, id: report._id });
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/reports/:id/logs",
+  tags: ["Reports"],
+  summary: "Stream report logs (SSE)",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Server-sent event stream of log entries",
+  errorResponses: {
+    404: { description: "Report not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const fromStart = req.query.fromStart === "true";
+
+      const report = await reportCollection.findOne({ _id: id });
+
+      if (!report) {
+        res.status(404).json({ error: "Report not found" });
+        return;
+      }
+
+      // Set SSE headers
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      // Replay existing logs if requested
+      if (fromStart && report.logs && report.logs.length > 0) {
+        for (const log of report.logs) {
+          res.write(`data: ${JSON.stringify(log)}\n\n`);
+        }
+      }
+
+      // If report already completed/failed, send done and close
+      if (report.status === "completed" || report.status === "failed") {
+        res.write(`event: done\ndata: {"status":"${report.status}"}\n\n`);
+        res.end();
+        return;
+      }
+
+      // Live streaming via Redis + Change Streams (same pattern as requests)
+      let cleaned = false;
+      let changeStream: ReturnType<typeof reportCollection.watch> | null = null;
+      let redisSubscribed = false;
+
+      const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+      let inactivityTimer: ReturnType<typeof setTimeout>;
+
+      const resetInactivityTimer = () => {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+          res.write(`event: timeout\ndata: {"message":"Stream timeout after 5 minutes of inactivity"}\n\n`);
+          client.cleanup();
+        }, INACTIVITY_TIMEOUT_MS);
+      };
+
+      const heartbeat = setInterval(() => {
+        if (!cleaned) {
+          res.write(`:\n\n`);
+        }
+      }, 30_000);
+
+      const client: SSEClient = {
+        res,
+        onActivity: resetInactivityTimer,
+        cleanup: () => {
+          if (!cleaned) {
+            cleaned = true;
+            clearTimeout(inactivityTimer);
+            clearInterval(heartbeat);
+            if (changeStream) {
+              changeStream.close().catch(err => console.error("Error closing report change stream:", err));
+            }
+            if (redisSubscribed) {
+              unsubscribeClient(id, client);
+            }
+            res.end();
+          }
+        },
+      };
+
+      resetInactivityTimer();
+
+      if (redisHost) {
+        try {
+          await subscribeClient(id, client);
+          redisSubscribed = true;
+        } catch (err) {
+          console.error(`Redis subscription failed for report ${id}, using Change Streams only:`, err);
+        }
+      }
+
+      try {
+        changeStream = reportCollection.watch(
+          [{ $match: { "documentKey._id": id, operationType: "update" } }],
+          { fullDocument: "updateLookup" }
+        );
+
+        changeStream.on("change", (change) => {
+          if (change.operationType === "update" && change.fullDocument) {
+            const doc = change.fullDocument;
+            if (doc.status === "completed" || doc.status === "failed") {
+              res.write(`event: done\ndata: {"status":"${doc.status}"}\n\n`);
+              client.cleanup();
+            }
+          }
+        });
+
+        changeStream.on("error", (err) => {
+          console.error(`Report change stream error for ${id}:`, err);
+        });
+      } catch (err) {
+        console.error(`Failed to create change stream for report ${id}:`, err);
+      }
+
+      req.on("close", () => client.cleanup());
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/reports",
+  tags: ["Reports"],
+  summary: "Get reports for request",
+  params: z.object({ id: z.string() }),
+  response: z.array(ReportResponseSchema),
+  errorResponses: {
+    404: { description: "Run not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+
+      // Verify the run exists
+      const run = await collection.findOne({ _id: id });
+      if (!run) {
+        res.status(404).json({ error: "Run not found" });
+        return;
+      }
+
+      const reports = await reportCollection
+        .find({ requestId: id })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.json(reports.map(r => ({ ...r, id: r._id })));
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// POST /api/v1/reports/trigger — evaluate all report templates' triggers for a completed run
+// Called by coding agent workers after a run completes. Creates a report per matching template.
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/trigger",
+  tags: ["Reports"],
+  summary: "Trigger reports",
+  body: TriggerReportsInputSchema,
+  response: z.object({ triggered: z.number(), reports: z.array(ReportResponseSchema) }),
+  successStatus: 201,
+  errorResponses: {
+    400: { description: "Invalid input" },
+    404: { description: "Run not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestId } = req.body;
+
+      if (!requestId || typeof requestId !== "string") {
+        res.status(400).json({ error: "requestId is required and must be a string" });
+        return;
+      }
+
+      // Fetch the completed run
+      const run = await collection.findOne({ _id: requestId });
+      if (!run) {
+        res.status(404).json({ error: `Run ${requestId} not found` });
+        return;
+      }
+
+      // Fetch task prompt document (needed for promptFeature trigger evaluation)
       let taskPrompt: TaskPromptDocument | null = null;
       if (run.taskPromptId) {
         taskPrompt = await taskPromptCollection.findOne({ _id: run.taskPromptId });
       }
 
+      // Load all active report templates
+      const templates = await reportTemplateCollection
+        .find({ deletedAt: { $exists: false } })
+        .toArray();
+
+      // Evaluate each template's trigger against the run
+      const created: Array<{ id: string; requestId: string; templateId: string; status: string }> = [];
+
       for (const template of templates) {
+        // Cast the run to the shared RequestDocument shape for evaluateTrigger
         const triggerResult = evaluateTrigger(
           template.trigger as any,
           run as any,
@@ -3227,7 +3255,7 @@ app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, nex
           const reportId = uuidv4();
           const reportDoc: ReportDocument = {
             _id: reportId,
-            requestId: run._id,
+            requestId,
             templateId: template.id,
             status: "pending",
             logs: [],
@@ -3236,21 +3264,96 @@ app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, nex
           await reportCollection.insertOne(reportDoc);
           const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
           await reportQueueClient.sendMessage(messageContent);
-          created.push({ reportId, requestId: run._id, templateId: template.id });
+
+          created.push({ id: reportId, requestId, templateId: template.id, status: "pending" });
+          console.log(`Trigger matched template '${template.id}' — created report ${reportId} for run ${requestId}`);
         }
       }
+
+      console.log(`Trigger evaluation for run ${requestId}: ${created.length}/${templates.length} templates matched`);
+      res.status(201).json({ triggered: created.length, reports: created });
+    } catch (error) {
+      next(error);
     }
+  },
+});
 
-    console.log(`Bulk trigger: created ${created.length} reports for ${runs.length} runs`);
+// POST /api/v1/reports/bulk-trigger — evaluate report templates for multiple runs at once
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/bulk-trigger",
+  tags: ["Reports"],
+  summary: "Bulk trigger reports",
+  body: BulkTriggerReportsInputSchema,
+  response: z.array(z.object({}).passthrough()),
+  successStatus: 201,
+  errorResponses: {
+    400: { description: "Invalid input" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestIds } = req.body as { requestIds?: string[] };
 
-    res.status(201).json({
-      created: created.length,
-      reports: created,
-      notFound,
-    });
-  } catch (error) {
-    next(error);
-  }
+      if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+        res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+        return;
+      }
+
+      // Fetch runs
+      const runs = await collection.find({ _id: { $in: requestIds } as any }).toArray();
+      const foundIds = new Set(runs.map(r => r._id));
+      const notFound = requestIds.filter(id => !foundIds.has(id));
+
+      // Load all active templates
+      const templates = await reportTemplateCollection
+        .find({ deletedAt: { $exists: false } })
+        .toArray();
+
+      const created: Array<{ reportId: string; requestId: string; templateId: string }> = [];
+
+      for (const run of runs) {
+        // Fetch task prompt for trigger evaluation
+        let taskPrompt: TaskPromptDocument | null = null;
+        if (run.taskPromptId) {
+          taskPrompt = await taskPromptCollection.findOne({ _id: run.taskPromptId });
+        }
+
+        for (const template of templates) {
+          const triggerResult = evaluateTrigger(
+            template.trigger as any,
+            run as any,
+            taskPrompt as any
+          );
+
+          if (triggerResult) {
+            const reportId = uuidv4();
+            const reportDoc: ReportDocument = {
+              _id: reportId,
+              requestId: run._id,
+              templateId: template.id,
+              status: "pending",
+              logs: [],
+              createdAt: new Date(),
+            };
+            await reportCollection.insertOne(reportDoc);
+            const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
+            await reportQueueClient.sendMessage(messageContent);
+            created.push({ reportId, requestId: run._id, templateId: template.id });
+          }
+        }
+      }
+
+      console.log(`Bulk trigger: created ${created.length} reports for ${runs.length} runs`);
+
+      res.status(201).json({
+        created: created.length,
+        reports: created,
+        notFound,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // ============================================================

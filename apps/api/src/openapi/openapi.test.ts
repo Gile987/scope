@@ -32,6 +32,11 @@ import {
   CreateInsightInputSchema,
   UpdateInsightInputSchema,
   ReportResponseSchema,
+  CreateReportInputSchema,
+  BulkCreateReportsInputSchema,
+  BulkReportStatusInputSchema,
+  TriggerReportsInputSchema,
+  BulkTriggerReportsInputSchema,
   SkillResponseSchema,
   SkillRevisionResponseSchema,
   SkillSearchResultSchema,
@@ -373,6 +378,62 @@ apiRoute(testApp, registry, {
   method: "get", path: "/api/v1/skill-revisions/:id", tags: ["Skill Revisions"],
   summary: "Get revision by ID", response: SkillRevisionResponseSchema,
   errorResponses: { 404: { description: "Not found" } }, handler: noop,
+});
+
+// Reports
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/reports", tags: ["Reports"],
+  summary: "Create report", body: CreateReportInputSchema,
+  response: ReportResponseSchema, successStatus: 201,
+  errorResponses: { 400: { description: "Invalid input" }, 404: { description: "Run or template not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/reports", tags: ["Reports"],
+  summary: "List reports", query: z.object({ requestId: z.string().optional() }),
+  response: z.array(ReportResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/reports/bulk-create", tags: ["Reports"],
+  summary: "Bulk create reports", body: BulkCreateReportsInputSchema,
+  response: z.array(ReportResponseSchema), successStatus: 201,
+  errorResponses: { 400: { description: "Invalid input" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/reports/bulk-status", tags: ["Reports"],
+  summary: "Bulk get report statuses", body: BulkReportStatusInputSchema,
+  response: z.array(ReportResponseSchema),
+  errorResponses: { 400: { description: "Invalid input" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/reports/:id", tags: ["Reports"],
+  summary: "Get report", params: z.object({ id: z.string() }),
+  response: ReportResponseSchema,
+  errorResponses: { 404: { description: "Report not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/reports/:id/logs", tags: ["Reports"],
+  summary: "Stream report logs (SSE)", params: z.object({ id: z.string() }),
+  response: z.any(), rawResponse: true, responseDescription: "Server-sent event stream of log entries",
+  errorResponses: { 404: { description: "Report not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/requests/:id/reports", tags: ["Reports"],
+  summary: "Get reports for request", params: z.object({ id: z.string() }),
+  response: z.array(ReportResponseSchema),
+  errorResponses: { 404: { description: "Run not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/reports/trigger", tags: ["Reports"],
+  summary: "Trigger reports", body: TriggerReportsInputSchema,
+  response: z.object({ triggered: z.number(), reports: z.array(ReportResponseSchema) }),
+  successStatus: 201,
+  errorResponses: { 400: { description: "Invalid input" }, 404: { description: "Run not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/reports/bulk-trigger", tags: ["Reports"],
+  summary: "Bulk trigger reports", body: BulkTriggerReportsInputSchema,
+  response: z.array(z.object({}).passthrough()), successStatus: 201,
+  errorResponses: { 400: { description: "Invalid input" } }, handler: noop,
 });
 
 describe("OpenAPI document generation", () => {
