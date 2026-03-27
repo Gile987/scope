@@ -192,6 +192,32 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     try {
       // Process the task using the worker-specific processor
       workerResult = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
+    } catch (error) {
+      // Upload HAR from the error if the worker attached it before re-throwing
+      const errorHarFilePath: string | undefined = (error as any)?.harFilePath;
+      if (errorHarFilePath) {
+        try {
+          await sanitizeHarFile(errorHarFilePath, errorHarFilePath);
+          const blobStorage = new BlobStorage({
+            storageAccountName: this.config.storageAccountName,
+            storageConnectionString: this.config.storageConnectionString,
+          });
+          const harUrl = await blobStorage.uploadFile(
+            errorHarFilePath,
+            `${requestId}/devproxy.har`,
+            "application/json"
+          );
+          await log("info", "HAR file uploaded from failed request", { harUrl });
+          await withRetry(() => this.collection.updateOne(
+            { _id: requestId },
+            { $set: { harUrl, updatedAt: new Date() } }
+          ));
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await log("warn", `Failed to upload HAR file from failed request: ${msg}`);
+        }
+      }
+      throw error;
     } finally {
       // Lifecycle: always call teardown() if setup() exists, even on error
       if (this.processor.teardown) {

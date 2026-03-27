@@ -248,6 +248,25 @@ export async function runMultiTurnLoop(
       const errorMsg = error instanceof Error ? error.message : String(error);
       await iterLog("error", `Coding agent failed: ${errorMsg}`, { error: errorMsg });
 
+      // Extract HAR file path from the error if the worker attached it
+      const errorHarFilePath: string | undefined = (error as any)?.harFilePath;
+      let errorHarUrl: string | undefined;
+      if (errorHarFilePath) {
+        try {
+          await sanitizeHarFile(errorHarFilePath, errorHarFilePath);
+          const harBlobName = `${requestId}/iteration-${iteration}/devproxy.har`;
+          errorHarUrl = await blobStorage.uploadFile(
+            errorHarFilePath,
+            harBlobName,
+            "application/json"
+          );
+          await iterLog("info", "HAR file uploaded from failed iteration", { harUrl: errorHarUrl });
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await iterLog("warn", `Failed to upload HAR file from failed iteration: ${msg}`);
+        }
+      }
+
       // Extract video paths from the error if the worker attached them
       const errorVideoPaths: string[] = (error as any)?.videoFilePaths ?? [];
       let errorVideoUrls: string[] = [];
@@ -269,7 +288,7 @@ export async function runMultiTurnLoop(
         }
       }
 
-      // Persist a partial turn so video URLs are not lost
+      // Persist a partial turn so HAR/video URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
         codingAgentResponse: `Coding agent failed: ${errorMsg}`,
@@ -279,6 +298,7 @@ export async function runMultiTurnLoop(
         timestamp: new Date(),
         startedAt: iterationStartedAt,
         durationMs: Date.now() - iterationStartedAt.getTime(),
+        ...(errorHarUrl && { harUrl: errorHarUrl }),
         ...(errorVideoUrls.length > 0 && { videoUrls: errorVideoUrls }),
       };
       turns.push(partialTurn);
