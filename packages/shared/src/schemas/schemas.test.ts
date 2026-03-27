@@ -830,10 +830,10 @@ describe("agent schemas", () => {
       expect(result._id).toBe("agent1");
     });
 
-    it("rejects missing supportedModels", () => {
-      expect(() =>
-        CreateAgentInputSchema.parse({ _id: "a", name: "n" }),
-      ).toThrow();
+    it("accepts missing supportedModels (optional — registration jobs omit it)", () => {
+      const result = CreateAgentInputSchema.parse({ _id: "a", name: "n" });
+      expect(result._id).toBe("a");
+      expect(result.supportedModels).toBeUndefined();
     });
   });
 
