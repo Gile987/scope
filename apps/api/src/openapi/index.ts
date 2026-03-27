@@ -8,7 +8,7 @@ import "./routes/prompt-features.js";
 import "./routes/task-prompts.js";
 import "./routes/reports.js";
 // report-templates: registered via apiRoute() in index.ts
-import "./routes/insights.js";
+// insights: registered via apiRoute() in index.ts
 // agents: registered via apiRoute() in index.ts
 // models: registered via apiRoute() in index.ts
 // mcp-servers: registered via apiRoute() in index.ts

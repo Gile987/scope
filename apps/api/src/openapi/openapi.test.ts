@@ -28,6 +28,10 @@ import {
   CreateReportTemplateInputSchema,
   UpdateReportTemplateInputSchema,
   ReportTemplateResponseSchema,
+  InsightResponseSchema,
+  CreateInsightInputSchema,
+  UpdateInsightInputSchema,
+  ReportResponseSchema,
 } from "shared";
 
 // Register apiRoute()-based routes so they appear in the OpenAPI doc.
@@ -232,6 +236,84 @@ apiRoute(testApp, registry, {
   method: "delete", path: "/api/v1/report-templates/:id", tags: ["Report Templates"],
   summary: "Delete report template", params: z.object({ id: z.string() }),
   response: z.object({ message: z.string() }), successStatus: 204, handler: noop,
+});
+
+// Insights
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/insights", tags: ["Insights"],
+  summary: "List insights", query: z.object({ q: z.string().optional(), blocked: z.string().optional() }),
+  response: z.array(InsightResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/insights/search", tags: ["Insights"],
+  summary: "Search insights", query: z.object({ q: z.string(), blocked: z.string().optional() }),
+  response: z.array(InsightResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/insights/:id", tags: ["Insights"],
+  summary: "Get insight", params: z.object({ id: z.string() }),
+  response: InsightResponseSchema, errorResponses: { 404: { description: "Insight not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/insights", tags: ["Insights"],
+  summary: "Create insight", body: CreateInsightInputSchema,
+  response: InsightResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "put", path: "/api/v1/insights/:id", tags: ["Insights"],
+  summary: "Update insight", params: z.object({ id: z.string() }),
+  body: UpdateInsightInputSchema, response: InsightResponseSchema,
+  errorResponses: { 404: { description: "Insight not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "delete", path: "/api/v1/insights/:id", tags: ["Insights"],
+  summary: "Delete insight", params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }), successStatus: 204,
+  errorResponses: { 404: { description: "Insight not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/insights/:id/upvote", tags: ["Insights"],
+  summary: "Upvote insight", params: z.object({ id: z.string() }),
+  response: InsightResponseSchema, successStatus: 200,
+  errorResponses: { 404: { description: "Insight not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/insights/:id/downvote", tags: ["Insights"],
+  summary: "Downvote insight", params: z.object({ id: z.string() }),
+  response: InsightResponseSchema, successStatus: 200,
+  errorResponses: { 404: { description: "Insight not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/insights/:id/block", tags: ["Insights"],
+  summary: "Block insight", params: z.object({ id: z.string() }),
+  response: InsightResponseSchema, successStatus: 200,
+  errorResponses: { 404: { description: "Insight not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/insights/:id/unblock", tags: ["Insights"],
+  summary: "Unblock insight", params: z.object({ id: z.string() }),
+  response: InsightResponseSchema, successStatus: 200,
+  errorResponses: { 404: { description: "Insight not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/insights/:id/reports", tags: ["Insights"],
+  summary: "Get reports referencing insight", params: z.object({ id: z.string() }),
+  response: z.array(ReportResponseSchema),
+  errorResponses: { 404: { description: "Insight not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/reports/:id/insights", tags: ["Reports"],
+  summary: "Get insights for report", params: z.object({ id: z.string() }),
+  response: z.array(InsightResponseSchema.extend({ referencedAt: z.coerce.date().optional(), isNew: z.boolean().optional() })),
+  errorResponses: { 404: { description: "Report not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/reports/:id/insights", tags: ["Reports"],
+  summary: "Link insight to report", params: z.object({ id: z.string() }),
+  body: z.object({ insightId: z.string(), isNew: z.boolean().optional() }),
+  response: z.object({ insightId: z.string(), referencedAt: z.coerce.date(), isNew: z.boolean() }),
+  errorResponses: { 404: { description: "Report or insight not found" }, 409: { description: "Insight already referenced by this report" } },
+  handler: noop,
 });
 
 describe("OpenAPI document generation", () => {
