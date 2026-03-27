@@ -358,47 +358,89 @@ function getOrCreateQueueClient(queueName: string): QueueClient {
 // --- OpenAPI documentation (lazy — Swagger UI mounted in main() after all routes register) ---
 
 // Health check endpoint (liveness probe — always returns 200)
-app.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "healthy", version: GIT_COMMIT });
+apiRoute(app, registry, {
+  method: "get",
+  path: "/health",
+  tags: ["Health"],
+  summary: "Liveness probe",
+  response: z.object({ status: z.string(), version: z.string() }),
+  handler: async (_req, res) => {
+    res.json({ status: "healthy", version: GIT_COMMIT });
+  },
 });
 
 // Readiness probe — returns 200 only when all required DB migrations have
 // been applied. Kubernetes will withhold traffic until this returns 200.
-app.get("/ready", async (_req: Request, res: Response) => {
-  try {
-    const result = await checkMigrations(db);
-    if (result.ready) {
-      res.json({ status: "ready", migrations: result });
-    } else {
-      res.status(503).json({ status: "not-ready", migrations: result });
+apiRoute(app, registry, {
+  method: "get",
+  path: "/ready",
+  tags: ["Health"],
+  summary: "Readiness probe",
+  response: z.object({ status: z.string(), migrations: z.any() }),
+  errorResponses: {
+    503: { description: "Service is not ready" },
+  },
+  handler: async (_req, res) => {
+    try {
+      const result = await checkMigrations(db);
+      if (result.ready) {
+        res.json({ status: "ready", migrations: result });
+      } else {
+        res.status(503).json({ status: "not-ready", migrations: result });
+      }
+    } catch (err: any) {
+      res.status(503).json({
+        status: "not-ready",
+        error: err.message ?? String(err),
+      });
     }
-  } catch (err: any) {
-    res.status(503).json({
-      status: "not-ready",
-      error: err.message ?? String(err),
-    });
-  }
+  },
 });
 
 // About endpoint
-app.get("/about", (_req: Request, res: Response) => {
-  res.json({
-    name: "Multi-Worker API (MongoDB)",
-    version: GIT_COMMIT,
-    buildTime: BUILD_TIME,
-    environment: SCOPE_ENVIRONMENT,
-    description: "API that routes requests to multiple workers via separate queues",
-    workers: VALID_WORKERS,
-  });
+apiRoute(app, registry, {
+  method: "get",
+  path: "/about",
+  tags: ["System"],
+  summary: "API metadata",
+  response: z.object({
+    name: z.string(),
+    version: z.string(),
+    buildTime: z.string(),
+    environment: z.string(),
+    description: z.string(),
+    workers: z.array(z.string()),
+  }),
+  handler: async (_req, res) => {
+    res.json({
+      name: "Multi-Worker API (MongoDB)",
+      version: GIT_COMMIT,
+      buildTime: BUILD_TIME,
+      environment: SCOPE_ENVIRONMENT,
+      description: "API that routes requests to multiple workers via separate queues",
+      workers: VALID_WORKERS,
+    });
+  },
 });
 
 // Version endpoint
-app.get("/api/v1/version", (_req: Request, res: Response) => {
-  res.json({
-    commit: GIT_COMMIT,
-    buildTime: BUILD_TIME,
-    environment: SCOPE_ENVIRONMENT,
-  });
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/version",
+  tags: ["System"],
+  summary: "Version info",
+  response: z.object({
+    commit: z.string(),
+    buildTime: z.string(),
+    environment: z.string(),
+  }),
+  handler: async (_req, res) => {
+    res.json({
+      commit: GIT_COMMIT,
+      buildTime: BUILD_TIME,
+      environment: SCOPE_ENVIRONMENT,
+    });
+  },
 });
 
 // Submit a request

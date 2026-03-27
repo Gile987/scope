@@ -27,6 +27,25 @@ import {
 const testApp = express();
 const noop = () => {};
 
+// Health / System
+apiRoute(testApp, registry, {
+  method: "get", path: "/health", tags: ["Health"],
+  summary: "Liveness probe", response: z.object({ status: z.string(), version: z.string() }), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/ready", tags: ["Health"],
+  summary: "Readiness probe", response: z.object({ status: z.string(), migrations: z.any() }),
+  errorResponses: { 503: { description: "Service is not ready" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/about", tags: ["System"],
+  summary: "API metadata", response: z.object({ name: z.string(), version: z.string(), buildTime: z.string(), environment: z.string(), description: z.string(), workers: z.array(z.string()) }), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/version", tags: ["System"],
+  summary: "Version info", response: z.object({ commit: z.string(), buildTime: z.string(), environment: z.string() }), handler: noop,
+});
+
 // Feature flags
 apiRoute(testApp, registry, {
   method: "get", path: "/api/v1/feature-flags", tags: ["Feature Flags"],

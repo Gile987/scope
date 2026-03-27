@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 // Import all route registrations (side effects)
-import "./routes/health.js";
 import "./routes/requests.js";
 // criteria: registered via apiRoute() in index.ts
 import "./routes/prompt-features.js";
