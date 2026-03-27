@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient, parseHarFile, extractToolCalls } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -41,26 +41,26 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       skills: skillConfigs.map((s) => s.name),
     });
     
-    try {
-      // DevProxy integration — start recording if enabled
-      let devProxy: DevProxyClient | null = null;
-      if (DevProxyClient.isEnabled()) {
-        devProxy = new DevProxyClient();
-        try {
-          await log("info", "DevProxy enabled — waiting for sidecar to be ready...");
-          await devProxy.waitForReady();
-          const certPath = process.env.NODE_EXTRA_CA_CERTS || "/tmp/dev-proxy-ca.crt";
-          await devProxy.downloadCertificate(certPath);
-          await log("info", "DevProxy CA cert installed", { certPath });
-          await devProxy.startRecording();
-          await log("info", "DevProxy recording started");
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          await log("warn", `DevProxy setup failed, continuing without HAR capture: ${msg}`);
-          devProxy = null;
-        }
+    // DevProxy integration — start recording if enabled
+    let devProxy: DevProxyClient | null = null;
+    if (DevProxyClient.isEnabled()) {
+      devProxy = new DevProxyClient();
+      try {
+        await log("info", "DevProxy enabled — waiting for sidecar to be ready...");
+        await devProxy.waitForReady();
+        const certPath = process.env.NODE_EXTRA_CA_CERTS || "/tmp/dev-proxy-ca.crt";
+        await devProxy.downloadCertificate(certPath);
+        await log("info", "DevProxy CA cert installed", { certPath });
+        await devProxy.startRecording();
+        await log("info", "DevProxy recording started");
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        await log("warn", `DevProxy setup failed, continuing without HAR capture: ${msg}`);
+        devProxy = null;
       }
+    }
 
+    try {
       // Acquire token dynamically (env var fallback or Token Manager)
       // Prefer OAuth tokens over API keys
       const tokenResponse = await tokenClient.acquireTokenFull("claude-code-cli", "anthropic-oauth");
@@ -108,33 +108,17 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       });
 
       const response = result.response || `[${this.workerName}] No response from Claude Code`;
-
-      // DevProxy integration — stop recording and extract tool calls
+      const { harFilePath, tokenUsage } = devProxy
+        ? await devProxy.stopAndCollectHar(log)
+        : { harFilePath: null, tokenUsage: undefined };
+      return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }) };
+    } catch (error) {
       if (devProxy) {
-        try {
-          await devProxy.stopRecording();
-          await log("info", "DevProxy recording stopped");
-
-          const harFilePath = await devProxy.getLatestHarFile();
-          if (harFilePath) {
-            const har = await parseHarFile(harFilePath);
-            const toolCalls = extractToolCalls(har);
-            await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
-              toolCallCount: toolCalls.length,
-              toolNames: toolCalls.map((tc) => tc.name),
-            });
-            return { response, harFilePath };
-          } else {
-            await log("warn", "No HAR file found after DevProxy recording");
-          }
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          await log("warn", `DevProxy post-processing failed: ${msg}`);
+        const { harFilePath } = await devProxy.stopAndCollectHar(log);
+        if (harFilePath) {
+          (error as any).harFilePath = harFilePath;
         }
       }
-      
-      return { response };
-    } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await log("error", `Claude Code processing failed: ${errorMessage}`);
       throw error;
