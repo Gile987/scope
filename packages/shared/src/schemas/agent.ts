@@ -25,7 +25,7 @@ export const CreateAgentInputSchema = z
     _id: z.string(),
     name: z.string(),
     description: z.string().optional(),
-    supportedModels: z.array(z.string()),
+    supportedModels: z.array(z.string()).optional(),
     defaultModel: z.string().optional(),
   })
   .openapi("CreateAgentInput");
