@@ -32,6 +32,10 @@ import {
   CreateInsightInputSchema,
   UpdateInsightInputSchema,
   ReportResponseSchema,
+  SkillResponseSchema,
+  SkillRevisionResponseSchema,
+  SkillSearchResultSchema,
+  CreateSkillInputSchema,
 } from "shared";
 
 // Register apiRoute()-based routes so they appear in the OpenAPI doc.
@@ -314,6 +318,61 @@ apiRoute(testApp, registry, {
   response: z.object({ insightId: z.string(), referencedAt: z.coerce.date(), isNew: z.boolean() }),
   errorResponses: { 404: { description: "Report or insight not found" }, 409: { description: "Insight already referenced by this report" } },
   handler: noop,
+});
+
+// Skills
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/skills", tags: ["Skills"],
+  summary: "List all skills", response: z.array(SkillResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/skills/search", tags: ["Skills"],
+  summary: "Search skills", query: z.object({ q: z.string(), limit: z.string().optional() }),
+  response: z.array(SkillSearchResultSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/skills/search/external", tags: ["Skills"],
+  summary: "Search external skills", query: z.object({ q: z.string(), limit: z.string().optional() }),
+  response: z.array(SkillSearchResultSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/skills/:id(*)/revisions", tags: ["Skills"],
+  summary: "List skill revisions", response: z.array(SkillRevisionResponseSchema),
+  errorResponses: { 404: { description: "Skill not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/skills/:id(*)", tags: ["Skills"],
+  summary: "Get skill", response: SkillResponseSchema,
+  errorResponses: { 404: { description: "Skill not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/skills", tags: ["Skills"],
+  summary: "Create skill", body: CreateSkillInputSchema, response: SkillResponseSchema, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "delete", path: "/api/v1/skills/:id(*)", tags: ["Skills"],
+  summary: "Delete skill", response: z.any(), rawResponse: true, successStatus: 204, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/skills/:id(*)/resolve", tags: ["Skills"],
+  summary: "Resolve skill", response: SkillRevisionResponseSchema,
+  errorResponses: { 404: { description: "Skill not found" } }, handler: noop,
+});
+
+// Skill Revisions
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/skill-revisions/by-ref/:ref(*)/archive", tags: ["Skill Revisions"],
+  summary: "Download archive", response: z.any(), rawResponse: true, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/skill-revisions/by-ref/:ref(*)", tags: ["Skill Revisions"],
+  summary: "Get revision by ref", response: SkillRevisionResponseSchema,
+  errorResponses: { 404: { description: "Not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/skill-revisions/:id", tags: ["Skill Revisions"],
+  summary: "Get revision by ID", response: SkillRevisionResponseSchema,
+  errorResponses: { 404: { description: "Not found" } }, handler: noop,
 });
 
 describe("OpenAPI document generation", () => {

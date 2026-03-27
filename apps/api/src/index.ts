@@ -70,6 +70,10 @@ import {
   CreateTaskPromptInputSchema,
   TaskPromptResponseSchema,
   PatchTaskPromptFeatureInputSchema,
+  SkillResponseSchema,
+  SkillRevisionResponseSchema,
+  SkillSearchResultSchema,
+  CreateSkillInputSchema,
 } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -4397,262 +4401,332 @@ apiRoute(app, registry, {
 // =====================================================================
 
 // List all skills (with optional ?q= text search)
-app.get("/api/v1/skills", async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const skills = await skillCollection
-      .find({ deletedAt: { $exists: false } })
-      .toArray();
-    skills.sort((a, b) => a._id.localeCompare(b._id));
-    res.json(skills.map((s) => ({ ...s, id: s._id })));
-  } catch (error) {
-    next(error);
-  }
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skills",
+  tags: ["Skills"],
+  summary: "List all skills",
+  response: z.array(SkillResponseSchema),
+  handler: async (_req, res, next) => {
+    try {
+      const skills = await skillCollection
+        .find({ deletedAt: { $exists: false } })
+        .toArray();
+      skills.sort((a, b) => a._id.localeCompare(b._id));
+      res.json(skills.map((s) => ({ ...s, id: s._id })));
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Unified skill search — merges internal DB + skills.sh results
 // MUST be defined before /:id(*) to avoid being caught by the wildcard
-app.get("/api/v1/skills/search", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { q, limit: limitStr } = req.query;
-
-    if (!q || typeof q !== "string" || !q.trim()) {
-      res.status(400).json({ error: "Query parameter 'q' is required" });
-      return;
-    }
-
-    const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
-    const query = q.trim();
-
-    // Search internal DB (case-insensitive regex)
-    const regex = { $regex: query, $options: "i" };
-    const internalSkills = await skillCollection
-      .find({
-        deletedAt: { $exists: false },
-        $or: [
-          { name: regex },
-          { skillName: regex },
-          { description: regex },
-        ],
-      })
-      .limit(limit)
-      .toArray();
-
-    const internalResults: SkillSearchResult[] = internalSkills.map((s) => ({
-      id: s._id,
-      name: s.name,
-      source: s.source,
-      description: s.description,
-      internal: true,
-    }));
-
-    // Also track internal slugs to deduplicate
-    const internalSlugs = new Set(internalSkills.map((s) => s._id));
-
-    // Search skills.sh (external registry)
-    let externalResults: SkillSearchResult[] = [];
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skills/search",
+  tags: ["Skills"],
+  summary: "Search skills (internal + external)",
+  query: z.object({ q: z.string(), limit: z.string().optional() }),
+  response: z.array(SkillSearchResultSchema),
+  errorResponses: {
+    400: { description: "Missing query parameter" },
+  },
+  handler: async (req, res, next) => {
     try {
-      const skillsShUrl = `https://skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`;
-      const externalRes = await fetch(skillsShUrl, {
-        headers: { "User-Agent": "scope-mt-api" },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (externalRes.ok) {
-        const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string }> };
-        if (data.skills && Array.isArray(data.skills)) {
-          externalResults = data.skills
-            .filter((s) => !internalSlugs.has(s.id))
-            .map((s) => ({
-              id: s.id,
-              name: s.name,
-              source: s.source ?? s.id.split("/").slice(0, 2).join("/"),
-              internal: false,
-              installs: s.installs,
-            }));
-        }
-      }
-    } catch {
-      // skills.sh is optional — don't fail the request if it's down
-      console.warn("skills.sh search failed, returning only internal results");
-    }
+      const { q, limit: limitStr } = req.query;
 
-    // Merge: internal first, then external
-    const results = [...internalResults, ...externalResults].slice(0, limit);
-    res.json(results);
-  } catch (error) {
-    next(error);
-  }
+      if (!q || typeof q !== "string" || !q.trim()) {
+        res.status(400).json({ error: "Query parameter 'q' is required" });
+        return;
+      }
+
+      const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
+      const query = q.trim();
+
+      // Search internal DB (case-insensitive regex)
+      const regex = { $regex: query, $options: "i" };
+      const internalSkills = await skillCollection
+        .find({
+          deletedAt: { $exists: false },
+          $or: [
+            { name: regex },
+            { skillName: regex },
+            { description: regex },
+          ],
+        })
+        .limit(limit)
+        .toArray();
+
+      const internalResults: SkillSearchResult[] = internalSkills.map((s) => ({
+        id: s._id,
+        name: s.name,
+        source: s.source,
+        description: s.description,
+        internal: true,
+      }));
+
+      // Also track internal slugs to deduplicate
+      const internalSlugs = new Set(internalSkills.map((s) => s._id));
+
+      // Search skills.sh (external registry)
+      let externalResults: SkillSearchResult[] = [];
+      try {
+        const skillsShUrl = `https://skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+        const externalRes = await fetch(skillsShUrl, {
+          headers: { "User-Agent": "scope-mt-api" },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (externalRes.ok) {
+          const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string }> };
+          if (data.skills && Array.isArray(data.skills)) {
+            externalResults = data.skills
+              .filter((s) => !internalSlugs.has(s.id))
+              .map((s) => ({
+                id: s.id,
+                name: s.name,
+                source: s.source ?? s.id.split("/").slice(0, 2).join("/"),
+                internal: false,
+                installs: s.installs,
+              }));
+          }
+        }
+      } catch {
+        // skills.sh is optional — don't fail the request if it's down
+        console.warn("skills.sh search failed, returning only internal results");
+      }
+
+      // Merge: internal first, then external
+      const results = [...internalResults, ...externalResults].slice(0, limit);
+      res.json(results);
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Search external skills registry only (skills.sh)
-app.get("/api/v1/skills/search/external", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { q, limit: limitStr } = req.query;
-
-    if (!q || typeof q !== "string" || !q.trim()) {
-      res.status(400).json({ error: "Query parameter 'q' is required" });
-      return;
-    }
-
-    const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
-    const query = q.trim();
-
-    let externalResults: SkillSearchResult[] = [];
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skills/search/external",
+  tags: ["Skills"],
+  summary: "Search external skills registry",
+  query: z.object({ q: z.string(), limit: z.string().optional() }),
+  response: z.array(SkillSearchResultSchema),
+  errorResponses: {
+    400: { description: "Missing query parameter" },
+  },
+  handler: async (req, res, next) => {
     try {
-      const skillsShUrl = `https://skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`;
-      const externalRes = await fetch(skillsShUrl, {
-        headers: { "User-Agent": "scope-mt-api" },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (externalRes.ok) {
-        const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string; description?: string }> };
-        if (data.skills && Array.isArray(data.skills)) {
-          // Deduplicate against internal skills
-          const internalSlugs = new Set(
-            (await skillCollection.find({ deletedAt: { $exists: false } }, { projection: { _id: 1 } }).toArray()).map((s) => s._id)
-          );
-          externalResults = data.skills
-            .filter((s) => !internalSlugs.has(s.id))
-            .map((s) => ({
-              id: s.id,
-              name: s.name,
-              source: s.source ?? s.id.split("/").slice(0, 2).join("/"),
-              description: s.description,
-              internal: false,
-              installs: s.installs,
-            }));
-        }
-      }
-    } catch {
-      console.warn("skills.sh search failed");
-    }
+      const { q, limit: limitStr } = req.query;
 
-    res.json(externalResults.slice(0, limit));
-  } catch (error) {
-    next(error);
-  }
+      if (!q || typeof q !== "string" || !q.trim()) {
+        res.status(400).json({ error: "Query parameter 'q' is required" });
+        return;
+      }
+
+      const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
+      const query = q.trim();
+
+      let externalResults: SkillSearchResult[] = [];
+      try {
+        const skillsShUrl = `https://skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+        const externalRes = await fetch(skillsShUrl, {
+          headers: { "User-Agent": "scope-mt-api" },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (externalRes.ok) {
+          const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string; description?: string }> };
+          if (data.skills && Array.isArray(data.skills)) {
+            // Deduplicate against internal skills
+            const internalSlugs = new Set(
+              (await skillCollection.find({ deletedAt: { $exists: false } }, { projection: { _id: 1 } }).toArray()).map((s) => s._id)
+            );
+            externalResults = data.skills
+              .filter((s) => !internalSlugs.has(s.id))
+              .map((s) => ({
+                id: s.id,
+                name: s.name,
+                source: s.source ?? s.id.split("/").slice(0, 2).join("/"),
+                description: s.description,
+                internal: false,
+                installs: s.installs,
+              }));
+          }
+        }
+      } catch {
+        console.warn("skills.sh search failed");
+      }
+
+      res.json(externalResults.slice(0, limit));
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // List skill revisions for a given skill slug (source/skillName)
 // NOTE: Must be before the generic GET /:id(*) to avoid the greedy wildcard matching "slug/revisions" as the id.
-app.get("/api/v1/skills/:id(*)/revisions", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = req.params.id ?? req.params[0];
-    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!skill) {
-      res.status(404).json({ error: "Skill not found" });
-      return;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skills/:id(*)/revisions",
+  tags: ["Skills"],
+  summary: "List skill revisions",
+  query: z.object({ limit: z.string().optional() }),
+  response: z.array(SkillRevisionResponseSchema),
+  errorResponses: {
+    404: { description: "Skill not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const id = req.params.id ?? req.params[0];
+      const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!skill) {
+        res.status(404).json({ error: "Skill not found" });
+        return;
+      }
+
+      const limitStr = req.query.limit as string | undefined;
+      const limit = Math.min(Math.max(parseInt(limitStr ?? "20", 10), 1), 100);
+
+      const revisions = await skillRevisionStore.listBySkill(skill.source, skill.skillName, { limit });
+      res.json(revisions);
+    } catch (error) {
+      next(error);
     }
-
-    const limitStr = req.query.limit as string | undefined;
-    const limit = Math.min(Math.max(parseInt(limitStr ?? "20", 10), 1), 100);
-
-    const revisions = await skillRevisionStore.listBySkill(skill.source, skill.skillName, { limit });
-    res.json(revisions);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Get skill by slug (must be after /search and /revisions to avoid wildcard matching)
-app.get("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = req.params.id ?? req.params[0];
-    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!skill) {
-      res.status(404).json({ error: "Skill not found" });
-      return;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skills/:id(*)",
+  tags: ["Skills"],
+  summary: "Get skill by slug",
+  response: SkillResponseSchema,
+  errorResponses: {
+    404: { description: "Skill not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const id = req.params.id ?? req.params[0];
+      const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!skill) {
+        res.status(404).json({ error: "Skill not found" });
+        return;
+      }
+      res.json({ ...skill, id: skill._id });
+    } catch (error) {
+      next(error);
     }
-    res.json({ ...skill, id: skill._id });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Create / import a skill
-app.post("/api/v1/skills", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { source, skillName, name, description, origin } = req.body;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/skills",
+  tags: ["Skills"],
+  summary: "Create or import a skill",
+  body: CreateSkillInputSchema,
+  response: SkillResponseSchema,
+  handler: async (req, res, next) => {
+    try {
+      const { source, skillName, name, description, origin } = req.body;
 
-    if (!source || typeof source !== "string") {
-      res.status(400).json({ error: "source is required and must be a string (GitHub repo, e.g. 'vercel-labs/agent-skills')" });
-      return;
-    }
-    if (!skillName || typeof skillName !== "string") {
-      res.status(400).json({ error: "skillName is required and must be a string" });
-      return;
-    }
-    if (!name || typeof name !== "string") {
-      res.status(400).json({ error: "name is required and must be a string" });
-      return;
-    }
-    if (origin !== undefined && origin !== "skills-sh" && origin !== "manual") {
-      res.status(400).json({ error: "origin must be 'skills-sh' or 'manual'" });
-      return;
-    }
+      if (!source || typeof source !== "string") {
+        res.status(400).json({ error: "source is required and must be a string (GitHub repo, e.g. 'vercel-labs/agent-skills')" });
+        return;
+      }
+      if (!skillName || typeof skillName !== "string") {
+        res.status(400).json({ error: "skillName is required and must be a string" });
+        return;
+      }
+      if (!name || typeof name !== "string") {
+        res.status(400).json({ error: "name is required and must be a string" });
+        return;
+      }
+      if (origin !== undefined && origin !== "skills-sh" && origin !== "manual") {
+        res.status(400).json({ error: "origin must be 'skills-sh' or 'manual'" });
+        return;
+      }
 
-    const _id = `${source}/${skillName}`;
-    const now = new Date();
-    const existing = await skillCollection.findOne({ _id });
+      const _id = `${source}/${skillName}`;
+      const now = new Date();
+      const existing = await skillCollection.findOne({ _id });
 
-    if (existing) {
-      // Upsert: un-delete if soft-deleted, update fields
-      await skillCollection.updateOne(
-        { _id },
-        {
-          $set: {
-            name,
-            source,
-            skillName,
-            ...(description !== undefined ? { description } : {}),
-            ...(origin ? { origin } : {}),
-            updatedAt: now,
-          },
-          $unset: { deletedAt: "" },
-        }
-      );
-      const updated = await skillCollection.findOne({ _id });
-      res.json({ ...updated, id: updated!._id });
-    } else {
-      const skillDoc: SkillDocument = {
-        _id,
-        source,
-        skillName,
-        name,
-        ...(description ? { description } : {}),
-        origin: origin || "manual",
-        createdAt: now,
-      };
-      await skillCollection.insertOne(skillDoc as any);
-      res.status(201).json({ ...skillDoc, id: skillDoc._id });
+      if (existing) {
+        // Upsert: un-delete if soft-deleted, update fields
+        await skillCollection.updateOne(
+          { _id },
+          {
+            $set: {
+              name,
+              source,
+              skillName,
+              ...(description !== undefined ? { description } : {}),
+              ...(origin ? { origin } : {}),
+              updatedAt: now,
+            },
+            $unset: { deletedAt: "" },
+          }
+        );
+        const updated = await skillCollection.findOne({ _id });
+        res.json({ ...updated, id: updated!._id });
+      } else {
+        const skillDoc: SkillDocument = {
+          _id,
+          source,
+          skillName,
+          name,
+          ...(description ? { description } : {}),
+          origin: origin || "manual",
+          createdAt: now,
+        };
+        await skillCollection.insertOne(skillDoc as any);
+        res.status(201).json({ ...skillDoc, id: skillDoc._id });
+      }
+    } catch (error) {
+      next(error);
     }
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
-// Delete skill (soft-delete)
-app.delete("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = req.params.id ?? req.params[0];
+// Soft-delete a skill
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/skills/:id(*)",
+  tags: ["Skills"],
+  summary: "Soft-delete a skill",
+  response: z.any(),
+  rawResponse: true,
+  successStatus: 204,
+  errorResponses: {
+    404: { description: "Skill not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const id = req.params.id ?? req.params[0];
 
-    const existing = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "Skill not found" });
-      return;
+      const existing = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: "Skill not found" });
+        return;
+      }
+
+      await skillCollection.updateOne(
+        { _id: id },
+        { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+      );
+
+      // Also delete all associated skill revisions
+      await skillRevisionStore.deleteBySkill(existing.source, existing.skillName);
+
+      res.status(204).send();
+    } catch (error) {
+      next(error);
     }
-
-    await skillCollection.updateOne(
-      { _id: id },
-      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
-    );
-
-    // Also delete all associated skill revisions
-    await skillRevisionStore.deleteBySkill(existing.source, existing.skillName);
-
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // =====================================================================
@@ -4660,145 +4734,189 @@ app.delete("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: Ne
 // =====================================================================
 
 // Download skill revision archive (tar.gz) by ref — used by workers to fetch skill files through the API
-app.get("/api/v1/skill-revisions/by-ref/:ref(*)/archive", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const ref = req.params.ref ?? req.params[0];
-    // Strip trailing "/archive" that Express includes in the wildcard match
-    const cleanRef = ref.replace(/\/archive$/, "");
-    const revision = await skillRevisionStore.getByRef(cleanRef);
-    if (!revision) {
-      res.status(404).json({ error: "Skill revision not found" });
-      return;
-    }
-
-    if (!revision.archiveUrl) {
-      res.status(404).json({ error: "Skill revision has no archive" });
-      return;
-    }
-
-    // Parse the blob name from the archiveUrl
-    // archiveUrl format: https://<account>.blob.core.windows.net/skill-archives/<blobName>
-    // or Azurite: http://127.0.0.1:10000/devstoreaccount1/skill-archives/<blobName>
-    const archiveUrlObj = new URL(revision.archiveUrl);
-    const pathParts = archiveUrlObj.pathname.split("/").filter(Boolean);
-    // pathParts: ["skill-archives", "<blobName>"] or ["devstoreaccount1", "skill-archives", "<blobName>"]
-    const containerIdx = pathParts.indexOf("skill-archives");
-    if (containerIdx === -1 || containerIdx >= pathParts.length - 1) {
-      res.status(500).json({ error: "Cannot parse archive blob path" });
-      return;
-    }
-    const blobName = pathParts.slice(containerIdx + 1).join("/");
-
-    let blobServiceClient: BlobServiceClient;
-    if (storageConnectionString) {
-      blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
-    } else if (storageAccountName) {
-      const credential = new DefaultAzureCredential();
-      blobServiceClient = new BlobServiceClient(
-        `https://${storageAccountName}.blob.core.windows.net`,
-        credential
-      );
-    } else {
-      res.status(500).json({ error: "Blob storage not configured" });
-      return;
-    }
-
-    const containerClient = blobServiceClient.getContainerClient("skill-archives");
-    const blobClient = containerClient.getBlobClient(blobName);
-
-    const downloadResponse = await blobClient.download();
-    if (!downloadResponse.readableStreamBody) {
-      res.status(500).json({ error: "Failed to download archive from blob storage" });
-      return;
-    }
-
-    res.setHeader("Content-Type", "application/gzip");
-    res.setHeader("Content-Disposition", `attachment; filename="${blobName}"`);
-    if (downloadResponse.contentLength !== undefined) {
-      res.setHeader("Content-Length", downloadResponse.contentLength.toString());
-    }
-
-    downloadResponse.readableStreamBody.pipe(res);
-  } catch (error) {
-    if (error instanceof RestError && error.statusCode === 404) {
-      res.status(404).json({ error: "Archive blob not found in storage" });
-      return;
-    }
-    next(error);
-  }
-});
-
-// Get skill revision by human-readable ref
-app.get("/api/v1/skill-revisions/by-ref/:ref(*)", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const ref = req.params.ref ?? req.params[0];
-    const revision = await skillRevisionStore.getByRef(ref);
-    if (!revision) {
-      res.status(404).json({ error: "Skill revision not found" });
-      return;
-    }
-    res.json(revision);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get skill revision by ID (UUIDv5)
-app.get("/api/v1/skill-revisions/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const revision = await skillRevisionStore.get(id);
-    if (!revision) {
-      res.status(404).json({ error: "Skill revision not found" });
-      return;
-    }
-    res.json(revision);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Resolve a skill — trigger resolution from GitHub and create a revision
-app.post("/api/v1/skills/:id(*)/resolve", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = req.params.id ?? req.params[0];
-    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!skill) {
-      res.status(404).json({ error: "Skill not found" });
-      return;
-    }
-
-    // Upload archive to blob storage
-    const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
-      if (!storageConnectionString && !storageAccountName) {
-        throw new Error("Blob storage not configured — cannot store skill archives");
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skill-revisions/by-ref/:ref(*)/archive",
+  tags: ["Skill Revisions"],
+  summary: "Download skill revision archive",
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Binary tar.gz archive",
+  errorResponses: {
+    404: { description: "Skill revision or archive not found" },
+    500: { description: "Blob storage error" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const ref = req.params.ref ?? req.params[0];
+      // Strip trailing "/archive" that Express includes in the wildcard match
+      const cleanRef = ref.replace(/\/archive$/, "");
+      const revision = await skillRevisionStore.getByRef(cleanRef);
+      if (!revision) {
+        res.status(404).json({ error: "Skill revision not found" });
+        return;
       }
+
+      if (!revision.archiveUrl) {
+        res.status(404).json({ error: "Skill revision has no archive" });
+        return;
+      }
+
+      // Parse the blob name from the archiveUrl
+      // archiveUrl format: https://<account>.blob.core.windows.net/skill-archives/<blobName>
+      // or Azurite: http://127.0.0.1:10000/devstoreaccount1/skill-archives/<blobName>
+      const archiveUrlObj = new URL(revision.archiveUrl);
+      const pathParts = archiveUrlObj.pathname.split("/").filter(Boolean);
+      // pathParts: ["skill-archives", "<blobName>"] or ["devstoreaccount1", "skill-archives", "<blobName>"]
+      const containerIdx = pathParts.indexOf("skill-archives");
+      if (containerIdx === -1 || containerIdx >= pathParts.length - 1) {
+        res.status(500).json({ error: "Cannot parse archive blob path" });
+        return;
+      }
+      const blobName = pathParts.slice(containerIdx + 1).join("/");
 
       let blobServiceClient: BlobServiceClient;
       if (storageConnectionString) {
         blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
-      } else {
+      } else if (storageAccountName) {
         const credential = new DefaultAzureCredential();
         blobServiceClient = new BlobServiceClient(
           `https://${storageAccountName}.blob.core.windows.net`,
           credential
         );
+      } else {
+        res.status(500).json({ error: "Blob storage not configured" });
+        return;
       }
 
       const containerClient = blobServiceClient.getContainerClient("skill-archives");
-      await containerClient.createIfNotExists();
-      const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
-      await blockBlobClient.upload(data, data.length, {
-        blobHTTPHeaders: { blobContentType: "application/gzip" },
-      });
-      return blockBlobClient.url;
-    };
+      const blobClient = containerClient.getBlobClient(blobName);
 
-    const revision = await skillResolver.resolve(skill.source, skill.skillName, skillRevisionStore, uploadArchive);
-    res.json(revision);
-  } catch (error) {
-    next(error);
-  }
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody) {
+        res.status(500).json({ error: "Failed to download archive from blob storage" });
+        return;
+      }
+
+      res.setHeader("Content-Type", "application/gzip");
+      res.setHeader("Content-Disposition", `attachment; filename="${blobName}"`);
+      if (downloadResponse.contentLength !== undefined) {
+        res.setHeader("Content-Length", downloadResponse.contentLength.toString());
+      }
+
+      downloadResponse.readableStreamBody.pipe(res);
+    } catch (error) {
+      if (error instanceof RestError && error.statusCode === 404) {
+        res.status(404).json({ error: "Archive blob not found in storage" });
+        return;
+      }
+      next(error);
+    }
+  },
+});
+
+// Get skill revision by human-readable ref
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skill-revisions/by-ref/:ref(*)",
+  tags: ["Skill Revisions"],
+  summary: "Get skill revision by ref",
+  response: SkillRevisionResponseSchema,
+  errorResponses: {
+    404: { description: "Skill revision not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const ref = req.params.ref ?? req.params[0];
+      const revision = await skillRevisionStore.getByRef(ref);
+      if (!revision) {
+        res.status(404).json({ error: "Skill revision not found" });
+        return;
+      }
+      res.json(revision);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// Get skill revision by ID (UUIDv5)
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skill-revisions/:id",
+  tags: ["Skill Revisions"],
+  summary: "Get skill revision by ID",
+  response: SkillRevisionResponseSchema,
+  errorResponses: {
+    404: { description: "Skill revision not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const revision = await skillRevisionStore.get(id);
+      if (!revision) {
+        res.status(404).json({ error: "Skill revision not found" });
+        return;
+      }
+      res.json(revision);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// Resolve a skill — trigger resolution from GitHub and create a revision
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/skills/:id(*)/resolve",
+  tags: ["Skills"],
+  summary: "Trigger skill resolution",
+  response: SkillRevisionResponseSchema,
+  errorResponses: {
+    404: { description: "Skill not found" },
+    500: { description: "Blob storage error" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const id = req.params.id ?? req.params[0];
+      const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!skill) {
+        res.status(404).json({ error: "Skill not found" });
+        return;
+      }
+
+      // Upload archive to blob storage
+      const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
+        if (!storageConnectionString && !storageAccountName) {
+          throw new Error("Blob storage not configured — cannot store skill archives");
+        }
+
+        let blobServiceClient: BlobServiceClient;
+        if (storageConnectionString) {
+          blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+        } else {
+          const credential = new DefaultAzureCredential();
+          blobServiceClient = new BlobServiceClient(
+            `https://${storageAccountName}.blob.core.windows.net`,
+            credential
+          );
+        }
+
+        const containerClient = blobServiceClient.getContainerClient("skill-archives");
+        await containerClient.createIfNotExists();
+        const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
+        await blockBlobClient.upload(data, data.length, {
+          blobHTTPHeaders: { blobContentType: "application/gzip" },
+        });
+        return blockBlobClient.url;
+      };
+
+      const revision = await skillResolver.resolve(skill.source, skill.skillName, skillRevisionStore, uploadArchive);
+      res.json(revision);
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // =====================================================================

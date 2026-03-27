@@ -12,8 +12,8 @@ import "./routes/reports.js";
 // agents: registered via apiRoute() in index.ts
 // models: registered via apiRoute() in index.ts
 // mcp-servers: registered via apiRoute() in index.ts
-import "./routes/skills.js";
-import "./routes/skill-revisions.js";
+// skills: registered via apiRoute() in index.ts
+// skill-revisions: registered via apiRoute() in index.ts
 import "./routes/tokens.js";
 import "./routes/accounts.js";
 // feature-flags: registered via apiRoute() in index.ts
