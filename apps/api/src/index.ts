@@ -49,6 +49,40 @@ import {
   McpServerHeaderSchema,
   FeatureFlagResponseSchema,
   UpdateFeatureFlagInputSchema,
+  AgentResponseSchema,
+  AgentVersionSchema,
+  CreateAgentInputSchema,
+  UpdateAgentInputSchema,
+  RegisterAgentVersionInputSchema,
+  PatchAgentVersionInputSchema,
+  CreateReportTemplateInputSchema,
+  UpdateReportTemplateInputSchema,
+  ReportTemplateResponseSchema,
+  InsightResponseSchema,
+  CreateInsightInputSchema,
+  UpdateInsightInputSchema,
+  ReportResponseSchema,
+  CreateReportInputSchema,
+  BulkCreateReportsInputSchema,
+  BulkReportStatusInputSchema,
+  TriggerReportsInputSchema,
+  BulkTriggerReportsInputSchema,
+  CreatePromptFeatureInputSchema,
+  UpdatePromptFeatureInputSchema,
+  PromptFeatureResponseSchema,
+  PromptFeatureResultSchema,
+  SuggestedPromptFeatureSchema,
+  CreateTaskPromptInputSchema,
+  TaskPromptResponseSchema,
+  PatchTaskPromptFeatureInputSchema,
+  SkillResponseSchema,
+  SkillRevisionResponseSchema,
+  SkillSearchResultSchema,
+  CreateSkillInputSchema,
+  RequestResponseSchema,
+  CreateRequestInputSchema,
+  ListRequestsQuerySchema,
+  BulkResubmitInputSchema,
 } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -358,52 +392,106 @@ function getOrCreateQueueClient(queueName: string): QueueClient {
 // --- OpenAPI documentation (lazy — Swagger UI mounted in main() after all routes register) ---
 
 // Health check endpoint (liveness probe — always returns 200)
-app.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "healthy", version: GIT_COMMIT });
+apiRoute(app, registry, {
+  method: "get",
+  path: "/health",
+  tags: ["Health"],
+  summary: "Liveness probe",
+  response: z.object({ status: z.string(), version: z.string() }),
+  handler: async (_req, res) => {
+    res.json({ status: "healthy", version: GIT_COMMIT });
+  },
 });
 
 // Readiness probe — returns 200 only when all required DB migrations have
 // been applied. Kubernetes will withhold traffic until this returns 200.
-app.get("/ready", async (_req: Request, res: Response) => {
-  try {
-    const result = await checkMigrations(db);
-    if (result.ready) {
-      res.json({ status: "ready", migrations: result });
-    } else {
-      res.status(503).json({ status: "not-ready", migrations: result });
+apiRoute(app, registry, {
+  method: "get",
+  path: "/ready",
+  tags: ["Health"],
+  summary: "Readiness probe",
+  response: z.object({ status: z.string(), migrations: z.any() }),
+  errorResponses: {
+    503: { description: "Service is not ready" },
+  },
+  handler: async (_req, res) => {
+    try {
+      const result = await checkMigrations(db);
+      if (result.ready) {
+        res.json({ status: "ready", migrations: result });
+      } else {
+        res.status(503).json({ status: "not-ready", migrations: result });
+      }
+    } catch (err: any) {
+      res.status(503).json({
+        status: "not-ready",
+        error: err.message ?? String(err),
+      });
     }
-  } catch (err: any) {
-    res.status(503).json({
-      status: "not-ready",
-      error: err.message ?? String(err),
-    });
-  }
+  },
 });
 
 // About endpoint
-app.get("/about", (_req: Request, res: Response) => {
-  res.json({
-    name: "Multi-Worker API (MongoDB)",
-    version: GIT_COMMIT,
-    buildTime: BUILD_TIME,
-    environment: SCOPE_ENVIRONMENT,
-    description: "API that routes requests to multiple workers via separate queues",
-    workers: VALID_WORKERS,
-  });
+apiRoute(app, registry, {
+  method: "get",
+  path: "/about",
+  tags: ["System"],
+  summary: "API metadata",
+  response: z.object({
+    name: z.string(),
+    version: z.string(),
+    buildTime: z.string(),
+    environment: z.string(),
+    description: z.string(),
+    workers: z.array(z.string()),
+  }),
+  handler: async (_req, res) => {
+    res.json({
+      name: "Multi-Worker API (MongoDB)",
+      version: GIT_COMMIT,
+      buildTime: BUILD_TIME,
+      environment: SCOPE_ENVIRONMENT,
+      description: "API that routes requests to multiple workers via separate queues",
+      workers: VALID_WORKERS,
+    });
+  },
 });
 
 // Version endpoint
-app.get("/api/v1/version", (_req: Request, res: Response) => {
-  res.json({
-    commit: GIT_COMMIT,
-    buildTime: BUILD_TIME,
-    environment: SCOPE_ENVIRONMENT,
-  });
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/version",
+  tags: ["System"],
+  summary: "Version info",
+  response: z.object({
+    commit: z.string(),
+    buildTime: z.string(),
+    environment: z.string(),
+  }),
+  handler: async (_req, res) => {
+    res.json({
+      commit: GIT_COMMIT,
+      buildTime: BUILD_TIME,
+      environment: SCOPE_ENVIRONMENT,
+    });
+  },
 });
 
 // Submit a request
-app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/requests",
+  tags: ["Requests"],
+  summary: "Submit request(s)",
+  body: CreateRequestInputSchema.extend({
+    count: z.number().min(1).max(10).default(1),
+    promptFeatureExtractionId: z.string().optional(),
+    skills: z.array(z.string()).optional(),
+    agentVersion: z.string().optional(),
+  }),
+  response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
+  successStatus: 201,
+  handler: async (req, res) => {
     const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, agentVersion: requestedAgentVersion } = req.body;
     const worker = req.query.worker as string;
 
@@ -709,14 +797,19 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       scenario,
       ...(maxIterations ? { maxIterations } : {}),
     });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Get request status
-app.get("/api/v1/requests/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id",
+  tags: ["Requests"],
+  summary: "Get request",
+  params: z.object({ id: z.string() }),
+  response: RequestResponseSchema,
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
     const { id } = req.params;
 
     const resource = await collection.findOne({ _id: id });
@@ -728,14 +821,21 @@ app.get("/api/v1/requests/:id", async (req: Request, res: Response, next: NextFu
 
     // Map _id back to id for API response
     res.json({ ...resource, id: resource._id });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Stream logs for a request via SSE (with connection pooling)
-app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/logs",
+  tags: ["Requests"],
+  summary: "Stream request logs (SSE)",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Server-sent event stream of log entries",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
     const { id } = req.params;
     const fromStart = req.query.fromStart === "true";
 
@@ -856,15 +956,18 @@ app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: N
 
     // Cleanup on client disconnect
     req.on("close", () => client.cleanup());
-
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // List all requests (excludes soft-deleted by default)
-app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests",
+  tags: ["Requests"],
+  summary: "List requests",
+  query: ListRequestsQuerySchema,
+  response: z.array(RequestResponseSchema),
+  handler: async (req, res) => {
     const workerFilter = req.query.worker as string;
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
@@ -913,14 +1016,24 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
       .toArray();
 
     res.json(resources.map(r => ({ ...r, id: r._id })));
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Analysis endpoint - compute pass@k, success@T, and iteration stats
-app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/analysis",
+  tags: ["Requests"],
+  summary: "Compute pass@k / success@T metrics",
+  query: z.object({
+    worker: z.string().optional(),
+    taskPromptId: z.string().optional(),
+    criteria: z.string().optional(),
+    submissionId: z.string().optional(),
+    k: z.string().optional(),
+  }),
+  response: z.object({}).passthrough().describe("Analysis metrics"),
+  handler: async (req, res) => {
     // Parse k values from query string (default: 1,2,5)
     const kParam = (req.query.k as string) || "1,2,5";
     const kValues = kParam.split(",").map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v) && v > 0);
@@ -956,14 +1069,19 @@ app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFuncti
 
     const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues, selectedCriteria);
     res.json(analysis);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Bulk re-submit requests (create new runs from existing ones)
-app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/requests/bulk-resubmit",
+  tags: ["Requests"],
+  summary: "Bulk resubmit requests",
+  body: BulkResubmitInputSchema,
+  response: z.array(RequestResponseSchema),
+  successStatus: 201,
+  handler: async (req, res) => {
     const { ids, count = 1, overrides } = req.body as {
       ids?: string[];
       count?: number;
@@ -1061,14 +1179,18 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
       newIds,
       submissionId,
     });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Bulk soft-delete requests
-app.delete("/api/v1/requests/bulk", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/requests/bulk",
+  tags: ["Requests"],
+  summary: "Bulk soft-delete requests",
+  body: z.object({ ids: z.array(z.string()) }),
+  response: z.object({ deleted: z.number() }),
+  handler: async (req, res) => {
     const { ids } = req.body as { ids?: string[] };
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
@@ -1096,14 +1218,19 @@ app.delete("/api/v1/requests/bulk", async (req: Request, res: Response, next: Ne
       deleted: result.modifiedCount,
       notFound,
     });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Soft-delete a request
-app.delete("/api/v1/requests/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/requests/:id",
+  tags: ["Requests"],
+  summary: "Soft-delete request",
+  params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }),
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
     const { id } = req.params;
 
     const result = await collection.updateOne(
@@ -1122,14 +1249,22 @@ app.delete("/api/v1/requests/:id", async (req: Request, res: Response, next: Nex
     }
 
     res.json({ id, deleted: true });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Download a snapshot for a specific iteration
-app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/snapshots/:iteration",
+  tags: ["Requests"],
+  summary: "Download iteration snapshot",
+  params: z.object({ id: z.string(), iteration: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Gzipped snapshot archive",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
     const { id, iteration } = req.params;
     const iterNum = parseInt(iteration, 10);
     if (isNaN(iterNum) || iterNum < 1) {
@@ -1190,13 +1325,24 @@ app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: R
       res.status(404).json({ error: "Snapshot not found — the blob may have been deleted or is no longer available" });
       return;
     }
-    next(error);
+    throw error;
   }
+  },
 });
 
 // Download a full run archive (run.yaml + iteration snapshots as .tar.gz entries)
-app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/archive",
+  tags: ["Requests"],
+  summary: "Download full run archive",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Gzipped run archive",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
     const { id } = req.params;
 
     const resource = await collection.findOne({ _id: id });
@@ -1301,12 +1447,13 @@ app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next
         res.status(404).json({ error: "Snapshot not found — the blob may have been deleted or is no longer available" });
         return;
       }
-      next(error);
+      throw error;
     } else {
       // Headers already sent — destroy the response to signal an error to the client
       res.destroy();
     }
   }
+  },
 });
 
 // --- Runs upload (import downloaded archives) ---
@@ -1314,8 +1461,18 @@ app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next
 // Download a HAR (HTTP Archive) file for a specific request or turn
 // For one-shot runs: GET /api/v1/requests/:id/har
 // For multi-turn runs: GET /api/v1/requests/:id/har?iteration=N
-app.get("/api/v1/requests/:id/har", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/har",
+  tags: ["Requests"],
+  summary: "Download HAR file",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "HAR-format JSON file",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
     const { id } = req.params;
     const iterationParam = req.query.iteration as string | undefined;
 
@@ -1389,16 +1546,27 @@ app.get("/api/v1/requests/:id/har", async (req: Request, res: Response, next: Ne
       res.status(404).json({ error: "HAR file not found — the blob may have been deleted or is no longer available" });
       return;
     }
-    next(error);
+    throw error;
   }
+  },
 });
 
 // Download a session recording video for a specific request or turn
 // For one-shot runs: GET /api/v1/requests/:id/video?index=0
 // For multi-turn runs: GET /api/v1/requests/:id/video?iteration=N&index=0
 // For setup videos:   GET /api/v1/requests/:id/video?phase=setup&index=0
-app.get("/api/v1/requests/:id/video", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/video",
+  tags: ["Requests"],
+  summary: "Download session recording",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "WebM video recording (supports Range requests)",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
     const { id } = req.params;
     const iterationParam = req.query.iteration as string | undefined;
     const phaseParam = req.query.phase as string | undefined;
@@ -1520,12 +1688,22 @@ app.get("/api/v1/requests/:id/video", async (req: Request, res: Response, next: 
       res.status(404).json({ error: "Video file not found — the blob may have been deleted or is no longer available" });
       return;
     }
-    next(error);
+    throw error;
   }
+  },
 });
 
 // POST /api/v1/runs/upload — Upload a run archive (tar.gz) to import a previously downloaded run
-app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, res: Response, next: NextFunction) => {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/runs/upload",
+  tags: ["Requests"],
+  summary: "Import run archive",
+  middleware: [upload.single("archive")],
+  response: RequestResponseSchema,
+  rawResponse: true,
+  successStatus: 201,
+  handler: async (req, res) => {
   const tempDir = mkdtempSync(join(tmpdir(), "run-upload-"));
   let uploadedFilePath: string | undefined;
 
@@ -1713,8 +1891,6 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       message: "Run uploaded successfully",
     });
 
-  } catch (error) {
-    next(error);
   } finally {
     // Cleanup temp files
     rmSync(tempDir, { recursive: true, force: true });
@@ -1722,6 +1898,7 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       rmSync(uploadedFilePath, { force: true });
     }
   }
+  },
 });
 
 // --- Criteria seed & CRUD (apiRoute) ---
@@ -2149,15 +2326,30 @@ apiRoute(app, registry, {
 // --- Prompt Feature CRUD & extraction ---
 
 // POST /api/v1/prompt-features/generate-prompt — AI-generate a prompt feature prompt from a behavior description
-app.post("/api/v1/prompt-features/generate-prompt", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/prompt-features/generate-prompt",
+  tags: ["Prompt Features"],
+  summary: "Generate prompt feature from behavior",
+  body: z.object({
+    behavior: z.string(),
+    currentId: z.string().optional(),
+  }),
+  response: z.object({ prompt: z.string() }),
+  errorResponses: {
+    400: { description: "Empty behavior string" },
+    503: { description: "LLM not configured" },
+  },
+  handler: async (req, res, next) => {
     const { behavior, currentId } = req.body;
     if (!behavior || typeof behavior !== "string" || !behavior.trim()) {
-      return res.status(400).json({ error: "Body must contain a non-empty 'behavior' string" });
+      res.status(400).json({ error: "Body must contain a non-empty 'behavior' string" });
+      return;
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      return;
     }
 
     const allFeatures = await promptFeatureCollection
@@ -2169,27 +2361,38 @@ app.post("/api/v1/prompt-features/generate-prompt", async (req: Request, res: Re
       ? allFeatures.filter((f: any) => f.id !== currentId)
       : allFeatures;
 
-    const result = await generatePromptFeaturePrompt(
-      behavior.trim(),
-      existingFeatures as { id: string; prompt: string }[],
-    );
-    console.log("[prompt-features/generate-prompt] LLM result:", JSON.stringify(result));
-    res.json(result);
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("not configured")) {
-      return res.status(503).json({ error: err.message });
+    try {
+      const result = await generatePromptFeaturePrompt(
+        behavior.trim(),
+        existingFeatures as { id: string; prompt: string }[],
+      );
+      console.log("[prompt-features/generate-prompt] LLM result:", JSON.stringify(result));
+      res.json(result);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("not configured")) {
+        res.status(503).json({ error: err.message });
+        return;
+      }
+      next(err);
     }
-    next(err);
-  }
+  },
 });
 
 // POST /api/v1/prompt-features/seed — bulk seed prompt features from a JSON array
-app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/prompt-features/seed",
+  tags: ["Prompt Features"],
+  summary: "Seed prompt features in bulk",
+  body: z.object({
+    features: z.array(CreatePromptFeatureInputSchema),
+  }),
+  response: z.object({
+    seeded: z.number(),
+    errors: z.array(z.string()),
+  }),
+  handler: async (req, res) => {
     const { features } = req.body;
-    if (!Array.isArray(features)) {
-      return res.status(400).json({ error: "Body must contain a 'features' array" });
-    }
 
     let seeded = 0;
     const errors: string[] = [];
@@ -2223,9 +2426,7 @@ app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, nex
     }
 
     res.json({ seeded, errors });
-  } catch (err) {
-    next(err);
-  }
+  },
 });
 
 // ==========================================
@@ -2233,12 +2434,26 @@ app.post("/api/v1/prompt-features/seed", async (req: Request, res: Response, nex
 // ==========================================
 
 // POST /api/v1/task-prompts/generate — AI-generate a task prompt from a description or variation
-app.post("/api/v1/task-prompts/generate", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/task-prompts/generate",
+  tags: ["Task Prompts"],
+  summary: "Generate task prompts",
+  body: z.object({
+    description: z.string().optional(),
+    existingPrompt: z.string().optional(),
+  }),
+  response: z.object({ tasks: z.array(z.string()) }),
+  successStatus: 200,
+  errorResponses: {
+    503: { description: "LLM not configured" },
+  },
+  handler: async (req, res, next) => {
     const { description, existingPrompt } = req.body;
 
     if (!isTaskPromptLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      return;
     }
 
     // Fetch recent task prompts as context (avoid duplicates)
@@ -2259,95 +2474,153 @@ app.post("/api/v1/task-prompts/generate", async (req: Request, res: Response, ne
     );
     console.log("[task-prompts/generate] LLM result:", JSON.stringify(result));
     res.json(result);
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("not configured")) {
-      return res.status(503).json({ error: err.message });
-    }
-    next(err);
-  }
+  },
 });
 
 // GET /api/v1/task-prompts — list all task prompts (paginated, optional search)
-app.get("/api/v1/task-prompts", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const limit = parseInt(req.query.limit as string) || 50;
-    const offset = parseInt(req.query.offset as string) || 0;
-    const search = req.query.search as string | undefined;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/task-prompts",
+  tags: ["Task Prompts"],
+  summary: "List task prompts",
+  query: z.object({
+    limit: z.coerce.number().optional(),
+    offset: z.coerce.number().optional(),
+    search: z.string().optional(),
+  }),
+  response: z.object({
+    items: z.array(TaskPromptResponseSchema),
+    total: z.number(),
+    limit: z.number(),
+    offset: z.number(),
+  }),
+  handler: async (req, res, next) => {
+    const limit = req.query.limit ?? 50;
+    const offset = req.query.offset ?? 0;
+    const search = req.query.search;
 
     const { items, total } = await taskPromptStore.getAll({ limit, offset, search });
     res.json({ items, total, limit, offset });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // GET /api/v1/task-prompts/:id — get a single task prompt by ID
-app.get("/api/v1/task-prompts/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/task-prompts/:id",
+  tags: ["Task Prompts"],
+  summary: "Get task prompt",
+  params: z.object({ id: z.string() }),
+  response: TaskPromptResponseSchema,
+  errorResponses: {
+    404: { description: "Task prompt not found" },
+  },
+  handler: async (req, res, next) => {
     const { id } = req.params;
     const taskPrompt = await taskPromptStore.get(id);
     if (!taskPrompt) {
-      return res.status(404).json({ error: "Task prompt not found" });
+      res.status(404).json({ error: "Task prompt not found" });
+      return;
     }
     res.json(taskPrompt);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // POST /api/v1/task-prompts — create (or find existing) task prompt. Idempotent.
-app.post("/api/v1/task-prompts", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/task-prompts",
+  tags: ["Task Prompts"],
+  summary: "Create or find task prompt",
+  body: CreateTaskPromptInputSchema,
+  response: TaskPromptResponseSchema,
+  errorResponses: {
+    400: { description: "Empty text string" },
+  },
+  handler: async (req, res, next) => {
     const { text } = req.body;
     if (!text || typeof text !== "string" || !text.trim()) {
-      return res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
+      res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
+      return;
     }
 
     const taskPrompt = await taskPromptStore.findOrCreate(text);
     res.status(201).json(taskPrompt);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // DELETE /api/v1/task-prompts/:id — soft-delete a task prompt
-app.delete("/api/v1/task-prompts/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    await taskPromptStore.delete(id);
-    res.json({ deleted: true });
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("not found")) {
-      return res.status(404).json({ error: error.message });
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/task-prompts/:id",
+  tags: ["Task Prompts"],
+  summary: "Soft-delete task prompt",
+  params: z.object({ id: z.string() }),
+  response: z.object({ deleted: z.boolean() }),
+  errorResponses: {
+    404: { description: "Task prompt not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      await taskPromptStore.delete(id);
+      res.json({ deleted: true });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("not found")) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      next(error);
     }
-    next(error);
-  }
+  },
 });
 
 // POST /api/v1/task-prompts/:id/extract-features — extract prompt features for a task prompt
-app.post("/api/v1/task-prompts/:id/extract-features", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/task-prompts/:id/extract-features",
+  tags: ["Task Prompts"],
+  summary: "Extract features from task prompt",
+  params: z.object({ id: z.string() }),
+  query: z.object({ force: z.string().optional() }),
+  body: z.object({ model: z.string().optional() }),
+  response: z.object({
+    taskPromptId: z.string(),
+    features: z.array(PromptFeatureResultSchema),
+    featuresExtractedAt: z.coerce.date().optional(),
+    suggestedFeatures: z.array(SuggestedPromptFeatureSchema).optional(),
+    cached: z.boolean(),
+  }),
+  successStatus: 200,
+  errorResponses: {
+    404: { description: "Task prompt not found" },
+    503: { description: "LLM not configured" },
+  },
+  handler: async (req, res, next) => {
     const { id } = req.params;
     const { model } = req.body;
     const force = req.query.force === "true";
 
     const taskPrompt = await taskPromptStore.get(id);
     if (!taskPrompt) {
-      return res.status(404).json({ error: "Task prompt not found" });
+      res.status(404).json({ error: "Task prompt not found" });
+      return;
     }
 
     // Return cached features if available (unless force re-extraction)
     if (!force && taskPrompt.features && taskPrompt.features.length > 0) {
-      return res.json({
+      res.json({
         taskPromptId: taskPrompt._id,
         features: taskPrompt.features,
         featuresExtractedAt: taskPrompt.featuresExtractedAt,
         cached: true,
       });
+      return;
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      return;
     }
 
     const allFeatures = await promptFeatureCollection
@@ -2355,39 +2628,62 @@ app.post("/api/v1/task-prompts/:id/extract-features", async (req: Request, res: 
       .toArray();
 
     const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt }));
-    const { results, suggestedFeatures } = await extractPromptFeatures(taskPrompt.text, featureConfigs, model);
+    try {
+      const { results, suggestedFeatures } = await extractPromptFeatures(taskPrompt.text, featureConfigs, model);
 
-    // Store features on the task prompt entity
-    const updated = await taskPromptStore.attachFeatures(id, results);
+      // Store features on the task prompt entity
+      const updated = await taskPromptStore.attachFeatures(id, results);
 
-    res.json({
-      taskPromptId: updated._id,
-      features: updated.features,
-      featuresExtractedAt: updated.featuresExtractedAt,
-      suggestedFeatures: suggestedFeatures.length > 0 ? suggestedFeatures : undefined,
-      cached: false,
-    });
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("not configured")) {
-      return res.status(503).json({ error: err.message });
+      res.json({
+        taskPromptId: updated._id,
+        features: updated.features,
+        featuresExtractedAt: updated.featuresExtractedAt,
+        suggestedFeatures: suggestedFeatures.length > 0 ? suggestedFeatures : undefined,
+        cached: false,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("not configured")) {
+        res.status(503).json({ error: err.message });
+        return;
+      }
+      if (err instanceof Error && err.message.includes("not found")) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      next(err);
     }
-    if (err instanceof Error && err.message.includes("not found")) {
-      return res.status(404).json({ error: err.message });
-    }
-    next(err);
-  }
+  },
 });
 
 // POST /api/v1/prompt-features/extract-from-text — extract features from raw text without persisting
-app.post("/api/v1/prompt-features/extract-from-text", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/prompt-features/extract-from-text",
+  tags: ["Prompt Features"],
+  summary: "Extract features from text",
+  body: z.object({
+    text: z.string(),
+    model: z.string().optional(),
+  }),
+  response: z.object({
+    features: z.array(PromptFeatureResultSchema),
+    suggestedFeatures: z.array(SuggestedPromptFeatureSchema).optional(),
+    cached: z.boolean(),
+  }),
+  errorResponses: {
+    400: { description: "Empty text string" },
+    503: { description: "LLM not configured" },
+  },
+  handler: async (req, res, next) => {
     const { text, model } = req.body;
     if (!text || typeof text !== "string" || !text.trim()) {
-      return res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
+      res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
+      return;
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      return res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      return;
     }
 
     const allFeatures = await promptFeatureCollection
@@ -2395,45 +2691,69 @@ app.post("/api/v1/prompt-features/extract-from-text", async (req: Request, res: 
       .toArray();
 
     const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt }));
-    const { results, suggestedFeatures } = await extractPromptFeatures(text.trim(), featureConfigs, model);
+    try {
+      const { results, suggestedFeatures } = await extractPromptFeatures(text.trim(), featureConfigs, model);
 
-    res.json({
-      features: results,
-      suggestedFeatures: suggestedFeatures.length > 0 ? suggestedFeatures : undefined,
-      cached: false,
-    });
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("not configured")) {
-      return res.status(503).json({ error: err.message });
+      res.json({
+        features: results,
+        suggestedFeatures: suggestedFeatures.length > 0 ? suggestedFeatures : undefined,
+        cached: false,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("not configured")) {
+        res.status(503).json({ error: err.message });
+        return;
+      }
+      next(err);
     }
-    next(err);
-  }
+  },
 });
 
 // PATCH /api/v1/task-prompts/:id/features/:featureId — toggle a feature's detected flag
-app.patch("/api/v1/task-prompts/:id/features/:featureId", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id, featureId } = req.params;
-    const { detected } = req.body;
+apiRoute(app, registry, {
+  method: "patch",
+  path: "/api/v1/task-prompts/:id/features/:featureId",
+  tags: ["Task Prompts"],
+  summary: "Toggle feature flag on task prompt",
+  params: z.object({ id: z.string(), featureId: z.string() }),
+  body: PatchTaskPromptFeatureInputSchema,
+  response: TaskPromptResponseSchema,
+  errorResponses: {
+    400: { description: "Invalid detected value" },
+    404: { description: "Task prompt or feature not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id, featureId } = req.params;
+      const { detected } = req.body;
 
-    if (typeof detected !== "boolean") {
-      return res.status(400).json({ error: "'detected' must be a boolean" });
-    }
+      if (typeof detected !== "boolean") {
+        res.status(400).json({ error: "'detected' must be a boolean" });
+        return;
+      }
 
-    const updated = await taskPromptStore.toggleFeature(id, featureId, detected);
-    res.json(updated);
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("not found")) {
-      return res.status(404).json({ error: err.message });
+      const updated = await taskPromptStore.toggleFeature(id, featureId, detected);
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("not found")) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      next(err);
     }
-    next(err);
-  }
+  },
 });
 
 // List all prompt features (with optional search)
-app.get("/api/v1/prompt-features", async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const q = _req.query.q as string | undefined;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/prompt-features",
+  tags: ["Prompt Features"],
+  summary: "List features",
+  query: z.object({ q: z.string().optional() }),
+  response: z.array(PromptFeatureResponseSchema),
+  handler: async (req, res) => {
+    const q = req.query.q;
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (q) {
       filter.$or = [
@@ -2444,14 +2764,21 @@ app.get("/api/v1/prompt-features", async (_req: Request, res: Response, next: Ne
     const features = await promptFeatureCollection.find(filter).toArray();
     features.sort((a, b) => a.id.localeCompare(b.id));
     res.json(features);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Get single prompt feature by ID
-app.get("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/prompt-features/:id",
+  tags: ["Prompt Features"],
+  summary: "Get feature",
+  params: z.object({ id: z.string() }),
+  response: PromptFeatureResponseSchema,
+  errorResponses: {
+    404: { description: "Feature not found" },
+  },
+  handler: async (req, res) => {
     const { id } = req.params;
     const feature = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
     if (!feature) {
@@ -2460,14 +2787,23 @@ app.get("/api/v1/prompt-features/:id", async (req: Request, res: Response, next:
     }
 
     res.json(feature);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Create a new prompt feature
-app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/prompt-features",
+  tags: ["Prompt Features"],
+  summary: "Create feature",
+  body: CreatePromptFeatureInputSchema,
+  response: PromptFeatureResponseSchema,
+  successStatus: 201,
+  errorResponses: {
+    400: { description: "Invalid input" },
+    409: { description: "Feature already exists" },
+  },
+  handler: async (req, res) => {
     const { id, prompt } = req.body;
 
     if (!id || typeof id !== "string") {
@@ -2497,14 +2833,23 @@ app.post("/api/v1/prompt-features", async (req: Request, res: Response, next: Ne
 
     await promptFeatureCollection.insertOne(doc as any);
     res.status(201).json(doc);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Update a prompt feature
-app.put("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/prompt-features/:id",
+  tags: ["Prompt Features"],
+  summary: "Update feature",
+  params: z.object({ id: z.string() }),
+  body: UpdatePromptFeatureInputSchema,
+  response: PromptFeatureResponseSchema,
+  errorResponses: {
+    400: { description: "Invalid input" },
+    404: { description: "Feature not found" },
+  },
+  handler: async (req, res) => {
     const { id } = req.params;
     const { prompt } = req.body;
 
@@ -2530,14 +2875,21 @@ app.put("/api/v1/prompt-features/:id", async (req: Request, res: Response, next:
 
     const updated = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
     res.json(updated);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Delete a prompt feature (soft-delete)
-app.delete("/api/v1/prompt-features/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/prompt-features/:id",
+  tags: ["Prompt Features"],
+  summary: "Soft-delete feature",
+  params: z.object({ id: z.string() }),
+  response: z.object({ id: z.string(), deleted: z.boolean() }),
+  errorResponses: {
+    404: { description: "Feature not found" },
+  },
+  handler: async (req, res) => {
     const { id } = req.params;
 
     const existing = await promptFeatureCollection.findOne({ id, deletedAt: { $exists: false } });
@@ -2552,431 +2904,452 @@ app.delete("/api/v1/prompt-features/:id", async (req: Request, res: Response, ne
     );
 
     res.json({ id, deleted: true });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // ==================== Report Endpoints ====================
 
 // Create a report for a run (POST /api/v1/reports)
 // Accepts optional templateId to associate the report with a report template.
-app.post("/api/v1/reports", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { requestId, templateId } = req.body;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports",
+  tags: ["Reports"],
+  summary: "Create report",
+  body: CreateReportInputSchema,
+  response: ReportResponseSchema,
+  successStatus: 201,
+  errorResponses: {
+    400: { description: "Invalid input" },
+    404: { description: "Run or template not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestId, templateId } = req.body;
 
-    if (!requestId || typeof requestId !== "string") {
-      res.status(400).json({ error: "requestId is required and must be a string" });
-      return;
-    }
-
-    // Verify the run exists
-    const run = await collection.findOne({ _id: requestId });
-    if (!run) {
-      res.status(404).json({ error: `Run ${requestId} not found` });
-      return;
-    }
-
-    // Verify the template exists (if specified)
-    if (templateId) {
-      const template = await reportTemplateCollection.findOne({ id: templateId, deletedAt: { $exists: false } });
-      if (!template) {
-        res.status(404).json({ error: `Report template '${templateId}' not found` });
+      if (!requestId || typeof requestId !== "string") {
+        res.status(400).json({ error: "requestId is required and must be a string" });
         return;
       }
-    }
 
-    const reportId = uuidv4();
+      // Verify the run exists
+      const run = await collection.findOne({ _id: requestId });
+      if (!run) {
+        res.status(404).json({ error: `Run ${requestId} not found` });
+        return;
+      }
 
-    const reportDoc: ReportDocument = {
-      _id: reportId,
-      requestId,
-      ...(templateId ? { templateId } : {}),
-      status: "pending",
-      logs: [],
-      createdAt: new Date(),
-    };
+      // Verify the template exists (if specified)
+      if (templateId) {
+        const template = await reportTemplateCollection.findOne({ id: templateId, deletedAt: { $exists: false } });
+        if (!template) {
+          res.status(404).json({ error: `Report template '${templateId}' not found` });
+          return;
+        }
+      }
 
-    await reportCollection.insertOne(reportDoc);
-
-    // Queue the report for processing
-    const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
-    await reportQueueClient.sendMessage(messageContent);
-
-    console.log(`Created report ${reportId} for run ${requestId}${templateId ? ` (template: ${templateId})` : ""} and queued for processing`);
-
-    res.status(201).json({
-      id: reportId,
-      requestId,
-      ...(templateId ? { templateId } : {}),
-      status: "pending",
-      message: "Report generation queued",
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// List all reports (GET /api/v1/reports)
-app.get("/api/v1/reports", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const requestIdFilter = req.query.requestId as string;
-    const filter: Record<string, unknown> = {};
-    if (requestIdFilter) {
-      filter.requestId = requestIdFilter;
-    }
-
-    const reports = await reportCollection
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    // Enrich reports with the task from their associated run
-    const requestIds = [...new Set(reports.map(r => r.requestId))];
-    const runs = requestIds.length > 0
-      ? await collection.find({ _id: { $in: requestIds } as any }, { projection: { _id: 1, "scenario.task": 1 } }).toArray()
-      : [];
-    const taskByRequestId = new Map(runs.map(r => [r._id, r.scenario?.task]));
-
-    res.json(reports.map(r => ({ ...r, id: r._id, task: taskByRequestId.get(r.requestId) })));
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Bulk create reports for multiple runs (POST /api/v1/reports/bulk-create)
-app.post("/api/v1/reports/bulk-create", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { requestIds } = req.body as { requestIds?: string[] };
-
-    if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
-      res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
-      return;
-    }
-
-    // Verify all runs exist
-    const runs = await collection.find({ _id: { $in: requestIds } as any }).toArray();
-    const foundIds = new Set(runs.map(r => r._id));
-    const notFound = requestIds.filter(id => !foundIds.has(id));
-
-    // Create reports only for runs that exist
-    const validIds = requestIds.filter(id => foundIds.has(id));
-    const created: { reportId: string; requestId: string }[] = [];
-
-    for (const requestId of validIds) {
       const reportId = uuidv4();
+
       const reportDoc: ReportDocument = {
         _id: reportId,
         requestId,
+        ...(templateId ? { templateId } : {}),
         status: "pending",
         logs: [],
         createdAt: new Date(),
       };
+
       await reportCollection.insertOne(reportDoc);
 
+      // Queue the report for processing
       const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
       await reportQueueClient.sendMessage(messageContent);
 
-      created.push({ reportId, requestId });
+      console.log(`Created report ${reportId} for run ${requestId}${templateId ? ` (template: ${templateId})` : ""} and queued for processing`);
+
+      res.status(201).json({
+        id: reportId,
+        requestId,
+        ...(templateId ? { templateId } : {}),
+        status: "pending",
+        message: "Report generation queued",
+      });
+    } catch (error) {
+      next(error);
     }
-
-    console.log(`Bulk created ${created.length} reports for ${validIds.length} runs`);
-
-    res.status(201).json({
-      created: created.length,
-      reports: created,
-      notFound,
-    });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
-// Bulk report status (POST /api/v1/reports/bulk-status)
-app.post("/api/v1/reports/bulk-status", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { requestIds } = req.body as { requestIds?: string[] };
-
-    if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
-      res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
-      return;
-    }
-
-    // Find the latest report for each requestId
-    const reports = await reportCollection
-      .find({ requestId: { $in: requestIds } })
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    // Build a map of requestId → latest report status
-    const statusMap: Record<string, { reportId: string; status: string }> = {};
-    for (const report of reports) {
-      if (!statusMap[report.requestId]) {
-        statusMap[report.requestId] = {
-          reportId: report._id,
-          status: report.status,
-        };
-      }
-    }
-
-    res.json(statusMap);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get a single report (GET /api/v1/reports/:id)
-app.get("/api/v1/reports/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-
-    const report = await reportCollection.findOne({ _id: id });
-
-    if (!report) {
-      res.status(404).json({ error: "Report not found" });
-      return;
-    }
-
-    res.json({ ...report, id: report._id });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Stream report logs via SSE (GET /api/v1/reports/:id/logs)
-app.get("/api/v1/reports/:id/logs", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const fromStart = req.query.fromStart === "true";
-
-    const report = await reportCollection.findOne({ _id: id });
-
-    if (!report) {
-      res.status(404).json({ error: "Report not found" });
-      return;
-    }
-
-    // Set SSE headers
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
-
-    // Replay existing logs if requested
-    if (fromStart && report.logs && report.logs.length > 0) {
-      for (const log of report.logs) {
-        res.write(`data: ${JSON.stringify(log)}\n\n`);
-      }
-    }
-
-    // If report already completed/failed, send done and close
-    if (report.status === "completed" || report.status === "failed") {
-      res.write(`event: done\ndata: {"status":"${report.status}"}\n\n`);
-      res.end();
-      return;
-    }
-
-    // Live streaming via Redis + Change Streams (same pattern as requests)
-    let cleaned = false;
-    let changeStream: ReturnType<typeof reportCollection.watch> | null = null;
-    let redisSubscribed = false;
-
-    const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
-    let inactivityTimer: ReturnType<typeof setTimeout>;
-
-    const resetInactivityTimer = () => {
-      clearTimeout(inactivityTimer);
-      inactivityTimer = setTimeout(() => {
-        res.write(`event: timeout\ndata: {"message":"Stream timeout after 5 minutes of inactivity"}\n\n`);
-        client.cleanup();
-      }, INACTIVITY_TIMEOUT_MS);
-    };
-
-    const heartbeat = setInterval(() => {
-      if (!cleaned) {
-        res.write(`:\n\n`);
-      }
-    }, 30_000);
-
-    const client: SSEClient = {
-      res,
-      onActivity: resetInactivityTimer,
-      cleanup: () => {
-        if (!cleaned) {
-          cleaned = true;
-          clearTimeout(inactivityTimer);
-          clearInterval(heartbeat);
-          if (changeStream) {
-            changeStream.close().catch(err => console.error("Error closing report change stream:", err));
-          }
-          if (redisSubscribed) {
-            unsubscribeClient(id, client);
-          }
-          res.end();
-        }
-      },
-    };
-
-    resetInactivityTimer();
-
-    if (redisHost) {
-      try {
-        await subscribeClient(id, client);
-        redisSubscribed = true;
-      } catch (err) {
-        console.error(`Redis subscription failed for report ${id}, using Change Streams only:`, err);
-      }
-    }
-
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/reports",
+  tags: ["Reports"],
+  summary: "List reports",
+  query: z.object({ requestId: z.string().optional() }),
+  response: z.array(ReportResponseSchema),
+  handler: async (req, res, next) => {
     try {
-      changeStream = reportCollection.watch(
-        [{ $match: { "documentKey._id": id, operationType: "update" } }],
-        { fullDocument: "updateLookup" }
-      );
+      const requestIdFilter = req.query.requestId as string;
+      const filter: Record<string, unknown> = {};
+      if (requestIdFilter) {
+        filter.requestId = requestIdFilter;
+      }
 
-      changeStream.on("change", (change) => {
-        if (change.operationType === "update" && change.fullDocument) {
-          const doc = change.fullDocument;
-          if (doc.status === "completed" || doc.status === "failed") {
-            res.write(`event: done\ndata: {"status":"${doc.status}"}\n\n`);
-            client.cleanup();
-          }
-        }
-      });
+      const reports = await reportCollection
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .toArray();
 
-      changeStream.on("error", (err) => {
-        console.error(`Report change stream error for ${id}:`, err);
-      });
-    } catch (err) {
-      console.error(`Failed to create change stream for report ${id}:`, err);
+      // Enrich reports with the task from their associated run
+      const requestIds = [...new Set(reports.map(r => r.requestId))];
+      const runs = requestIds.length > 0
+        ? await collection.find({ _id: { $in: requestIds } as any }, { projection: { _id: 1, "scenario.task": 1 } }).toArray()
+        : [];
+      const taskByRequestId = new Map(runs.map(r => [r._id, r.scenario?.task]));
+
+      res.json(reports.map(r => ({ ...r, id: r._id, task: taskByRequestId.get(r.requestId) })));
+    } catch (error) {
+      next(error);
     }
-
-    req.on("close", () => client.cleanup());
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
-// Get reports for a specific run (GET /api/v1/requests/:id/reports)
-app.get("/api/v1/requests/:id/reports", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/bulk-create",
+  tags: ["Reports"],
+  summary: "Bulk create reports",
+  body: BulkCreateReportsInputSchema,
+  response: z.array(ReportResponseSchema),
+  successStatus: 201,
+  errorResponses: {
+    400: { description: "Invalid input" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestIds } = req.body as { requestIds?: string[] };
 
-    // Verify the run exists
-    const run = await collection.findOne({ _id: id });
-    if (!run) {
-      res.status(404).json({ error: "Run not found" });
-      return;
-    }
+      if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+        res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+        return;
+      }
 
-    const reports = await reportCollection
-      .find({ requestId: id })
-      .sort({ createdAt: -1 })
-      .toArray();
+      // Verify all runs exist
+      const runs = await collection.find({ _id: { $in: requestIds } as any }).toArray();
+      const foundIds = new Set(runs.map(r => r._id));
+      const notFound = requestIds.filter(id => !foundIds.has(id));
 
-    res.json(reports.map(r => ({ ...r, id: r._id })));
-  } catch (error) {
-    next(error);
-  }
-});
+      // Create reports only for runs that exist
+      const validIds = requestIds.filter(id => foundIds.has(id));
+      const created: { reportId: string; requestId: string }[] = [];
 
-// POST /api/v1/reports/trigger — evaluate all report templates' triggers for a completed run
-// Called by coding agent workers after a run completes. Creates a report per matching template.
-app.post("/api/v1/reports/trigger", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { requestId } = req.body;
-
-    if (!requestId || typeof requestId !== "string") {
-      res.status(400).json({ error: "requestId is required and must be a string" });
-      return;
-    }
-
-    // Fetch the completed run
-    const run = await collection.findOne({ _id: requestId });
-    if (!run) {
-      res.status(404).json({ error: `Run ${requestId} not found` });
-      return;
-    }
-
-    // Fetch task prompt document (needed for promptFeature trigger evaluation)
-    let taskPrompt: TaskPromptDocument | null = null;
-    if (run.taskPromptId) {
-      taskPrompt = await taskPromptCollection.findOne({ _id: run.taskPromptId });
-    }
-
-    // Load all active report templates
-    const templates = await reportTemplateCollection
-      .find({ deletedAt: { $exists: false } })
-      .toArray();
-
-    // Evaluate each template's trigger against the run
-    const created: Array<{ id: string; requestId: string; templateId: string; status: string }> = [];
-
-    for (const template of templates) {
-      // Cast the run to the shared RequestDocument shape for evaluateTrigger
-      const triggerResult = evaluateTrigger(
-        template.trigger as any,
-        run as any,
-        taskPrompt as any
-      );
-
-      if (triggerResult) {
+      for (const requestId of validIds) {
         const reportId = uuidv4();
         const reportDoc: ReportDocument = {
           _id: reportId,
           requestId,
-          templateId: template.id,
           status: "pending",
           logs: [],
           createdAt: new Date(),
         };
         await reportCollection.insertOne(reportDoc);
+
         const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
         await reportQueueClient.sendMessage(messageContent);
 
-        created.push({ id: reportId, requestId, templateId: template.id, status: "pending" });
-        console.log(`Trigger matched template '${template.id}' — created report ${reportId} for run ${requestId}`);
+        created.push({ reportId, requestId });
       }
-    }
 
-    console.log(`Trigger evaluation for run ${requestId}: ${created.length}/${templates.length} templates matched`);
-    res.status(201).json({ triggered: created.length, reports: created });
-  } catch (error) {
-    next(error);
-  }
+      console.log(`Bulk created ${created.length} reports for ${validIds.length} runs`);
+
+      res.status(201).json({
+        created: created.length,
+        reports: created,
+        notFound,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
-// POST /api/v1/reports/bulk-trigger — evaluate report templates for multiple runs at once
-app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { requestIds } = req.body as { requestIds?: string[] };
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/bulk-status",
+  tags: ["Reports"],
+  summary: "Bulk get report statuses",
+  body: BulkReportStatusInputSchema,
+  response: z.array(ReportResponseSchema),
+  errorResponses: {
+    400: { description: "Invalid input" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestIds } = req.body as { requestIds?: string[] };
 
-    if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
-      res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
-      return;
+      if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+        res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+        return;
+      }
+
+      // Find the latest report for each requestId
+      const reports = await reportCollection
+        .find({ requestId: { $in: requestIds } })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      // Build a map of requestId → latest report status
+      const statusMap: Record<string, { reportId: string; status: string }> = {};
+      for (const report of reports) {
+        if (!statusMap[report.requestId]) {
+          statusMap[report.requestId] = {
+            reportId: report._id,
+            status: report.status,
+          };
+        }
+      }
+
+      res.json(statusMap);
+    } catch (error) {
+      next(error);
     }
+  },
+});
 
-    // Fetch runs
-    const runs = await collection.find({ _id: { $in: requestIds } as any }).toArray();
-    const foundIds = new Set(runs.map(r => r._id));
-    const notFound = requestIds.filter(id => !foundIds.has(id));
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/reports/:id",
+  tags: ["Reports"],
+  summary: "Get report",
+  params: z.object({ id: z.string() }),
+  response: ReportResponseSchema,
+  errorResponses: {
+    404: { description: "Report not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
 
-    // Load all active templates
-    const templates = await reportTemplateCollection
-      .find({ deletedAt: { $exists: false } })
-      .toArray();
+      const report = await reportCollection.findOne({ _id: id });
 
-    const created: Array<{ reportId: string; requestId: string; templateId: string }> = [];
+      if (!report) {
+        res.status(404).json({ error: "Report not found" });
+        return;
+      }
 
-    for (const run of runs) {
-      // Fetch task prompt for trigger evaluation
+      res.json({ ...report, id: report._id });
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/reports/:id/logs",
+  tags: ["Reports"],
+  summary: "Stream report logs (SSE)",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Server-sent event stream of log entries",
+  errorResponses: {
+    404: { description: "Report not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const fromStart = req.query.fromStart === "true";
+
+      const report = await reportCollection.findOne({ _id: id });
+
+      if (!report) {
+        res.status(404).json({ error: "Report not found" });
+        return;
+      }
+
+      // Set SSE headers
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      // Replay existing logs if requested
+      if (fromStart && report.logs && report.logs.length > 0) {
+        for (const log of report.logs) {
+          res.write(`data: ${JSON.stringify(log)}\n\n`);
+        }
+      }
+
+      // If report already completed/failed, send done and close
+      if (report.status === "completed" || report.status === "failed") {
+        res.write(`event: done\ndata: {"status":"${report.status}"}\n\n`);
+        res.end();
+        return;
+      }
+
+      // Live streaming via Redis + Change Streams (same pattern as requests)
+      let cleaned = false;
+      let changeStream: ReturnType<typeof reportCollection.watch> | null = null;
+      let redisSubscribed = false;
+
+      const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+      let inactivityTimer: ReturnType<typeof setTimeout>;
+
+      const resetInactivityTimer = () => {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+          res.write(`event: timeout\ndata: {"message":"Stream timeout after 5 minutes of inactivity"}\n\n`);
+          client.cleanup();
+        }, INACTIVITY_TIMEOUT_MS);
+      };
+
+      const heartbeat = setInterval(() => {
+        if (!cleaned) {
+          res.write(`:\n\n`);
+        }
+      }, 30_000);
+
+      const client: SSEClient = {
+        res,
+        onActivity: resetInactivityTimer,
+        cleanup: () => {
+          if (!cleaned) {
+            cleaned = true;
+            clearTimeout(inactivityTimer);
+            clearInterval(heartbeat);
+            if (changeStream) {
+              changeStream.close().catch(err => console.error("Error closing report change stream:", err));
+            }
+            if (redisSubscribed) {
+              unsubscribeClient(id, client);
+            }
+            res.end();
+          }
+        },
+      };
+
+      resetInactivityTimer();
+
+      if (redisHost) {
+        try {
+          await subscribeClient(id, client);
+          redisSubscribed = true;
+        } catch (err) {
+          console.error(`Redis subscription failed for report ${id}, using Change Streams only:`, err);
+        }
+      }
+
+      try {
+        changeStream = reportCollection.watch(
+          [{ $match: { "documentKey._id": id, operationType: "update" } }],
+          { fullDocument: "updateLookup" }
+        );
+
+        changeStream.on("change", (change) => {
+          if (change.operationType === "update" && change.fullDocument) {
+            const doc = change.fullDocument;
+            if (doc.status === "completed" || doc.status === "failed") {
+              res.write(`event: done\ndata: {"status":"${doc.status}"}\n\n`);
+              client.cleanup();
+            }
+          }
+        });
+
+        changeStream.on("error", (err) => {
+          console.error(`Report change stream error for ${id}:`, err);
+        });
+      } catch (err) {
+        console.error(`Failed to create change stream for report ${id}:`, err);
+      }
+
+      req.on("close", () => client.cleanup());
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/reports",
+  tags: ["Reports"],
+  summary: "Get reports for request",
+  params: z.object({ id: z.string() }),
+  response: z.array(ReportResponseSchema),
+  errorResponses: {
+    404: { description: "Run not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+
+      // Verify the run exists
+      const run = await collection.findOne({ _id: id });
+      if (!run) {
+        res.status(404).json({ error: "Run not found" });
+        return;
+      }
+
+      const reports = await reportCollection
+        .find({ requestId: id })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.json(reports.map(r => ({ ...r, id: r._id })));
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// POST /api/v1/reports/trigger — evaluate all report templates' triggers for a completed run
+// Called by coding agent workers after a run completes. Creates a report per matching template.
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/trigger",
+  tags: ["Reports"],
+  summary: "Trigger reports",
+  body: TriggerReportsInputSchema,
+  response: z.object({ triggered: z.number(), reports: z.array(ReportResponseSchema) }),
+  successStatus: 201,
+  errorResponses: {
+    400: { description: "Invalid input" },
+    404: { description: "Run not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestId } = req.body;
+
+      if (!requestId || typeof requestId !== "string") {
+        res.status(400).json({ error: "requestId is required and must be a string" });
+        return;
+      }
+
+      // Fetch the completed run
+      const run = await collection.findOne({ _id: requestId });
+      if (!run) {
+        res.status(404).json({ error: `Run ${requestId} not found` });
+        return;
+      }
+
+      // Fetch task prompt document (needed for promptFeature trigger evaluation)
       let taskPrompt: TaskPromptDocument | null = null;
       if (run.taskPromptId) {
         taskPrompt = await taskPromptCollection.findOne({ _id: run.taskPromptId });
       }
 
+      // Load all active report templates
+      const templates = await reportTemplateCollection
+        .find({ deletedAt: { $exists: false } })
+        .toArray();
+
+      // Evaluate each template's trigger against the run
+      const created: Array<{ id: string; requestId: string; templateId: string; status: string }> = [];
+
       for (const template of templates) {
+        // Cast the run to the shared RequestDocument shape for evaluateTrigger
         const triggerResult = evaluateTrigger(
           template.trigger as any,
           run as any,
@@ -2987,7 +3360,7 @@ app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, nex
           const reportId = uuidv4();
           const reportDoc: ReportDocument = {
             _id: reportId,
-            requestId: run._id,
+            requestId,
             templateId: template.id,
             status: "pending",
             logs: [],
@@ -2996,21 +3369,96 @@ app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, nex
           await reportCollection.insertOne(reportDoc);
           const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
           await reportQueueClient.sendMessage(messageContent);
-          created.push({ reportId, requestId: run._id, templateId: template.id });
+
+          created.push({ id: reportId, requestId, templateId: template.id, status: "pending" });
+          console.log(`Trigger matched template '${template.id}' — created report ${reportId} for run ${requestId}`);
         }
       }
+
+      console.log(`Trigger evaluation for run ${requestId}: ${created.length}/${templates.length} templates matched`);
+      res.status(201).json({ triggered: created.length, reports: created });
+    } catch (error) {
+      next(error);
     }
+  },
+});
 
-    console.log(`Bulk trigger: created ${created.length} reports for ${runs.length} runs`);
+// POST /api/v1/reports/bulk-trigger — evaluate report templates for multiple runs at once
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/bulk-trigger",
+  tags: ["Reports"],
+  summary: "Bulk trigger reports",
+  body: BulkTriggerReportsInputSchema,
+  response: z.array(z.object({}).passthrough()),
+  successStatus: 201,
+  errorResponses: {
+    400: { description: "Invalid input" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestIds } = req.body as { requestIds?: string[] };
 
-    res.status(201).json({
-      created: created.length,
-      reports: created,
-      notFound,
-    });
-  } catch (error) {
-    next(error);
-  }
+      if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+        res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+        return;
+      }
+
+      // Fetch runs
+      const runs = await collection.find({ _id: { $in: requestIds } as any }).toArray();
+      const foundIds = new Set(runs.map(r => r._id));
+      const notFound = requestIds.filter(id => !foundIds.has(id));
+
+      // Load all active templates
+      const templates = await reportTemplateCollection
+        .find({ deletedAt: { $exists: false } })
+        .toArray();
+
+      const created: Array<{ reportId: string; requestId: string; templateId: string }> = [];
+
+      for (const run of runs) {
+        // Fetch task prompt for trigger evaluation
+        let taskPrompt: TaskPromptDocument | null = null;
+        if (run.taskPromptId) {
+          taskPrompt = await taskPromptCollection.findOne({ _id: run.taskPromptId });
+        }
+
+        for (const template of templates) {
+          const triggerResult = evaluateTrigger(
+            template.trigger as any,
+            run as any,
+            taskPrompt as any
+          );
+
+          if (triggerResult) {
+            const reportId = uuidv4();
+            const reportDoc: ReportDocument = {
+              _id: reportId,
+              requestId: run._id,
+              templateId: template.id,
+              status: "pending",
+              logs: [],
+              createdAt: new Date(),
+            };
+            await reportCollection.insertOne(reportDoc);
+            const messageContent = Buffer.from(JSON.stringify({ reportId })).toString("base64");
+            await reportQueueClient.sendMessage(messageContent);
+            created.push({ reportId, requestId: run._id, templateId: template.id });
+          }
+        }
+      }
+
+      console.log(`Bulk trigger: created ${created.length} reports for ${runs.length} runs`);
+
+      res.status(201).json({
+        created: created.length,
+        reports: created,
+        notFound,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // ============================================================
@@ -3018,164 +3466,109 @@ app.post("/api/v1/reports/bulk-trigger", async (req: Request, res: Response, nex
 // ============================================================
 
 // Get the default system prompt used when no template override is set
-app.get("/api/v1/report-templates/default-system-prompt", (_req: Request, res: Response) => {
-  res.json({ content: REPORT_SYSTEM_PROMPT });
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/report-templates/default-system-prompt",
+  tags: ["Report Templates"],
+  summary: "Get default system prompt",
+  response: z.object({ content: z.string() }),
+  handler: (_req, res) => {
+    res.json({ content: REPORT_SYSTEM_PROMPT });
+  },
 });
 
 // List all report templates
-app.get("/api/v1/report-templates", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const q = req.query.q as string | undefined;
-    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
-    if (q) {
-      filter.$or = [
-        { id: { $regex: q, $options: "i" } },
-        { name: { $regex: q, $options: "i" } },
-        { description: { $regex: q, $options: "i" } },
-      ];
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/report-templates",
+  tags: ["Report Templates"],
+  summary: "List report templates",
+  query: z.object({ q: z.string().optional() }),
+  response: z.array(ReportTemplateResponseSchema),
+  handler: async (req, res, next) => {
+    try {
+      const q = req.query.q as string | undefined;
+      const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+      if (q) {
+        filter.$or = [
+          { id: { $regex: q, $options: "i" } },
+          { name: { $regex: q, $options: "i" } },
+          { description: { $regex: q, $options: "i" } },
+        ];
+      }
+      const templates = await reportTemplateCollection.find(filter).toArray();
+      templates.sort((a, b) => a.id.localeCompare(b.id));
+      res.json(templates);
+    } catch (error) {
+      next(error);
     }
-    const templates = await reportTemplateCollection.find(filter).toArray();
-    templates.sort((a, b) => a.id.localeCompare(b.id));
-    res.json(templates);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Get single report template by ID
-app.get("/api/v1/report-templates/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const template = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
-    if (!template) {
-      res.status(404).json({ error: `Report template '${id}' not found` });
-      return;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/report-templates/:id",
+  tags: ["Report Templates"],
+  summary: "Get report template",
+  params: z.object({ id: z.string() }),
+  response: ReportTemplateResponseSchema,
+  errorResponses: {
+    404: { description: "Report template not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const template = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+      if (!template) {
+        res.status(404).json({ error: `Report template '${id}' not found` });
+        return;
+      }
+      res.json(template);
+    } catch (error) {
+      next(error);
     }
-    res.json(template);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Create a report template
-app.post("/api/v1/report-templates", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id, name, description, userPrompt, systemPrompt, trigger } = req.body;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/report-templates",
+  tags: ["Report Templates"],
+  summary: "Create report template",
+  body: CreateReportTemplateInputSchema,
+  response: ReportTemplateResponseSchema,
+  errorResponses: {
+    409: { description: "Report template already exists" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id, name, description, userPrompt, systemPrompt, trigger } = req.body;
 
-    if (!id || typeof id !== "string") {
-      res.status(400).json({ error: "id is required and must be a string" });
-      return;
-    }
-    if (!/^[a-z][a-z0-9_-]*$/.test(id)) {
-      res.status(400).json({ error: "id must start with a lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores" });
-      return;
-    }
-    if (!name || typeof name !== "string") {
-      res.status(400).json({ error: "name is required and must be a string" });
-      return;
-    }
-    if (!userPrompt || typeof userPrompt !== "string") {
-      res.status(400).json({ error: "userPrompt is required and must be a string" });
-      return;
-    }
-
-    // Validate systemPrompt if provided
-    if (systemPrompt !== undefined) {
-      if (!systemPrompt || typeof systemPrompt !== "object") {
-        res.status(400).json({ error: "systemPrompt must be an object with 'mode' and 'content'" });
+      if (!id || typeof id !== "string") {
+        res.status(400).json({ error: "id is required and must be a string" });
         return;
       }
-      if (!["append", "override"].includes(systemPrompt.mode)) {
-        res.status(400).json({ error: "systemPrompt.mode must be 'append' or 'override'" });
+      if (!/^[a-z][a-z0-9_-]*$/.test(id)) {
+        res.status(400).json({ error: "id must start with a lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores" });
         return;
       }
-      if (!systemPrompt.content || typeof systemPrompt.content !== "string") {
-        res.status(400).json({ error: "systemPrompt.content is required and must be a string" });
+      if (!name || typeof name !== "string") {
+        res.status(400).json({ error: "name is required and must be a string" });
         return;
       }
-    }
-
-    // Validate trigger if provided
-    if (trigger !== undefined) {
-      const triggerError = validateTrigger(trigger);
-      if (triggerError) {
-        res.status(400).json({ error: triggerError });
+      if (!userPrompt || typeof userPrompt !== "string") {
+        res.status(400).json({ error: "userPrompt is required and must be a string" });
         return;
       }
-    }
 
-    // Check for duplicate id
-    const existing = await reportTemplateCollection.findOne({ id });
-    if (existing && !existing.deletedAt) {
-      res.status(409).json({ error: `Report template '${id}' already exists` });
-      return;
-    }
-
-    const now = new Date();
-
-    if (existing && existing.deletedAt) {
-      // Un-delete: update the soft-deleted document
-      await reportTemplateCollection.updateOne(
-        { id },
-        {
-          $set: {
-            name,
-            ...(description !== undefined ? { description } : {}),
-            userPrompt,
-            ...(systemPrompt !== undefined ? { systemPrompt } : {}),
-            ...(trigger !== undefined ? { trigger } : {}),
-            updatedAt: now,
-          },
-          $unset: { deletedAt: "" },
+      // Validate systemPrompt if provided
+      if (systemPrompt !== undefined) {
+        if (!systemPrompt || typeof systemPrompt !== "object") {
+          res.status(400).json({ error: "systemPrompt must be an object with 'mode' and 'content'" });
+          return;
         }
-      );
-      const updated = await reportTemplateCollection.findOne({ id });
-      res.status(201).json(updated);
-    } else {
-      const templateDoc: ReportTemplateDocument = {
-        id,
-        name,
-        ...(description ? { description } : {}),
-        userPrompt,
-        ...(systemPrompt ? { systemPrompt } : {}),
-        ...(trigger ? { trigger } : {}),
-        createdAt: now,
-      };
-      await reportTemplateCollection.insertOne(templateDoc as any);
-      res.status(201).json(templateDoc);
-    }
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Update a report template
-app.put("/api/v1/report-templates/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const { name, description, userPrompt, systemPrompt, trigger } = req.body;
-
-    const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: `Report template '${id}' not found` });
-      return;
-    }
-
-    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-    if (name !== undefined) updateFields.name = name;
-    if (description !== undefined) updateFields.description = description;
-    if (userPrompt !== undefined) {
-      if (typeof userPrompt !== "string" || !userPrompt.trim()) {
-        res.status(400).json({ error: "userPrompt must be a non-empty string" });
-        return;
-      }
-      updateFields.userPrompt = userPrompt;
-    }
-    if (systemPrompt !== undefined) {
-      if (systemPrompt === null) {
-        // Allow removing systemPrompt by setting to null
-        updateFields.systemPrompt = undefined;
-      } else {
         if (!["append", "override"].includes(systemPrompt.mode)) {
           res.status(400).json({ error: "systemPrompt.mode must be 'append' or 'override'" });
           return;
@@ -3184,51 +3577,167 @@ app.put("/api/v1/report-templates/:id", async (req: Request, res: Response, next
           res.status(400).json({ error: "systemPrompt.content is required and must be a string" });
           return;
         }
-        updateFields.systemPrompt = systemPrompt;
       }
-    }
-    if (trigger !== undefined) {
-      if (trigger === null) {
-        // Allow removing trigger (reverts to "always" behavior)
-        updateFields.trigger = undefined;
-      } else {
+
+      // Validate trigger if provided
+      if (trigger !== undefined) {
         const triggerError = validateTrigger(trigger);
         if (triggerError) {
           res.status(400).json({ error: triggerError });
           return;
         }
-        updateFields.trigger = trigger;
       }
-    }
 
-    await reportTemplateCollection.updateOne({ id }, { $set: updateFields });
-    const updated = await reportTemplateCollection.findOne({ id });
-    res.json(updated);
-  } catch (error) {
-    next(error);
-  }
+      // Check for duplicate id
+      const existing = await reportTemplateCollection.findOne({ id });
+      if (existing && !existing.deletedAt) {
+        res.status(409).json({ error: `Report template '${id}' already exists` });
+        return;
+      }
+
+      const now = new Date();
+
+      if (existing && existing.deletedAt) {
+        // Un-delete: update the soft-deleted document
+        await reportTemplateCollection.updateOne(
+          { id },
+          {
+            $set: {
+              name,
+              ...(description !== undefined ? { description } : {}),
+              userPrompt,
+              ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+              ...(trigger !== undefined ? { trigger } : {}),
+              updatedAt: now,
+            },
+            $unset: { deletedAt: "" },
+          }
+        );
+        const updated = await reportTemplateCollection.findOne({ id });
+        res.status(201).json(updated);
+      } else {
+        const templateDoc: ReportTemplateDocument = {
+          id,
+          name,
+          ...(description ? { description } : {}),
+          userPrompt,
+          ...(systemPrompt ? { systemPrompt } : {}),
+          ...(trigger ? { trigger } : {}),
+          createdAt: now,
+        };
+        await reportTemplateCollection.insertOne(templateDoc as any);
+        res.status(201).json(templateDoc);
+      }
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// Update a report template
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/report-templates/:id",
+  tags: ["Report Templates"],
+  summary: "Update report template",
+  params: z.object({ id: z.string() }),
+  body: UpdateReportTemplateInputSchema,
+  response: ReportTemplateResponseSchema,
+  errorResponses: {
+    404: { description: "Report template not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { name, description, userPrompt, systemPrompt, trigger } = req.body;
+
+      const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: `Report template '${id}' not found` });
+        return;
+      }
+
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+      if (name !== undefined) updateFields.name = name;
+      if (description !== undefined) updateFields.description = description;
+      if (userPrompt !== undefined) {
+        if (typeof userPrompt !== "string" || !userPrompt.trim()) {
+          res.status(400).json({ error: "userPrompt must be a non-empty string" });
+          return;
+        }
+        updateFields.userPrompt = userPrompt;
+      }
+      if (systemPrompt !== undefined) {
+        if (systemPrompt === null) {
+          // Allow removing systemPrompt by setting to null
+          updateFields.systemPrompt = undefined;
+        } else {
+          if (!["append", "override"].includes(systemPrompt.mode)) {
+            res.status(400).json({ error: "systemPrompt.mode must be 'append' or 'override'" });
+            return;
+          }
+          if (!systemPrompt.content || typeof systemPrompt.content !== "string") {
+            res.status(400).json({ error: "systemPrompt.content is required and must be a string" });
+            return;
+          }
+          updateFields.systemPrompt = systemPrompt;
+        }
+      }
+      if (trigger !== undefined) {
+        if (trigger === null) {
+          // Allow removing trigger (reverts to "always" behavior)
+          updateFields.trigger = undefined;
+        } else {
+          const triggerError = validateTrigger(trigger);
+          if (triggerError) {
+            res.status(400).json({ error: triggerError });
+            return;
+          }
+          updateFields.trigger = trigger;
+        }
+      }
+
+      await reportTemplateCollection.updateOne({ id }, { $set: updateFields });
+      const updated = await reportTemplateCollection.findOne({ id });
+      res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Delete a report template (soft-delete)
-app.delete("/api/v1/report-templates/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/report-templates/:id",
+  tags: ["Report Templates"],
+  summary: "Delete report template",
+  params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }),
+  successStatus: 204,
+  errorResponses: {
+    404: { description: "Report template not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
 
-    const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: `Report template '${id}' not found` });
-      return;
+      const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: `Report template '${id}' not found` });
+        return;
+      }
+
+      await reportTemplateCollection.updateOne(
+        { id },
+        { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+      );
+
+      res.status(204).send();
+    } catch (error) {
+      next(error);
     }
-
-    await reportTemplateCollection.updateOne(
-      { id },
-      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
-    );
-
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 /**
@@ -3333,321 +3842,413 @@ if (TOKEN_MANAGER_URL) {
 }
 
 // =============================================
-// Coding Agents CRUD
+// Coding Agents CRUD (apiRoute)
 // =============================================
 
 // List all agents
-app.get("/api/v1/agents", async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const agents = await agentCollection
-      .find({ deletedAt: { $exists: false } })
-      .toArray();
-    // Sort in JS for CosmosDB compatibility
-    agents.sort((a, b) => a._id.localeCompare(b._id));
-    res.json(agents.map((a) => ({ ...a, id: a._id })));
-  } catch (error) {
-    next(error);
-  }
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/agents",
+  tags: ["Agents"],
+  summary: "List agents",
+  response: z.array(AgentResponseSchema),
+  handler: async (_req, res, next) => {
+    try {
+      const agents = await agentCollection
+        .find({ deletedAt: { $exists: false } })
+        .toArray();
+      // Sort in JS for CosmosDB compatibility
+      agents.sort((a, b) => a._id.localeCompare(b._id));
+      res.json(agents.map((a) => ({ ...a, id: a._id })));
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Get a single agent
-app.get("/api/v1/agents/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!agent) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/agents/:id",
+  tags: ["Agents"],
+  summary: "Get agent",
+  params: z.object({ id: z.string() }),
+  response: AgentResponseSchema,
+  errorResponses: {
+    404: { description: "Agent not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!agent) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+      res.json({ ...agent, id: agent._id });
+    } catch (error) {
+      next(error);
     }
-    res.json({ ...agent, id: agent._id });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Create or upsert an agent (idempotent — used by seed jobs)
-app.post("/api/v1/agents", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { _id, name, description, supportedModels, defaultModel } = req.body;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/agents",
+  tags: ["Agents"],
+  summary: "Create or update agent (upsert)",
+  body: CreateAgentInputSchema,
+  response: AgentResponseSchema,
+  errorResponses: {
+    400: { description: "Validation error" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { _id, name, description, supportedModels, defaultModel } = req.body;
 
-    if (!_id || typeof _id !== "string") {
-      res.status(400).json({ error: "_id is required and must be a string" });
-      return;
-    }
-    if (!name || typeof name !== "string") {
-      res.status(400).json({ error: "name is required and must be a string" });
-      return;
-    }
-    // supportedModels is optional — if provided, must be a string array
-    if (supportedModels !== undefined && (!Array.isArray(supportedModels) || !supportedModels.every((m: unknown) => typeof m === "string"))) {
-      res.status(400).json({ error: "supportedModels must be an array of strings" });
-      return;
-    }
-    if (defaultModel !== undefined && typeof defaultModel !== "string") {
-      res.status(400).json({ error: "defaultModel must be a string" });
-      return;
-    }
-    if (defaultModel && supportedModels && supportedModels.length > 0 && !supportedModels.includes(defaultModel)) {
-      res.status(400).json({ error: "defaultModel must be one of supportedModels" });
-      return;
-    }
-
-    const now = new Date();
-    const existing = await agentCollection.findOne({ _id });
-
-    if (existing) {
-      // Upsert: update existing (un-delete if soft-deleted)
-      // Only update supportedModels if explicitly provided — prevents registration
-      // jobs from wiping models set by the scanner
-      const effectiveModels = supportedModels ?? existing.supportedModels;
-      await agentCollection.updateOne(
-        { _id },
-        {
-          $set: {
-            name,
-            ...(description !== undefined ? { description } : {}),
-            ...(supportedModels !== undefined ? { supportedModels } : {}),
-            ...(defaultModel !== undefined ? { defaultModel } : {}),
-            updatedAt: now,
-          },
-          $unset: { deletedAt: "" },
-        }
-      );
-      const updated = await agentCollection.findOne({ _id });
-      res.json({ ...updated, id: updated!._id });
-    } else {
-      // Create new — default to empty supportedModels if not provided
-      const agentDoc: CodingAgentDocument = {
-        _id,
-        name,
-        ...(description ? { description } : {}),
-        supportedModels: supportedModels ?? [],
-        ...(defaultModel ? { defaultModel } : {}),
-        createdAt: now,
-      };
-      await agentCollection.insertOne(agentDoc);
-      res.status(201).json({ ...agentDoc, id: agentDoc._id });
-    }
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Update an agent
-app.put("/api/v1/agents/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const { name, description, supportedModels, defaultModel } = req.body;
-
-    const existing = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
-
-    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-    if (name !== undefined) updateFields.name = name;
-    if (description !== undefined) updateFields.description = description;
-    if (supportedModels !== undefined) {
-      if (!Array.isArray(supportedModels) || !supportedModels.every((m: unknown) => typeof m === "string")) {
+      if (!_id || typeof _id !== "string") {
+        res.status(400).json({ error: "_id is required and must be a string" });
+        return;
+      }
+      if (!name || typeof name !== "string") {
+        res.status(400).json({ error: "name is required and must be a string" });
+        return;
+      }
+      // supportedModels is optional — if provided, must be a string array
+      if (supportedModels !== undefined && (!Array.isArray(supportedModels) || !supportedModels.every((m: unknown) => typeof m === "string"))) {
         res.status(400).json({ error: "supportedModels must be an array of strings" });
         return;
       }
-      updateFields.supportedModels = supportedModels;
-    }
-    if (defaultModel !== undefined) {
-      const models = (supportedModels as string[] | undefined) || existing.supportedModels;
-      if (defaultModel && models.length > 0 && !models.includes(defaultModel)) {
+      if (defaultModel !== undefined && typeof defaultModel !== "string") {
+        res.status(400).json({ error: "defaultModel must be a string" });
+        return;
+      }
+      if (defaultModel && supportedModels && supportedModels.length > 0 && !supportedModels.includes(defaultModel)) {
         res.status(400).json({ error: "defaultModel must be one of supportedModels" });
         return;
       }
-      updateFields.defaultModel = defaultModel;
+
+      const now = new Date();
+      const existing = await agentCollection.findOne({ _id });
+
+      if (existing) {
+        // Upsert: update existing (un-delete if soft-deleted)
+        // Only update supportedModels if explicitly provided — prevents registration
+        // jobs from wiping models set by the scanner
+        const effectiveModels = supportedModels ?? existing.supportedModels;
+        await agentCollection.updateOne(
+          { _id },
+          {
+            $set: {
+              name,
+              ...(description !== undefined ? { description } : {}),
+              ...(supportedModels !== undefined ? { supportedModels } : {}),
+              ...(defaultModel !== undefined ? { defaultModel } : {}),
+              updatedAt: now,
+            },
+            $unset: { deletedAt: "" },
+          }
+        );
+        const updated = await agentCollection.findOne({ _id });
+        res.json({ ...updated, id: updated!._id });
+      } else {
+        // Create new — default to empty supportedModels if not provided
+        const agentDoc: CodingAgentDocument = {
+          _id,
+          name,
+          ...(description ? { description } : {}),
+          supportedModels: supportedModels ?? [],
+          ...(defaultModel ? { defaultModel } : {}),
+          createdAt: now,
+        };
+        await agentCollection.insertOne(agentDoc);
+        res.status(201).json({ ...agentDoc, id: agentDoc._id });
+      }
+    } catch (error) {
+      next(error);
     }
+  },
+});
 
-    await agentCollection.updateOne({ _id: id }, { $set: updateFields });
+// Update an agent
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/agents/:id",
+  tags: ["Agents"],
+  summary: "Update agent",
+  params: z.object({ id: z.string() }),
+  body: UpdateAgentInputSchema,
+  response: AgentResponseSchema,
+  errorResponses: {
+    400: { description: "Validation error" },
+    404: { description: "Agent not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { name, description, supportedModels, defaultModel } = req.body;
 
-    const updated = await agentCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
-  } catch (error) {
-    next(error);
-  }
+      const existing = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+      if (name !== undefined) updateFields.name = name;
+      if (description !== undefined) updateFields.description = description;
+      if (supportedModels !== undefined) {
+        if (!Array.isArray(supportedModels) || !supportedModels.every((m: unknown) => typeof m === "string")) {
+          res.status(400).json({ error: "supportedModels must be an array of strings" });
+          return;
+        }
+        updateFields.supportedModels = supportedModels;
+      }
+      if (defaultModel !== undefined) {
+        const models = (supportedModels as string[] | undefined) || existing.supportedModels;
+        if (defaultModel && models.length > 0 && !models.includes(defaultModel)) {
+          res.status(400).json({ error: "defaultModel must be one of supportedModels" });
+          return;
+        }
+        updateFields.defaultModel = defaultModel;
+      }
+
+      await agentCollection.updateOne({ _id: id }, { $set: updateFields });
+
+      const updated = await agentCollection.findOne({ _id: id });
+      res.json({ ...updated, id: updated!._id });
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Soft-delete an agent
-app.delete("/api/v1/agents/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/agents/:id",
+  tags: ["Agents"],
+  summary: "Delete agent",
+  params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }),
+  successStatus: 204,
+  errorResponses: {
+    404: { description: "Agent not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
 
-    const existing = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
+      const existing = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+
+      await agentCollection.updateOne(
+        { _id: id },
+        { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+      );
+
+      res.status(204).send();
+    } catch (error) {
+      next(error);
     }
-
-    await agentCollection.updateOne(
-      { _id: id },
-      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
-    );
-
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // ============================================================
-// Agent Versions routes (/api/v1/agents/:id/versions)
+// Agent Versions routes (/api/v1/agents/:id/versions) (apiRoute)
 // ============================================================
 
 // List versions for an agent (optional ?status=active filter)
-app.get("/api/v1/agents/:id/versions", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.query;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/agents/:id/versions",
+  tags: ["Agents"],
+  summary: "List agent versions",
+  params: z.object({ id: z.string() }),
+  query: z.object({ status: z.string().optional() }),
+  response: z.array(AgentVersionSchema),
+  errorResponses: {
+    404: { description: "Agent not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.query;
 
-    const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!agent) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
+      const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!agent) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+
+      let versions = agent.versions ?? [];
+      if (status && typeof status === "string") {
+        versions = versions.filter((v) => v.status === status);
+      }
+
+      res.json(versions);
+    } catch (error) {
+      next(error);
     }
-
-    let versions = agent.versions ?? [];
-    if (status && typeof status === "string") {
-      versions = versions.filter((v) => v.status === status);
-    }
-
-    res.json(versions);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Register/upsert an agent version (keyed by agentVersion)
-app.post("/api/v1/agents/:id/versions", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const { agentVersion, workerVersion, components, gitCommit, buildTime, imageTag, queueName } = req.body;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/agents/:id/versions",
+  tags: ["Agents"],
+  summary: "Register agent version (upsert)",
+  params: z.object({ id: z.string() }),
+  body: RegisterAgentVersionInputSchema,
+  response: AgentVersionSchema,
+  errorResponses: {
+    400: { description: "Validation error" },
+    404: { description: "Agent not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { agentVersion, workerVersion, components, gitCommit, buildTime, imageTag, queueName } = req.body;
 
-    // Validate required fields
-    if (!agentVersion || typeof agentVersion !== "string") {
-      res.status(400).json({ error: "agentVersion is required and must be a string" });
-      return;
-    }
-    if (!workerVersion || typeof workerVersion !== "string") {
-      res.status(400).json({ error: "workerVersion is required and must be a string" });
-      return;
-    }
-    if (!components || typeof components !== "object" || Array.isArray(components)) {
-      res.status(400).json({ error: "components is required and must be an object" });
-      return;
-    }
-    if (!gitCommit || typeof gitCommit !== "string") {
-      res.status(400).json({ error: "gitCommit is required and must be a string" });
-      return;
-    }
-    if (!buildTime || typeof buildTime !== "string") {
-      res.status(400).json({ error: "buildTime is required and must be a string" });
-      return;
-    }
-    if (!imageTag || typeof imageTag !== "string") {
-      res.status(400).json({ error: "imageTag is required and must be a string" });
-      return;
-    }
-    if (!queueName || typeof queueName !== "string") {
-      res.status(400).json({ error: "queueName is required and must be a string" });
-      return;
-    }
+      // Validate required fields
+      if (!agentVersion || typeof agentVersion !== "string") {
+        res.status(400).json({ error: "agentVersion is required and must be a string" });
+        return;
+      }
+      if (!workerVersion || typeof workerVersion !== "string") {
+        res.status(400).json({ error: "workerVersion is required and must be a string" });
+        return;
+      }
+      if (!components || typeof components !== "object" || Array.isArray(components)) {
+        res.status(400).json({ error: "components is required and must be an object" });
+        return;
+      }
+      if (!gitCommit || typeof gitCommit !== "string") {
+        res.status(400).json({ error: "gitCommit is required and must be a string" });
+        return;
+      }
+      if (!buildTime || typeof buildTime !== "string") {
+        res.status(400).json({ error: "buildTime is required and must be a string" });
+        return;
+      }
+      if (!imageTag || typeof imageTag !== "string") {
+        res.status(400).json({ error: "imageTag is required and must be a string" });
+        return;
+      }
+      if (!queueName || typeof queueName !== "string") {
+        res.status(400).json({ error: "queueName is required and must be a string" });
+        return;
+      }
 
-    const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!agent) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
+      const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!agent) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+
+      const now = new Date();
+      const versionEntry: AgentVersion = {
+        agentVersion,
+        workerVersion,
+        components,
+        gitCommit,
+        buildTime,
+        imageTag,
+        queueName,
+        status: "active",
+        createdAt: now,
+      };
+
+      // Upsert: update existing entry with same agentVersion or push new
+      const existing = (agent.versions ?? []).find((v) => v.agentVersion === agentVersion);
+      if (existing) {
+        await agentCollection.updateOne(
+          { _id: id, "versions.agentVersion": agentVersion },
+          {
+            $set: {
+              "versions.$.workerVersion": workerVersion,
+              "versions.$.components": components,
+              "versions.$.gitCommit": gitCommit,
+              "versions.$.buildTime": buildTime,
+              "versions.$.imageTag": imageTag,
+              "versions.$.queueName": queueName,
+              "versions.$.status": "active",
+              updatedAt: now,
+            },
+          }
+        );
+      } else {
+        await agentCollection.updateOne(
+          { _id: id },
+          {
+            $push: { versions: versionEntry },
+            $set: { updatedAt: now },
+          }
+        );
+      }
+
+      res.status(existing ? 200 : 201).json(versionEntry);
+    } catch (error) {
+      next(error);
     }
+  },
+});
 
-    const now = new Date();
-    const versionEntry: AgentVersion = {
-      agentVersion,
-      workerVersion,
-      components,
-      gitCommit,
-      buildTime,
-      imageTag,
-      queueName,
-      status: "active",
-      createdAt: now,
-    };
+// Update an agent version's status (e.g. retire)
+apiRoute(app, registry, {
+  method: "patch",
+  path: "/api/v1/agents/:id/versions/:agentVersion",
+  tags: ["Agents"],
+  summary: "Patch agent version",
+  params: z.object({ id: z.string(), agentVersion: z.string() }),
+  body: PatchAgentVersionInputSchema,
+  response: AgentVersionSchema,
+  errorResponses: {
+    400: { description: "Invalid status value" },
+    404: { description: "Agent or version not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id, agentVersion } = req.params;
+      const { status } = req.body;
 
-    // Upsert: update existing entry with same agentVersion or push new
-    const existing = (agent.versions ?? []).find((v) => v.agentVersion === agentVersion);
-    if (existing) {
+      if (!status || !(["active", "retired"] as string[]).includes(status)) {
+        res.status(400).json({ error: "status must be 'active' or 'retired'" });
+        return;
+      }
+
+      const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!agent) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+
+      const version = (agent.versions ?? []).find((v) => v.agentVersion === agentVersion);
+      if (!version) {
+        res.status(404).json({ error: "Version not found" });
+        return;
+      }
+
       await agentCollection.updateOne(
         { _id: id, "versions.agentVersion": agentVersion },
         {
           $set: {
-            "versions.$.workerVersion": workerVersion,
-            "versions.$.components": components,
-            "versions.$.gitCommit": gitCommit,
-            "versions.$.buildTime": buildTime,
-            "versions.$.imageTag": imageTag,
-            "versions.$.queueName": queueName,
-            "versions.$.status": "active",
-            updatedAt: now,
+            "versions.$.status": status,
+            updatedAt: new Date(),
           },
         }
       );
-    } else {
-      await agentCollection.updateOne(
-        { _id: id },
-        {
-          $push: { versions: versionEntry },
-          $set: { updatedAt: now },
-        }
-      );
+
+      res.json({ ...version, status });
+    } catch (error) {
+      next(error);
     }
-
-    res.status(existing ? 200 : 201).json(versionEntry);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Update an agent version's status (e.g. retire)
-app.patch("/api/v1/agents/:id/versions/:agentVersion", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id, agentVersion } = req.params;
-    const { status } = req.body;
-
-    if (!status || !(["active", "retired"] as string[]).includes(status)) {
-      res.status(400).json({ error: "status must be 'active' or 'retired'" });
-      return;
-    }
-
-    const agent = await agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!agent) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
-
-    const version = (agent.versions ?? []).find((v) => v.agentVersion === agentVersion);
-    if (!version) {
-      res.status(404).json({ error: "Version not found" });
-      return;
-    }
-
-    await agentCollection.updateOne(
-      { _id: id, "versions.agentVersion": agentVersion },
-      {
-        $set: {
-          "versions.$.status": status,
-          updatedAt: new Date(),
-        },
-      }
-    );
-
-    res.json({ ...version, status });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // ============================================================
@@ -4008,262 +4609,332 @@ apiRoute(app, registry, {
 // =====================================================================
 
 // List all skills (with optional ?q= text search)
-app.get("/api/v1/skills", async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const skills = await skillCollection
-      .find({ deletedAt: { $exists: false } })
-      .toArray();
-    skills.sort((a, b) => a._id.localeCompare(b._id));
-    res.json(skills.map((s) => ({ ...s, id: s._id })));
-  } catch (error) {
-    next(error);
-  }
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skills",
+  tags: ["Skills"],
+  summary: "List all skills",
+  response: z.array(SkillResponseSchema),
+  handler: async (_req, res, next) => {
+    try {
+      const skills = await skillCollection
+        .find({ deletedAt: { $exists: false } })
+        .toArray();
+      skills.sort((a, b) => a._id.localeCompare(b._id));
+      res.json(skills.map((s) => ({ ...s, id: s._id })));
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Unified skill search — merges internal DB + skills.sh results
 // MUST be defined before /:id(*) to avoid being caught by the wildcard
-app.get("/api/v1/skills/search", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { q, limit: limitStr } = req.query;
-
-    if (!q || typeof q !== "string" || !q.trim()) {
-      res.status(400).json({ error: "Query parameter 'q' is required" });
-      return;
-    }
-
-    const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
-    const query = q.trim();
-
-    // Search internal DB (case-insensitive regex)
-    const regex = { $regex: query, $options: "i" };
-    const internalSkills = await skillCollection
-      .find({
-        deletedAt: { $exists: false },
-        $or: [
-          { name: regex },
-          { skillName: regex },
-          { description: regex },
-        ],
-      })
-      .limit(limit)
-      .toArray();
-
-    const internalResults: SkillSearchResult[] = internalSkills.map((s) => ({
-      id: s._id,
-      name: s.name,
-      source: s.source,
-      description: s.description,
-      internal: true,
-    }));
-
-    // Also track internal slugs to deduplicate
-    const internalSlugs = new Set(internalSkills.map((s) => s._id));
-
-    // Search skills.sh (external registry)
-    let externalResults: SkillSearchResult[] = [];
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skills/search",
+  tags: ["Skills"],
+  summary: "Search skills (internal + external)",
+  query: z.object({ q: z.string(), limit: z.string().optional() }),
+  response: z.array(SkillSearchResultSchema),
+  errorResponses: {
+    400: { description: "Missing query parameter" },
+  },
+  handler: async (req, res, next) => {
     try {
-      const skillsShUrl = `https://skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`;
-      const externalRes = await fetch(skillsShUrl, {
-        headers: { "User-Agent": "scope-mt-api" },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (externalRes.ok) {
-        const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string }> };
-        if (data.skills && Array.isArray(data.skills)) {
-          externalResults = data.skills
-            .filter((s) => !internalSlugs.has(s.id))
-            .map((s) => ({
-              id: s.id,
-              name: s.name,
-              source: s.source ?? s.id.split("/").slice(0, 2).join("/"),
-              internal: false,
-              installs: s.installs,
-            }));
-        }
-      }
-    } catch {
-      // skills.sh is optional — don't fail the request if it's down
-      console.warn("skills.sh search failed, returning only internal results");
-    }
+      const { q, limit: limitStr } = req.query;
 
-    // Merge: internal first, then external
-    const results = [...internalResults, ...externalResults].slice(0, limit);
-    res.json(results);
-  } catch (error) {
-    next(error);
-  }
+      if (!q || typeof q !== "string" || !q.trim()) {
+        res.status(400).json({ error: "Query parameter 'q' is required" });
+        return;
+      }
+
+      const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
+      const query = q.trim();
+
+      // Search internal DB (case-insensitive regex)
+      const regex = { $regex: query, $options: "i" };
+      const internalSkills = await skillCollection
+        .find({
+          deletedAt: { $exists: false },
+          $or: [
+            { name: regex },
+            { skillName: regex },
+            { description: regex },
+          ],
+        })
+        .limit(limit)
+        .toArray();
+
+      const internalResults: SkillSearchResult[] = internalSkills.map((s) => ({
+        id: s._id,
+        name: s.name,
+        source: s.source,
+        description: s.description,
+        internal: true,
+      }));
+
+      // Also track internal slugs to deduplicate
+      const internalSlugs = new Set(internalSkills.map((s) => s._id));
+
+      // Search skills.sh (external registry)
+      let externalResults: SkillSearchResult[] = [];
+      try {
+        const skillsShUrl = `https://skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+        const externalRes = await fetch(skillsShUrl, {
+          headers: { "User-Agent": "scope-mt-api" },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (externalRes.ok) {
+          const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string }> };
+          if (data.skills && Array.isArray(data.skills)) {
+            externalResults = data.skills
+              .filter((s) => !internalSlugs.has(s.id))
+              .map((s) => ({
+                id: s.id,
+                name: s.name,
+                source: s.source ?? s.id.split("/").slice(0, 2).join("/"),
+                internal: false,
+                installs: s.installs,
+              }));
+          }
+        }
+      } catch {
+        // skills.sh is optional — don't fail the request if it's down
+        console.warn("skills.sh search failed, returning only internal results");
+      }
+
+      // Merge: internal first, then external
+      const results = [...internalResults, ...externalResults].slice(0, limit);
+      res.json(results);
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Search external skills registry only (skills.sh)
-app.get("/api/v1/skills/search/external", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { q, limit: limitStr } = req.query;
-
-    if (!q || typeof q !== "string" || !q.trim()) {
-      res.status(400).json({ error: "Query parameter 'q' is required" });
-      return;
-    }
-
-    const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
-    const query = q.trim();
-
-    let externalResults: SkillSearchResult[] = [];
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skills/search/external",
+  tags: ["Skills"],
+  summary: "Search external skills registry",
+  query: z.object({ q: z.string(), limit: z.string().optional() }),
+  response: z.array(SkillSearchResultSchema),
+  errorResponses: {
+    400: { description: "Missing query parameter" },
+  },
+  handler: async (req, res, next) => {
     try {
-      const skillsShUrl = `https://skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`;
-      const externalRes = await fetch(skillsShUrl, {
-        headers: { "User-Agent": "scope-mt-api" },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (externalRes.ok) {
-        const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string; description?: string }> };
-        if (data.skills && Array.isArray(data.skills)) {
-          // Deduplicate against internal skills
-          const internalSlugs = new Set(
-            (await skillCollection.find({ deletedAt: { $exists: false } }, { projection: { _id: 1 } }).toArray()).map((s) => s._id)
-          );
-          externalResults = data.skills
-            .filter((s) => !internalSlugs.has(s.id))
-            .map((s) => ({
-              id: s.id,
-              name: s.name,
-              source: s.source ?? s.id.split("/").slice(0, 2).join("/"),
-              description: s.description,
-              internal: false,
-              installs: s.installs,
-            }));
-        }
-      }
-    } catch {
-      console.warn("skills.sh search failed");
-    }
+      const { q, limit: limitStr } = req.query;
 
-    res.json(externalResults.slice(0, limit));
-  } catch (error) {
-    next(error);
-  }
+      if (!q || typeof q !== "string" || !q.trim()) {
+        res.status(400).json({ error: "Query parameter 'q' is required" });
+        return;
+      }
+
+      const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
+      const query = q.trim();
+
+      let externalResults: SkillSearchResult[] = [];
+      try {
+        const skillsShUrl = `https://skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+        const externalRes = await fetch(skillsShUrl, {
+          headers: { "User-Agent": "scope-mt-api" },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (externalRes.ok) {
+          const data = await externalRes.json() as { skills?: Array<{ id: string; name: string; installs?: number; source?: string; description?: string }> };
+          if (data.skills && Array.isArray(data.skills)) {
+            // Deduplicate against internal skills
+            const internalSlugs = new Set(
+              (await skillCollection.find({ deletedAt: { $exists: false } }, { projection: { _id: 1 } }).toArray()).map((s) => s._id)
+            );
+            externalResults = data.skills
+              .filter((s) => !internalSlugs.has(s.id))
+              .map((s) => ({
+                id: s.id,
+                name: s.name,
+                source: s.source ?? s.id.split("/").slice(0, 2).join("/"),
+                description: s.description,
+                internal: false,
+                installs: s.installs,
+              }));
+          }
+        }
+      } catch {
+        console.warn("skills.sh search failed");
+      }
+
+      res.json(externalResults.slice(0, limit));
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // List skill revisions for a given skill slug (source/skillName)
 // NOTE: Must be before the generic GET /:id(*) to avoid the greedy wildcard matching "slug/revisions" as the id.
-app.get("/api/v1/skills/:id(*)/revisions", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = req.params.id ?? req.params[0];
-    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!skill) {
-      res.status(404).json({ error: "Skill not found" });
-      return;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skills/:id(*)/revisions",
+  tags: ["Skills"],
+  summary: "List skill revisions",
+  query: z.object({ limit: z.string().optional() }),
+  response: z.array(SkillRevisionResponseSchema),
+  errorResponses: {
+    404: { description: "Skill not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const id = req.params.id ?? req.params[0];
+      const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!skill) {
+        res.status(404).json({ error: "Skill not found" });
+        return;
+      }
+
+      const limitStr = req.query.limit as string | undefined;
+      const limit = Math.min(Math.max(parseInt(limitStr ?? "20", 10), 1), 100);
+
+      const revisions = await skillRevisionStore.listBySkill(skill.source, skill.skillName, { limit });
+      res.json(revisions);
+    } catch (error) {
+      next(error);
     }
-
-    const limitStr = req.query.limit as string | undefined;
-    const limit = Math.min(Math.max(parseInt(limitStr ?? "20", 10), 1), 100);
-
-    const revisions = await skillRevisionStore.listBySkill(skill.source, skill.skillName, { limit });
-    res.json(revisions);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Get skill by slug (must be after /search and /revisions to avoid wildcard matching)
-app.get("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = req.params.id ?? req.params[0];
-    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!skill) {
-      res.status(404).json({ error: "Skill not found" });
-      return;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skills/:id(*)",
+  tags: ["Skills"],
+  summary: "Get skill by slug",
+  response: SkillResponseSchema,
+  errorResponses: {
+    404: { description: "Skill not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const id = req.params.id ?? req.params[0];
+      const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!skill) {
+        res.status(404).json({ error: "Skill not found" });
+        return;
+      }
+      res.json({ ...skill, id: skill._id });
+    } catch (error) {
+      next(error);
     }
-    res.json({ ...skill, id: skill._id });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Create / import a skill
-app.post("/api/v1/skills", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { source, skillName, name, description, origin } = req.body;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/skills",
+  tags: ["Skills"],
+  summary: "Create or import a skill",
+  body: CreateSkillInputSchema,
+  response: SkillResponseSchema,
+  handler: async (req, res, next) => {
+    try {
+      const { source, skillName, name, description, origin } = req.body;
 
-    if (!source || typeof source !== "string") {
-      res.status(400).json({ error: "source is required and must be a string (GitHub repo, e.g. 'vercel-labs/agent-skills')" });
-      return;
-    }
-    if (!skillName || typeof skillName !== "string") {
-      res.status(400).json({ error: "skillName is required and must be a string" });
-      return;
-    }
-    if (!name || typeof name !== "string") {
-      res.status(400).json({ error: "name is required and must be a string" });
-      return;
-    }
-    if (origin !== undefined && origin !== "skills-sh" && origin !== "manual") {
-      res.status(400).json({ error: "origin must be 'skills-sh' or 'manual'" });
-      return;
-    }
+      if (!source || typeof source !== "string") {
+        res.status(400).json({ error: "source is required and must be a string (GitHub repo, e.g. 'vercel-labs/agent-skills')" });
+        return;
+      }
+      if (!skillName || typeof skillName !== "string") {
+        res.status(400).json({ error: "skillName is required and must be a string" });
+        return;
+      }
+      if (!name || typeof name !== "string") {
+        res.status(400).json({ error: "name is required and must be a string" });
+        return;
+      }
+      if (origin !== undefined && origin !== "skills-sh" && origin !== "manual") {
+        res.status(400).json({ error: "origin must be 'skills-sh' or 'manual'" });
+        return;
+      }
 
-    const _id = `${source}/${skillName}`;
-    const now = new Date();
-    const existing = await skillCollection.findOne({ _id });
+      const _id = `${source}/${skillName}`;
+      const now = new Date();
+      const existing = await skillCollection.findOne({ _id });
 
-    if (existing) {
-      // Upsert: un-delete if soft-deleted, update fields
-      await skillCollection.updateOne(
-        { _id },
-        {
-          $set: {
-            name,
-            source,
-            skillName,
-            ...(description !== undefined ? { description } : {}),
-            ...(origin ? { origin } : {}),
-            updatedAt: now,
-          },
-          $unset: { deletedAt: "" },
-        }
-      );
-      const updated = await skillCollection.findOne({ _id });
-      res.json({ ...updated, id: updated!._id });
-    } else {
-      const skillDoc: SkillDocument = {
-        _id,
-        source,
-        skillName,
-        name,
-        ...(description ? { description } : {}),
-        origin: origin || "manual",
-        createdAt: now,
-      };
-      await skillCollection.insertOne(skillDoc as any);
-      res.status(201).json({ ...skillDoc, id: skillDoc._id });
+      if (existing) {
+        // Upsert: un-delete if soft-deleted, update fields
+        await skillCollection.updateOne(
+          { _id },
+          {
+            $set: {
+              name,
+              source,
+              skillName,
+              ...(description !== undefined ? { description } : {}),
+              ...(origin ? { origin } : {}),
+              updatedAt: now,
+            },
+            $unset: { deletedAt: "" },
+          }
+        );
+        const updated = await skillCollection.findOne({ _id });
+        res.json({ ...updated, id: updated!._id });
+      } else {
+        const skillDoc: SkillDocument = {
+          _id,
+          source,
+          skillName,
+          name,
+          ...(description ? { description } : {}),
+          origin: origin || "manual",
+          createdAt: now,
+        };
+        await skillCollection.insertOne(skillDoc as any);
+        res.status(201).json({ ...skillDoc, id: skillDoc._id });
+      }
+    } catch (error) {
+      next(error);
     }
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
-// Delete skill (soft-delete)
-app.delete("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = req.params.id ?? req.params[0];
+// Soft-delete a skill
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/skills/:id(*)",
+  tags: ["Skills"],
+  summary: "Soft-delete a skill",
+  response: z.any(),
+  rawResponse: true,
+  successStatus: 204,
+  errorResponses: {
+    404: { description: "Skill not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const id = req.params.id ?? req.params[0];
 
-    const existing = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "Skill not found" });
-      return;
+      const existing = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: "Skill not found" });
+        return;
+      }
+
+      await skillCollection.updateOne(
+        { _id: id },
+        { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+      );
+
+      // Also delete all associated skill revisions
+      await skillRevisionStore.deleteBySkill(existing.source, existing.skillName);
+
+      res.status(204).send();
+    } catch (error) {
+      next(error);
     }
-
-    await skillCollection.updateOne(
-      { _id: id },
-      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
-    );
-
-    // Also delete all associated skill revisions
-    await skillRevisionStore.deleteBySkill(existing.source, existing.skillName);
-
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // =====================================================================
@@ -4271,508 +4942,710 @@ app.delete("/api/v1/skills/:id(*)", async (req: Request, res: Response, next: Ne
 // =====================================================================
 
 // Download skill revision archive (tar.gz) by ref — used by workers to fetch skill files through the API
-app.get("/api/v1/skill-revisions/by-ref/:ref(*)/archive", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const ref = req.params.ref ?? req.params[0];
-    // Strip trailing "/archive" that Express includes in the wildcard match
-    const cleanRef = ref.replace(/\/archive$/, "");
-    const revision = await skillRevisionStore.getByRef(cleanRef);
-    if (!revision) {
-      res.status(404).json({ error: "Skill revision not found" });
-      return;
-    }
-
-    if (!revision.archiveUrl) {
-      res.status(404).json({ error: "Skill revision has no archive" });
-      return;
-    }
-
-    // Parse the blob name from the archiveUrl
-    // archiveUrl format: https://<account>.blob.core.windows.net/skill-archives/<blobName>
-    // or Azurite: http://127.0.0.1:10000/devstoreaccount1/skill-archives/<blobName>
-    const archiveUrlObj = new URL(revision.archiveUrl);
-    const pathParts = archiveUrlObj.pathname.split("/").filter(Boolean);
-    // pathParts: ["skill-archives", "<blobName>"] or ["devstoreaccount1", "skill-archives", "<blobName>"]
-    const containerIdx = pathParts.indexOf("skill-archives");
-    if (containerIdx === -1 || containerIdx >= pathParts.length - 1) {
-      res.status(500).json({ error: "Cannot parse archive blob path" });
-      return;
-    }
-    const blobName = pathParts.slice(containerIdx + 1).join("/");
-
-    let blobServiceClient: BlobServiceClient;
-    if (storageConnectionString) {
-      blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
-    } else if (storageAccountName) {
-      const credential = new DefaultAzureCredential();
-      blobServiceClient = new BlobServiceClient(
-        `https://${storageAccountName}.blob.core.windows.net`,
-        credential
-      );
-    } else {
-      res.status(500).json({ error: "Blob storage not configured" });
-      return;
-    }
-
-    const containerClient = blobServiceClient.getContainerClient("skill-archives");
-    const blobClient = containerClient.getBlobClient(blobName);
-
-    const downloadResponse = await blobClient.download();
-    if (!downloadResponse.readableStreamBody) {
-      res.status(500).json({ error: "Failed to download archive from blob storage" });
-      return;
-    }
-
-    res.setHeader("Content-Type", "application/gzip");
-    res.setHeader("Content-Disposition", `attachment; filename="${blobName}"`);
-    if (downloadResponse.contentLength !== undefined) {
-      res.setHeader("Content-Length", downloadResponse.contentLength.toString());
-    }
-
-    downloadResponse.readableStreamBody.pipe(res);
-  } catch (error) {
-    if (error instanceof RestError && error.statusCode === 404) {
-      res.status(404).json({ error: "Archive blob not found in storage" });
-      return;
-    }
-    next(error);
-  }
-});
-
-// Get skill revision by human-readable ref
-app.get("/api/v1/skill-revisions/by-ref/:ref(*)", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const ref = req.params.ref ?? req.params[0];
-    const revision = await skillRevisionStore.getByRef(ref);
-    if (!revision) {
-      res.status(404).json({ error: "Skill revision not found" });
-      return;
-    }
-    res.json(revision);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get skill revision by ID (UUIDv5)
-app.get("/api/v1/skill-revisions/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const revision = await skillRevisionStore.get(id);
-    if (!revision) {
-      res.status(404).json({ error: "Skill revision not found" });
-      return;
-    }
-    res.json(revision);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Resolve a skill — trigger resolution from GitHub and create a revision
-app.post("/api/v1/skills/:id(*)/resolve", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = req.params.id ?? req.params[0];
-    const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!skill) {
-      res.status(404).json({ error: "Skill not found" });
-      return;
-    }
-
-    // Upload archive to blob storage
-    const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
-      if (!storageConnectionString && !storageAccountName) {
-        throw new Error("Blob storage not configured — cannot store skill archives");
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skill-revisions/by-ref/:ref(*)/archive",
+  tags: ["Skill Revisions"],
+  summary: "Download skill revision archive",
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Binary tar.gz archive",
+  errorResponses: {
+    404: { description: "Skill revision or archive not found" },
+    500: { description: "Blob storage error" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const ref = req.params.ref ?? req.params[0];
+      // Strip trailing "/archive" that Express includes in the wildcard match
+      const cleanRef = ref.replace(/\/archive$/, "");
+      const revision = await skillRevisionStore.getByRef(cleanRef);
+      if (!revision) {
+        res.status(404).json({ error: "Skill revision not found" });
+        return;
       }
+
+      if (!revision.archiveUrl) {
+        res.status(404).json({ error: "Skill revision has no archive" });
+        return;
+      }
+
+      // Parse the blob name from the archiveUrl
+      // archiveUrl format: https://<account>.blob.core.windows.net/skill-archives/<blobName>
+      // or Azurite: http://127.0.0.1:10000/devstoreaccount1/skill-archives/<blobName>
+      const archiveUrlObj = new URL(revision.archiveUrl);
+      const pathParts = archiveUrlObj.pathname.split("/").filter(Boolean);
+      // pathParts: ["skill-archives", "<blobName>"] or ["devstoreaccount1", "skill-archives", "<blobName>"]
+      const containerIdx = pathParts.indexOf("skill-archives");
+      if (containerIdx === -1 || containerIdx >= pathParts.length - 1) {
+        res.status(500).json({ error: "Cannot parse archive blob path" });
+        return;
+      }
+      const blobName = pathParts.slice(containerIdx + 1).join("/");
 
       let blobServiceClient: BlobServiceClient;
       if (storageConnectionString) {
         blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
-      } else {
+      } else if (storageAccountName) {
         const credential = new DefaultAzureCredential();
         blobServiceClient = new BlobServiceClient(
           `https://${storageAccountName}.blob.core.windows.net`,
           credential
         );
+      } else {
+        res.status(500).json({ error: "Blob storage not configured" });
+        return;
       }
 
       const containerClient = blobServiceClient.getContainerClient("skill-archives");
-      await containerClient.createIfNotExists();
-      const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
-      await blockBlobClient.upload(data, data.length, {
-        blobHTTPHeaders: { blobContentType: "application/gzip" },
-      });
-      return blockBlobClient.url;
-    };
+      const blobClient = containerClient.getBlobClient(blobName);
 
-    const revision = await skillResolver.resolve(skill.source, skill.skillName, skillRevisionStore, uploadArchive);
-    res.json(revision);
-  } catch (error) {
-    next(error);
-  }
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody) {
+        res.status(500).json({ error: "Failed to download archive from blob storage" });
+        return;
+      }
+
+      res.setHeader("Content-Type", "application/gzip");
+      res.setHeader("Content-Disposition", `attachment; filename="${blobName}"`);
+      if (downloadResponse.contentLength !== undefined) {
+        res.setHeader("Content-Length", downloadResponse.contentLength.toString());
+      }
+
+      downloadResponse.readableStreamBody.pipe(res);
+    } catch (error) {
+      if (error instanceof RestError && error.statusCode === 404) {
+        res.status(404).json({ error: "Archive blob not found in storage" });
+        return;
+      }
+      next(error);
+    }
+  },
+});
+
+// Get skill revision by human-readable ref
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skill-revisions/by-ref/:ref(*)",
+  tags: ["Skill Revisions"],
+  summary: "Get skill revision by ref",
+  response: SkillRevisionResponseSchema,
+  errorResponses: {
+    404: { description: "Skill revision not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const ref = req.params.ref ?? req.params[0];
+      const revision = await skillRevisionStore.getByRef(ref);
+      if (!revision) {
+        res.status(404).json({ error: "Skill revision not found" });
+        return;
+      }
+      res.json(revision);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// Get skill revision by ID (UUIDv5)
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/skill-revisions/:id",
+  tags: ["Skill Revisions"],
+  summary: "Get skill revision by ID",
+  response: SkillRevisionResponseSchema,
+  errorResponses: {
+    404: { description: "Skill revision not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const revision = await skillRevisionStore.get(id);
+      if (!revision) {
+        res.status(404).json({ error: "Skill revision not found" });
+        return;
+      }
+      res.json(revision);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// Resolve a skill — trigger resolution from GitHub and create a revision
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/skills/:id(*)/resolve",
+  tags: ["Skills"],
+  summary: "Trigger skill resolution",
+  response: SkillRevisionResponseSchema,
+  errorResponses: {
+    404: { description: "Skill not found" },
+    500: { description: "Blob storage error" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const id = req.params.id ?? req.params[0];
+      const skill = await skillCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!skill) {
+        res.status(404).json({ error: "Skill not found" });
+        return;
+      }
+
+      // Upload archive to blob storage
+      const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
+        if (!storageConnectionString && !storageAccountName) {
+          throw new Error("Blob storage not configured — cannot store skill archives");
+        }
+
+        let blobServiceClient: BlobServiceClient;
+        if (storageConnectionString) {
+          blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+        } else {
+          const credential = new DefaultAzureCredential();
+          blobServiceClient = new BlobServiceClient(
+            `https://${storageAccountName}.blob.core.windows.net`,
+            credential
+          );
+        }
+
+        const containerClient = blobServiceClient.getContainerClient("skill-archives");
+        await containerClient.createIfNotExists();
+        const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
+        await blockBlobClient.upload(data, data.length, {
+          blobHTTPHeaders: { blobContentType: "application/gzip" },
+        });
+        return blockBlobClient.url;
+      };
+
+      const revision = await skillResolver.resolve(skill.source, skill.skillName, skillRevisionStore, uploadArchive);
+      res.json(revision);
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // =====================================================================
-// Insights API
+// Insights API (apiRoute)
 // =====================================================================
 
 // List all insights (with optional ?q= text search, ?blocked= filter)
-app.get("/api/v1/insights", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { q, blocked } = req.query;
-    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/insights",
+  tags: ["Insights"],
+  summary: "List insights",
+  query: z.object({
+    q: z.string().optional(),
+    blocked: z.string().optional(),
+  }),
+  response: z.array(InsightResponseSchema),
+  handler: async (req, res, next) => {
+    try {
+      const { q, blocked } = req.query;
+      const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
 
-    if (blocked !== undefined) {
-      filter.blocked = blocked === "true";
-    }
+      if (blocked !== undefined) {
+        filter.blocked = blocked === "true";
+      }
 
-    if (q && typeof q === "string" && q.trim()) {
-      // Case-insensitive regex search across title, description, category, and tags
-      const regex = { $regex: q.trim(), $options: "i" };
-      filter.$or = [
-        { title: regex },
-        { description: regex },
-        { category: regex },
-        { tags: regex },
-      ];
-    }
-
-    const insights = await insightsCollection
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    res.json(insights.map((i) => ({ ...i, id: i._id })));
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Search insights by keyword (fuzzy regex match)
-app.get("/api/v1/insights/search", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { q, blocked } = req.query;
-
-    if (!q || typeof q !== "string" || !q.trim()) {
-      res.status(400).json({ error: "Query parameter 'q' is required" });
-      return;
-    }
-
-    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
-
-    if (blocked !== undefined) {
-      filter.blocked = blocked === "true";
-    } else {
-      // Default: exclude blocked insights from search
-      filter.blocked = { $ne: true };
-    }
-
-    // Split query into words and match all of them (AND) across title/description/tags
-    const words = q.trim().split(/\s+/);
-    filter.$and = words.map((word) => {
-      const regex = { $regex: word, $options: "i" };
-      return {
-        $or: [
+      if (q && typeof q === "string" && q.trim()) {
+        // Case-insensitive regex search across title, description, category, and tags
+        const regex = { $regex: q.trim(), $options: "i" };
+        filter.$or = [
           { title: regex },
           { description: regex },
           { category: regex },
           { tags: regex },
-        ],
-      };
-    });
+        ];
+      }
 
-    const insights = await insightsCollection
-      .find(filter)
-      .sort({ referenceCount: -1, createdAt: -1 })
-      .limit(20)
-      .toArray();
+      const insights = await insightsCollection
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .toArray();
 
-    res.json(insights.map((i) => ({ ...i, id: i._id })));
-  } catch (error) {
-    next(error);
-  }
+      res.json(insights.map((i) => ({ ...i, id: i._id })));
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// Search insights by keyword (fuzzy regex match)
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/insights/search",
+  tags: ["Insights"],
+  summary: "Search insights",
+  query: z.object({
+    q: z.string(),
+    blocked: z.string().optional(),
+  }),
+  response: z.array(InsightResponseSchema),
+  handler: async (req, res, next) => {
+    try {
+      const { q, blocked } = req.query;
+
+      if (!q || typeof q !== "string" || !q.trim()) {
+        res.status(400).json({ error: "Query parameter 'q' is required" });
+        return;
+      }
+
+      const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+
+      if (blocked !== undefined) {
+        filter.blocked = blocked === "true";
+      } else {
+        // Default: exclude blocked insights from search
+        filter.blocked = { $ne: true };
+      }
+
+      // Split query into words and match all of them (AND) across title/description/tags
+      const words = q.trim().split(/\s+/);
+      filter.$and = words.map((word) => {
+        const regex = { $regex: word, $options: "i" };
+        return {
+          $or: [
+            { title: regex },
+            { description: regex },
+            { category: regex },
+            { tags: regex },
+          ],
+        };
+      });
+
+      const insights = await insightsCollection
+        .find(filter)
+        .sort({ referenceCount: -1, createdAt: -1 })
+        .limit(20)
+        .toArray();
+
+      res.json(insights.map((i) => ({ ...i, id: i._id })));
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Get a single insight
-app.get("/api/v1/insights/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const insight = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!insight) {
-      res.status(404).json({ error: "Insight not found" });
-      return;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/insights/:id",
+  tags: ["Insights"],
+  summary: "Get insight",
+  params: z.object({ id: z.string() }),
+  response: InsightResponseSchema,
+  errorResponses: {
+    404: { description: "Insight not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const insight = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!insight) {
+        res.status(404).json({ error: "Insight not found" });
+        return;
+      }
+      res.json({ ...insight, id: insight._id });
+    } catch (error) {
+      next(error);
     }
-    res.json({ ...insight, id: insight._id });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Create a new insight
-app.post("/api/v1/insights", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { title, description, category, tags, createdBy, sourceReportId } = req.body;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/insights",
+  tags: ["Insights"],
+  summary: "Create insight",
+  body: CreateInsightInputSchema,
+  response: InsightResponseSchema,
+  handler: async (req, res, next) => {
+    try {
+      const { title, description, category, tags, createdBy, sourceReportId } = req.body;
 
-    if (!title || typeof title !== "string" || !title.trim()) {
-      res.status(400).json({ error: "title is required" });
-      return;
+      if (!title || typeof title !== "string" || !title.trim()) {
+        res.status(400).json({ error: "title is required" });
+        return;
+      }
+      if (!description || typeof description !== "string" || !description.trim()) {
+        res.status(400).json({ error: "description is required" });
+        return;
+      }
+
+      const now = new Date();
+      const doc: InsightDocument = {
+        _id: uuidv4(),
+        title: title.trim(),
+        description: description.trim(),
+        category: category?.trim() || undefined,
+        tags: Array.isArray(tags) ? tags.map((t: string) => t.trim()).filter(Boolean) : undefined,
+        upvotes: 0,
+        downvotes: 0,
+        blocked: false,
+        referenceCount: 0,
+        createdBy: createdBy === "agent" ? "agent" : "user",
+        sourceReportId: sourceReportId || undefined,
+        createdAt: now,
+      };
+
+      await insightsCollection.insertOne(doc);
+      res.status(201).json({ ...doc, id: doc._id });
+    } catch (error) {
+      next(error);
     }
-    if (!description || typeof description !== "string" || !description.trim()) {
-      res.status(400).json({ error: "description is required" });
-      return;
-    }
-
-    const now = new Date();
-    const doc: InsightDocument = {
-      _id: uuidv4(),
-      title: title.trim(),
-      description: description.trim(),
-      category: category?.trim() || undefined,
-      tags: Array.isArray(tags) ? tags.map((t: string) => t.trim()).filter(Boolean) : undefined,
-      upvotes: 0,
-      downvotes: 0,
-      blocked: false,
-      referenceCount: 0,
-      createdBy: createdBy === "agent" ? "agent" : "user",
-      sourceReportId: sourceReportId || undefined,
-      createdAt: now,
-    };
-
-    await insightsCollection.insertOne(doc);
-    res.status(201).json({ ...doc, id: doc._id });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Update an insight
-app.put("/api/v1/insights/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "Insight not found" });
-      return;
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/insights/:id",
+  tags: ["Insights"],
+  summary: "Update insight",
+  params: z.object({ id: z.string() }),
+  body: UpdateInsightInputSchema,
+  response: InsightResponseSchema,
+  errorResponses: {
+    404: { description: "Insight not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: "Insight not found" });
+        return;
+      }
+
+      const { title, description, category, tags } = req.body;
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+
+      if (title !== undefined) updateFields.title = title.trim();
+      if (description !== undefined) updateFields.description = description.trim();
+      if (category !== undefined) updateFields.category = category?.trim() || undefined;
+      if (tags !== undefined) updateFields.tags = Array.isArray(tags) ? tags.map((t: string) => t.trim()).filter(Boolean) : undefined;
+
+      await insightsCollection.updateOne({ _id: id }, { $set: updateFields });
+      const updated = await insightsCollection.findOne({ _id: id });
+      res.json({ ...updated, id: updated!._id });
+    } catch (error) {
+      next(error);
     }
-
-    const { title, description, category, tags } = req.body;
-    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-
-    if (title !== undefined) updateFields.title = title.trim();
-    if (description !== undefined) updateFields.description = description.trim();
-    if (category !== undefined) updateFields.category = category?.trim() || undefined;
-    if (tags !== undefined) updateFields.tags = Array.isArray(tags) ? tags.map((t: string) => t.trim()).filter(Boolean) : undefined;
-
-    await insightsCollection.updateOne({ _id: id }, { $set: updateFields });
-    const updated = await insightsCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Soft-delete an insight
-app.delete("/api/v1/insights/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "Insight not found" });
-      return;
-    }
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/insights/:id",
+  tags: ["Insights"],
+  summary: "Delete insight",
+  params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }),
+  successStatus: 204,
+  errorResponses: {
+    404: { description: "Insight not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: "Insight not found" });
+        return;
+      }
 
-    await insightsCollection.updateOne(
-      { _id: id },
-      { $set: { deletedAt: new Date(), updatedAt: new Date() } }
-    );
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
+      await insightsCollection.updateOne(
+        { _id: id },
+        { $set: { deletedAt: new Date(), updatedAt: new Date() } }
+      );
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Upvote an insight
-app.post("/api/v1/insights/:id/upvote", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "Insight not found" });
-      return;
-    }
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/insights/:id/upvote",
+  tags: ["Insights"],
+  summary: "Upvote insight",
+  params: z.object({ id: z.string() }),
+  response: InsightResponseSchema,
+  successStatus: 200,
+  errorResponses: {
+    404: { description: "Insight not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: "Insight not found" });
+        return;
+      }
 
-    await insightsCollection.updateOne({ _id: id }, { $inc: { upvotes: 1 }, $set: { updatedAt: new Date() } });
-    const updated = await insightsCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
-  } catch (error) {
-    next(error);
-  }
+      await insightsCollection.updateOne({ _id: id }, { $inc: { upvotes: 1 }, $set: { updatedAt: new Date() } });
+      const updated = await insightsCollection.findOne({ _id: id });
+      res.json({ ...updated, id: updated!._id });
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Downvote an insight
-app.post("/api/v1/insights/:id/downvote", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "Insight not found" });
-      return;
-    }
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/insights/:id/downvote",
+  tags: ["Insights"],
+  summary: "Downvote insight",
+  params: z.object({ id: z.string() }),
+  response: InsightResponseSchema,
+  successStatus: 200,
+  errorResponses: {
+    404: { description: "Insight not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: "Insight not found" });
+        return;
+      }
 
-    await insightsCollection.updateOne({ _id: id }, { $inc: { downvotes: 1 }, $set: { updatedAt: new Date() } });
-    const updated = await insightsCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
-  } catch (error) {
-    next(error);
-  }
+      await insightsCollection.updateOne({ _id: id }, { $inc: { downvotes: 1 }, $set: { updatedAt: new Date() } });
+      const updated = await insightsCollection.findOne({ _id: id });
+      res.json({ ...updated, id: updated!._id });
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Block an insight
-app.post("/api/v1/insights/:id/block", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "Insight not found" });
-      return;
-    }
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/insights/:id/block",
+  tags: ["Insights"],
+  summary: "Block insight",
+  params: z.object({ id: z.string() }),
+  response: InsightResponseSchema,
+  successStatus: 200,
+  errorResponses: {
+    404: { description: "Insight not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: "Insight not found" });
+        return;
+      }
 
-    await insightsCollection.updateOne({ _id: id }, { $set: { blocked: true, updatedAt: new Date() } });
-    const updated = await insightsCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
-  } catch (error) {
-    next(error);
-  }
+      await insightsCollection.updateOne({ _id: id }, { $set: { blocked: true, updatedAt: new Date() } });
+      const updated = await insightsCollection.findOne({ _id: id });
+      res.json({ ...updated, id: updated!._id });
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Unblock an insight
-app.post("/api/v1/insights/:id/unblock", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!existing) {
-      res.status(404).json({ error: "Insight not found" });
-      return;
-    }
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/insights/:id/unblock",
+  tags: ["Insights"],
+  summary: "Unblock insight",
+  params: z.object({ id: z.string() }),
+  response: InsightResponseSchema,
+  successStatus: 200,
+  errorResponses: {
+    404: { description: "Insight not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const existing = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!existing) {
+        res.status(404).json({ error: "Insight not found" });
+        return;
+      }
 
-    await insightsCollection.updateOne({ _id: id }, { $set: { blocked: false, updatedAt: new Date() } });
-    const updated = await insightsCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
-  } catch (error) {
-    next(error);
-  }
+      await insightsCollection.updateOne({ _id: id }, { $set: { blocked: false, updatedAt: new Date() } });
+      const updated = await insightsCollection.findOne({ _id: id });
+      res.json({ ...updated, id: updated!._id });
+    } catch (error) {
+      next(error);
+    }
+  },
 });
 
 // Get reports that reference a specific insight
-app.get("/api/v1/insights/:id/reports", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const insight = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
-    if (!insight) {
-      res.status(404).json({ error: "Insight not found" });
-      return;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/insights/:id/reports",
+  tags: ["Insights"],
+  summary: "Get reports referencing insight",
+  params: z.object({ id: z.string() }),
+  response: z.array(ReportResponseSchema),
+  errorResponses: {
+    404: { description: "Insight not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const insight = await insightsCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!insight) {
+        res.status(404).json({ error: "Insight not found" });
+        return;
+      }
+
+      const reports = await reportCollection
+        .find({ "insightReferences.insightId": id })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.json(reports.map((r) => ({ ...r, id: r._id })));
+    } catch (error) {
+      next(error);
     }
-
-    const reports = await reportCollection
-      .find({ "insightReferences.insightId": id })
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    res.json(reports.map((r) => ({ ...r, id: r._id })));
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Get insights referenced by a specific report
-app.get("/api/v1/reports/:id/insights", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const report = await reportCollection.findOne({ _id: id });
-    if (!report) {
-      res.status(404).json({ error: "Report not found" });
-      return;
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/reports/:id/insights",
+  tags: ["Reports"],
+  summary: "Get insights for report",
+  params: z.object({ id: z.string() }),
+  response: z.array(InsightResponseSchema.extend({
+    referencedAt: z.coerce.date().optional(),
+    isNew: z.boolean().optional(),
+  })),
+  errorResponses: {
+    404: { description: "Report not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const report = await reportCollection.findOne({ _id: id });
+      if (!report) {
+        res.status(404).json({ error: "Report not found" });
+        return;
+      }
+
+      if (!report.insightReferences || report.insightReferences.length === 0) {
+        res.json([]);
+        return;
+      }
+
+      const insightIds = report.insightReferences.map((ref) => ref.insightId);
+      const insights = await insightsCollection
+        .find({ _id: { $in: insightIds }, deletedAt: { $exists: false } })
+        .toArray();
+
+      // Enrich with reference metadata
+      const enriched = insights.map((insight) => {
+        const ref = report.insightReferences!.find((r) => r.insightId === insight._id);
+        return {
+          ...insight,
+          id: insight._id,
+          referencedAt: ref?.referencedAt,
+          isNew: ref?.isNew,
+        };
+      });
+
+      res.json(enriched);
+    } catch (error) {
+      next(error);
     }
-
-    if (!report.insightReferences || report.insightReferences.length === 0) {
-      res.json([]);
-      return;
-    }
-
-    const insightIds = report.insightReferences.map((ref) => ref.insightId);
-    const insights = await insightsCollection
-      .find({ _id: { $in: insightIds }, deletedAt: { $exists: false } })
-      .toArray();
-
-    // Enrich with reference metadata
-    const enriched = insights.map((insight) => {
-      const ref = report.insightReferences!.find((r) => r.insightId === insight._id);
-      return {
-        ...insight,
-        id: insight._id,
-        referencedAt: ref?.referencedAt,
-        isNew: ref?.isNew,
-      };
-    });
-
-    res.json(enriched);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Add an insight reference to a report
-app.post("/api/v1/reports/:id/insights", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const { insightId, isNew } = req.body;
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/:id/insights",
+  tags: ["Reports"],
+  summary: "Link insight to report",
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    insightId: z.string(),
+    isNew: z.boolean().optional(),
+  }),
+  response: z.object({
+    insightId: z.string(),
+    referencedAt: z.coerce.date(),
+    isNew: z.boolean(),
+  }),
+  errorResponses: {
+    404: { description: "Report or insight not found" },
+    409: { description: "Insight already referenced by this report" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { insightId, isNew } = req.body;
 
-    if (!insightId || typeof insightId !== "string") {
-      res.status(400).json({ error: "insightId is required" });
-      return;
+      if (!insightId || typeof insightId !== "string") {
+        res.status(400).json({ error: "insightId is required" });
+        return;
+      }
+
+      const report = await reportCollection.findOne({ _id: id });
+      if (!report) {
+        res.status(404).json({ error: "Report not found" });
+        return;
+      }
+
+      const insight = await insightsCollection.findOne({ _id: insightId, deletedAt: { $exists: false } });
+      if (!insight) {
+        res.status(404).json({ error: "Insight not found" });
+        return;
+      }
+
+      // Check if already referenced
+      const alreadyReferenced = report.insightReferences?.some((ref) => ref.insightId === insightId);
+      if (alreadyReferenced) {
+        res.status(409).json({ error: "Insight already referenced by this report" });
+        return;
+      }
+
+      const reference: InsightReference = {
+        insightId,
+        referencedAt: new Date(),
+        isNew: isNew === true,
+      };
+
+      // Add reference to report
+      await reportCollection.updateOne(
+        { _id: id },
+        { $push: { insightReferences: reference }, $set: { updatedAt: new Date() } }
+      );
+
+      // Increment reference count on insight
+      await insightsCollection.updateOne(
+        { _id: insightId },
+        { $inc: { referenceCount: 1 }, $set: { updatedAt: new Date() } }
+      );
+
+      res.status(201).json(reference);
+    } catch (error) {
+      next(error);
     }
-
-    const report = await reportCollection.findOne({ _id: id });
-    if (!report) {
-      res.status(404).json({ error: "Report not found" });
-      return;
-    }
-
-    const insight = await insightsCollection.findOne({ _id: insightId, deletedAt: { $exists: false } });
-    if (!insight) {
-      res.status(404).json({ error: "Insight not found" });
-      return;
-    }
-
-    // Check if already referenced
-    const alreadyReferenced = report.insightReferences?.some((ref) => ref.insightId === insightId);
-    if (alreadyReferenced) {
-      res.status(409).json({ error: "Insight already referenced by this report" });
-      return;
-    }
-
-    const reference: InsightReference = {
-      insightId,
-      referencedAt: new Date(),
-      isNew: isNew === true,
-    };
-
-    // Add reference to report
-    await reportCollection.updateOne(
-      { _id: id },
-      { $push: { insightReferences: reference }, $set: { updatedAt: new Date() } }
-    );
-
-    // Increment reference count on insight
-    await insightsCollection.updateOne(
-      { _id: insightId },
-      { $inc: { referenceCount: 1 }, $set: { updatedAt: new Date() } }
-    );
-
-    res.status(201).json(reference);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // ─── Feature Flags (apiRoute) ─────────────────────────────────────────────────

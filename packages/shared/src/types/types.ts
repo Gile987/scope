@@ -115,7 +115,7 @@ export interface RequestDocument {
   status: "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
   result?: string;
   error?: string;
-  logs: LogEvent[];
+  logs?: LogEvent[];
   createdAt: Date;
   updatedAt?: Date;
   // Multi-turn fields

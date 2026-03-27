@@ -27,6 +27,9 @@ import type {
   ModelResponseSchema,
   McpServerResponseSchema,
   FeatureFlagResponseSchema,
+  ReportTriggerSchema,
+  ReportTemplateResponseSchema,
+  RequestResponseSchema,
 } from "shared";
 
 // ─── Document types (inferred from Zod schemas) ─────────────────────────────
@@ -44,82 +47,10 @@ export type ModelDocument = z.infer<typeof ModelResponseSchema>;
 export type McpServerDocument = z.infer<typeof McpServerResponseSchema>;
 export type FeatureFlagDocument = z.infer<typeof FeatureFlagResponseSchema>;
 
-// ─── Types not yet migrated to z.infer<> (schema mismatches to resolve) ──────
-// RequestDocument: schema turns[] has extra fields (criteriaResults, tokenUsage, etc.)
-// ReportTemplateDocument: schema has both _id and id, interface only has id
-// These will be migrated once the Request and ReportTemplate route groups move.
-
-export type ReportTrigger =
-  | { type: "always" }
-  | { type: "criteria"; criteriaIds: string[]; match?: "any" | "all" }
-  | { type: "taskPrompt"; taskPromptIds: string[] }
-  | {
-      type: "promptFeature";
-      featureIds: string[];
-      match?: "any" | "all";
-    };
-
-export interface ReportTemplateDocument {
-  id: string;
-  name: string;
-  description?: string;
-  userPrompt: string;
-  systemPrompt?: {
-    mode: "append" | "override";
-    content: string;
-  };
-  trigger?: ReportTrigger;
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-}
-
-export interface RequestDocument {
-  _id: string;
-  scenario: { task: string; criteria: string[]; version?: "v1" | "v2" };
-  workerType: WorkerType;
-  model?: string;
-  status:
-    | "pending"
-    | "processing"
-    | "iterating"
-    | "completed"
-    | "failed"
-    | "exhausted";
-  result?: string;
-  error?: string;
-  logs?: LogEvent[];
-  maxIterations?: number;
-  turns?: Array<{
-    iteration: number;
-    codingAgentResponse: string;
-    judgeFeedback: string;
-    snapshotUrl: string;
-    passed: boolean;
-    timestamp: Date;
-    harUrl?: string;
-    videoUrls?: string[];
-  }>;
-  personaInstructions?: string;
-  persona?: {
-    personality: string;
-    experience: string;
-    verbosity: string;
-    type: string;
-  };
-  createdAt: Date;
-  updatedAt?: Date;
-  deletedAt?: Date;
-  taskPromptId?: string;
-  mcpServers?: string[];
-  skillRevisions?: string[];
-  harUrl?: string;
-  videoUrls?: string[];
-  setupVideoUrls?: string[];
-  agentVersion?: string;
-  workerVersion?: string;
-  submissionId?: string;
-}
+export type ReportTrigger = z.infer<typeof ReportTriggerSchema>;
+// Omit _id — MongoDB auto-generates it; the document type only uses `id`
+export type ReportTemplateDocument = Omit<z.infer<typeof ReportTemplateResponseSchema>, "_id">;
+export type RequestDocument = z.infer<typeof RequestResponseSchema>;
 
 export const VALID_WORKERS = [
   "coder-acp-claude-code",
