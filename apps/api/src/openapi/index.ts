@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 // Import all route registrations (side effects)
-import "./routes/requests.js";
+// requests: registered via apiRoute() in index.ts
 // criteria: registered via apiRoute() in index.ts
 // prompt-features: registered via apiRoute() in index.ts
 // task-prompts: registered via apiRoute() in index.ts

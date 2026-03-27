@@ -4,7 +4,7 @@
 import { z, type ZodType, type ZodObject } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import type { Express, Request, Response, NextFunction } from "express";
+import type { Express, Request, Response, NextFunction, RequestHandler } from "express";
 
 extendZodWithOpenApi(z);
 
@@ -61,6 +61,9 @@ export interface ApiRouteConfig<
    * Body/query/params are still validated, but response is not documented as JSON.
    */
   rawResponse?: boolean;
+
+  /** Express middleware to run before the validation handler (e.g. multer). */
+  middleware?: RequestHandler[];
 
   /** The route handler. */
   handler: (
@@ -139,6 +142,7 @@ export function apiRoute<
     successStatus,
     errorResponses,
     rawResponse,
+    middleware,
     handler,
   } = config;
 
@@ -192,7 +196,7 @@ export function apiRoute<
 
   // ── Express handler with validation middleware ──────────────────────────
 
-  app[method](path, async (req: Request, res: Response, next: NextFunction) => {
+  const validationHandler: RequestHandler = async (req, res, next) => {
     try {
       // Validate path params
       if (params) {
@@ -229,5 +233,11 @@ export function apiRoute<
     } catch (error) {
       next(error);
     }
-  });
+  };
+
+  if (middleware && middleware.length > 0) {
+    app[method](path, ...middleware, validationHandler);
+  } else {
+    app[method](path, validationHandler);
+  }
 }

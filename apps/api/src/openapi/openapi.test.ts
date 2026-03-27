@@ -41,6 +41,10 @@ import {
   SkillRevisionResponseSchema,
   SkillSearchResultSchema,
   CreateSkillInputSchema,
+  RequestResponseSchema,
+  CreateRequestInputSchema,
+  ListRequestsQuerySchema,
+  BulkResubmitInputSchema,
 } from "shared";
 
 // Register apiRoute()-based routes so they appear in the OpenAPI doc.
@@ -434,6 +438,81 @@ apiRoute(testApp, registry, {
   summary: "Bulk trigger reports", body: BulkTriggerReportsInputSchema,
   response: z.array(z.object({}).passthrough()), successStatus: 201,
   errorResponses: { 400: { description: "Invalid input" } }, handler: noop,
+});
+
+// Requests
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/requests", tags: ["Requests"],
+  summary: "Submit request(s)", body: CreateRequestInputSchema,
+  response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]), successStatus: 201, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/requests/:id", tags: ["Requests"],
+  summary: "Get request", params: z.object({ id: z.string() }),
+  response: RequestResponseSchema,
+  errorResponses: { 404: { description: "Not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/requests/:id/logs", tags: ["Requests"],
+  summary: "Stream request logs (SSE)", params: z.object({ id: z.string() }),
+  response: z.any(), rawResponse: true, responseDescription: "Server-sent event stream of log entries",
+  errorResponses: { 404: { description: "Not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/requests", tags: ["Requests"],
+  summary: "List requests", query: ListRequestsQuerySchema,
+  response: z.array(RequestResponseSchema), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/analysis", tags: ["Requests"],
+  summary: "Compute pass@k / success@T metrics",
+  query: z.object({ worker: z.string().optional(), taskPromptId: z.string().optional(), criteria: z.string().optional(), submissionId: z.string().optional(), k: z.string().optional() }),
+  response: z.object({}).passthrough().describe("Analysis metrics"), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/requests/bulk-resubmit", tags: ["Requests"],
+  summary: "Bulk resubmit requests", body: BulkResubmitInputSchema,
+  response: z.array(RequestResponseSchema), successStatus: 201, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "delete", path: "/api/v1/requests/bulk", tags: ["Requests"],
+  summary: "Bulk soft-delete requests", body: z.object({ ids: z.array(z.string()) }),
+  response: z.object({ deleted: z.number() }), handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "delete", path: "/api/v1/requests/:id", tags: ["Requests"],
+  summary: "Soft-delete request", params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }),
+  errorResponses: { 404: { description: "Not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/requests/:id/snapshots/:iteration", tags: ["Requests"],
+  summary: "Download iteration snapshot", params: z.object({ id: z.string(), iteration: z.string() }),
+  response: z.any(), rawResponse: true, responseDescription: "Gzipped snapshot archive",
+  errorResponses: { 404: { description: "Not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/requests/:id/archive", tags: ["Requests"],
+  summary: "Download full run archive", params: z.object({ id: z.string() }),
+  response: z.any(), rawResponse: true, responseDescription: "Gzipped run archive",
+  errorResponses: { 404: { description: "Not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/requests/:id/har", tags: ["Requests"],
+  summary: "Download HAR file", params: z.object({ id: z.string() }),
+  response: z.any(), rawResponse: true, responseDescription: "HAR-format JSON file",
+  errorResponses: { 404: { description: "Not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "get", path: "/api/v1/requests/:id/video", tags: ["Requests"],
+  summary: "Download session recording", params: z.object({ id: z.string() }),
+  response: z.any(), rawResponse: true, responseDescription: "WebM video recording (supports Range requests)",
+  errorResponses: { 404: { description: "Not found" } }, handler: noop,
+});
+apiRoute(testApp, registry, {
+  method: "post", path: "/api/v1/runs/upload", tags: ["Requests"],
+  summary: "Import run archive", response: RequestResponseSchema,
+  rawResponse: true, successStatus: 201, handler: noop,
 });
 
 describe("OpenAPI document generation", () => {

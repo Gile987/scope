@@ -79,6 +79,10 @@ import {
   SkillRevisionResponseSchema,
   SkillSearchResultSchema,
   CreateSkillInputSchema,
+  RequestResponseSchema,
+  CreateRequestInputSchema,
+  ListRequestsQuerySchema,
+  BulkResubmitInputSchema,
 } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -474,8 +478,20 @@ apiRoute(app, registry, {
 });
 
 // Submit a request
-app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/requests",
+  tags: ["Requests"],
+  summary: "Submit request(s)",
+  body: CreateRequestInputSchema.extend({
+    count: z.number().min(1).max(10).default(1),
+    promptFeatureExtractionId: z.string().optional(),
+    skills: z.array(z.string()).optional(),
+    agentVersion: z.string().optional(),
+  }),
+  response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
+  successStatus: 201,
+  handler: async (req, res) => {
     const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, agentVersion: requestedAgentVersion } = req.body;
     const worker = req.query.worker as string;
 
@@ -781,14 +797,19 @@ app.post("/api/v1/requests", async (req: Request, res: Response, next: NextFunct
       scenario,
       ...(maxIterations ? { maxIterations } : {}),
     });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Get request status
-app.get("/api/v1/requests/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id",
+  tags: ["Requests"],
+  summary: "Get request",
+  params: z.object({ id: z.string() }),
+  response: RequestResponseSchema,
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
     const { id } = req.params;
 
     const resource = await collection.findOne({ _id: id });
@@ -800,14 +821,21 @@ app.get("/api/v1/requests/:id", async (req: Request, res: Response, next: NextFu
 
     // Map _id back to id for API response
     res.json({ ...resource, id: resource._id });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Stream logs for a request via SSE (with connection pooling)
-app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/logs",
+  tags: ["Requests"],
+  summary: "Stream request logs (SSE)",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Server-sent event stream of log entries",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
     const { id } = req.params;
     const fromStart = req.query.fromStart === "true";
 
@@ -928,15 +956,18 @@ app.get("/api/v1/requests/:id/logs", async (req: Request, res: Response, next: N
 
     // Cleanup on client disconnect
     req.on("close", () => client.cleanup());
-
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // List all requests (excludes soft-deleted by default)
-app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests",
+  tags: ["Requests"],
+  summary: "List requests",
+  query: ListRequestsQuerySchema,
+  response: z.array(RequestResponseSchema),
+  handler: async (req, res) => {
     const workerFilter = req.query.worker as string;
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
@@ -985,14 +1016,24 @@ app.get("/api/v1/requests", async (req: Request, res: Response, next: NextFuncti
       .toArray();
 
     res.json(resources.map(r => ({ ...r, id: r._id })));
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Analysis endpoint - compute pass@k, success@T, and iteration stats
-app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/analysis",
+  tags: ["Requests"],
+  summary: "Compute pass@k / success@T metrics",
+  query: z.object({
+    worker: z.string().optional(),
+    taskPromptId: z.string().optional(),
+    criteria: z.string().optional(),
+    submissionId: z.string().optional(),
+    k: z.string().optional(),
+  }),
+  response: z.object({}).passthrough().describe("Analysis metrics"),
+  handler: async (req, res) => {
     // Parse k values from query string (default: 1,2,5)
     const kParam = (req.query.k as string) || "1,2,5";
     const kValues = kParam.split(",").map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v) && v > 0);
@@ -1028,14 +1069,19 @@ app.get("/api/v1/analysis", async (req: Request, res: Response, next: NextFuncti
 
     const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues, selectedCriteria);
     res.json(analysis);
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Bulk re-submit requests (create new runs from existing ones)
-app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/requests/bulk-resubmit",
+  tags: ["Requests"],
+  summary: "Bulk resubmit requests",
+  body: BulkResubmitInputSchema,
+  response: z.array(RequestResponseSchema),
+  successStatus: 201,
+  handler: async (req, res) => {
     const { ids, count = 1, overrides } = req.body as {
       ids?: string[];
       count?: number;
@@ -1133,14 +1179,18 @@ app.post("/api/v1/requests/bulk-resubmit", async (req: Request, res: Response, n
       newIds,
       submissionId,
     });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Bulk soft-delete requests
-app.delete("/api/v1/requests/bulk", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/requests/bulk",
+  tags: ["Requests"],
+  summary: "Bulk soft-delete requests",
+  body: z.object({ ids: z.array(z.string()) }),
+  response: z.object({ deleted: z.number() }),
+  handler: async (req, res) => {
     const { ids } = req.body as { ids?: string[] };
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
@@ -1168,14 +1218,19 @@ app.delete("/api/v1/requests/bulk", async (req: Request, res: Response, next: Ne
       deleted: result.modifiedCount,
       notFound,
     });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Soft-delete a request
-app.delete("/api/v1/requests/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/requests/:id",
+  tags: ["Requests"],
+  summary: "Soft-delete request",
+  params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }),
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
     const { id } = req.params;
 
     const result = await collection.updateOne(
@@ -1194,14 +1249,22 @@ app.delete("/api/v1/requests/:id", async (req: Request, res: Response, next: Nex
     }
 
     res.json({ id, deleted: true });
-  } catch (error) {
-    next(error);
-  }
+  },
 });
 
 // Download a snapshot for a specific iteration
-app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/snapshots/:iteration",
+  tags: ["Requests"],
+  summary: "Download iteration snapshot",
+  params: z.object({ id: z.string(), iteration: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Gzipped snapshot archive",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
     const { id, iteration } = req.params;
     const iterNum = parseInt(iteration, 10);
     if (isNaN(iterNum) || iterNum < 1) {
@@ -1262,13 +1325,24 @@ app.get("/api/v1/requests/:id/snapshots/:iteration", async (req: Request, res: R
       res.status(404).json({ error: "Snapshot not found — the blob may have been deleted or is no longer available" });
       return;
     }
-    next(error);
+    throw error;
   }
+  },
 });
 
 // Download a full run archive (run.yaml + iteration snapshots as .tar.gz entries)
-app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/archive",
+  tags: ["Requests"],
+  summary: "Download full run archive",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Gzipped run archive",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
     const { id } = req.params;
 
     const resource = await collection.findOne({ _id: id });
@@ -1373,12 +1447,13 @@ app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next
         res.status(404).json({ error: "Snapshot not found — the blob may have been deleted or is no longer available" });
         return;
       }
-      next(error);
+      throw error;
     } else {
       // Headers already sent — destroy the response to signal an error to the client
       res.destroy();
     }
   }
+  },
 });
 
 // --- Runs upload (import downloaded archives) ---
@@ -1386,8 +1461,18 @@ app.get("/api/v1/requests/:id/archive", async (req: Request, res: Response, next
 // Download a HAR (HTTP Archive) file for a specific request or turn
 // For one-shot runs: GET /api/v1/requests/:id/har
 // For multi-turn runs: GET /api/v1/requests/:id/har?iteration=N
-app.get("/api/v1/requests/:id/har", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/har",
+  tags: ["Requests"],
+  summary: "Download HAR file",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "HAR-format JSON file",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
     const { id } = req.params;
     const iterationParam = req.query.iteration as string | undefined;
 
@@ -1461,16 +1546,27 @@ app.get("/api/v1/requests/:id/har", async (req: Request, res: Response, next: Ne
       res.status(404).json({ error: "HAR file not found — the blob may have been deleted or is no longer available" });
       return;
     }
-    next(error);
+    throw error;
   }
+  },
 });
 
 // Download a session recording video for a specific request or turn
 // For one-shot runs: GET /api/v1/requests/:id/video?index=0
 // For multi-turn runs: GET /api/v1/requests/:id/video?iteration=N&index=0
 // For setup videos:   GET /api/v1/requests/:id/video?phase=setup&index=0
-app.get("/api/v1/requests/:id/video", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/video",
+  tags: ["Requests"],
+  summary: "Download session recording",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "WebM video recording (supports Range requests)",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
     const { id } = req.params;
     const iterationParam = req.query.iteration as string | undefined;
     const phaseParam = req.query.phase as string | undefined;
@@ -1592,12 +1688,22 @@ app.get("/api/v1/requests/:id/video", async (req: Request, res: Response, next: 
       res.status(404).json({ error: "Video file not found — the blob may have been deleted or is no longer available" });
       return;
     }
-    next(error);
+    throw error;
   }
+  },
 });
 
 // POST /api/v1/runs/upload — Upload a run archive (tar.gz) to import a previously downloaded run
-app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, res: Response, next: NextFunction) => {
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/runs/upload",
+  tags: ["Requests"],
+  summary: "Import run archive",
+  middleware: [upload.single("archive")],
+  response: RequestResponseSchema,
+  rawResponse: true,
+  successStatus: 201,
+  handler: async (req, res) => {
   const tempDir = mkdtempSync(join(tmpdir(), "run-upload-"));
   let uploadedFilePath: string | undefined;
 
@@ -1785,8 +1891,6 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       message: "Run uploaded successfully",
     });
 
-  } catch (error) {
-    next(error);
   } finally {
     // Cleanup temp files
     rmSync(tempDir, { recursive: true, force: true });
@@ -1794,6 +1898,7 @@ app.post("/api/v1/runs/upload", upload.single("archive"), async (req: Request, r
       rmSync(uploadedFilePath, { force: true });
     }
   }
+  },
 });
 
 // --- Criteria seed & CRUD (apiRoute) ---
