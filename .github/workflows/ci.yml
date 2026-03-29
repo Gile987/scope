@@ -136,7 +136,7 @@ jobs:
           path: ctrf/
 
   integration-test:
-    name: Integration Tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    name: Integration Tests (${{ matrix.worker.name }})
     needs: [detect-changes]
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -146,7 +146,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        worker:
+          - name: vscode-web
+            images: |
+              docker buildx build \
+                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
+                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --load \
+                .
+              docker buildx build \
+                --target dev \
+                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
+                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --load \
+                .
+          - name: copilot-acp
+            dockerfile: apps/workers/coder-acp-copilot/Dockerfile
+            versions_env: apps/workers/coder-acp-copilot/versions.env
+            test_pattern: apps/workers/coder-acp-copilot
+            images: |
+              source apps/workers/coder-acp-copilot/versions.env
+              docker buildx build \
+                -t coder-acp-copilot-integration-test \
+                -f apps/workers/coder-acp-copilot/Dockerfile \
+                --target dev \
+                --build-arg COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --load \
+                .
 
     steps:
       - name: Checkout repository
@@ -180,42 +212,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
-          restore-keys: docker-
+          key: docker-${{ matrix.worker.name }}-${{ hashFiles(matrix.worker.dockerfile, matrix.worker.versions_env) }}
+          restore-keys: docker-${{ matrix.worker.name }}-
 
       - name: Pre-build Docker test images
         run: |
-          docker buildx build \
-            --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-            --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-            --cache-from type=local,src=/tmp/.buildx-cache \
-            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
-            --load \
-            .
-          docker buildx build \
-            --target dev \
-            --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-            --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-            --cache-from type=local,src=/tmp/.buildx-cache \
-            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
-            --load \
-            .
-          # Build coder-acp-copilot integration test image
-          source apps/workers/coder-acp-copilot/versions.env
-          docker buildx build \
-            -t coder-acp-copilot-integration-test \
-            -f apps/workers/coder-acp-copilot/Dockerfile \
-            --target dev \
-            --build-arg COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION \
-            --cache-from type=local,src=/tmp/.buildx-cache \
-            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
-            --load \
-            .
+          ${{ matrix.worker.images }}
           # Rotate cache to avoid unbounded growth
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Run integration tests
-        run: npx vitest run --config vitest.integration.config.ts --silent=false --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+        run: npx vitest run --config vitest.integration.config.ts --silent=false ${{ matrix.worker.test_pattern }}
         env:
           GH_AUTH_USERNAME: ${{ secrets.GH_AUTH_USERNAME }}
           GH_AUTH_PASSWORD: ${{ secrets.GH_AUTH_PASSWORD }}
@@ -225,20 +233,21 @@ jobs:
       - name: Generate GitHub test summary from CTRF
         if: always()
         run: |
-          pnpm exec github-actions-ctrf "ctrf/*-integration-ctrf-report.json" --title "Integration Test Results (shard ${{ matrix.shard }})" || true
+          pnpm exec github-actions-ctrf "ctrf/*-integration-ctrf-report.json" --title "Integration Test Results (${{ matrix.worker.name }})" || true
 
       - name: Upload CTRF integration test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ctrf-integration-test-results-shard-${{ matrix.shard }}
+          name: ctrf-integration-test-results-${{ matrix.worker.name }}
           path: ctrf/
+          if-no-files-found: ignore
 
       - name: Upload test snapshots
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-snapshots-shard-${{ matrix.shard }}
+          name: test-snapshots-${{ matrix.worker.name }}
           path: test-snapshots/
           if-no-files-found: ignore
 
@@ -246,7 +255,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-videos-shard-${{ matrix.shard }}
+          name: test-videos-${{ matrix.worker.name }}
           path: test-videos/
           if-no-files-found: ignore
 
