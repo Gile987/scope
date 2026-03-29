@@ -206,6 +206,8 @@ services:
         # Register dev version: coder-acp-claude-code
         post "/api/v1/agents/coder-acp-claude-code/versions" '{"agentVersion":"claude-code-acp-dev-sdk-dev","workerVersion":"claude-code-acp-dev-sdk-dev-local-dev","components":{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-claude-code"}'
 
+
+
         echo ""
         echo "All agents and dev versions registered."
 

@@ -13,3 +13,4 @@ packages:
   - "packages/github-auth"
   - "packages/model-scanning"
   - "packages/db-migrations"
+  - "packages/copilot-driver-ext"

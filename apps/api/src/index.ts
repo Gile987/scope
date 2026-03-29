@@ -344,6 +344,23 @@ async function initializeClients(): Promise<void> {
 
   const insightCount = await insightsCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Insights collection has ${insightCount} documents`);
+
+  // Seed default agents (upsert — always updates name, preserves existing models)
+  const defaultAgents: Array<{ _id: string; name: string }> = [
+    { _id: "coder-acp-claude-code", name: "Claude Code (ACP)" },
+    { _id: "coder-acp-copilot", name: "Copilot (ACP)" },
+  ];
+  for (const agent of defaultAgents) {
+    await agentCollection.updateOne(
+      { _id: agent._id },
+      {
+        $set: { name: agent.name },
+        $setOnInsert: { supportedModels: [], createdAt: new Date() },
+      },
+      { upsert: true }
+    );
+  }
+  console.log(`Ensured ${defaultAgents.length} default agents exist`);
   
   console.log(`Connected to MongoDB: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
 

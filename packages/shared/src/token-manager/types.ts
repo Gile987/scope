@@ -12,12 +12,7 @@
  * The kind of credential stored (token format).
  */
 export type TokenType =
-  | "github-pat-classic"
-  | "github-pat-fine-grained"
-  | "github-oauth"
-  | "github-oauth-cookie-state"
-  | "anthropic-api-key"
-  | "anthropic-oauth";
+  "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth";
 
 /**
  * What a token can do — derived from (type + detected scopes/permissions).

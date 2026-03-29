@@ -179,6 +179,16 @@ jobs:
                 --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
                 --load \
                 .
+          - name: vscode-electron
+            images: |
+              docker buildx build \
+                --target dev \
+                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
+                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --load \
+                .
 
     steps:
       - name: Checkout repository

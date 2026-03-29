@@ -406,12 +406,7 @@ export interface ReportTemplate {
 // =============================================================================
 
 export type TokenType =
-  | "github-pat-classic"
-  | "github-pat-fine-grained"
-  | "github-oauth"
-  | "github-oauth-cookie-state"
-  | "anthropic-api-key"
-  | "anthropic-oauth";
+  "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth";
 
 export type TokenCapability =
   "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
