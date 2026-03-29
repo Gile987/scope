@@ -139,12 +139,7 @@ describe("coder-acp-copilot integration", async () => {
   }, 600_000); // 10 min for Docker build
 
   afterAll(async () => {
-    if (!canRun) return;
-    try {
-      await docker.getImage(IMAGE_TAG).remove({ force: true });
-    } catch {
-      // ignore
-    }
+    // Image kept for faster re-runs. Use `docker system prune` to clean up.
   }, 60_000);
 
   // -----------------------------------------------------------------------
