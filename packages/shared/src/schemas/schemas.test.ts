@@ -356,13 +356,33 @@ describe("request schemas", () => {
   });
 
   describe("BulkResubmitInputSchema", () => {
-    it("accepts valid input", () => {
-      const result = BulkResubmitInputSchema.parse({ requestIds: ["r1", "r2"] });
-      expect(result.requestIds).toHaveLength(2);
+    it("accepts valid input with ids", () => {
+      const result = BulkResubmitInputSchema.parse({ ids: ["r1", "r2"] });
+      expect(result.ids).toHaveLength(2);
+      expect(result.count).toBe(1); // default
     });
 
-    it("rejects missing requestIds", () => {
+    it("accepts input with count and overrides", () => {
+      const result = BulkResubmitInputSchema.parse({
+        ids: ["r1"],
+        count: 3,
+        overrides: { workerType: "coder-acp-copilot", model: "gpt-4o" },
+      });
+      expect(result.count).toBe(3);
+      expect(result.overrides?.workerType).toBe("coder-acp-copilot");
+    });
+
+    it("rejects missing ids", () => {
       expect(() => BulkResubmitInputSchema.parse({})).toThrow();
+    });
+
+    it("rejects empty ids array", () => {
+      expect(() => BulkResubmitInputSchema.parse({ ids: [] })).toThrow();
+    });
+
+    it("rejects count outside range", () => {
+      expect(() => BulkResubmitInputSchema.parse({ ids: ["r1"], count: 0 })).toThrow();
+      expect(() => BulkResubmitInputSchema.parse({ ids: ["r1"], count: 11 })).toThrow();
     });
   });
 });

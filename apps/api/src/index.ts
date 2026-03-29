@@ -1082,29 +1082,9 @@ apiRoute(app, registry, {
   response: z.array(RequestResponseSchema),
   successStatus: 201,
   handler: async (req, res) => {
-    const { ids, count = 1, overrides } = req.body as {
-      ids?: string[];
-      count?: number;
-      overrides?: {
-        workerType?: string;
-        model?: string | null;
-        maxIterations?: number | null;
-        mcpServers?: string[] | null;
-        skillRevisions?: string[] | null;
-      };
-    };
+    const { ids, count, overrides } = req.body;
 
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      res.status(400).json({ error: "Request body must include 'ids' array" });
-      return;
-    }
-
-    if (typeof count !== "number" || count < 1 || count > 10) {
-      res.status(400).json({ error: "count must be a number between 1 and 10" });
-      return;
-    }
-
-    // Validate overrides if provided
+    // Validate workerType override against known workers
     if (overrides?.workerType && !VALID_WORKERS.includes(overrides.workerType as WorkerType)) {
       res.status(400).json({ error: `Invalid workerType override: ${overrides.workerType}` });
       return;

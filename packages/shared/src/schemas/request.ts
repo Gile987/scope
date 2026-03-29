@@ -123,13 +123,15 @@ export const ListRequestsQuerySchema = z
 
 export const BulkResubmitInputSchema = z
   .object({
-    requestIds: z.array(z.string()),
+    ids: z.array(z.string()).min(1),
+    count: z.number().int().min(1).max(10).optional().default(1),
     overrides: z
       .object({
-        model: z.string().optional(),
-        maxIterations: z.number().optional(),
-        mcpServers: z.array(z.string()).optional(),
-        skillRevisions: z.array(z.string()).optional(),
+        workerType: z.string().optional(),
+        model: z.string().nullable().optional(),
+        maxIterations: z.number().nullable().optional(),
+        mcpServers: z.array(z.string()).nullable().optional(),
+        skillRevisions: z.array(z.string()).nullable().optional(),
       })
       .optional(),
   })
