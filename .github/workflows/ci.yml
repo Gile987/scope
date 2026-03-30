@@ -353,6 +353,7 @@ jobs:
       db-migrations: ${{ steps.changes.outputs.db-migrations }}
       shared: ${{ steps.changes.outputs.shared }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
+      build-matrix: ${{ steps.build-matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -391,91 +392,102 @@ jobs:
             db-migrations:
               - 'packages/db-migrations/**'
 
+      - name: Compute build image matrix
+        id: build-matrix
+        run: |
+          MATRIX='[]'
+          add_image() {
+            MATRIX=$(echo "$MATRIX" | jq -c --arg n "$1" --arg d "$2" '. + [{name: $n, dockerfile: $d}]')
+          }
+
+          if [[ "$EVENT" == "workflow_dispatch" ]]; then
+            if [[ "$INPUT" == "all" ]]; then
+              for name in $ALL; do
+                case "$name" in
+                  api)                       add_image "$name" "apps/api/Dockerfile" ;;
+                  judge)                     add_image "$name" "apps/judge/Dockerfile" ;;
+                  portal)                    add_image "$name" "apps/portal/Dockerfile" ;;
+                  coder-acp-copilot)         add_image "$name" "apps/workers/coder-acp-copilot/Dockerfile" ;;
+                  coder-acp-claude-code)     add_image "$name" "apps/workers/coder-acp-claude-code/Dockerfile" ;;
+                  token-manager)             add_image "$name" "apps/token-manager/Dockerfile" ;;
+                  model-scanner-copilot)     add_image "$name" "apps/model-scanners/copilot/Dockerfile" ;;
+                  model-scanner-anthropic)   add_image "$name" "apps/model-scanners/anthropic/Dockerfile" ;;
+                  report-generator)          add_image "$name" "apps/workers/report-generator/Dockerfile" ;;
+                  db-migrations)             add_image "$name" "packages/db-migrations/Dockerfile" ;;
+                esac
+              done
+            elif [[ -n "$INPUT" ]]; then
+              IFS=',' read -ra NAMES <<< "$INPUT"
+              for raw in "${NAMES[@]}"; do
+                name=$(echo "$raw" | xargs)
+                case "$name" in
+                  api)                       add_image "$name" "apps/api/Dockerfile" ;;
+                  judge)                     add_image "$name" "apps/judge/Dockerfile" ;;
+                  portal)                    add_image "$name" "apps/portal/Dockerfile" ;;
+                  coder-acp-copilot)         add_image "$name" "apps/workers/coder-acp-copilot/Dockerfile" ;;
+                  coder-acp-claude-code)     add_image "$name" "apps/workers/coder-acp-claude-code/Dockerfile" ;;
+                  token-manager)             add_image "$name" "apps/token-manager/Dockerfile" ;;
+                  model-scanner-copilot)     add_image "$name" "apps/model-scanners/copilot/Dockerfile" ;;
+                  model-scanner-anthropic)   add_image "$name" "apps/model-scanners/anthropic/Dockerfile" ;;
+                  report-generator)          add_image "$name" "apps/workers/report-generator/Dockerfile" ;;
+                  db-migrations)             add_image "$name" "packages/db-migrations/Dockerfile" ;;
+                  *) echo "⚠️ Unknown image: $name" ;;
+                esac
+              done
+            fi
+          else
+            [[ "$API" == "true" || "$SHARED" == "true" ]]                                                       && add_image api "apps/api/Dockerfile"
+            [[ "$JUDGE" == "true" || "$SHARED" == "true" ]]                                                     && add_image judge "apps/judge/Dockerfile"
+            [[ "$PORTAL" == "true" || "$SHARED" == "true" ]]                                                    && add_image portal "apps/portal/Dockerfile"
+            [[ "$CODER_ACP_COPILOT" == "true" || "$SHARED" == "true" ]]                                         && add_image coder-acp-copilot "apps/workers/coder-acp-copilot/Dockerfile"
+            [[ "$CODER_ACP_CLAUDE_CODE" == "true" || "$SHARED" == "true" ]]                                     && add_image coder-acp-claude-code "apps/workers/coder-acp-claude-code/Dockerfile"
+            [[ "$TOKEN_MANAGER" == "true" || "$SHARED" == "true" ]]                                             && add_image token-manager "apps/token-manager/Dockerfile"
+            [[ "$MODEL_SCANNER_COPILOT" == "true" || "$SHARED" == "true" || "$MODEL_SCANNING" == "true" ]]      && add_image model-scanner-copilot "apps/model-scanners/copilot/Dockerfile"
+            [[ "$MODEL_SCANNER_ANTHROPIC" == "true" || "$SHARED" == "true" || "$MODEL_SCANNING" == "true" ]]    && add_image model-scanner-anthropic "apps/model-scanners/anthropic/Dockerfile"
+            [[ "$REPORT_GENERATOR" == "true" || "$SHARED" == "true" ]]                                          && add_image report-generator "apps/workers/report-generator/Dockerfile"
+            [[ "$DB_MIGRATIONS" == "true" ]]                                                                     && add_image db-migrations "packages/db-migrations/Dockerfile"
+          fi
+
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "Images to build: $MATRIX"
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT: ${{ github.event.inputs.images }}
+          ALL: ${{ env.ALL_IMAGES }}
+          API: ${{ steps.changes.outputs.api }}
+          JUDGE: ${{ steps.changes.outputs.judge }}
+          PORTAL: ${{ steps.changes.outputs.portal }}
+          CODER_ACP_COPILOT: ${{ steps.changes.outputs.coder-acp-copilot }}
+          CODER_ACP_CLAUDE_CODE: ${{ steps.changes.outputs.coder-acp-claude-code }}
+          TOKEN_MANAGER: ${{ steps.changes.outputs.token-manager }}
+          MODEL_SCANNER_COPILOT: ${{ steps.changes.outputs.model-scanner-copilot }}
+          MODEL_SCANNER_ANTHROPIC: ${{ steps.changes.outputs.model-scanner-anthropic }}
+          REPORT_GENERATOR: ${{ steps.changes.outputs.report-generator }}
+          DB_MIGRATIONS: ${{ steps.changes.outputs.db-migrations }}
+          SHARED: ${{ steps.changes.outputs.shared }}
+          MODEL_SCANNING: ${{ steps.changes.outputs.model-scanning }}
+
   # ---------------------------------------------------------------------------
   # Build container images — gated on CI passing
   # ---------------------------------------------------------------------------
   build-images:
     name: "Build image: ${{ matrix.image.name }}"
     if: >-
-      always() &&
       !cancelled() &&
       needs.test.result == 'success' &&
       needs.build.result == 'success' &&
-      (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped') &&
-      (
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.images != '') ||
-        ((github.event_name == 'push' || github.event_name == 'pull_request') && (
-          needs.detect-changes.outputs.api == 'true' ||
-          needs.detect-changes.outputs.judge == 'true' ||
-          needs.detect-changes.outputs.portal == 'true' ||
-          needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
-          needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
-          needs.detect-changes.outputs.token-manager == 'true' ||
-          needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
-          needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
-          needs.detect-changes.outputs.report-generator == 'true' ||
-          needs.detect-changes.outputs.db-migrations == 'true' ||
-          needs.detect-changes.outputs.shared == 'true' ||
-          needs.detect-changes.outputs.model-scanning == 'true'
-        ))
-      )
+      (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped')
     needs: [test, integration-test, build, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
     strategy:
       fail-fast: false
       matrix:
-        image:
-          - name: api
-            dockerfile: apps/api/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.api == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
-          - name: judge
-            dockerfile: apps/judge/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.judge == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
-          - name: portal
-            dockerfile: apps/portal/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.portal == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
-          - name: coder-acp-copilot
-            dockerfile: apps/workers/coder-acp-copilot/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.coder-acp-copilot == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
-          - name: coder-acp-claude-code
-            dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
-          - name: token-manager
-            dockerfile: apps/token-manager/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.token-manager == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
-          - name: model-scanner-copilot
-            dockerfile: apps/model-scanners/copilot/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.model-scanner-copilot == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
-          - name: model-scanner-anthropic
-            dockerfile: apps/model-scanners/anthropic/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.model-scanner-anthropic == 'true' || needs.detect-changes.outputs.shared == 'true' || needs.detect-changes.outputs.model-scanning == 'true') && 'true' || 'false' }}
-          - name: report-generator
-            dockerfile: apps/workers/report-generator/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.report-generator == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
-          - name: db-migrations
-            dockerfile: packages/db-migrations/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
-        exclude:
-          - image:
-              changed: "false"
+        image: ${{ fromJSON(needs.detect-changes.outputs.build-matrix) }}
     steps:
-      - name: Check if image should be built (manual trigger)
-        id: check
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          IMAGES="${{ github.event.inputs.images }}"
-          if [[ "$IMAGES" == "all" ]] || echo "$IMAGES" | grep -qw "${{ matrix.image.name }}"; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - uses: actions/checkout@v4
-        if: steps.check.outputs.skip != 'true'
 
       - name: Log in to Azure
-        if: steps.check.outputs.skip != 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -484,7 +496,6 @@ jobs:
 
       - name: Compute image tags
         id: tags
-        if: steps.check.outputs.skip != 'true'
         run: |
           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
@@ -530,7 +541,6 @@ jobs:
 
       - name: Load pinned versions
         id: versions
-        if: steps.check.outputs.skip != 'true'
         run: |
           EXTRA_ARGS=""
           for f in apps/workers/${{ matrix.image.name }}/versions.env apps/${{ matrix.image.name }}/versions.env; do
@@ -545,7 +555,6 @@ jobs:
           echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
 
       - name: Build and push to ACR
-        if: steps.check.outputs.skip != 'true'
         run: |
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
