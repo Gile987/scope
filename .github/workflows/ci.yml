@@ -136,7 +136,7 @@ jobs:
           path: ctrf/
 
   integration-test:
-    name: Integration Tests (${{ matrix.worker.name }})
+    name: "${{ matrix.worker.name == '__none__' && 'Integration tests (none needed)' || format('Integration Tests ({0})', matrix.worker.name) }}"
     needs: [detect-changes]
     runs-on: ubuntu-latest
 
@@ -147,15 +147,18 @@ jobs:
 
     steps:
       - name: Checkout repository
+        if: matrix.worker.name != '__none__'
         uses: actions/checkout@v4
 
       # pnpm/action-setup@v4 is not allowed on EMU
       - name: Install pnpm
+        if: matrix.worker.name != '__none__'
         run: |
           curl -fsSL https://get.pnpm.io/install.sh | sh -
           echo "$HOME/.local/share/pnpm" >> $GITHUB_PATH
 
       - name: Setup Node.js
+        if: matrix.worker.name != '__none__'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -163,17 +166,21 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
+        if: matrix.worker.name != '__none__'
         run: pnpm install --frozen-lockfile
 
       - name: Build shared packages
+        if: matrix.worker.name != '__none__'
         run: pnpm --filter shared --filter github-auth build
 
       - name: Set up Docker Buildx
+        if: matrix.worker.name != '__none__'
         uses: docker/setup-buildx-action@v4.0.0
         with:
           driver: docker-container
 
       - name: Cache Docker layers
+        if: matrix.worker.name != '__none__'
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
@@ -181,6 +188,7 @@ jobs:
           restore-keys: docker-${{ matrix.worker.name }}-
 
       - name: Pre-build Docker test images
+        if: matrix.worker.name != '__none__'
         run: |
           source "${{ matrix.worker.versions_env }}"
           case "${{ matrix.worker.name }}" in
@@ -227,6 +235,7 @@ jobs:
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Run integration tests
+        if: matrix.worker.name != '__none__'
         run: npx vitest run --config vitest.integration.config.ts --silent=false ${{ matrix.worker.test_pattern }}
         env:
           GH_AUTH_USERNAME: ${{ secrets.GH_AUTH_USERNAME }}
@@ -235,13 +244,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 
       - name: Generate GitHub test summary from CTRF
-        if: always()
+        if: always() && matrix.worker.name != '__none__'
         run: |
           pnpm exec github-actions-ctrf "ctrf/*-integration-ctrf-report.json" --title "Integration Test Results (${{ matrix.worker.name }})" || true
 
       - name: Upload CTRF integration test results
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && matrix.worker.name != '__none__'
         with:
           name: ctrf-integration-test-results-${{ matrix.worker.name }}
           path: ctrf/
@@ -249,14 +258,14 @@ jobs:
 
       - name: Upload test snapshots
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && matrix.worker.name != '__none__'
         with:
           name: test-snapshots-${{ matrix.worker.name }}
           path: test-snapshots/
           if-no-files-found: ignore
 
       - name: Collect test videos
-        if: always()
+        if: always() && matrix.worker.name != '__none__'
         run: |
           mkdir -p test-videos
           i=0; find apps/workers/*/test-output -name "*.webm" | sort | while read f; do
@@ -266,7 +275,7 @@ jobs:
 
       - name: Upload test videos
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && matrix.worker.name != '__none__'
         with:
           name: test-videos-${{ matrix.worker.name }}
           path: test-videos/
@@ -442,6 +451,11 @@ jobs:
             [[ "$DB_MIGRATIONS" == "true" ]]                                                                     && add_image db-migrations "packages/db-migrations/Dockerfile"
           fi
 
+          # Use sentinel entry when no images to build — prevents empty fromJSON()
+          # from causing a job failure while avoiding the skipped-job placeholder
+          if [ "$MATRIX" = "[]" ]; then
+            MATRIX='[{"name":"__none__","dockerfile":""}]'
+          fi
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           echo "Images to build: $MATRIX"
         env:
@@ -476,8 +490,10 @@ jobs:
             "vscode-electron": e.CODER_VSCODE_ELECTRON === "true" || e.SHARED === "true"
           };
           const result = isDispatch ? workers : workers.filter(w => changed[w.name]);
-          require("fs").appendFileSync(e.GITHUB_OUTPUT, "workers=" + JSON.stringify(result) + "\n");
-          console.log("Integration workers:", JSON.stringify(result));
+          // Sentinel entry when no workers needed — avoids empty fromJSON() failure
+          const output = result.length > 0 ? result : [{name: "__none__", dockerfile: "", versions_env: "", test_pattern: ""}];
+          require("fs").appendFileSync(e.GITHUB_OUTPUT, "workers=" + JSON.stringify(output) + "\n");
+          console.log("Integration workers:", JSON.stringify(output));
           '
         env:
           EVENT: ${{ github.event_name }}
@@ -488,7 +504,7 @@ jobs:
   # Build container images — gated on CI passing
   # ---------------------------------------------------------------------------
   build-images:
-    name: "Build image: ${{ matrix.image.name }}"
+    name: "${{ matrix.image.name == '__none__' && 'Image builds (none needed)' || format('Build image: {0}', matrix.image.name) }}"
     if: ${{ !failure() && !cancelled() }}
     needs: [test, integration-test, build, detect-changes]
     runs-on: ubuntu-latest
@@ -499,8 +515,10 @@ jobs:
         image: ${{ fromJSON(needs.detect-changes.outputs.build-matrix) }}
     steps:
       - uses: actions/checkout@v4
+        if: matrix.image.name != '__none__'
 
       - name: Log in to Azure
+        if: matrix.image.name != '__none__'
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -509,6 +527,7 @@ jobs:
 
       - name: Compute image tags
         id: tags
+        if: matrix.image.name != '__none__'
         run: |
           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
@@ -554,6 +573,7 @@ jobs:
 
       - name: Load pinned versions
         id: versions
+        if: matrix.image.name != '__none__'
         run: |
           EXTRA_ARGS=""
           for f in apps/workers/${{ matrix.image.name }}/versions.env apps/${{ matrix.image.name }}/versions.env; do
@@ -568,6 +588,7 @@ jobs:
           echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
 
       - name: Build and push to ACR
+        if: matrix.image.name != '__none__'
         run: |
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
