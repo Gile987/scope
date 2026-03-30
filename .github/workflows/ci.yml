@@ -354,6 +354,7 @@ jobs:
       shared: ${{ steps.changes.outputs.shared }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
       build-matrix: ${{ steps.build-matrix.outputs.matrix }}
+      has-images: ${{ steps.build-matrix.outputs.has-images }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -449,6 +450,11 @@ jobs:
           fi
 
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          if [ "$MATRIX" != "[]" ]; then
+            echo "has-images=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-images=false" >> "$GITHUB_OUTPUT"
+          fi
           echo "Images to build: $MATRIX"
         env:
           EVENT: ${{ github.event_name }}
@@ -474,6 +480,7 @@ jobs:
     name: "Build image: ${{ matrix.image.name }}"
     if: >-
       !cancelled() &&
+      needs.detect-changes.outputs.has-images == 'true' &&
       needs.test.result == 'success' &&
       needs.build.result == 'success' &&
       (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped')
