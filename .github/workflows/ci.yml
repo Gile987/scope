@@ -138,58 +138,12 @@ jobs:
   integration-test:
     name: Integration Tests (${{ matrix.worker.name }})
     needs: [detect-changes]
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
-      needs.detect-changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        worker:
-          - name: vscode-web
-            images: |
-              docker buildx build \
-                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
-                --load \
-                .
-              docker buildx build \
-                --target dev \
-                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
-                --load \
-                .
-          - name: copilot-acp
-            dockerfile: apps/workers/coder-acp-copilot/Dockerfile
-            versions_env: apps/workers/coder-acp-copilot/versions.env
-            test_pattern: apps/workers/coder-acp-copilot
-            images: |
-              source apps/workers/coder-acp-copilot/versions.env
-              docker buildx build \
-                -t coder-acp-copilot-integration-test \
-                -f apps/workers/coder-acp-copilot/Dockerfile \
-                --target dev \
-                --build-arg COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
-                --load \
-                .
-          - name: vscode-electron
-            images: |
-              docker buildx build \
-                --target dev \
-                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
-                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
-                --cache-from type=local,src=/tmp/.buildx-cache \
-                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
-                --load \
-                .
+        worker: ${{ fromJSON(needs.detect-changes.outputs.integration-workers) }}
 
     steps:
       - name: Checkout repository
@@ -228,7 +182,46 @@ jobs:
 
       - name: Pre-build Docker test images
         run: |
-          ${{ matrix.worker.images }}
+          source "${{ matrix.worker.versions_env }}"
+          case "${{ matrix.worker.name }}" in
+            vscode-web)
+              docker buildx build \
+                -f "${{ matrix.worker.dockerfile }}" \
+                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
+                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --load .
+              docker buildx build \
+                -f "${{ matrix.worker.dockerfile }}" \
+                --target dev \
+                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
+                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --load .
+              ;;
+            copilot-acp)
+              docker buildx build \
+                -t coder-acp-copilot-integration-test \
+                -f "${{ matrix.worker.dockerfile }}" \
+                --target dev \
+                --build-arg COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --load .
+              ;;
+            vscode-electron)
+              docker buildx build \
+                -f "${{ matrix.worker.dockerfile }}" \
+                --target dev \
+                --build-arg VSCODE_VERSION=$VSCODE_VERSION \
+                --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --load .
+              ;;
+          esac
           # Rotate cache to avoid unbounded growth
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
@@ -354,7 +347,7 @@ jobs:
       shared: ${{ steps.changes.outputs.shared }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
       build-matrix: ${{ steps.build-matrix.outputs.matrix }}
-      has-images: ${{ steps.build-matrix.outputs.has-images }}
+      integration-workers: ${{ steps.integration-matrix.outputs.workers }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -450,11 +443,6 @@ jobs:
           fi
 
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
-          if [ "$MATRIX" != "[]" ]; then
-            echo "has-images=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has-images=false" >> "$GITHUB_OUTPUT"
-          fi
           echo "Images to build: $MATRIX"
         env:
           EVENT: ${{ github.event_name }}
@@ -473,17 +461,35 @@ jobs:
           SHARED: ${{ steps.changes.outputs.shared }}
           MODEL_SCANNING: ${{ steps.changes.outputs.model-scanning }}
 
+      - name: Compute integration test matrix
+        id: integration-matrix
+        run: |
+          node -e '
+          const workers = [
+            { name: "copilot-acp", dockerfile: "apps/workers/coder-acp-copilot/Dockerfile", versions_env: "apps/workers/coder-acp-copilot/versions.env", test_pattern: "apps/workers/coder-acp-copilot" },
+          ];
+          const e = process.env;
+          const isDispatch = e.EVENT === "workflow_dispatch";
+          const changed = {
+            "vscode-web": e.CODER_VSCODE_WEB === "true" || e.SHARED === "true",
+            "copilot-acp": e.CODER_ACP_COPILOT === "true" || e.SHARED === "true",
+            "vscode-electron": e.CODER_VSCODE_ELECTRON === "true" || e.SHARED === "true"
+          };
+          const result = isDispatch ? workers : workers.filter(w => changed[w.name]);
+          require("fs").appendFileSync(e.GITHUB_OUTPUT, "workers=" + JSON.stringify(result) + "\n");
+          console.log("Integration workers:", JSON.stringify(result));
+          '
+        env:
+          EVENT: ${{ github.event_name }}
+          CODER_ACP_COPILOT: ${{ steps.changes.outputs.coder-acp-copilot }}
+          SHARED: ${{ steps.changes.outputs.shared }}
+
   # ---------------------------------------------------------------------------
   # Build container images — gated on CI passing
   # ---------------------------------------------------------------------------
   build-images:
     name: "Build image: ${{ matrix.image.name }}"
-    if: >-
-      !cancelled() &&
-      needs.detect-changes.outputs.has-images == 'true' &&
-      needs.test.result == 'success' &&
-      needs.build.result == 'success' &&
-      (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped')
+    if: ${{ !failure() && !cancelled() }}
     needs: [test, integration-test, build, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
