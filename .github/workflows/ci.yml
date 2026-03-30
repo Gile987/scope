@@ -140,6 +140,7 @@ jobs:
     needs: [detect-changes]
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
       needs.detect-changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
 
@@ -261,6 +262,15 @@ jobs:
           path: test-snapshots/
           if-no-files-found: ignore
 
+      - name: Collect test videos
+        if: always()
+        run: |
+          mkdir -p test-videos
+          i=0; find apps/workers/*/test-output -name "*.webm" | sort | while read f; do
+            cp "$f" "test-videos/recording-$i.webm"
+            i=$((i+1))
+          done
+
       - name: Upload test videos
         uses: actions/upload-artifact@v4
         if: always()
@@ -369,6 +379,7 @@ jobs:
               - 'apps/workers/coder-acp-copilot/**'
             coder-acp-claude-code:
               - 'apps/workers/coder-acp-claude-code/**'
+              - 'packages/copilot-driver-ext/**'
             token-manager:
               - 'apps/token-manager/**'
             model-scanner-copilot:
