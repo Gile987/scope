@@ -343,20 +343,8 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      api: ${{ steps.changes.outputs.api }}
-      judge: ${{ steps.changes.outputs.judge }}
-      portal: ${{ steps.changes.outputs.portal }}
-      coder-acp-copilot: ${{ steps.changes.outputs.coder-acp-copilot }}
-      coder-acp-claude-code: ${{ steps.changes.outputs.coder-acp-claude-code }}
-      token-manager: ${{ steps.changes.outputs.token-manager }}
-      model-scanner-copilot: ${{ steps.changes.outputs.model-scanner-copilot }}
-      model-scanner-anthropic: ${{ steps.changes.outputs.model-scanner-anthropic }}
-      report-generator: ${{ steps.changes.outputs.report-generator }}
-      db-migrations: ${{ steps.changes.outputs.db-migrations }}
-      shared: ${{ steps.changes.outputs.shared }}
-      model-scanning: ${{ steps.changes.outputs.model-scanning }}
-      build-matrix: ${{ steps.build-matrix.outputs.matrix }}
-      integration-workers: ${{ steps.integration-matrix.outputs.workers }}
+      build-matrix: ${{ steps.matrices.outputs.build-matrix }}
+      integration-workers: ${{ steps.matrices.outputs.integration-workers }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -395,110 +383,82 @@ jobs:
             db-migrations:
               - 'packages/db-migrations/**'
 
-      - name: Compute build image matrix
-        id: build-matrix
-        run: |
-          MATRIX='[]'
-          add_image() {
-            MATRIX=$(echo "$MATRIX" | jq -c --arg n "$1" --arg d "$2" '. + [{name: $n, dockerfile: $d}]')
-          }
-
-          if [[ "$EVENT" == "workflow_dispatch" ]]; then
-            if [[ "$INPUT" == "all" ]]; then
-              for name in $ALL; do
-                case "$name" in
-                  api)                       add_image "$name" "apps/api/Dockerfile" ;;
-                  judge)                     add_image "$name" "apps/judge/Dockerfile" ;;
-                  portal)                    add_image "$name" "apps/portal/Dockerfile" ;;
-                  coder-acp-copilot)         add_image "$name" "apps/workers/coder-acp-copilot/Dockerfile" ;;
-                  coder-acp-claude-code)     add_image "$name" "apps/workers/coder-acp-claude-code/Dockerfile" ;;
-                  token-manager)             add_image "$name" "apps/token-manager/Dockerfile" ;;
-                  model-scanner-copilot)     add_image "$name" "apps/model-scanners/copilot/Dockerfile" ;;
-                  model-scanner-anthropic)   add_image "$name" "apps/model-scanners/anthropic/Dockerfile" ;;
-                  report-generator)          add_image "$name" "apps/workers/report-generator/Dockerfile" ;;
-                  db-migrations)             add_image "$name" "packages/db-migrations/Dockerfile" ;;
-                esac
-              done
-            elif [[ -n "$INPUT" ]]; then
-              IFS=',' read -ra NAMES <<< "$INPUT"
-              for raw in "${NAMES[@]}"; do
-                name=$(echo "$raw" | xargs)
-                case "$name" in
-                  api)                       add_image "$name" "apps/api/Dockerfile" ;;
-                  judge)                     add_image "$name" "apps/judge/Dockerfile" ;;
-                  portal)                    add_image "$name" "apps/portal/Dockerfile" ;;
-                  coder-acp-copilot)         add_image "$name" "apps/workers/coder-acp-copilot/Dockerfile" ;;
-                  coder-acp-claude-code)     add_image "$name" "apps/workers/coder-acp-claude-code/Dockerfile" ;;
-                  token-manager)             add_image "$name" "apps/token-manager/Dockerfile" ;;
-                  model-scanner-copilot)     add_image "$name" "apps/model-scanners/copilot/Dockerfile" ;;
-                  model-scanner-anthropic)   add_image "$name" "apps/model-scanners/anthropic/Dockerfile" ;;
-                  report-generator)          add_image "$name" "apps/workers/report-generator/Dockerfile" ;;
-                  db-migrations)             add_image "$name" "packages/db-migrations/Dockerfile" ;;
-                  *) echo "⚠️ Unknown image: $name" ;;
-                esac
-              done
-            fi
-          else
-            [[ "$API" == "true" || "$SHARED" == "true" ]]                                                       && add_image api "apps/api/Dockerfile"
-            [[ "$JUDGE" == "true" || "$SHARED" == "true" ]]                                                     && add_image judge "apps/judge/Dockerfile"
-            [[ "$PORTAL" == "true" || "$SHARED" == "true" ]]                                                    && add_image portal "apps/portal/Dockerfile"
-            [[ "$CODER_ACP_COPILOT" == "true" || "$SHARED" == "true" ]]                                         && add_image coder-acp-copilot "apps/workers/coder-acp-copilot/Dockerfile"
-            [[ "$CODER_ACP_CLAUDE_CODE" == "true" || "$SHARED" == "true" ]]                                     && add_image coder-acp-claude-code "apps/workers/coder-acp-claude-code/Dockerfile"
-            [[ "$TOKEN_MANAGER" == "true" || "$SHARED" == "true" ]]                                             && add_image token-manager "apps/token-manager/Dockerfile"
-            [[ "$MODEL_SCANNER_COPILOT" == "true" || "$SHARED" == "true" || "$MODEL_SCANNING" == "true" ]]      && add_image model-scanner-copilot "apps/model-scanners/copilot/Dockerfile"
-            [[ "$MODEL_SCANNER_ANTHROPIC" == "true" || "$SHARED" == "true" || "$MODEL_SCANNING" == "true" ]]    && add_image model-scanner-anthropic "apps/model-scanners/anthropic/Dockerfile"
-            [[ "$REPORT_GENERATOR" == "true" || "$SHARED" == "true" ]]                                          && add_image report-generator "apps/workers/report-generator/Dockerfile"
-            [[ "$DB_MIGRATIONS" == "true" ]]                                                                     && add_image db-migrations "packages/db-migrations/Dockerfile"
-          fi
-
-          # Use sentinel entry when no images to build — prevents empty fromJSON()
-          # from causing a job failure while avoiding the skipped-job placeholder
-          if [ "$MATRIX" = "[]" ]; then
-            MATRIX='[{"name":"__none__","dockerfile":""}]'
-          fi
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
-          echo "Images to build: $MATRIX"
-        env:
-          EVENT: ${{ github.event_name }}
-          INPUT: ${{ github.event.inputs.images }}
-          ALL: ${{ env.ALL_IMAGES }}
-          API: ${{ steps.changes.outputs.api }}
-          JUDGE: ${{ steps.changes.outputs.judge }}
-          PORTAL: ${{ steps.changes.outputs.portal }}
-          CODER_ACP_COPILOT: ${{ steps.changes.outputs.coder-acp-copilot }}
-          CODER_ACP_CLAUDE_CODE: ${{ steps.changes.outputs.coder-acp-claude-code }}
-          TOKEN_MANAGER: ${{ steps.changes.outputs.token-manager }}
-          MODEL_SCANNER_COPILOT: ${{ steps.changes.outputs.model-scanner-copilot }}
-          MODEL_SCANNER_ANTHROPIC: ${{ steps.changes.outputs.model-scanner-anthropic }}
-          REPORT_GENERATOR: ${{ steps.changes.outputs.report-generator }}
-          DB_MIGRATIONS: ${{ steps.changes.outputs.db-migrations }}
-          SHARED: ${{ steps.changes.outputs.shared }}
-          MODEL_SCANNING: ${{ steps.changes.outputs.model-scanning }}
-
-      - name: Compute integration test matrix
-        id: integration-matrix
+      - name: Compute matrices
+        id: matrices
         run: |
           node -e '
-          const workers = [
-            { name: "copilot-acp", dockerfile: "apps/workers/coder-acp-copilot/Dockerfile", versions_env: "apps/workers/coder-acp-copilot/versions.env", test_pattern: "apps/workers/coder-acp-copilot" },
-          ];
+          const fs = require("fs");
           const e = process.env;
           const isDispatch = e.EVENT === "workflow_dispatch";
-          const changed = {
-            "vscode-web": e.CODER_VSCODE_WEB === "true" || e.SHARED === "true",
-            "copilot-acp": e.CODER_ACP_COPILOT === "true" || e.SHARED === "true",
-            "vscode-electron": e.CODER_VSCODE_ELECTRON === "true" || e.SHARED === "true"
-          };
-          const result = isDispatch ? workers : workers.filter(w => changed[w.name]);
-          // Sentinel entry when no workers needed — avoids empty fromJSON() failure
-          const output = result.length > 0 ? result : [{name: "__none__", dockerfile: "", versions_env: "", test_pattern: ""}];
-          require("fs").appendFileSync(e.GITHUB_OUTPUT, "workers=" + JSON.stringify(output) + "\n");
-          console.log("Integration workers:", JSON.stringify(output));
+          const ch = (k) => e["CHANGE_" + k] === "true";
+          const SENTINEL = [{name: "__none__"}];
+
+          // --- Build image matrix ---
+          const images = [
+            { name: "api",                     dockerfile: "apps/api/Dockerfile",                              triggers: ["api", "shared"] },
+            { name: "judge",                   dockerfile: "apps/judge/Dockerfile",                            triggers: ["judge", "shared"] },
+            { name: "portal",                  dockerfile: "apps/portal/Dockerfile",                           triggers: ["portal", "shared"] },
+            { name: "coder-acp-copilot",       dockerfile: "apps/workers/coder-acp-copilot/Dockerfile",       triggers: ["coder-acp-copilot", "shared"] },
+            { name: "coder-acp-claude-code",   dockerfile: "apps/workers/coder-acp-claude-code/Dockerfile",   triggers: ["coder-acp-claude-code", "shared"] },
+            { name: "token-manager",           dockerfile: "apps/token-manager/Dockerfile",                    triggers: ["token-manager", "shared"] },
+            { name: "model-scanner-copilot",   dockerfile: "apps/model-scanners/copilot/Dockerfile",          triggers: ["model-scanner-copilot", "shared", "model-scanning"] },
+            { name: "model-scanner-anthropic", dockerfile: "apps/model-scanners/anthropic/Dockerfile",        triggers: ["model-scanner-anthropic", "shared", "model-scanning"] },
+            { name: "report-generator",        dockerfile: "apps/workers/report-generator/Dockerfile",        triggers: ["report-generator", "shared"] },
+            { name: "db-migrations",           dockerfile: "packages/db-migrations/Dockerfile",               triggers: ["db-migrations"] },
+          ];
+
+          let buildMatrix;
+          if (isDispatch) {
+            const input = (e.INPUT || "").trim();
+            if (input === "all") {
+              buildMatrix = images.map(({name, dockerfile}) => ({name, dockerfile}));
+            } else if (input) {
+              const requested = new Set(input.split(",").map(s => s.trim()));
+              buildMatrix = images.filter(i => requested.has(i.name)).map(({name, dockerfile}) => ({name, dockerfile}));
+            } else {
+              buildMatrix = [];
+            }
+          } else {
+            buildMatrix = images
+              .filter(i => i.triggers.some(t => ch(t)))
+              .map(({name, dockerfile}) => ({name, dockerfile}));
+          }
+
+          // --- Integration test matrix ---
+          const workers = [
+            { name: "copilot-acp",      dockerfile: "apps/workers/coder-acp-copilot/Dockerfile",                   versions_env: "apps/workers/coder-acp-copilot/versions.env",                   test_pattern: "apps/workers/coder-acp-copilot",                   triggers: ["coder-acp-copilot", "shared"] },
+          ];
+
+          const integrationWorkers = isDispatch
+            ? workers
+            : workers.filter(w => w.triggers.some(t => ch(t)));
+
+          // Sentinel fallback for empty matrices (avoids GitHub Actions empty-matrix failure)
+          const bm = buildMatrix.length > 0 ? buildMatrix : SENTINEL;
+          const iw = integrationWorkers.length > 0
+            ? integrationWorkers.map(({name, dockerfile, versions_env, test_pattern}) => ({name, dockerfile, versions_env, test_pattern}))
+            : SENTINEL;
+
+          fs.appendFileSync(e.GITHUB_OUTPUT, "build-matrix=" + JSON.stringify(bm) + "\n");
+          fs.appendFileSync(e.GITHUB_OUTPUT, "integration-workers=" + JSON.stringify(iw) + "\n");
+          console.log("Build images:", JSON.stringify(bm));
+          console.log("Integration workers:", JSON.stringify(iw));
           '
         env:
           EVENT: ${{ github.event_name }}
-          CODER_ACP_COPILOT: ${{ steps.changes.outputs.coder-acp-copilot }}
-          SHARED: ${{ steps.changes.outputs.shared }}
+          INPUT: ${{ github.event.inputs.images }}
+          CHANGE_api: ${{ steps.changes.outputs.api }}
+          CHANGE_judge: ${{ steps.changes.outputs.judge }}
+          CHANGE_portal: ${{ steps.changes.outputs.portal }}
+          CHANGE_coder-acp-copilot: ${{ steps.changes.outputs.coder-acp-copilot }}
+          CHANGE_coder-acp-claude-code: ${{ steps.changes.outputs.coder-acp-claude-code }}
+          CHANGE_token-manager: ${{ steps.changes.outputs.token-manager }}
+          CHANGE_model-scanner-copilot: ${{ steps.changes.outputs.model-scanner-copilot }}
+          CHANGE_model-scanner-anthropic: ${{ steps.changes.outputs.model-scanner-anthropic }}
+          CHANGE_report-generator: ${{ steps.changes.outputs.report-generator }}
+          CHANGE_db-migrations: ${{ steps.changes.outputs.db-migrations }}
+          CHANGE_shared: ${{ steps.changes.outputs.shared }}
+          CHANGE_model-scanning: ${{ steps.changes.outputs.model-scanning }}
 
   # ---------------------------------------------------------------------------
   # Build container images — gated on CI passing
