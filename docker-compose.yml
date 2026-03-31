@@ -440,6 +440,33 @@ services:
       - copilot_har_output:/har-output
       - copilot_devproxy_cert:/certs
 
+  devproxy-vscode-electron:
+    image: ghcr.io/dotnet/dev-proxy:2.1.0
+    profiles: [vscode-electron-driver-ext]
+    user: "1000:1000"
+    working_dir: /har-output
+    command: ["--config-file", "/config/devproxyrc.json", "--record"]
+    volumes:
+      - vscode_electron_har_output:/har-output
+      - vscode_electron_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:18897/proxy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      devproxy-vscode-electron-init:
+        condition: service_completed_successfully
+
+  devproxy-vscode-electron-init:
+    image: busybox:1.37
+    profiles: [vscode-electron-driver-ext]
+    command: ["sh", "-c", "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'"]
+    volumes:
+      - vscode_electron_har_output:/har-output
+      - vscode_electron_devproxy_cert:/certs
+
   # Report Generator worker (LLM-powered run reports via Copilot SDK)
   report-generator:
     build:
@@ -473,6 +500,8 @@ volumes:
   copilot_devproxy_cert:
   claude_har_output:
   claude_devproxy_cert:
+  vscode_electron_har_output:
+  vscode_electron_devproxy_cert:
 
 networks:
   default:
