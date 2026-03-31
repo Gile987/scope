@@ -345,16 +345,16 @@ async function initializeClients(): Promise<void> {
   const insightCount = await insightsCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Insights collection has ${insightCount} documents`);
 
-  // Seed default agents (upsert — always updates name, preserves existing models)
-  const defaultAgents: Array<{ _id: string; name: string }> = [
-    { _id: "coder-acp-claude-code", name: "Claude Code (ACP)" },
-    { _id: "coder-acp-copilot", name: "Copilot (ACP)" },
+  // Seed default agents (upsert — always updates name and modelProvider, preserves existing models)
+  const defaultAgents: Array<{ _id: string; name: string; modelProvider?: string }> = [
+    { _id: "coder-acp-claude-code", name: "Claude Code (ACP)", modelProvider: "anthropic" },
+    { _id: "coder-acp-copilot", name: "Copilot (ACP)", modelProvider: "github-copilot" },
   ];
   for (const agent of defaultAgents) {
     await agentCollection.updateOne(
       { _id: agent._id },
       {
-        $set: { name: agent.name },
+        $set: { name: agent.name, ...(agent.modelProvider ? { modelProvider: agent.modelProvider } : {}) },
         $setOnInsert: { supportedModels: [], createdAt: new Date() },
       },
       { upsert: true }
@@ -3848,11 +3848,17 @@ apiRoute(app, registry, {
   path: "/api/v1/agents",
   tags: ["Agents"],
   summary: "List agents",
+  query: z.object({ modelProvider: z.string().optional() }),
   response: z.array(AgentResponseSchema),
-  handler: async (_req, res, next) => {
+  handler: async (req, res, next) => {
     try {
+      const modelProvider = req.query?.modelProvider as string | undefined;
+      const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+      if (modelProvider) {
+        filter.modelProvider = modelProvider;
+      }
       const agents = await agentCollection
-        .find({ deletedAt: { $exists: false } })
+        .find(filter)
         .toArray();
       // Sort in JS for CosmosDB compatibility
       agents.sort((a, b) => a._id.localeCompare(b._id));
@@ -3902,7 +3908,7 @@ apiRoute(app, registry, {
   },
   handler: async (req, res, next) => {
     try {
-      const { _id, name, description, supportedModels, defaultModel } = req.body;
+      const { _id, name, description, modelProvider, supportedModels, defaultModel } = req.body;
 
       if (!_id || typeof _id !== "string") {
         res.status(400).json({ error: "_id is required and must be a string" });
@@ -3940,6 +3946,7 @@ apiRoute(app, registry, {
             $set: {
               name,
               ...(description !== undefined ? { description } : {}),
+              ...(modelProvider !== undefined ? { modelProvider } : {}),
               ...(supportedModels !== undefined ? { supportedModels } : {}),
               ...(defaultModel !== undefined ? { defaultModel } : {}),
               updatedAt: now,
@@ -3955,6 +3962,7 @@ apiRoute(app, registry, {
           _id,
           name,
           ...(description ? { description } : {}),
+          ...(modelProvider ? { modelProvider } : {}),
           supportedModels: supportedModels ?? [],
           ...(defaultModel ? { defaultModel } : {}),
           createdAt: now,

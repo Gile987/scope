@@ -8,24 +8,18 @@ import { TokenManagerClient } from "shared";
 import {
   parseScannerArgs,
   waitForApi,
-  upsertAgent,
   reconcileModels,
+  fetchAgentsByProvider,
 } from "model-scanning";
 import { scanCopilotModels } from "./scan.js";
 
-const AGENT_ID = "coder-acp-copilot";
-const AGENT_DEFINITION = {
-  _id: AGENT_ID,
-  name: "Copilot (ACP)",
-  description: "GitHub Copilot coding agent via ACP protocol",
-  supportedModels: [] as string[],  // Will be populated by scan
-};
+const PROVIDER = "github-copilot";
 
 async function main(): Promise<void> {
   const { dryRun, apiUrl } = parseScannerArgs();
   const tokenClient = new TokenManagerClient();
 
-  console.log(`Model scanner: copilot (agent: ${AGENT_ID})`);
+  console.log(`Model scanner: copilot (provider: ${PROVIDER})`);
   console.log(`Mode: ${dryRun ? "dry-run" : "live"}`);
 
   // Acquire token — must be an OAuth token, not a PAT (Copilot API rejects PATs)
@@ -48,32 +42,38 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Live mode: wait for API, upsert agent, sync models
+  // Live mode: wait for API, discover agents, sync models
   console.log(`Waiting for API at ${apiUrl}...`);
   await waitForApi(apiUrl);
 
-  // Upsert agent definition (creates if doesn't exist)
-  console.log("Upserting agent definition...");
-  await upsertAgent(apiUrl, {
-    ...AGENT_DEFINITION,
-    supportedModels: scanResult.models.map((m) => m.id),
-  });
+  // Discover all agents that declare this model provider
+  console.log(`Discovering agents with modelProvider: ${PROVIDER}...`);
+  const agents = await fetchAgentsByProvider(apiUrl, PROVIDER);
 
-  // Sync models with lifecycle tracking
-  console.log("Syncing models...");
-  const report = await reconcileModels(
-    apiUrl,
-    AGENT_ID,
-    "github-copilot",
-    scanResult,
-  );
-  console.log(
-    `Sync complete: +${report.added.length} added, -${report.removed.length} removed, =${report.unchanged.length} unchanged`,
-  );
-  if (report.added.length > 0) console.log(`  Added: ${report.added.join(", ")}`);
-  if (report.removed.length > 0) console.log(`  Removed: ${report.removed.join(", ")}`);
+  if (agents.length === 0) {
+    console.warn(`No agents found with modelProvider: ${PROVIDER}. Nothing to sync.`);
+    process.exit(0);
+  }
 
-  console.log("Done.");
+  console.log(`Found ${agents.length} agent(s): ${agents.map((a) => a._id).join(", ")}`);
+
+  // Sync models for each agent
+  for (const agent of agents) {
+    console.log(`\nSyncing models for agent: ${agent._id}...`);
+    const report = await reconcileModels(
+      apiUrl,
+      agent._id,
+      PROVIDER,
+      scanResult,
+    );
+    console.log(
+      `  Sync complete: +${report.added.length} added, -${report.removed.length} removed, =${report.unchanged.length} unchanged`,
+    );
+    if (report.added.length > 0) console.log(`  Added: ${report.added.join(", ")}`);
+    if (report.removed.length > 0) console.log(`  Removed: ${report.removed.join(", ")}`);
+  }
+
+  console.log("\nDone.");
 }
 
 main().catch((error) => {

@@ -116,6 +116,27 @@ describe("CodingAgentDocument", () => {
     // Application-level validation: defaultModel should be in supportedModels
     expect(agent.supportedModels).toContain(agent.defaultModel);
   });
+
+  it("supports optional modelProvider field", () => {
+    const agent: CodingAgentDocument = {
+      _id: "coder-acp-copilot",
+      name: "Copilot (ACP)",
+      modelProvider: "github-copilot",
+      supportedModels: ["gpt-4.1"],
+      createdAt: new Date(),
+    };
+
+    expect(agent.modelProvider).toBe("github-copilot");
+
+    const agentWithout: CodingAgentDocument = {
+      _id: "test-agent",
+      name: "Test",
+      supportedModels: [],
+      createdAt: new Date(),
+    };
+
+    expect(agentWithout.modelProvider).toBeUndefined();
+  });
 });
 
 describe("InsightDocument", () => {

@@ -562,6 +562,7 @@ export interface CodingAgent {
   _id: string;
   name: string;
   description?: string;
+  modelProvider?: string;
   supportedModels: string[];
   defaultModel?: string;
   versions?: AgentVersion[];

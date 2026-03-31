@@ -84,6 +84,7 @@ export interface CodingAgentDocument {
   _id: string;               // Agent ID (e.g. "coder-acp-copilot")
   name: string;              // Display name
   description?: string;
+  modelProvider?: string;     // Model provider (e.g. "github-copilot", "anthropic") — used by scanners to discover agents
   supportedModels: string[];  // Empty array = model selection disabled
   defaultModel?: string;
   versions?: AgentVersion[];  // Registered agent versions (embedded array)

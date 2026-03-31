@@ -89,6 +89,7 @@ export interface AgentDefinition {
   _id: string;
   name: string;
   description?: string;
+  modelProvider?: string;
   supportedModels: string[];
   defaultModel?: string;
 }

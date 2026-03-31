@@ -25,6 +25,7 @@ export const CreateAgentInputSchema = z
     _id: z.string(),
     name: z.string(),
     description: z.string().optional(),
+    modelProvider: z.string().optional(),
     supportedModels: z.array(z.string()).optional(),
     defaultModel: z.string().optional(),
   })
@@ -34,6 +35,7 @@ export const UpdateAgentInputSchema = z
   .object({
     name: z.string().optional(),
     description: z.string().optional(),
+    modelProvider: z.string().optional(),
     supportedModels: z.array(z.string()).optional(),
     defaultModel: z.string().optional(),
   })
@@ -44,6 +46,7 @@ export const AgentResponseSchema = z
     _id: z.string(),
     name: z.string(),
     description: z.string().optional(),
+    modelProvider: z.string().optional(),
     supportedModels: z.array(z.string()),
     defaultModel: z.string().optional(),
     versions: z.array(AgentVersionSchema).optional(),

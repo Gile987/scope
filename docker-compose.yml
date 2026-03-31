@@ -195,13 +195,13 @@ services:
 
 
         # Upsert agent: coder-acp-copilot
-        post "/api/v1/agents" '{"_id":"coder-acp-copilot","name":"Copilot (ACP)","description":"GitHub Copilot coding agent via ACP protocol"}'
+        post "/api/v1/agents" '{"_id":"coder-acp-copilot","name":"Copilot (ACP)","description":"GitHub Copilot coding agent via ACP protocol","modelProvider":"github-copilot"}'
 
         # Register dev version: coder-acp-copilot
         post "/api/v1/agents/coder-acp-copilot/versions" '{"agentVersion":"copilot-dev","workerVersion":"copilot-dev-local-dev","components":{"COPILOT_CLI_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-copilot"}'
 
         # Upsert agent: coder-acp-claude-code
-        post "/api/v1/agents" '{"_id":"coder-acp-claude-code","name":"Claude Code (ACP)","description":"Anthropic Claude Code coding agent via ACP protocol"}'
+        post "/api/v1/agents" '{"_id":"coder-acp-claude-code","name":"Claude Code (ACP)","description":"Anthropic Claude Code coding agent via ACP protocol","modelProvider":"anthropic"}'
 
         # Register dev version: coder-acp-claude-code
         post "/api/v1/agents/coder-acp-claude-code/versions" '{"agentVersion":"claude-code-acp-dev-sdk-dev","workerVersion":"claude-code-acp-dev-sdk-dev-local-dev","components":{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-claude-code"}'
