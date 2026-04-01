@@ -79,7 +79,7 @@ describe("TokenManagerClient", () => {
         ok: true,
         json: async () => ({
           value: "ghp_from_api",
-          tokenId: "abc-123",
+          keyId: "abc-123",
           capability: "copilot-sdk",
         }),
       };
@@ -92,7 +92,7 @@ describe("TokenManagerClient", () => {
 
       expect(result).toBe("ghp_from_api");
       expect(fetchSpy).toHaveBeenCalledWith(
-        "http://token-manager:80/api/v1/tokens/acquire",
+        "http://token-manager:80/api/v1/keys/acquire",
         expect.objectContaining({
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -105,7 +105,7 @@ describe("TokenManagerClient", () => {
       delete process.env.GITHUB_TOKEN;
       const mockResponse = {
         ok: true,
-        json: async () => ({ value: "ghp_test", tokenId: "x", capability: "copilot-sdk" }),
+        json: async () => ({ value: "ghp_test", keyId: "x", capability: "copilot-sdk" }),
       };
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
@@ -115,7 +115,7 @@ describe("TokenManagerClient", () => {
       await client.acquireToken("copilot-sdk");
 
       expect(fetchSpy).toHaveBeenCalledWith(
-        "http://token-manager:80/api/v1/tokens/acquire",
+        "http://token-manager:80/api/v1/keys/acquire",
         expect.anything()
       );
     });
@@ -125,7 +125,7 @@ describe("TokenManagerClient", () => {
       process.env.TOKEN_MANAGER_URL = "http://tm-from-env:80";
       const mockResponse = {
         ok: true,
-        json: async () => ({ value: "ghp_env", tokenId: "x", capability: "copilot-sdk" }),
+        json: async () => ({ value: "ghp_env", keyId: "x", capability: "copilot-sdk" }),
       };
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
@@ -135,7 +135,7 @@ describe("TokenManagerClient", () => {
       await client.acquireToken("copilot-sdk");
 
       expect(fetchSpy).toHaveBeenCalledWith(
-        "http://tm-from-env:80/api/v1/tokens/acquire",
+        "http://tm-from-env:80/api/v1/keys/acquire",
         expect.anything()
       );
     });
@@ -178,7 +178,7 @@ describe("TokenManagerClient", () => {
       delete process.env.GITHUB_TOKEN;
       const mockResponse = {
         ok: true,
-        json: async () => ({ tokenId: "x", capability: "copilot-sdk" }),
+        json: async () => ({ keyId: "x", capability: "copilot-sdk" }),
       };
       vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse as Response);
 

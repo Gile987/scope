@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import { createAccountRouter } from "./account-routes.js";
 import type { Collection, FindCursor, WithId } from "mongodb";
-import type { TokenSecretStore } from "./keyvault-store.js";
+import type { SecretStore } from "./keyvault-store.js";
 
 // Inline the types we need to avoid "shared" resolution issues in worktrees
 interface AccountDocument {
@@ -29,13 +29,13 @@ interface AccountSecretValue {
 
 function makeApp(
   collection: Partial<Collection<AccountDocument>>,
-  store: Partial<TokenSecretStore>
+  store: Partial<SecretStore>
 ) {
   const app = express();
   app.use(express.json());
   const router = createAccountRouter(
     collection as Collection<AccountDocument>,
-    store as TokenSecretStore
+    store as SecretStore
   );
   app.use(router);
   return app;

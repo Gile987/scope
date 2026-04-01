@@ -3,10 +3,10 @@
 
 import { describe, it, expect } from "vitest";
 import { deriveCapabilities } from "./capabilities.js";
-import type { TokenValidationResult } from "./types.js";
+import type { KeyValidationResult } from "./types.js";
 
-const validResult: TokenValidationResult = { status: "valid" };
-const invalidResult: TokenValidationResult = { status: "invalid" };
+const validResult: KeyValidationResult = { status: "valid" };
+const invalidResult: KeyValidationResult = { status: "invalid" };
 
 describe("deriveCapabilities", () => {
   it("returns empty array for non-valid status", () => {
@@ -15,7 +15,7 @@ describe("deriveCapabilities", () => {
 
   describe("github-pat-classic", () => {
     it("returns copilot capabilities when copilot scope is present", () => {
-      const result: TokenValidationResult = {
+      const result: KeyValidationResult = {
         status: "valid",
         scopes: ["copilot", "repo"],
       };
@@ -26,7 +26,7 @@ describe("deriveCapabilities", () => {
     });
 
     it("does NOT include copilot-models (PATs rejected by Copilot models API)", () => {
-      const result: TokenValidationResult = {
+      const result: KeyValidationResult = {
         status: "valid",
         scopes: ["copilot"],
       };
@@ -35,7 +35,7 @@ describe("deriveCapabilities", () => {
     });
 
     it("returns empty array when copilot scope is missing", () => {
-      const result: TokenValidationResult = {
+      const result: KeyValidationResult = {
         status: "valid",
         scopes: ["repo"],
       };
@@ -45,7 +45,7 @@ describe("deriveCapabilities", () => {
 
   describe("github-pat-fine-grained", () => {
     it("returns github-models when capability was probed", () => {
-      const result: TokenValidationResult = {
+      const result: KeyValidationResult = {
         status: "valid",
         capabilities: ["github-models"],
       };
