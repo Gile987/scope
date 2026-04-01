@@ -154,7 +154,7 @@ describe("TokenManagerClient", () => {
       const client = new TokenManagerClient("http://token-manager:80");
 
       await expect(client.acquireToken("copilot-sdk")).rejects.toThrow(
-        /Token acquisition failed.*copilot-sdk.*404/
+        /Key acquisition failed.*copilot-sdk.*404/
       );
     });
 
@@ -170,7 +170,7 @@ describe("TokenManagerClient", () => {
       const client = new TokenManagerClient("http://token-manager:80");
 
       await expect(client.acquireToken("copilot-sdk")).rejects.toThrow(
-        /Token acquisition failed.*copilot-sdk.*500/
+        /Key acquisition failed.*copilot-sdk.*500/
       );
     });
 
@@ -185,7 +185,7 @@ describe("TokenManagerClient", () => {
       const client = new TokenManagerClient("http://token-manager:80");
 
       await expect(client.acquireToken("copilot-sdk")).rejects.toThrow(
-        /Invalid token response.*copilot-sdk.*no value/
+        /Invalid key response.*copilot-sdk.*no value/
       );
     });
 
@@ -196,7 +196,7 @@ describe("TokenManagerClient", () => {
       const client = new TokenManagerClient();
 
       await expect(client.acquireToken("copilot-sdk")).rejects.toThrow(
-        /No token available.*copilot-sdk.*GITHUB_TOKEN.*TOKEN_MANAGER_URL/
+        /No key available.*copilot-sdk.*GITHUB_TOKEN.*TOKEN_MANAGER_URL/
       );
     });
   });
