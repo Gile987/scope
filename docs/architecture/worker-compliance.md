@@ -14,13 +14,13 @@ This document tracks which [coding worker requirements](worker-requirements.md) 
 | 4 | Publish structured logs | ✅ | ✅ | ✅ | ✅ |
 | 6 | Capture HAR files | ✅ DevProxy sidecar | ✅ DevProxy sidecar | ❌ Not implemented | ✅ DevProxy sidecar |
 | 7 | Capture video recordings | N/A (CLI, headless) | N/A (CLI, headless) | ✅ Playwright recording (setup + session) | ✅ ffmpeg X11 capture (`video-recorder.ts`) |
-| 8 | Implement lifecycle hooks (`setup`/`teardown`) | ❌ Not implemented | ❌ Not implemented | ✅ VS Code process + browser lifecycle | ✅ Electron process + driver extension lifecycle |
+| 8 | Implement lifecycle hooks (`setup`/`teardown`) | — Not needed (stateless) | — Not needed (stateless) | ✅ VS Code process + browser lifecycle | ✅ Electron process + driver extension lifecycle |
 | 9 | Report agent & component versions | ✅ `COPILOT_CLI_VERSION` | ✅ `CLAUDE_CODE_ACP_VERSION`, `CLAUDE_AGENT_SDK_VERSION` | ✅ `VSCODE_VERSION`, `COPILOT_CHAT_VERSION` | ✅ `VSCODE_VERSION`, `COPILOT_CHAT_VERSION` |
 | 11 | Support MCP servers | ✅ Via ACP `mcpServers` | ✅ Via ACP `mcpServers` | ❌ Not implemented | ✅ Via `workbench.mcp.startServer` command |
 | 12 | Support Skills | ✅ Filesystem discovery | ✅ Filesystem discovery | ✅ Filesystem discovery | ✅ Filesystem discovery |
 | 13 | Have integration tests | ✅ `copilot-cli.integration.test.ts` | ❌ Unit tests only | ✅ `vscode-web.integration.test.ts` (Docker) | ✅ `vscode-electron.integration.test.ts` (Docker) |
 | 14 | Support multi-turn conversations | ✅ Via queue processor | ✅ Via queue processor | ✅ Via `setup`/`teardown` + session reuse | ✅ Via `setup`/`teardown` + Electron reuse |
-| 15 | Auto-approve agent permissions | ✅ `--yolo` flag + ACP auto-approve | ✅ ACP auto-approve | N/A (browser-driven) | N/A (VS Code command-driven) |
+| 15 | Auto-approve agent permissions | ✅ `--yolo` flag + ACP auto-approve | ✅ ACP auto-approve | N/A (browser-driven) | ❌ Not implemented |
 | 16 | Sandbox workspace filesystem access | N/A (agent manages own FS) | ✅ Path traversal protection in `ACPClientHandler` | N/A (browser-driven) | N/A (VS Code manages FS) |
 | 17 | Persist auth state across iterations | N/A (stateless token) | N/A (stateless token) | ✅ Cookie state saved after each `processMessage()` | N/A (token minted once in `setup()`) |
 | — | Token usage reporting | ✅ Extracted from HAR | ✅ Extracted from HAR | ❌ Not implemented | ✅ Extracted from HAR |
