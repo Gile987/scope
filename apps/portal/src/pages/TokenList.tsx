@@ -4,8 +4,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import type { TokenDocument, TokenCapability } from "@/types";
-import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS, ALL_CAPABILITIES } from "@/types";
+import type { KeyDocument, KeyCapability } from "@/types";
+import { KEY_TYPE_LABELS, KEY_CAPABILITY_LABELS, ALL_CAPABILITIES } from "@/types";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -40,11 +40,11 @@ export function TokenList() {
 
   const { data: tokens = [], isLoading, isRefetching } = useQuery({
     queryKey: ["tokens", capabilityFilter],
-    queryFn: () => api.listTokens(capabilityFilter === "all" ? undefined : capabilityFilter),
+    queryFn: () => api.listKeys(capabilityFilter === "all" ? undefined : capabilityFilter),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: api.deleteToken,
+    mutationFn: api.deleteKey,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tokens"] });
       toast.success("Key deleted");
@@ -52,17 +52,17 @@ export function TokenList() {
   });
 
   const validateMutation = useMutation({
-    mutationFn: api.validateToken,
+    mutationFn: api.validateKey,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tokens"] });
       toast.success("Key validated");
     },
   });
 
-  const activeTokens = tokens.filter((t: TokenDocument) => !t.deletedAt);
+  const activeTokens = tokens.filter((t: KeyDocument) => !t.deletedAt);
 
   // Find capabilities that have no valid, enabled tokens
-  const coveredCapabilities = new Set<TokenCapability>();
+  const coveredCapabilities = new Set<KeyCapability>();
   for (const t of activeTokens) {
     if (t.enabled && t.lastValidationStatus === "valid") {
       for (const c of t.capabilities ?? []) {
@@ -96,7 +96,7 @@ export function TokenList() {
           <SelectContent>
             <SelectItem value="all">All capabilities</SelectItem>
             {ALL_CAPABILITIES.map((c) => (
-              <SelectItem key={c} value={c}>{TOKEN_CAPABILITY_LABELS[c]}</SelectItem>
+              <SelectItem key={c} value={c}>{KEY_CAPABILITY_LABELS[c]}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -109,7 +109,7 @@ export function TokenList() {
           <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <span>
             <span className="font-medium">Missing coverage:</span>{" "}
-            {uncoveredCapabilities.map((c) => TOKEN_CAPABILITY_LABELS[c]).join(", ")}.
+            {uncoveredCapabilities.map((c) => KEY_CAPABILITY_LABELS[c]).join(", ")}.
             Register a key with these capabilities to enable the corresponding features.
           </span>
         </div>
@@ -144,7 +144,7 @@ export function TokenList() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {activeTokens.map((token: TokenDocument) => (
+              {activeTokens.map((token: KeyDocument) => (
                 <TableRow key={token._id}>
                   <TableCell className="font-mono text-xs">
                     <Link to={`/secrets/keys/${token._id}`} className="hover:underline">
@@ -157,7 +157,7 @@ export function TokenList() {
                   <TableCell>
                     <Badge variant="outline" className="gap-1">
                       <KeyRound className="h-3 w-3" />
-                      {TOKEN_TYPE_LABELS[token.type]}
+                      {KEY_TYPE_LABELS[token.type]}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -165,7 +165,7 @@ export function TokenList() {
                       {(token.capabilities ?? []).length > 0
                         ? token.capabilities.map((c) => (
                             <Badge key={c} variant="secondary" className="text-xs">
-                              {TOKEN_CAPABILITY_LABELS[c]}
+                              {KEY_CAPABILITY_LABELS[c]}
                             </Badge>
                           ))
                         : <span className="text-xs text-muted-foreground">—</span>

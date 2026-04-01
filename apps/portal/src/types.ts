@@ -402,30 +402,30 @@ export interface ReportTemplate {
 }
 
 // =============================================================================
-// Token Manager types
+// Key Manager types
 // =============================================================================
 
-export type TokenType =
+export type KeyType =
   "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth";
 
-export type TokenCapability =
+export type KeyCapability =
   "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
 
-export type TokenValidationStatus =
+export type KeyValidationStatus =
   | "valid"
   | "invalid"
   | "expired"
   | "error"
   | "unknown";
 
-export interface TokenDocument {
+export interface KeyDocument {
   _id: string;
-  type: TokenType;
-  capabilities: TokenCapability[];
+  type: KeyType;
+  capabilities: KeyCapability[];
   secretName: string;
   expiresAt?: string;
   lastValidatedAt?: string;
-  lastValidationStatus: TokenValidationStatus;
+  lastValidationStatus: KeyValidationStatus;
   lastValidationError?: string;
   enabled: boolean;
   comment?: string;
@@ -436,10 +436,10 @@ export interface TokenDocument {
   deletedAt?: string;
 }
 
-export interface TokenValidationResult {
-  status: TokenValidationStatus;
+export interface KeyValidationResult {
+  status: KeyValidationStatus;
   scopes?: string[];
-  capabilities?: TokenCapability[];
+  capabilities?: KeyCapability[];
   expiresAt?: string;
   error?: string;
   rateLimit?: {
@@ -449,21 +449,21 @@ export interface TokenValidationResult {
   };
 }
 
-export interface CreateTokenRequest {
-  type: TokenType;
+export interface CreateKeyRequest {
+  type: KeyType;
   value: string;
   expiresAt?: string;
   enabled?: boolean;
   comment?: string;
 }
 
-export interface UpdateTokenRequest {
+export interface UpdateKeyRequest {
   enabled?: boolean;
   expiresAt?: string | null;
   comment?: string | null;
 }
 
-export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
+export const KEY_TYPE_LABELS: Record<KeyType, string> = {
   "github-pat-classic": "GitHub PAT (classic)",
   "github-pat-fine-grained": "GitHub PAT (fine-grained)",
   "github-oauth": "GitHub OAuth",
@@ -472,7 +472,7 @@ export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
   "anthropic-oauth": "Anthropic OAuth (Subscription)",
 };
 
-export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
+export const KEY_CAPABILITY_LABELS: Record<KeyCapability, string> = {
   "github-models": "GitHub Models",
   "copilot-models": "Copilot Models",
   "copilot-sdk": "Copilot SDK",
@@ -481,7 +481,7 @@ export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
   "anthropic-api": "Anthropic API"
 };
 
-export const TOKEN_CAPABILITY_DESCRIPTIONS: Record<TokenCapability, string> = {
+export const KEY_CAPABILITY_DESCRIPTIONS: Record<KeyCapability, string> = {
   "github-models": "Access AI models hosted on GitHub (GPT-4o, Claude, etc.)",
   "copilot-models": "List models available via the Copilot API (OAuth only, PATs rejected)",
   "copilot-sdk": "Use the Copilot SDK to make LLM requests programmatically",
@@ -491,12 +491,12 @@ export const TOKEN_CAPABILITY_DESCRIPTIONS: Record<TokenCapability, string> = {
 };
 
 /**
- * Static matrix of which capabilities each token type can provide.
+ * Static matrix of which capabilities each key type can provide.
  * Mirrors the server-side deriveCapabilities() logic for display purposes.
  * Conditional capabilities (require specific scopes) are included — actual
  * detection happens during validation.
  */
-export const TOKEN_TYPE_EXPECTED_CAPABILITIES: Record<TokenType, TokenCapability[]> = {
+export const KEY_TYPE_EXPECTED_CAPABILITIES: Record<KeyType, KeyCapability[]> = {
   "github-pat-classic": ["copilot-sdk", "copilot-cli"],
   "github-pat-fine-grained": ["github-models"],
   "github-oauth": ["github-models", "copilot-models", "copilot-sdk", "copilot-cli"],
@@ -505,7 +505,7 @@ export const TOKEN_TYPE_EXPECTED_CAPABILITIES: Record<TokenType, TokenCapability
   "anthropic-oauth": ["claude-code-cli"],
 };
 
-export const ALL_CAPABILITIES: TokenCapability[] = [
+export const ALL_CAPABILITIES: KeyCapability[] = [
   "github-models", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli", "anthropic-api"
 ];
 

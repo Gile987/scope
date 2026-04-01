@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -488,53 +488,53 @@ export const api = {
     return request("/version");
   },
 
-  // ─── Token Manager ──────────────────────────────────────────────────────────
+  // ─── Key Manager ──────────────────────────────────────────────────────────
 
-  /** List all tokens (metadata only), optionally filtered by capability */
-  listTokens: (capability?: string): Promise<TokenDocument[]> => {
+  /** List all keys (metadata only), optionally filtered by capability */
+  listKeys: (capability?: string): Promise<KeyDocument[]> => {
     const params = new URLSearchParams();
     if (capability) params.set("capability", capability);
     const qs = params.toString();
-    return request(`/tokens${qs ? `?${qs}` : ""}`);
+    return request(`/keys${qs ? `?${qs}` : ""}`);
   },
 
-  /** Get a single token by ID */
-  getToken: (id: string): Promise<TokenDocument> => {
-    return request(`/tokens/${id}`);
+  /** Get a single key by ID */
+  getKey: (id: string): Promise<KeyDocument> => {
+    return request(`/keys/${id}`);
   },
 
-  /** Preview token — validate without storing */
-  previewToken: (body: { type: string; value: string }): Promise<TokenValidationResult> => {
-    return request("/tokens/preview", {
+  /** Preview key — validate without storing */
+  previewKey: (body: { type: string; value: string }): Promise<KeyValidationResult> => {
+    return request("/keys/preview", {
       method: "POST",
       body: JSON.stringify(body),
     });
   },
 
-  /** Register a new token */
-  createToken: (body: CreateTokenRequest): Promise<TokenDocument> => {
-    return request("/tokens", {
+  /** Register a new key */
+  createKey: (body: CreateKeyRequest): Promise<KeyDocument> => {
+    return request("/keys", {
       method: "POST",
       body: JSON.stringify(body),
     });
   },
 
-  /** Update token metadata (enabled, expiresAt) */
-  updateToken: (id: string, body: UpdateTokenRequest): Promise<TokenDocument> => {
-    return request(`/tokens/${id}`, {
+  /** Update key metadata (enabled, expiresAt) */
+  updateKey: (id: string, body: UpdateKeyRequest): Promise<KeyDocument> => {
+    return request(`/keys/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
     });
   },
 
-  /** Soft-delete a token */
-  deleteToken: (id: string): Promise<void> => {
-    return request(`/tokens/${id}`, { method: "DELETE" });
+  /** Soft-delete a key */
+  deleteKey: (id: string): Promise<void> => {
+    return request(`/keys/${id}`, { method: "DELETE" });
   },
 
-  /** Trigger on-demand validation for a token */
-  validateToken: (id: string): Promise<TokenDocument> => {
-    return request(`/tokens/${id}/validate`, { method: "POST" });
+  /** Trigger on-demand validation for a key */
+  validateKey: (id: string): Promise<KeyDocument> => {
+    return request(`/keys/${id}/validate`, { method: "POST" });
   },
 
   // ─── Accounts ─────────────────────────────────────────────────────────────
