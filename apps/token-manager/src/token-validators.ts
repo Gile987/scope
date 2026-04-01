@@ -1,17 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { TokenType, TokenValidationResult, deriveCapabilities } from "shared";
+import { KeyType, KeyValidationResult, deriveCapabilities } from "shared";
 
 /**
- * Validate a token by calling the provider's API and derive its capabilities.
+ * Validate a key by calling the provider's API and derive its capabilities.
  * Returns a result object — never throws.
  */
 export async function validateToken(
-  type: TokenType,
+  type: KeyType,
   value: string
-): Promise<TokenValidationResult> {
-  let result: TokenValidationResult;
+): Promise<KeyValidationResult> {
+  let result: KeyValidationResult;
 
   switch (type) {
     case "github-pat-classic":
@@ -47,7 +47,7 @@ export async function validateToken(
  */
 async function validateGitHubToken(
   token: string
-): Promise<TokenValidationResult> {
+): Promise<KeyValidationResult> {
   try {
     const response = await fetch("https://api.github.com/user", {
       headers: {
@@ -94,7 +94,7 @@ async function validateGitHubToken(
  */
 async function validateGitHubFineGrainedPat(
   token: string
-): Promise<TokenValidationResult> {
+): Promise<KeyValidationResult> {
   // First validate the token itself
   const baseResult = await validateGitHubToken(token);
   if (baseResult.status !== "valid") {
@@ -102,7 +102,7 @@ async function validateGitHubFineGrainedPat(
   }
 
   // Probe GitHub Models API to detect models:read permission
-  const capabilities: TokenValidationResult["capabilities"] = [];
+  const capabilities: KeyValidationResult["capabilities"] = [];
   try {
     const modelsResponse = await fetch(
       "https://models.inference.ai.azure.com/models",
@@ -123,7 +123,7 @@ async function validateGitHubFineGrainedPat(
 
 async function validateAnthropicKey(
   key: string
-): Promise<TokenValidationResult> {
+): Promise<KeyValidationResult> {
   try {
     const response = await fetch("https://api.anthropic.com/v1/models", {
       headers: {
@@ -155,7 +155,7 @@ async function validateAnthropicKey(
 
 async function validateAnthropicOAuth(
   _token: string
-): Promise<TokenValidationResult> {
+): Promise<KeyValidationResult> {
   // OAuth tokens from Claude Code subscriptions cannot be validated against
   // the Anthropic REST API — the API rejects them with "OAuth authentication
   // is currently not supported". Accept structurally (like cookie-state).
@@ -165,7 +165,7 @@ async function validateAnthropicOAuth(
 
 async function validateGitHubOAuthCookieState(
   value: string
-): Promise<TokenValidationResult> {
+): Promise<KeyValidationResult> {
   try {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed !== "object") {
@@ -183,7 +183,7 @@ async function validateGitHubOAuthCookieState(
 
 function parseRateLimit(
   headers: Headers
-): TokenValidationResult["rateLimit"] | undefined {
+): KeyValidationResult["rateLimit"] | undefined {
   const limit = headers.get("x-ratelimit-limit");
   const remaining = headers.get("x-ratelimit-remaining");
   const reset = headers.get("x-ratelimit-reset");
