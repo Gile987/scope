@@ -48,6 +48,15 @@ export const ConversationTurnSchema = z
     tokenUsage: TokenUsageSchema.optional(),
     startedAt: z.coerce.date().optional(),
     durationMs: z.number().optional(),
+    toolCalls: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      arguments: z.record(z.string(), z.unknown()),
+      response: z.string().optional(),
+      timestamp: z.string().optional(),
+    })).optional(),
+    rawChatUrl: z.string().optional(),
+    rawChatFormat: z.string().optional(),
   })
   .openapi("ConversationTurn");
 
@@ -106,6 +115,8 @@ export const RequestResponseSchema = z
     setupVideoUrls: z.array(z.string()).optional(),
     tokenUsage: TokenUsageSchema.optional(),
     submissionId: z.string().optional(),
+    rawChatUrl: z.string().optional(),
+    rawChatFormat: z.string().optional(),
   })
   .openapi("RequestResponse");
 

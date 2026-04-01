@@ -192,6 +192,8 @@ export async function runMultiTurnLoop(
     let turnHarUrl: string | undefined;
     let turnTokenUsage: TokenUsage | undefined;
     let turnToolCalls: ToolCall[] | undefined;
+    let turnRawChatUrl: string | undefined;
+    let turnRawChatFormat: string | undefined;
     const turnVideoUrls: string[] = [];
     try {
       const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs });
@@ -242,6 +244,23 @@ export async function runMultiTurnLoop(
         } catch (uploadError) {
           const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
           await iterLog("warn", `Failed to upload video files: ${msg}`);
+        }
+      }
+
+      // Upload raw chat transcript to blob storage if available
+      if (workerResult.rawChatFilePath) {
+        try {
+          const chatBlobName = `${requestId}/iteration-${iteration}/chat-export.json`;
+          turnRawChatUrl = await blobStorage.uploadFile(
+            workerResult.rawChatFilePath,
+            chatBlobName,
+            "application/json"
+          );
+          turnRawChatFormat = workerResult.rawChatFormat;
+          await iterLog("info", "Raw chat transcript uploaded", { rawChatUrl: turnRawChatUrl });
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await iterLog("warn", `Failed to upload raw chat transcript: ${msg}`);
         }
       }
     } catch (error) {
@@ -342,6 +361,8 @@ export async function runMultiTurnLoop(
         durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(turnHarUrl && { harUrl: turnHarUrl }),
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+        ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
+        ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -390,6 +411,8 @@ export async function runMultiTurnLoop(
         durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(turnHarUrl && { harUrl: turnHarUrl }),
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+        ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
+        ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -435,6 +458,8 @@ export async function runMultiTurnLoop(
       ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
       ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
       ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
+      ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
+      ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
     };
     turns.push(turn);
 

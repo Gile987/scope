@@ -33,7 +33,7 @@ import {
 } from "./task-prompt-llm.js";
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
-import { blobNameFromSnapshotsUrl, rewriteHarUrlsForArchive, detectBundledHarFiles, uploadBundledHarFiles } from "./archive-har.js";
+import { blobNameFromSnapshotsUrl, rewriteHarUrlsForArchive, detectBundledHarFiles, uploadBundledHarFiles, detectBundledChatFiles, uploadBundledChatFiles } from "./archive-har.js";
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, resolveAgentVersion } from "shared";
 import { evaluateTrigger, REPORT_SYSTEM_PROMPT } from "shared";
 import {
@@ -1436,6 +1436,32 @@ apiRoute(app, registry, {
       }
     }
 
+    // Bundle raw chat export files into the archive
+    const chatEntries: Array<{ url: string; entryName: string }> = [];
+    for (const turn of resource.turns) {
+      if (turn.rawChatUrl) chatEntries.push({ url: turn.rawChatUrl, entryName: `${id}/iteration-${turn.iteration}.chat-export.json` });
+    }
+    if (resource.rawChatUrl) chatEntries.push({ url: resource.rawChatUrl, entryName: `${id}/run.chat-export.json` });
+
+    for (const { url, entryName } of chatEntries) {
+      try {
+        const blobName = blobNameFromSnapshotsUrl(url);
+        if (!blobName) continue;
+
+        const blobClient = containerClient.getBlockBlobClient(blobName);
+        const downloadResponse = await blobClient.download();
+        if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
+
+        const entry = pack.entry({ name: entryName, size: downloadResponse.contentLength });
+        await pipeline(downloadResponse.readableStreamBody, entry);
+      } catch (blobError) {
+        if (blobError instanceof RestError && (blobError.statusCode === 404 || blobError.code === "ContainerNotFound" || blobError.code === "BlobNotFound")) {
+          continue;
+        }
+        throw blobError;
+      }
+    }
+
     // Finalize the tar archive
     pack.finalize();
   } catch (error) {
@@ -1854,6 +1880,19 @@ apiRoute(app, registry, {
       runDoc.harUrl = topLevelHarUrl;
     }
 
+    // Upload bundled chat export files to blob storage
+    const detectedChatFiles = detectBundledChatFiles(readdirSync(runDir));
+    const topLevelChatUrl = await uploadBundledChatFiles({
+      chatFiles: detectedChatFiles,
+      runDir,
+      runId: runDoc._id,
+      turns,
+      containerClient,
+    });
+    if (topLevelChatUrl) {
+      runDoc.rawChatUrl = topLevelChatUrl;
+    }
+
     // Prepare document for insertion
     const docToInsert: RequestDocument = {
       _id: runDoc._id,
@@ -1874,6 +1913,8 @@ apiRoute(app, registry, {
       ...(runDoc.logs && Array.isArray(runDoc.logs) ? { logs: runDoc.logs } : {}),
       ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv4() }),
       ...(runDoc.harUrl ? { harUrl: runDoc.harUrl } : {}),
+      ...(runDoc.rawChatUrl ? { rawChatUrl: runDoc.rawChatUrl } : {}),
+      ...(runDoc.rawChatFormat ? { rawChatFormat: runDoc.rawChatFormat } : {}),
     };
 
     // Insert into MongoDB

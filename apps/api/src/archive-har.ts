@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 /**
- * Helpers for bundling HAR files in run archives.
+ * Helpers for bundling HAR and raw chat export files in run archives.
  *
  * Extracted from the archive download/upload endpoints so the logic
  * is independently testable without Express, MongoDB, or blob-storage mocks.
@@ -22,23 +22,32 @@ export function blobNameFromSnapshotsUrl(url: string): string | null {
 }
 
 /**
- * Deep-clone a run resource and rewrite `harUrl` fields to relative archive paths.
+ * Deep-clone a run resource and rewrite `harUrl` and `rawChatUrl` fields to relative archive paths.
  *
- * - Top-level `harUrl` → `"run.har"`
- * - Per-turn `harUrl`  → `"iteration-{N}.har"`
+ * - Top-level `harUrl`     → `"run.har"`
+ * - Per-turn `harUrl`      → `"iteration-{N}.har"`
+ * - Top-level `rawChatUrl` → `"run.chat-export.json"`
+ * - Per-turn `rawChatUrl`  → `"iteration-{N}.chat-export.json"`
  */
 export function rewriteHarUrlsForArchive<T extends {
   harUrl?: string;
-  turns?: Array<{ iteration: number; harUrl?: string; [key: string]: unknown }>;
+  rawChatUrl?: string;
+  turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; [key: string]: unknown }>;
 }>(resource: T): T {
   const copy = JSON.parse(JSON.stringify(resource));
   if (copy.harUrl) {
     copy.harUrl = "run.har";
   }
+  if (copy.rawChatUrl) {
+    copy.rawChatUrl = "run.chat-export.json";
+  }
   if (copy.turns) {
     for (const turn of copy.turns) {
       if (turn.harUrl) {
         turn.harUrl = `iteration-${turn.iteration}.har`;
+      }
+      if (turn.rawChatUrl) {
+        turn.rawChatUrl = `iteration-${turn.iteration}.chat-export.json`;
       }
     }
   }
@@ -124,4 +133,73 @@ export async function uploadBundledHarFiles(opts: {
   }
 
   return topLevelHarUrl;
+}
+
+/** Describes a raw chat export file found in an extracted archive directory. */
+export interface DetectedChatFile {
+  fileName: string;
+  /** Iteration number (for per-turn files), or `null` for top-level `run.chat-export.json`. */
+  iteration: number | null;
+}
+
+/**
+ * Scan a list of filenames and return the chat export files that follow the bundled naming convention:
+ * - `iteration-{N}.chat-export.json` → per-turn chat export
+ * - `run.chat-export.json`           → top-level chat export
+ */
+export function detectBundledChatFiles(fileNames: string[]): DetectedChatFile[] {
+  const results: DetectedChatFile[] = [];
+  for (const name of fileNames) {
+    if (!name.endsWith(".chat-export.json")) continue;
+    const iterMatch = name.match(/^iteration-(\d+)\.chat-export\.json$/);
+    if (iterMatch) {
+      results.push({ fileName: name, iteration: parseInt(iterMatch[1], 10) });
+    } else if (name === "run.chat-export.json") {
+      results.push({ fileName: name, iteration: null });
+    }
+  }
+  return results;
+}
+
+/**
+ * Upload detected chat export files from an extracted archive directory to blob storage.
+ * Mutates `turns` and returns the top-level `rawChatUrl` (if any).
+ */
+export async function uploadBundledChatFiles(opts: {
+  chatFiles: DetectedChatFile[];
+  runDir: string;
+  runId: string;
+  turns: Array<{ iteration: number; rawChatUrl?: string; [key: string]: unknown }>;
+  containerClient: BlobUploader;
+}): Promise<string | undefined> {
+  const { chatFiles, runDir, runId, turns, containerClient } = opts;
+  const { join } = await import("node:path");
+  let topLevelChatUrl: string | undefined;
+
+  for (const chat of chatFiles) {
+    const chatPath = join(runDir, chat.fileName);
+
+    if (chat.iteration !== null) {
+      const blobName = `${runId}/iteration-${chat.iteration}/chat-export.json`;
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      await blockBlobClient.uploadFile(chatPath, {
+        blobHTTPHeaders: { blobContentType: "application/json" },
+        tags: { requestId: runId, iteration: String(chat.iteration) },
+      });
+      const turn = turns.find(t => t.iteration === chat.iteration);
+      if (turn) {
+        turn.rawChatUrl = blockBlobClient.url;
+      }
+    } else {
+      const blobName = `${runId}/chat-export.json`;
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      await blockBlobClient.uploadFile(chatPath, {
+        blobHTTPHeaders: { blobContentType: "application/json" },
+        tags: { requestId: runId },
+      });
+      topLevelChatUrl = blockBlobClient.url;
+    }
+  }
+
+  return topLevelChatUrl;
 }

@@ -30,6 +30,8 @@ export interface ConversationTurn {
   startedAt?: Date;        // When this iteration began
   durationMs?: number;     // Wall-clock duration of this iteration in milliseconds
   toolCalls?: ToolCall[];   // Tool calls extracted from HAR (computed at iteration completion)
+  rawChatUrl?: string;     // Blob storage URL to the raw chat transcript export
+  rawChatFormat?: string;  // Format identifier for the raw chat export
 }
 
 // Multi-turn configuration constants
@@ -135,6 +137,8 @@ export interface RequestDocument {
   videoUrls?: string[];            // Blob storage URLs to session recording videos (one-shot)
   setupVideoUrls?: string[];       // Blob storage URLs to setup-phase videos (e.g. TOTP login recording)
   tokenUsage?: TokenUsage;          // LLM token usage for the run (one-shot) or aggregate across turns
+  rawChatUrl?: string;             // Blob storage URL to the raw chat transcript export (one-shot)
+  rawChatFormat?: string;          // Format identifier for the raw chat export
 }
 
 // Log event for real-time streaming and persistence
@@ -168,6 +172,12 @@ export interface WorkerResult {
   videoFilePaths?: string[];
   /** LLM token usage extracted from HAR or reported by the agent */
   tokenUsage?: TokenUsage;
+  /** Tool calls extracted from the chat transcript export */
+  toolCalls?: ToolCall[];
+  /** Path to the raw chat transcript export file on disk (for upload to blob storage) */
+  rawChatFilePath?: string;
+  /** Format identifier for the raw chat export */
+  rawChatFormat?: string;
 }
 
 /** Log function signature used by worker processors. */
