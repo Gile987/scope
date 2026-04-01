@@ -20,7 +20,7 @@ This document tracks which [coding worker requirements](worker-requirements.md) 
 | 12 | Support Skills | ✅ Filesystem discovery | ✅ Filesystem discovery | ✅ Filesystem discovery | ✅ Filesystem discovery |
 | 13 | Have integration tests | ✅ `copilot-cli.integration.test.ts` | ❌ Unit tests only | ✅ `vscode-web.integration.test.ts` (Docker) | ✅ `vscode-electron.integration.test.ts` (Docker) |
 | 14 | Support multi-turn conversations | ✅ Via queue processor | ✅ Via queue processor | ✅ Via `setup`/`teardown` + session reuse | ✅ Via `setup`/`teardown` + Electron reuse |
-| 15 | Auto-approve agent permissions | ✅ `--yolo` flag + ACP auto-approve | ✅ ACP auto-approve | N/A (browser-driven) | ❌ Not implemented |
+| 15 | Auto-approve agent permissions | ✅ `--yolo` flag + ACP auto-approve | ✅ ACP auto-approve | ✅ Playwright controls UI directly | ❌ Not implemented |
 | 16 | Sandbox workspace filesystem access | N/A (agent manages own FS) | ✅ Path traversal protection in `ACPClientHandler` | N/A (browser-driven) | N/A (VS Code manages FS) |
 | 17 | Persist auth state across iterations | N/A (stateless token) | N/A (stateless token) | ✅ Cookie state saved after each `processMessage()` | N/A (token minted once in `setup()`) |
 | — | Token usage reporting | ✅ Extracted from HAR | ✅ Extracted from HAR | ❌ Not implemented | ✅ Extracted from HAR |
