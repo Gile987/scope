@@ -6,18 +6,18 @@ import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 
 extendZodWithOpenApi(z);
 
-export const TokenInputSchema = z
+export const KeyInputSchema = z
   .object({})
   .passthrough()
-  .openapi("TokenInput");
+  .openapi("KeyInput");
 
-export const TokenResponseSchema = z
+export const KeyResponseSchema = z
   .object({})
   .passthrough()
-  .openapi("TokenResponse");
+  .openapi("KeyResponse");
 
-export const ValidateTokenInputSchema = z
+export const ValidateKeyInputSchema = z
   .object({
     token: z.string(),
   })
-  .openapi("ValidateTokenInput");
+  .openapi("ValidateKeyInput");
