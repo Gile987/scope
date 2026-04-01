@@ -2,7 +2,7 @@
 
 > **Status:** Current as of March 2026.
 
-This document defines the requirements that every coding agent worker must satisfy. Requirements are derived from the `WorkerProcessor` interface, the `CodingAgentQueueProcessor` orchestration layer, and the patterns established by the three existing workers (Copilot CLI, Claude Code, VS Code Web).
+This document defines the requirements that every coding agent worker must satisfy. Requirements are derived from the `WorkerProcessor` interface, the `CodingAgentQueueProcessor` orchestration layer, and the patterns established by the four existing workers (Copilot CLI, Claude Code, VS Code Web, VS Code Electron).
 
 ## Quick Reference
 
@@ -22,6 +22,9 @@ This document defines the requirements that every coding agent worker must satis
 | 12 | [Support Skills](#12-support-skills) | Recommended | `WorkerProcessorOptions.skillConfigs` |
 | 13 | [Have integration tests](#13-have-integration-tests) | Recommended | — |
 | 14 | [Support multi-turn conversations](#14-support-multi-turn-conversations) | ✅ | `setup()` + `processMessage()` × N + `teardown()` |
+| 15 | [Auto-approve agent permissions](#15-auto-approve-agent-permissions) | Conditional | ACP `requestPermission()` |
+| 16 | [Sandbox workspace filesystem access](#16-sandbox-workspace-filesystem-access) | Recommended | ACP `readTextFile()` / `writeTextFile()` |
+| 17 | [Persist auth state across iterations](#17-persist-auth-state-across-iterations) | Conditional | `processMessage()` side-effect |
 
 ## Detailed Requirements
 
@@ -124,7 +127,7 @@ Each worker uses the appropriate **capability** for its agent:
 | Worker | Capability | Token Type |
 |--------|-----------|------------|
 | `coder-acp-copilot` | `copilot-sdk` | GitHub PAT / OAuth |
-| `coder-acp-claude-code` | `claude-code-cli` | Anthropic API key / OAuth |
+| `coder-acp-claude-code` | `claude-code-cli` / `anthropic-oauth` | Anthropic API key / OAuth |
 
 The Token Manager provides round-robin distribution, automatic validation, and secure storage via Azure Key Vault.
 
@@ -147,16 +150,18 @@ if (DevProxyClient.isEnabled()) {
 
   // ... run the agent ...
 
-  const harFilePath = await devProxy.stopRecording();
-  return { response, harFilePath };
+  const { harFilePath, tokenUsage } = await devProxy.stopAndCollectHar(log);
+  return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }) };
 }
 ```
 
 The queue processor automatically sanitizes HAR files (strips credentials) before uploading to blob storage.
 
-HAR files are parsed to extract `ToolCall[]` data (tool name, arguments, timestamps) for analytics.
+HAR files are parsed to extract `ToolCall[]` data (tool name, arguments, timestamps) for analytics. The `stopAndCollectHar()` method also extracts `TokenUsage` from HAR entries, enabling token usage reporting without agent-specific instrumentation.
 
-**When required:** All CLI-based workers (Copilot, Claude Code) should support HAR capture. Browser-based workers (VS Code Web) may use alternative approaches.
+For native CLI binaries that don't honor `NODE_EXTRA_CA_CERTS` (e.g., the Copilot CLI binary), workers should create a combined CA bundle using `devProxy.createCombinedCaBundle()` and inject it via `SSL_CERT_FILE`.
+
+**When required:** All CLI-based workers (Copilot, Claude Code) and desktop workers (VS Code Electron) should support HAR capture. Browser-based workers (VS Code Web) may use alternative approaches.
 
 **Source:** [`packages/shared/src/har/`](../../packages/shared/src/har/) — HAR parsing and sanitization.
 
@@ -316,6 +321,69 @@ The queue processor calls `processMessage()` multiple times when criteria are pr
 The multi-turn loop is: `setup()` → (`processMessage()` → judge → feedback) × N → `teardown()`.
 
 **Source:** [`packages/shared/src/queue/queue-processor.ts`](../../packages/shared/src/queue/queue-processor.ts) — `processMultiTurn()`.
+
+---
+
+### 15. Auto-approve agent permissions
+
+ACP-based workers must auto-approve all permission requests from the coding agent. Since workers run in isolated containers with no interactive user, the `requestPermission()` callback should select the first available option:
+
+```typescript
+async requestPermission(
+  params: acp.RequestPermissionRequest
+): Promise<acp.RequestPermissionResponse> {
+  const firstOption = params.options[0];
+  if (firstOption) {
+    return { outcome: { outcome: "selected", optionId: firstOption.optionId } };
+  }
+  return { outcome: { outcome: "cancelled" } };
+}
+```
+
+For CLI workers that support it (e.g., Copilot), the `--yolo` flag should also be passed to skip interactive confirmation prompts at the agent level.
+
+**When required:** Mandatory for ACP-based workers (Copilot CLI, Claude Code). Not applicable for browser/desktop workers where the agent operates through the IDE.
+
+**Source:** [`apps/workers/coder-acp-copilot/src/acp-client.ts`](../../apps/workers/coder-acp-copilot/src/acp-client.ts) — `ACPClientHandler.requestPermission()`.
+
+---
+
+### 16. Sandbox workspace filesystem access
+
+ACP workers that implement the `readTextFile` / `writeTextFile` filesystem callbacks must enforce path traversal protection. All file paths must be resolved and validated to remain within the workspace directory:
+
+```typescript
+private resolvePath(filePath: string): string {
+  const fullPath = isAbsolute(filePath)
+    ? resolve(filePath)
+    : resolve(this.workspacePath, filePath);
+  if (!fullPath.startsWith(this.workspacePath + "/") && fullPath !== this.workspacePath) {
+    throw new Error(`Path traversal blocked: "${filePath}" resolves outside workspace`);
+  }
+  return fullPath;
+}
+```
+
+**When required:** Recommended for ACP workers that implement filesystem callbacks. Claude Code's `ACPClientHandler` implements this; Copilot CLI's handler returns empty content for reads (agent manages its own filesystem).
+
+**Source:** [`apps/workers/coder-acp-claude-code/src/acp-client.ts`](../../apps/workers/coder-acp-claude-code/src/acp-client.ts) — `ACPClientHandler.resolvePath()`.
+
+---
+
+### 17. Persist auth state across iterations
+
+Workers that use browser-based authentication (cookie state) must persist updated auth state after each `processMessage()` call. This ensures that token refreshes during a session are carried forward to subsequent iterations in multi-turn runs:
+
+```typescript
+// After receiving the response, persist cookies for next iteration
+await saveStorageState(AUTH_STATE_PATH);
+this.storageStateJson = readFileSync(AUTH_STATE_PATH, "utf-8");
+```
+
+This is critical for long multi-turn runs where OAuth tokens may expire between iterations. The saved state includes refreshed cookies and session tokens.
+
+**When required:** Mandatory for browser-based workers with cookie authentication (VS Code Web). Not applicable for workers using stateless API tokens (Copilot CLI, Claude Code) or workers that mint a token once in `setup()` (VS Code Electron).
+
 
 ---
 
