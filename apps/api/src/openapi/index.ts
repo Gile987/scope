@@ -14,7 +14,7 @@
 // mcp-servers: registered via apiRoute() in index.ts
 // skills: registered via apiRoute() in index.ts
 // skill-revisions: registered via apiRoute() in index.ts
-import "./routes/tokens.js";
+import "./routes/keys.js";
 import "./routes/accounts.js";
 // feature-flags: registered via apiRoute() in index.ts
 
