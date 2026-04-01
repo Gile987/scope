@@ -64,11 +64,11 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       // Acquire token dynamically (env var fallback or Token Manager)
       // Prefer OAuth tokens over API keys
       const tokenResponse = await tokenClient.acquireTokenFull("claude-code-cli", "anthropic-oauth");
-      const isOAuth = tokenResponse.tokenType === "anthropic-oauth";
+      const isOAuth = tokenResponse.keyType === "anthropic-oauth";
       const envVarName = isOAuth ? "CLAUDE_CODE_OAUTH_TOKEN" : "ANTHROPIC_API_KEY";
       await log("info", `Acquired ${envVarName}`, {
         preview: `${tokenResponse.value.substring(0, 7)}...(${tokenResponse.value.length} chars)`,
-        tokenType: tokenResponse.tokenType,
+        keyType: tokenResponse.keyType,
       });
 
       // Run ACP session with Claude Code
