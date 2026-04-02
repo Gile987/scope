@@ -34,7 +34,7 @@ import {
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
 import { blobNameFromSnapshotsUrl, rewriteHarUrlsForArchive, detectBundledHarFiles, uploadBundledHarFiles, detectBundledChatFiles, uploadBundledChatFiles } from "./archive-har.js";
-import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, resolveAgentVersion } from "shared";
+import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, type ExtensionSearchResult, ExtensionClient, parseExtensionSpec, resolveAgentVersion } from "shared";
 import { evaluateTrigger, REPORT_SYSTEM_PROMPT } from "shared";
 import {
   CreateCriteriaInputSchema,
@@ -79,6 +79,11 @@ import {
   SkillRevisionResponseSchema,
   SkillSearchResultSchema,
   CreateSkillInputSchema,
+  ExtensionResponseSchema,
+  ExtensionSearchResultSchema,
+  CreateExtensionInputSchema,
+  UpdateExtensionInputSchema,
+  ExtensionVersionInfoSchema,
   RequestResponseSchema,
   CreateRequestInputSchema,
   ListRequestsQuerySchema,
@@ -105,6 +110,7 @@ import type {
   CodingAgentDocument,
   ModelDocument,
   McpServerDocument,
+  ExtensionDocument,
   FeatureFlagDocument,
   WorkerType,
 } from "./route-context.js";
@@ -158,6 +164,7 @@ let taskPromptStore: TaskPromptStore;
 let featureFlagCollection: Collection<FeatureFlagDocument>;
 let reportTemplateCollection: Collection<ReportTemplateDocument>;
 let skillCollection: Collection<SkillDocument>;
+let extensionCollection: Collection<ExtensionDocument>;
 let skillRevisionCollection: Collection<SkillRevisionDocument>;
 let skillRevisionStore: SkillRevisionStore;
 let skillResolver: SkillResolver;
@@ -298,6 +305,7 @@ async function initializeClients(): Promise<void> {
   featureFlagCollection = db.collection<FeatureFlagDocument>("feature-flags");
   reportTemplateCollection = db.collection<ReportTemplateDocument>("report-templates");
   skillCollection = db.collection<SkillDocument>("skills");
+  extensionCollection = db.collection<ExtensionDocument>("extensions");
   skillRevisionCollection = db.collection<SkillRevisionDocument>("skill-revisions");
   skillRevisionStore = new SkillRevisionStore(skillRevisionCollection);
   skillResolver = new SkillResolver({
@@ -325,12 +333,16 @@ async function initializeClients(): Promise<void> {
   const skillCount = await skillCollection.countDocuments({ deletedAt: { $exists: false } });
   console.log(`Skills collection has ${skillCount} documents`);
 
+  const extensionCount = await extensionCollection.countDocuments({ deletedAt: { $exists: false } });
+  console.log(`Extensions collection has ${extensionCount} documents`);
+
   // Seed default feature flags (upsert — won't overwrite existing enabled state)
   const defaultFlags: Array<{ key: string; label: string }> = [
     { key: "mcp", label: "MCP Servers" },
     { key: "models", label: "Models" },
     { key: "agents", label: "Agents" },
     { key: "tokens", label: "Tokens" },
+    { key: "extensions", label: "VS Code Extensions" },
   ];
   for (const flag of defaultFlags) {
     await featureFlagCollection.updateOne(
@@ -504,12 +516,13 @@ apiRoute(app, registry, {
     count: z.number().min(1).max(10).default(1),
     promptFeatureExtractionId: z.string().optional(),
     skills: z.array(z.string()).optional(),
+    extensions: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
   }),
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, agentVersion: requestedAgentVersion } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion } = req.body;
     const worker = req.query.worker as string;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
@@ -689,6 +702,48 @@ apiRoute(app, registry, {
       }
     }
 
+    // Validate extension specs if provided (supports "id" or "id@version" format)
+    let validatedExtensions: string[] | undefined;
+    if (extensionIds !== undefined) {
+      if (!Array.isArray(extensionIds) || !extensionIds.every((s: unknown) => typeof s === "string")) {
+        res.status(400).json({ error: "extensions must be an array of strings (extension IDs or id@version specs)" });
+        return;
+      }
+      if (extensionIds.length > 0) {
+        // Parse specs to extract bare IDs for DB validation
+        const parsedSpecs = extensionIds.map((spec: string) => parseExtensionSpec(spec));
+        const bareIds = parsedSpecs.map((s) => s.id);
+        const existingExtensions = await extensionCollection
+          .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
+          .toArray();
+        const existingIds = new Set(existingExtensions.map((e: ExtensionDocument) => e._id));
+        const missingIds = bareIds.filter((id: string) => !existingIds.has(id));
+        if (missingIds.length > 0) {
+          res.status(400).json({ error: `Extension(s) not found: ${missingIds.join(", ")}` });
+          return;
+        }
+
+        // Resolve "latest stable" for extensions without a pinned version
+        const extensionClient = new ExtensionClient("");
+        const resolvedSpecs: string[] = [];
+        for (const spec of parsedSpecs) {
+          if (spec.version) {
+            // Version already pinned
+            resolvedSpecs.push(`${spec.id}@${spec.version}`);
+          } else {
+            // Resolve latest stable from marketplace
+            const versions = await extensionClient.getVersions(spec.id, false);
+            if (versions.length === 0) {
+              res.status(422).json({ error: `No stable versions found for extension "${spec.id}"` });
+              return;
+            }
+            resolvedSpecs.push(`${spec.id}@${versions[0].version}`);
+          }
+        }
+        validatedExtensions = resolvedSpecs;
+      }
+    }
+
     // Normalize scenario: ensure criteria is always an array, preserve version
     const scenario: RequestDocument['scenario'] = {
       task: scenarioObj.task as string,
@@ -733,6 +788,7 @@ apiRoute(app, registry, {
           ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
+          ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
           ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
           submissionId,
         };
@@ -788,6 +844,7 @@ apiRoute(app, registry, {
       ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
+      ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
       submissionId,
     };
@@ -1131,6 +1188,9 @@ apiRoute(app, registry, {
         const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
         const effectiveMcpServers = overrides?.mcpServers !== undefined ? overrides.mcpServers : original.mcpServers;
         const effectiveSkillRevisions = overrides?.skillRevisions !== undefined ? overrides.skillRevisions : original.skillRevisions;
+        const effectiveExtensions = overrides?.extensions !== undefined ? overrides.extensions : original.extensions;
+        // Strip extensions for non-vscode workers (they don't support VS Code extensions)
+        const isVscodeWorker = effectiveWorkerType.includes("vscode");
 
         const newDoc: RequestDocument = {
           _id: requestId,
@@ -1144,6 +1204,7 @@ apiRoute(app, registry, {
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(effectiveSkillRevisions && effectiveSkillRevisions.length > 0 ? { skillRevisions: effectiveSkillRevisions } : {}),
+          ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
           submissionId,
         };
 
@@ -5167,6 +5228,241 @@ apiRoute(app, registry, {
 
       const revision = await skillResolver.resolve(skill.source, skill.skillName, skillRevisionStore, uploadArchive);
       res.json(revision);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// =====================================================================
+// Extensions API (VS Code Extensions)
+// =====================================================================
+
+// GET /api/v1/extensions — list all extensions
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/extensions",
+  tags: ["Extensions"],
+  summary: "List all extensions",
+  response: z.array(ExtensionResponseSchema),
+  handler: async (_req, res) => {
+    const extensions = await extensionCollection
+      .find({ deletedAt: { $exists: false } })
+      .toArray();
+    extensions.sort((a, b) => a._id.localeCompare(b._id));
+    res.json(extensions.map((e) => ({ ...e, id: e._id })));
+  },
+});
+
+// GET /api/v1/extensions/search — search internal DB + VS Code marketplace
+// MUST be defined before /:id to avoid being caught by the route param
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/extensions/search",
+  tags: ["Extensions"],
+  summary: "Search extensions (internal + marketplace)",
+  query: z.object({ q: z.string(), limit: z.string().optional() }),
+  response: z.array(ExtensionSearchResultSchema),
+  errorResponses: {
+    400: { description: "Missing query parameter" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { q, limit: limitStr } = req.query;
+
+      if (!q || typeof q !== "string" || !q.trim()) {
+        res.status(400).json({ error: "Query parameter 'q' is required" });
+        return;
+      }
+
+      const limit = Math.min(Math.max(parseInt(limitStr as string, 10) || 10, 1), 50);
+      const query = q.trim();
+
+      // Search internal DB (case-insensitive regex)
+      const regex = { $regex: query, $options: "i" };
+      const internalExtensions = await extensionCollection
+        .find({
+          deletedAt: { $exists: false },
+          $or: [
+            { _id: regex },
+            { name: regex },
+            { publisher: regex },
+            { description: regex },
+          ],
+        })
+        .limit(limit)
+        .toArray();
+
+      const internalResults: ExtensionSearchResult[] = internalExtensions.map((e) => ({
+        id: e._id,
+        name: e.name,
+        publisher: e.publisher,
+        description: e.description,
+        internal: true,
+      }));
+
+      const internalIds = new Set(internalExtensions.map((e) => e._id));
+
+      // Search VS Code marketplace
+      let externalResults: ExtensionSearchResult[] = [];
+      try {
+        const extensionClient = new ExtensionClient("");
+        const marketplaceResults = await extensionClient.searchMarketplace(query, limit);
+        externalResults = marketplaceResults.filter((r) => !internalIds.has(r.id));
+      } catch {
+        console.warn("VS Code marketplace search failed, returning only internal results");
+      }
+
+      const results = [...internalResults, ...externalResults].slice(0, limit);
+      res.json(results);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// GET /api/v1/extensions/:id — get extension by ID
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/extensions/:id",
+  tags: ["Extensions"],
+  summary: "Get extension by ID",
+  params: z.object({ id: z.string() }),
+  response: ExtensionResponseSchema,
+  handler: async (req, res) => {
+    const extension = await extensionCollection.findOne({
+      _id: req.params.id,
+      deletedAt: { $exists: false },
+    });
+    if (!extension) {
+      res.status(404).json({ error: "Extension not found" });
+      return;
+    }
+    res.json({ ...extension, id: extension._id });
+  },
+});
+
+// POST /api/v1/extensions — create/import extension (upserts if soft-deleted)
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/extensions",
+  tags: ["Extensions"],
+  summary: "Create or import an extension",
+  body: CreateExtensionInputSchema,
+  response: ExtensionResponseSchema,
+  handler: async (req, res) => {
+    const { _id, publisher, name, description, origin } = req.body;
+    const now = new Date();
+    const existing = await extensionCollection.findOne({ _id });
+
+    if (existing) {
+      await extensionCollection.updateOne(
+        { _id },
+        {
+          $set: {
+            publisher,
+            name,
+            ...(description !== undefined ? { description } : {}),
+            origin,
+            updatedAt: now,
+          },
+          $unset: { deletedAt: "" },
+        },
+      );
+      const updated = await extensionCollection.findOne({ _id });
+      res.json({ ...updated, id: updated!._id });
+    } else {
+      const extensionDoc: ExtensionDocument = {
+        _id,
+        publisher,
+        name,
+        ...(description ? { description } : {}),
+        origin,
+        createdAt: now,
+      };
+      await extensionCollection.insertOne(extensionDoc);
+      res.status(201).json({ ...extensionDoc, id: extensionDoc._id });
+    }
+  },
+});
+
+// PUT /api/v1/extensions/:id — update extension
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/extensions/:id",
+  tags: ["Extensions"],
+  summary: "Update extension",
+  params: z.object({ id: z.string() }),
+  body: UpdateExtensionInputSchema,
+  response: ExtensionResponseSchema,
+  handler: async (req, res) => {
+    const { id } = req.params;
+    const { name, description } = req.body;
+
+    const existing = await extensionCollection.findOne({
+      _id: id,
+      deletedAt: { $exists: false },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Extension not found" });
+      return;
+    }
+
+    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+    if (name !== undefined) updateFields.name = name;
+    if (description !== undefined) updateFields.description = description;
+
+    await extensionCollection.updateOne({ _id: id }, { $set: updateFields });
+    const updated = await extensionCollection.findOne({ _id: id });
+    res.json({ ...updated, id: updated!._id });
+  },
+});
+
+// DELETE /api/v1/extensions/:id — soft-delete extension
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/extensions/:id",
+  tags: ["Extensions"],
+  summary: "Delete extension",
+  params: z.object({ id: z.string() }),
+  response: z.object({ message: z.string() }),
+  successStatus: 204,
+  handler: async (req, res) => {
+    const { id } = req.params;
+
+    const existing = await extensionCollection.findOne({
+      _id: id,
+      deletedAt: { $exists: false },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Extension not found" });
+      return;
+    }
+
+    await extensionCollection.updateOne(
+      { _id: id },
+      { $set: { deletedAt: new Date(), updatedAt: new Date() } },
+    );
+
+    res.status(204).send();
+  },
+});
+
+// GET /api/v1/extensions/:id/versions — list available versions from VS Code marketplace
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/extensions/:id/versions",
+  tags: ["Extensions"],
+  summary: "List available versions for an extension",
+  params: z.object({ id: z.string() }),
+  query: z.object({ preRelease: z.string().optional() }),
+  response: z.array(ExtensionVersionInfoSchema),
+  handler: async (req, res, next) => {
+    try {
+      const includePreRelease = req.query.preRelease === "true";
+      const extensionClient = new ExtensionClient("");
+      const versions = await extensionClient.getVersions(req.params.id, includePreRelease);
+      res.json(versions);
     } catch (error) {
       next(error);
     }

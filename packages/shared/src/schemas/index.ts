@@ -14,6 +14,7 @@ export * from "./agent.js";
 export * from "./model.js";
 export * from "./mcp-server.js";
 export * from "./skill.js";
+export * from "./extension.js";
 export * from "./token.js";
 export * from "./account.js";
 export * from "./feature-flag.js";

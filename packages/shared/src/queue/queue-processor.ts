@@ -12,6 +12,7 @@ import {
 } from "../types/types.js";
 import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
+import type { ExtensionConfig } from "../types/extension.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
@@ -20,6 +21,7 @@ import { JudgeClient } from "../judge/judge-client.js";
 import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
 import { McpServerClient } from "../mcp/mcp-server-client.js";
 import { SkillClient } from "../skills/skill-client.js";
+import { ExtensionClient } from "../extensions/extension-client.js";
 import { extractSkillsToWorkspace } from "../skills/skill-extractor.js";
 
 /**
@@ -95,13 +97,26 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Installed ${installedPaths.length} skill path(s) to workspace`, { installedPaths });
     }
 
+    // Resolve extension specs (id or id@version) to configs via API
+    let extensionConfigs: ExtensionConfig[] | undefined;
+    if (requestDoc.extensions && requestDoc.extensions.length > 0) {
+      const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+      if (!apiBaseUrl) {
+        throw new Error("Extensions requested but SCOPE_MT_API_URL is not configured");
+      }
+      const extensionClient = new ExtensionClient(apiBaseUrl);
+      await log("info", `Resolving ${requestDoc.extensions.length} extension(s)`, { extensions: requestDoc.extensions });
+      extensionConfigs = await extensionClient.resolveExtensions(requestDoc.extensions);
+      await log("info", `Resolved extensions: ${extensionConfigs.map(e => e.version ? `${e.id}@${e.version}` : e.id).join(", ")}`);
+    }
+
     // Determine if this is a multi-turn request (criteria present in scenario)
     const isMultiTurn = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
 
     if (isMultiTurn) {
-      await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs);
+      await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs, extensionConfigs);
     } else {
-      await this.processOneShot(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs);
+      await this.processOneShot(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs, extensionConfigs);
     }
   }
 
@@ -140,7 +155,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     currentPopReceipt: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     mcpServerConfigs?: McpServerConfig[],
-    skillConfigs?: SkillConfig[]
+    skillConfigs?: SkillConfig[],
+    extensionConfigs?: ExtensionConfig[]
   ): Promise<void> {
     const requestId = requestDoc._id;
 
@@ -155,7 +171,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Lifecycle: call setup() before processMessage so workers can acquire expensive resources
     if (this.processor.setup) {
-      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
+      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
 
       // Upload setup-phase videos (e.g. TOTP login recording) to a dedicated blob path
       if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
@@ -191,7 +207,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     let workerResult;
     try {
       // Process the task using the worker-specific processor
-      workerResult = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
+      workerResult = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
     } catch (error) {
       // Upload HAR from the error if the worker attached it before re-throwing
       const errorHarFilePath: string | undefined = (error as any)?.harFilePath;
@@ -304,7 +320,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     currentPopReceipt: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     mcpServerConfigs?: McpServerConfig[],
-    skillConfigs?: SkillConfig[]
+    skillConfigs?: SkillConfig[],
+    extensionConfigs?: ExtensionConfig[]
   ): Promise<void> {
     const requestId = requestDoc._id;
     const judgeServiceUrl = process.env.JUDGE_SERVICE_URL;
@@ -364,6 +381,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       model: requestDoc.model,
       mcpServerConfigs,
       skillConfigs,
+      extensionConfigs,
       onTurnComplete: async (turn: ConversationTurn) => {
         // Persist each turn incrementally to MongoDB (retry on CosmosDB 429)
         await withRetry(() => this.collection.updateOne(

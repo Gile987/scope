@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, TokenDocument, TokenValidationResult, CreateTokenRequest, UpdateTokenRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -720,5 +720,44 @@ export const api = {
   /** List revisions for a skill */
   listSkillRevisions: (slug: string): Promise<SkillRevisionDocument[]> => {
     return request(`/skills/${slug}/revisions`);
+  },
+
+  // ─── Extensions ──────────────────────────────────────────────────────────
+
+  /** List all imported extensions */
+  listExtensions: (): Promise<ExtensionDocument[]> => {
+    return request("/extensions");
+  },
+
+  /** Get a single extension by ID */
+  getExtension: (id: string): Promise<ExtensionDocument> => {
+    return request(`/extensions/${id}`);
+  },
+
+  /** Search extensions (internal + VS Code marketplace) */
+  searchExtensions: (query: string, limit?: number): Promise<ExtensionSearchResult[]> => {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    return request(`/extensions/search?${params}`);
+  },
+
+  /** Import an extension */
+  createExtension: (body: { _id: string; publisher: string; name: string; origin: string; description?: string }): Promise<ExtensionDocument> => {
+    return request("/extensions", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** List available versions for an extension from the VS Code marketplace */
+  getExtensionVersions: (id: string, preRelease = false): Promise<ExtensionVersionInfo[]> => {
+    const params = new URLSearchParams();
+    if (preRelease) params.set("preRelease", "true");
+    return request(`/extensions/${id}/versions?${params}`);
+  },
+
+  /** Soft-delete an extension */
+  deleteExtension: (id: string): Promise<{ id: string; deleted: boolean }> => {
+    return request(`/extensions/${id}`, { method: "DELETE" });
   },
 };

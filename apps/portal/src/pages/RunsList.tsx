@@ -89,6 +89,8 @@ export function RunsList() {
     const uniqueMcp = [...new Set(mcpSets)];
     const skillSets = selected.map((r) => (r.skillRevisions ?? []).sort().join(","));
     const uniqueSkills = [...new Set(skillSets)];
+    const extSets = selected.map((r) => (r.extensions ?? []).sort().join(","));
+    const uniqueExts = [...new Set(extSets)];
 
     return {
       worker: workers.length === 1 ? workers[0] : null,
@@ -96,11 +98,13 @@ export function RunsList() {
       maxIterations: iterations.length === 1 ? (iterations[0] || null) : null,
       mcpServers: uniqueMcp.length === 1 ? (selected[0].mcpServers ?? []) : null,
       skillRevisions: uniqueSkills.length === 1 ? (selected[0].skillRevisions ?? []) : null,
+      extensions: uniqueExts.length === 1 ? (selected[0].extensions ?? []) : null,
       isMultiWorker: workers.length > 1,
       isMultiModel: models.length > 1,
       isMultiIterations: iterations.length > 1,
       isMultiMcp: uniqueMcp.length > 1,
       isMultiSkills: uniqueSkills.length > 1,
+      isMultiExtensions: uniqueExts.length > 1,
     };
   }, [runs, selectedIds]);
 
@@ -430,6 +434,13 @@ export function RunsList() {
                         if (v === "__keep__") { delete next.workerType; } else { next.workerType = v; }
                         // Reset model override when worker changes (supported models differ per worker)
                         delete next.model;
+                        // Manage extensions: clear for non-vscode workers, restore for vscode workers
+                        const effectiveWorkerType = v === "__keep__" ? selectedRunsSummary.worker : v;
+                        if (effectiveWorkerType && !effectiveWorkerType.includes("vscode")) {
+                          next.extensions = null;
+                        } else {
+                          delete next.extensions;
+                        }
                         return next;
                       })}
                     >
@@ -655,6 +666,80 @@ export function RunsList() {
                       })()}
                     </div>
                   </div>
+
+                  {/* Extensions override — only for VS Code workers */}
+                  {effectiveWorker?.includes("vscode") && (
+                  <div className="flex items-start gap-4">
+                    <Label className="text-sm w-32 shrink-0 pt-2">Extensions</Label>
+                    <div className="flex-1 space-y-1.5">
+                      <Select
+                        value={resubmitOverrides.extensions === null ? "__clear__" : resubmitOverrides.extensions !== undefined ? "__custom__" : "__keep__"}
+                        onValueChange={(v) => setResubmitOverrides((prev) => {
+                          const next = { ...prev };
+                          if (v === "__keep__") { delete next.extensions; }
+                          else if (v === "__clear__") { next.extensions = null; }
+                          else { next.extensions = []; }
+                          return next;
+                        })}
+                      >
+                        <SelectTrigger className="w-56">
+                          <SelectValue>
+                            {resubmitOverrides.extensions === null
+                              ? "Clear (no extensions)"
+                              : resubmitOverrides.extensions !== undefined
+                                ? "Choose extensions…"
+                                : selectedRunsSummary.extensions && selectedRunsSummary.extensions.length > 0
+                                  ? selectedRunsSummary.extensions.join(", ")
+                                  : selectedRunsSummary.isMultiExtensions ? "Mixed (keep each)" : "None"
+                            }
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__keep__">
+                            {selectedRunsSummary.extensions && selectedRunsSummary.extensions.length > 0
+                              ? selectedRunsSummary.extensions.join(", ")
+                              : selectedRunsSummary.isMultiExtensions ? "Mixed (keep each)" : "None"}
+                          </SelectItem>
+                          <SelectItem value="__clear__">Clear (no extensions)</SelectItem>
+                          <SelectItem value="__custom__">Choose extensions…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {resubmitOverrides.extensions !== undefined && resubmitOverrides.extensions !== null && (() => {
+                        const allExts = [...new Set(
+                          runs
+                            .filter((r) => selectedIds.has(r._id))
+                            .flatMap((r) => r.extensions ?? [])
+                        )];
+                        return (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {allExts.map((ext) => {
+                              const selected = resubmitOverrides.extensions?.includes(ext) ?? false;
+                              return (
+                                <Button
+                                  key={ext}
+                                  type="button"
+                                  variant={selected ? "default" : "outline"}
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  onClick={() => setResubmitOverrides((prev) => {
+                                    const current = prev.extensions ?? [];
+                                    const next = selected ? current.filter((e) => e !== ext) : [...current, ext];
+                                    return { ...prev, extensions: next };
+                                  })}
+                                >
+                                  {ext}
+                                </Button>
+                              );
+                            })}
+                            {allExts.length === 0 && (
+                              <span className="text-xs text-muted-foreground italic">No extensions in selected runs</span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  )}
                 </div>
               </div>
               <AlertDialogFooter>

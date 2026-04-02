@@ -229,6 +229,17 @@ export function RunDetail() {
                   ))}
                 </>
               )}
+              {run.extensions && run.extensions.length > 0 && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <span>Extensions:</span>
+                  {run.extensions.map((id) => (
+                    <Link key={id} to={`/extensions/${id}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                      {id}
+                    </Link>
+                  ))}
+                </>
+              )}
             </div>
           </div>
           {run.turns && run.turns.some(t => t.snapshotUrl) && (

@@ -13,11 +13,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles } from "lucide-react";
+import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle } from "lucide-react";
 import { WORKER_TYPES, type CodingAgent, type McpServerDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { SkillPicker } from "@/components/SkillPicker";
+import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { Stepper } from "@/components/Stepper";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
@@ -48,6 +49,9 @@ export function SubmitRun() {
   // Skills
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
 
+  // Extensions
+  const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+
   // Agent version
   const [selectedAgentVersion, setSelectedAgentVersion] = useState<string>("");
 
@@ -67,13 +71,17 @@ export function SubmitRun() {
 
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
   const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
+  const isVscodeWorker = worker.includes("vscode");
 
-  // When agent changes, reset model to the agent's default
+  // When agent changes, reset model to the agent's default and clear extensions for non-vscode workers
   useEffect(() => {
     if (selectedAgent) {
       setModel(selectedAgent.defaultModel ?? "");
     } else {
       setModel("");
+    }
+    if (!worker.includes("vscode")) {
+      setSelectedExtensions([]);
     }
   }, [worker, selectedAgent?.defaultModel]);
 
@@ -180,6 +188,7 @@ export function SubmitRun() {
       ...(occurrences > 1 ? { count: occurrences } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
+      ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
     });
   };
@@ -488,6 +497,22 @@ export function SubmitRun() {
             </CardContent>
           </Card>
 
+          {/* Extensions (optional — only for VS Code workers) */}
+          {isVscodeWorker && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Puzzle className="h-5 w-5" />
+                  Extensions <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+                </CardTitle>
+                <CardDescription>Search and select VS Code extensions to install for this run</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} />
+              </CardContent>
+            </Card>
+          )}
+
           <Separator />
 
           {/* Continue */}
@@ -554,6 +579,18 @@ export function SubmitRun() {
                       {selectedSkills.map((s) => (
                         <Badge key={s} variant="secondary" className="font-mono text-xs">
                           {s}
+                        </Badge>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {selectedExtensions.length > 0 && (
+                  <>
+                    <span className="text-muted-foreground">Extensions</span>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedExtensions.map((e) => (
+                        <Badge key={e} variant="secondary" className="font-mono text-xs">
+                          {e}
                         </Badge>
                       ))}
                     </div>

@@ -66,6 +66,11 @@ import {
   SkillOriginSchema,
   CreateSkillInputSchema,
   SkillResponseSchema,
+  // extension
+  ExtensionOriginSchema,
+  CreateExtensionInputSchema,
+  ExtensionResponseSchema,
+  ExtensionSearchResultSchema,
   // feature-flag
   FeatureFlagResponseSchema,
   UpdateFeatureFlagInputSchema,
@@ -1059,6 +1064,119 @@ describe("skill schemas", () => {
         createdAt: NOW,
       });
       expect(result.origin).toBe("skills-sh");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extension.ts
+// ---------------------------------------------------------------------------
+describe("extension schemas", () => {
+  describe("ExtensionOriginSchema", () => {
+    it("accepts 'marketplace'", () => {
+      expect(ExtensionOriginSchema.parse("marketplace")).toBe("marketplace");
+    });
+
+    it("accepts 'manual'", () => {
+      expect(ExtensionOriginSchema.parse("manual")).toBe("manual");
+    });
+
+    it("rejects 'github'", () => {
+      expect(() => ExtensionOriginSchema.parse("github")).toThrow();
+    });
+  });
+
+  describe("CreateExtensionInputSchema", () => {
+    it("accepts valid input", () => {
+      const result = CreateExtensionInputSchema.parse({
+        _id: "ms-python.python",
+        publisher: "ms-python",
+        name: "Python",
+        origin: "marketplace",
+      });
+      expect(result._id).toBe("ms-python.python");
+    });
+
+    it("accepts input with optional fields", () => {
+      const result = CreateExtensionInputSchema.parse({
+        _id: "ms-python.python",
+        publisher: "ms-python",
+        name: "Python",
+        description: "Python language support",
+        origin: "marketplace",
+      });
+      expect(result.description).toBe("Python language support");
+    });
+
+    it("rejects invalid extension ID format", () => {
+      expect(() =>
+        CreateExtensionInputSchema.parse({
+          _id: "invalid",
+          publisher: "p",
+          name: "n",
+          origin: "manual",
+        }),
+      ).toThrow();
+    });
+
+    it("rejects missing origin", () => {
+      expect(() =>
+        CreateExtensionInputSchema.parse({
+          _id: "ms-python.python",
+          publisher: "ms-python",
+          name: "Python",
+        }),
+      ).toThrow();
+    });
+  });
+
+  describe("ExtensionResponseSchema", () => {
+    it("accepts valid response", () => {
+      const result = ExtensionResponseSchema.parse({
+        _id: "ms-python.python",
+        publisher: "ms-python",
+        name: "Python",
+        origin: "marketplace",
+        createdAt: NOW,
+      });
+      expect(result.publisher).toBe("ms-python");
+    });
+
+    it("accepts response with optional fields", () => {
+      const result = ExtensionResponseSchema.parse({
+        _id: "ms-python.python",
+        publisher: "ms-python",
+        name: "Python",
+        description: "Python lang",
+        origin: "manual",
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      expect(result.description).toBe("Python lang");
+    });
+  });
+
+  describe("ExtensionSearchResultSchema", () => {
+    it("accepts valid search result", () => {
+      const result = ExtensionSearchResultSchema.parse({
+        id: "ms-python.python",
+        name: "Python",
+        publisher: "ms-python",
+        internal: false,
+      });
+      expect(result.internal).toBe(false);
+    });
+
+    it("accepts result with optional fields", () => {
+      const result = ExtensionSearchResultSchema.parse({
+        id: "ms-python.python",
+        name: "Python",
+        publisher: "ms-python",
+        description: "Python support",
+        internal: true,
+        version: "2024.22.1",
+      });
+      expect(result.version).toBe("2024.22.1");
     });
   });
 });
