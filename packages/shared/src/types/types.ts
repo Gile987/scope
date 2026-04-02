@@ -3,6 +3,7 @@
 
 import type { McpServerConfig } from './mcp.js';
 import type { SkillConfig } from './skill.js';
+import type { ExtensionConfig } from './extension.js';
 import type { ToolCall } from '../har/types.js';
 
 // Re-export ToolCall so consumers can import from types
@@ -131,6 +132,7 @@ export interface RequestDocument {
   promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
+  extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   workerVersion?: string;          // Exact build that processed this run (e.g. "copilot-0.0.415-20260318T163740Z-44d16d6")
   harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
@@ -160,6 +162,7 @@ export interface WorkerProcessorOptions {
   model?: string;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
+  extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation
 }
 
 // Result returned by a worker processor

@@ -85,6 +85,7 @@ export const CreateRequestInputSchema = z
     persona: PersonaSchema.optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
+    extensions: z.array(z.string()).optional(),
   })
   .openapi("CreateRequestInput");
 
@@ -108,6 +109,7 @@ export const RequestResponseSchema = z
     taskPromptId: z.string().optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
+    extensions: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
     workerVersion: z.string().optional(),
     harUrl: z.string().optional(),
@@ -143,6 +145,7 @@ export const BulkResubmitInputSchema = z
         maxIterations: z.number().nullable().optional(),
         mcpServers: z.array(z.string()).nullable().optional(),
         skillRevisions: z.array(z.string()).nullable().optional(),
+        extensions: z.array(z.string()).nullable().optional(),
       })
       .optional(),
   })

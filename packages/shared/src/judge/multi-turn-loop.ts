@@ -13,6 +13,7 @@ import {
 } from "../types/types.js";
 import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
+import type { ExtensionConfig } from "../types/extension.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
 import { sanitizeHarFile, extractToolCalls } from "../har/har-parser.js";
 import type { ToolCall } from "../har/types.js";
@@ -55,6 +56,8 @@ export interface MultiTurnConfig {
   mcpServerConfigs?: McpServerConfig[];
   /** Resolved skill configurations to inject into the agent prompt */
   skillConfigs?: SkillConfig[];
+  /** Resolved VS Code extension configurations for runtime installation */
+  extensionConfigs?: ExtensionConfig[];
 }
 
 export interface MultiTurnResult {
@@ -95,6 +98,7 @@ export async function runMultiTurnLoop(
     model,
     mcpServerConfigs,
     skillConfigs,
+    extensionConfigs,
   } = config;
 
   const turns: ConversationTurn[] = [];
@@ -108,6 +112,8 @@ export async function runMultiTurnLoop(
     mcpServers: mcpServerConfigs?.map((s) => s.name) ?? [],
     skillCount: skillConfigs?.length ?? 0,
     skills: skillConfigs?.map((s) => s.name) ?? [],
+    extensionCount: extensionConfigs?.length ?? 0,
+    extensions: extensionConfigs?.map((e) => e.id) ?? [],
   });
 
   // Lifecycle: call setup() once before all iterations so workers can acquire expensive resources
@@ -140,7 +146,7 @@ export async function runMultiTurnLoop(
     await log("info", "Calling processor setup...", { phase: "setup" });
     let setupResult: SetupResult | void;
     try {
-      setupResult = await processor.setup(log, { model, mcpServerConfigs, skillConfigs });
+      setupResult = await processor.setup(log, { model, mcpServerConfigs, skillConfigs, extensionConfigs });
     } catch (setupError) {
       // Even on setup failure, try to upload setup videos (e.g. TOTP login recording)
       const errorResult = (setupError as any)?.setupResult as SetupResult | undefined;
@@ -196,7 +202,7 @@ export async function runMultiTurnLoop(
     let turnRawChatFormat: string | undefined;
     const turnVideoUrls: string[] = [];
     try {
-      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs });
+      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs, extensionConfigs });
       codingResponse = workerResult.response;
       turnTokenUsage = workerResult.tokenUsage;
 

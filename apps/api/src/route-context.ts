@@ -16,6 +16,7 @@ import type {
   SkillRevisionDocument,
   // Zod response schemas → inferred types replace hand-written interfaces
   CriteriaResponseSchema,
+  ExtensionResponseSchema,
   PromptFeatureResponseSchema,
   PromptFeatureExtractionResponseSchema,
   InsightReferenceSchema,
@@ -45,6 +46,7 @@ export type AgentVersion = z.infer<typeof AgentVersionSchema>;
 export type CodingAgentDocument = z.infer<typeof AgentResponseSchema>;
 export type ModelDocument = z.infer<typeof ModelResponseSchema>;
 export type McpServerDocument = z.infer<typeof McpServerResponseSchema>;
+export type ExtensionDocument = z.infer<typeof ExtensionResponseSchema>;
 export type FeatureFlagDocument = z.infer<typeof FeatureFlagResponseSchema>;
 
 export type ReportTrigger = z.infer<typeof ReportTriggerSchema>;

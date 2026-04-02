@@ -34,6 +34,8 @@ import { CreateMcpServer } from "@/pages/CreateMcpServer";
 import { McpServerDetail } from "@/pages/McpServerDetail";
 import { SkillList } from "@/pages/SkillList";
 import { SkillDetail } from "@/pages/SkillDetail";
+import { ExtensionList } from "@/pages/ExtensionList";
+import { ExtensionDetail } from "@/pages/ExtensionDetail";
 import { InsightsList } from "@/pages/InsightsList";
 import { InsightDetail } from "@/pages/InsightDetail";
 import { CriteriaMdpView } from "@/pages/CriteriaMdpView";
@@ -96,6 +98,8 @@ export function App() {
         <Route path="/mcp-servers/:slug" element={<FeatureRoute featureKey="mcp"><McpServerDetail /></FeatureRoute>} />
         <Route path="/skills" element={<FeatureRoute featureKey="skills"><SkillList /></FeatureRoute>} />
         <Route path="/skills/*" element={<FeatureRoute featureKey="skills"><SkillDetail /></FeatureRoute>} />
+        <Route path="/extensions" element={<FeatureRoute featureKey="extensions"><ExtensionList /></FeatureRoute>} />
+        <Route path="/extensions/:id" element={<FeatureRoute featureKey="extensions"><ExtensionDetail /></FeatureRoute>} />
         <Route path="/admin" element={<Admin />} />
       </Route>
     </Routes>

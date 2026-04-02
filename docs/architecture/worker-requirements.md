@@ -22,7 +22,7 @@ This document defines the requirements that every coding agent worker must satis
 | 12 | [Support Skills](#12-support-skills) | Recommended | `WorkerProcessorOptions.skillConfigs` |
 | 13 | [Have integration tests](#13-have-integration-tests) | Recommended | — |
 | 14 | [Support multi-turn conversations](#14-support-multi-turn-conversations) | ✅ | `setup()` + `processMessage()` × N + `teardown()` |
-| 15 | [Auto-approve agent permissions](#15-auto-approve-agent-permissions) | Conditional | ACP `requestPermission()` |
+| 15 | [Auto-approve agent permissions](#15-auto-approve-agent-permissions) | ✅ | Worker-specific |
 | 16 | [Sandbox workspace filesystem access](#16-sandbox-workspace-filesystem-access) | Recommended | ACP `readTextFile()` / `writeTextFile()` |
 | 17 | [Persist auth state across iterations](#17-persist-auth-state-across-iterations) | Conditional | `processMessage()` side-effect |
 
@@ -326,7 +326,11 @@ The multi-turn loop is: `setup()` → (`processMessage()` → judge → feedback
 
 ### 15. Auto-approve agent permissions
 
-ACP-based workers must auto-approve all permission requests from the coding agent. Since workers run in isolated containers with no interactive user, the `requestPermission()` callback should select the first available option:
+All workers must ensure that their coding agent can execute tool calls and file operations without interactive confirmation prompts. Since workers run in isolated containers with no interactive user, the agent must operate in a fully autonomous ("yolo") mode.
+
+The mechanism varies by worker type:
+
+- **ACP-based workers** — implement `requestPermission()` to auto-approve all permission requests, and pass CLI flags like `--yolo` where supported:
 
 ```typescript
 async requestPermission(
@@ -340,9 +344,11 @@ async requestPermission(
 }
 ```
 
-For CLI workers that support it (e.g., Copilot), the `--yolo` flag should also be passed to skip interactive confirmation prompts at the agent level.
+- **Browser-based workers** (VS Code Web) — the agent operates through Playwright-driven UI automation; no explicit approval mechanism is needed since the automation controls the interaction directly.
 
-**When required:** Mandatory for ACP-based workers (Copilot CLI, Claude Code). Not applicable for browser/desktop workers where the agent operates through the IDE.
+- **Desktop IDE workers** (VS Code Electron) — must configure the IDE or agent extension to auto-approve tool calls without user confirmation (e.g., via VS Code settings or extension-specific yolo flags).
+
+**When required:** Mandatory for all workers. The specific mechanism depends on the agent interface.
 
 **Source:** [`apps/workers/coder-acp-copilot/src/acp-client.ts`](../../apps/workers/coder-acp-copilot/src/acp-client.ts) — `ACPClientHandler.requestPermission()`.
 

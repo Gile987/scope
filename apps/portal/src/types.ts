@@ -88,6 +88,7 @@ export interface Run {
   mcpServers?: string[];
   skills?: string[];
   skillRevisions?: string[];
+  extensions?: string[];
   harUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
@@ -302,6 +303,7 @@ export interface BulkResubmitOverrides {
   maxIterations?: number | null;
   mcpServers?: string[] | null;
   skillRevisions?: string[] | null;
+  extensions?: string[] | null;
 }
 
 // Bulk re-submit response
@@ -709,6 +711,38 @@ export interface SkillSearchResult {
   description?: string;
   internal: boolean;
   installs?: number;
+}
+
+// =============================================================================
+// VS Code extension types
+// =============================================================================
+
+export type ExtensionOrigin = "marketplace" | "manual";
+
+export interface ExtensionDocument {
+  _id: string;
+  publisher: string;
+  name: string;
+  description?: string;
+  origin: ExtensionOrigin;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface ExtensionSearchResult {
+  id: string;
+  name: string;
+  publisher: string;
+  description?: string;
+  internal: boolean;
+  version?: string;
+}
+
+export interface ExtensionVersionInfo {
+  version: string;
+  preRelease: boolean;
+  lastUpdated: string;
 }
 
 // =============================================================================
