@@ -2,12 +2,12 @@
 // Licensed under the MIT License.
 
 import { Collection } from "mongodb";
-import { TokenDocument, TokenType, TokenValidationResult } from "shared";
+import { KeyDocument, KeyType, KeyValidationResult } from "shared";
 
 export interface TokenSchedulerDeps {
-  collection: Collection<TokenDocument>;
+  collection: Collection<KeyDocument>;
   getSecretValue: (name: string) => Promise<string>;
-  validateToken: (type: TokenType, value: string) => Promise<TokenValidationResult>;
+  validateToken: (type: KeyType, value: string) => Promise<KeyValidationResult>;
   intervalMs?: number;
 }
 

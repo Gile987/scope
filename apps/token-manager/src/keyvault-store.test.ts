@@ -2,9 +2,9 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { KeyVaultTokenStore } from "./keyvault-store.js";
+import { KeyVaultSecretStore } from "./keyvault-store.js";
 
-describe("KeyVaultTokenStore caching", () => {
+describe("KeyVaultSecretStore caching", () => {
   it("returns cached value within TTL", async () => {
     // We can't easily test the real SecretClient, so we test the caching logic
     // by using a short TTL and mocking time
@@ -17,7 +17,7 @@ describe("KeyVaultTokenStore caching", () => {
     };
 
     // Create store with a mocked client via prototype manipulation
-    const store = new KeyVaultTokenStore("https://fake-vault.vault.azure.net", 60_000);
+    const store = new KeyVaultSecretStore("https://fake-vault.vault.azure.net", 60_000);
     // Replace internal client with mock
     (store as any).client = mockSecretClient;
 
@@ -48,7 +48,7 @@ describe("KeyVaultTokenStore caching", () => {
       beginDeleteSecret: vi.fn().mockResolvedValue({}),
     };
 
-    const store = new KeyVaultTokenStore("https://fake-vault.vault.azure.net");
+    const store = new KeyVaultSecretStore("https://fake-vault.vault.azure.net");
     (store as any).client = mockSecretClient;
 
     await store.setSecret("test-secret", "new-value");
@@ -66,7 +66,7 @@ describe("KeyVaultTokenStore caching", () => {
       beginDeleteSecret: vi.fn().mockResolvedValue({}),
     };
 
-    const store = new KeyVaultTokenStore("https://fake-vault.vault.azure.net");
+    const store = new KeyVaultSecretStore("https://fake-vault.vault.azure.net");
     (store as any).client = mockSecretClient;
 
     // Prime cache

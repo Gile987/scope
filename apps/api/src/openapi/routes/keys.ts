@@ -5,81 +5,81 @@ import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { registry } from "../registry.js";
 import {
-  TokenInputSchema,
-  TokenResponseSchema,
-  ValidateTokenInputSchema,
+  KeyInputSchema,
+  KeyResponseSchema,
+  ValidateKeyInputSchema,
 } from "shared";
 
 extendZodWithOpenApi(z);
 
-// POST /api/v1/tokens/preview
+// POST /api/v1/keys/preview
 registry.registerPath({
   method: "post",
-  path: "/api/v1/tokens/preview",
-  tags: ["Tokens"],
-  summary: "Preview token",
+  path: "/api/v1/keys/preview",
+  tags: ["Keys"],
+  summary: "Preview key",
   request: {
     body: {
       content: {
-        "application/json": { schema: TokenInputSchema },
+        "application/json": { schema: KeyInputSchema },
       },
     },
   },
   responses: {
     200: {
-      description: "Token preview",
+      description: "Key preview",
       content: {
-        "application/json": { schema: TokenResponseSchema },
+        "application/json": { schema: KeyResponseSchema },
       },
     },
   },
 });
 
-// POST /api/v1/tokens
+// POST /api/v1/keys
 registry.registerPath({
   method: "post",
-  path: "/api/v1/tokens",
-  tags: ["Tokens"],
-  summary: "Create token",
+  path: "/api/v1/keys",
+  tags: ["Keys"],
+  summary: "Create key",
   request: {
     body: {
       content: {
-        "application/json": { schema: TokenInputSchema },
+        "application/json": { schema: KeyInputSchema },
       },
     },
   },
   responses: {
     201: {
-      description: "Token created",
+      description: "Key created",
       content: {
-        "application/json": { schema: TokenResponseSchema },
+        "application/json": { schema: KeyResponseSchema },
       },
     },
   },
 });
 
-// GET /api/v1/tokens
+// GET /api/v1/keys
 registry.registerPath({
   method: "get",
-  path: "/api/v1/tokens",
-  tags: ["Tokens"],
-  summary: "List tokens",
+  path: "/api/v1/keys",
+  tags: ["Keys"],
+  summary: "List keys",
   responses: {
     200: {
       description: "Success",
       content: {
-        "application/json": { schema: z.array(TokenResponseSchema) },
+        "application/json": { schema: z.array(KeyResponseSchema) },
       },
     },
   },
 });
 
-// GET /api/v1/tokens/:id
+// GET /api/v1/keys/:id
 registry.registerPath({
   method: "get",
-  path: "/api/v1/tokens/{id}",
-  tags: ["Tokens"],
-  summary: "Get token",
+  path: "/api/v1/keys/{id}",
+  tags: ["Keys"],
+  summary: "Get key",
   request: {
     params: z.object({ id: z.string() }),
   },
@@ -87,48 +87,48 @@ registry.registerPath({
     200: {
       description: "Success",
       content: {
-        "application/json": { schema: TokenResponseSchema },
+        "application/json": { schema: KeyResponseSchema },
       },
     },
   },
 });
 
-// PUT /api/v1/tokens/:id
+// PUT /api/v1/keys/:id
 registry.registerPath({
   method: "put",
-  path: "/api/v1/tokens/{id}",
-  tags: ["Tokens"],
-  summary: "Update token",
+  path: "/api/v1/keys/{id}",
+  tags: ["Keys"],
+  summary: "Update key",
   request: {
     params: z.object({ id: z.string() }),
     body: {
       content: {
-        "application/json": { schema: TokenInputSchema },
+        "application/json": { schema: KeyInputSchema },
       },
     },
   },
   responses: {
     200: {
-      description: "Token updated",
+      description: "Key updated",
       content: {
-        "application/json": { schema: TokenResponseSchema },
+        "application/json": { schema: KeyResponseSchema },
       },
     },
   },
 });
 
-// DELETE /api/v1/tokens/:id
+// DELETE /api/v1/keys/:id
 registry.registerPath({
   method: "delete",
-  path: "/api/v1/tokens/{id}",
-  tags: ["Tokens"],
-  summary: "Delete token",
+  path: "/api/v1/keys/{id}",
+  tags: ["Keys"],
+  summary: "Delete key",
   request: {
     params: z.object({ id: z.string() }),
   },
   responses: {
     200: {
-      description: "Token deleted",
+      description: "Key deleted",
       content: {
         "application/json": {
           schema: z.object({ success: z.boolean() }),
@@ -138,17 +138,17 @@ registry.registerPath({
   },
 });
 
-// POST /api/v1/tokens/:id/validate
+// POST /api/v1/keys/:id/validate
 registry.registerPath({
   method: "post",
-  path: "/api/v1/tokens/{id}/validate",
-  tags: ["Tokens"],
-  summary: "Validate token",
+  path: "/api/v1/keys/{id}/validate",
+  tags: ["Keys"],
+  summary: "Validate key",
   request: {
     params: z.object({ id: z.string() }),
     body: {
       content: {
-        "application/json": { schema: ValidateTokenInputSchema },
+        "application/json": { schema: ValidateKeyInputSchema },
       },
     },
   },
@@ -157,7 +157,7 @@ registry.registerPath({
       description: "Validation result",
       content: {
         "application/json": {
-          schema: z.object({}).passthrough().describe("Token validation result"),
+          schema: z.object({}).passthrough().describe("Key validation result"),
         },
       },
     },

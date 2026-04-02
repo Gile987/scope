@@ -13,13 +13,13 @@ import {
   UpdateAccountRequest,
   deriveAccountSecretName,
 } from "shared";
-import { TokenSecretStore } from "./keyvault-store.js";
+import { SecretStore } from "./keyvault-store.js";
 
 const VALID_ACCOUNT_TYPES: AccountType[] = ["github"];
 
 export function createAccountRouter(
   collection: Collection<AccountDocument>,
-  store: TokenSecretStore
+  store: SecretStore
 ): Router {
   const router = Router();
 

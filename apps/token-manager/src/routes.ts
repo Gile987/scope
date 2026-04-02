@@ -5,20 +5,20 @@ import { Router } from "express";
 import { Collection } from "mongodb";
 import { v4 as uuidv4 } from "uuid";
 import {
-  TokenDocument,
-  TokenType,
-  TokenCapability,
-  AcquireTokenResponse,
-  CreateTokenRequest,
-  UpdateTokenRequest,
-  AcquireTokenRequest,
+  KeyDocument,
+  KeyType,
+  KeyCapability,
+  AcquireKeyResponse,
+  CreateKeyRequest,
+  UpdateKeyRequest,
+  AcquireKeyRequest,
   deriveSecretName,
 } from "shared";
-import { TokenSecretStore } from "./keyvault-store.js";
+import { SecretStore } from "./keyvault-store.js";
 import { validateToken } from "./token-validators.js";
 import { RoundRobinMap } from "./round-robin.js";
 
-const VALID_TYPES: TokenType[] = [
+const VALID_TYPES: KeyType[] = [
   "github-pat-classic",
   "github-pat-fine-grained",
   "github-oauth",
@@ -26,7 +26,7 @@ const VALID_TYPES: TokenType[] = [
   "anthropic-api-key",
   "anthropic-oauth",
 ];
-const VALID_CAPABILITIES: TokenCapability[] = [
+const VALID_CAPABILITIES: KeyCapability[] = [
   "github-models",
   "copilot-models",
   "copilot-sdk",
@@ -35,19 +35,19 @@ const VALID_CAPABILITIES: TokenCapability[] = [
   "anthropic-api"
 ];
 
-export function createTokenRouter(
-  collection: Collection<TokenDocument>,
-  store: TokenSecretStore
+export function createKeyRouter(
+  collection: Collection<KeyDocument>,
+  store: SecretStore
 ): Router {
   const router = Router();
-  const roundRobin = new RoundRobinMap<TokenDocument>();
+  const roundRobin = new RoundRobinMap<KeyDocument>();
 
   // ──────────────────────────────────────────────
-  // POST /api/v1/tokens/preview — Validate without storing
+  // POST /api/v1/keys/preview — Validate without storing
   // ──────────────────────────────────────────────
-  router.post("/api/v1/tokens/preview", async (req, res, next) => {
+  router.post("/api/v1/keys/preview", async (req, res, next) => {
     try {
-      const { type, value } = req.body as { type: TokenType; value: string };
+      const { type, value } = req.body as { type: KeyType; value: string };
 
       if (!type || !VALID_TYPES.includes(type)) {
         res.status(400).json({
@@ -68,11 +68,11 @@ export function createTokenRouter(
   });
 
   // ──────────────────────────────────────────────
-  // POST /api/v1/tokens — Register a new token
+  // POST /api/v1/keys — Register a new key
   // ──────────────────────────────────────────────
-  router.post("/api/v1/tokens", async (req, res, next) => {
+  router.post("/api/v1/keys", async (req, res, next) => {
     try {
-      const body = req.body as CreateTokenRequest;
+      const body = req.body as CreateKeyRequest;
 
       // Validate required fields
       if (!body.type || !VALID_TYPES.includes(body.type)) {
@@ -93,7 +93,7 @@ export function createTokenRouter(
       await store.setSecret(secretName, body.value);
 
       // Create metadata document (capabilities set after validation)
-      const doc: TokenDocument = {
+      const doc: KeyDocument = {
         _id: id,
         type: body.type,
         capabilities: [],
@@ -143,9 +143,9 @@ export function createTokenRouter(
   });
 
   // ──────────────────────────────────────────────
-  // GET /api/v1/tokens — List all tokens (metadata)
+  // GET /api/v1/keys — List all keys (metadata)
   // ──────────────────────────────────────────────
-  router.get("/api/v1/tokens", async (req, res, next) => {
+  router.get("/api/v1/keys", async (req, res, next) => {
     try {
       const filter: Record<string, unknown> = {
         deletedAt: { $exists: false },
@@ -167,9 +167,9 @@ export function createTokenRouter(
   });
 
   // ──────────────────────────────────────────────
-  // GET /api/v1/tokens/:id — Get one token (metadata)
+  // GET /api/v1/keys/:id — Get one key (metadata)
   // ──────────────────────────────────────────────
-  router.get("/api/v1/tokens/:id", async (req, res, next) => {
+  router.get("/api/v1/keys/:id", async (req, res, next) => {
     try {
       const token = await collection.findOne({
         _id: req.params.id,
@@ -177,7 +177,7 @@ export function createTokenRouter(
       });
 
       if (!token) {
-        res.status(404).json({ error: "Token not found" });
+        res.status(404).json({ error: "Key not found" });
         return;
       }
 
@@ -188,11 +188,11 @@ export function createTokenRouter(
   });
 
   // ──────────────────────────────────────────────
-  // PUT /api/v1/tokens/:id — Update metadata only
+  // PUT /api/v1/keys/:id — Update metadata only
   // ──────────────────────────────────────────────
-  router.put("/api/v1/tokens/:id", async (req, res, next) => {
+  router.put("/api/v1/keys/:id", async (req, res, next) => {
     try {
-      const body = req.body as UpdateTokenRequest;
+      const body = req.body as UpdateKeyRequest;
       const update: Record<string, unknown> = { updatedAt: new Date() };
 
       if (typeof body.enabled === "boolean") {
@@ -216,7 +216,7 @@ export function createTokenRouter(
       );
 
       if (!result) {
-        res.status(404).json({ error: "Token not found" });
+        res.status(404).json({ error: "Key not found" });
         return;
       }
 
@@ -227,9 +227,9 @@ export function createTokenRouter(
   });
 
   // ──────────────────────────────────────────────
-  // DELETE /api/v1/tokens/:id — Soft-delete
+  // DELETE /api/v1/keys/:id — Soft-delete
   // ──────────────────────────────────────────────
-  router.delete("/api/v1/tokens/:id", async (req, res, next) => {
+  router.delete("/api/v1/keys/:id", async (req, res, next) => {
     try {
       const result = await collection.findOneAndUpdate(
         { _id: req.params.id, deletedAt: { $exists: false } },
@@ -238,7 +238,7 @@ export function createTokenRouter(
       );
 
       if (!result) {
-        res.status(404).json({ error: "Token not found" });
+        res.status(404).json({ error: "Key not found" });
         return;
       }
 
@@ -250,9 +250,9 @@ export function createTokenRouter(
   });
 
   // ──────────────────────────────────────────────
-  // POST /api/v1/tokens/:id/validate — On-demand validation
+  // POST /api/v1/keys/:id/validate — On-demand validation
   // ──────────────────────────────────────────────
-  router.post("/api/v1/tokens/:id/validate", async (req, res, next) => {
+  router.post("/api/v1/keys/:id/validate", async (req, res, next) => {
     try {
       const token = await collection.findOne({
         _id: req.params.id,
@@ -260,7 +260,7 @@ export function createTokenRouter(
       });
 
       if (!token) {
-        res.status(404).json({ error: "Token not found" });
+        res.status(404).json({ error: "Key not found" });
         return;
       }
 
@@ -289,11 +289,11 @@ export function createTokenRouter(
   });
 
   // ──────────────────────────────────────────────
-  // POST /api/v1/tokens/acquire — Round-robin token acquisition (internal)
+  // POST /api/v1/keys/acquire — Round-robin key acquisition (internal)
   // ──────────────────────────────────────────────
-  router.post("/api/v1/tokens/acquire", async (req, res, next) => {
+  router.post("/api/v1/keys/acquire", async (req, res, next) => {
     try {
-      const body = req.body as AcquireTokenRequest;
+      const body = req.body as AcquireKeyRequest;
 
       if (!body.capability || !VALID_CAPABILITIES.includes(body.capability)) {
         res.status(400).json({
@@ -313,15 +313,15 @@ export function createTokenRouter(
 
       if (tokens.length === 0) {
         res.status(404).json({
-          error: `No valid tokens available for capability '${body.capability}'`,
+          error: `No valid keys available for capability '${body.capability}'`,
         });
         return;
       }
 
-      // If a preferred tokenType was requested, try those first
+      // If a preferred keyType was requested, try those first
       let pool = tokens;
-      if (body.tokenType) {
-        const preferred = tokens.filter((t) => t.type === body.tokenType);
+      if (body.keyType) {
+        const preferred = tokens.filter((t) => t.type === body.keyType);
         if (preferred.length > 0) {
           pool = preferred;
         }
@@ -343,10 +343,10 @@ export function createTokenRouter(
       // Read secret value
       const value = await store.getSecret(selected.secretName);
 
-      const response: AcquireTokenResponse = {
+      const response: AcquireKeyResponse = {
         value,
-        tokenId: selected._id,
-        tokenType: selected.type,
+        keyId: selected._id,
+        keyType: selected.type,
         capability: body.capability,
         expiresAt: selected.expiresAt,
       };
