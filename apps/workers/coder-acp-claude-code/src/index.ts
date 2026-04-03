@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, McpGatewayClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -99,6 +99,10 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         const existingNodeOptions = process.env.NODE_OPTIONS || "";
         env.NODE_OPTIONS = [existingNodeOptions, "--use-env-proxy"].filter(Boolean).join(" ");
         env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+        const gatewayHost = process.env.MCP_GATEWAY_URL ? new URL(process.env.MCP_GATEWAY_URL).hostname : null;
+        const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
+        env.NO_PROXY = noProxy;
+        env.no_proxy = noProxy;
       } else if (!DevProxyClient.isEnabled()) {
         // DevProxy not configured — clear proxy vars so subprocess makes direct calls
         env.HTTP_PROXY = "";
@@ -107,16 +111,36 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         env.https_proxy = "";
         env.NODE_EXTRA_CA_CERTS = "";
       }
-      const result = await runACPSession(message, {
-        command: "claude-code-acp",
-        args: [],
-        env,
-        cwd: this.workspacePath!,
-        onLog: async (msg) => {
-          await log("debug", msg);
-        },
-        mcpServers: options?.mcpServerConfigs,
-      });
+      // MCP gateway lifecycle — register servers before ACP session, deregister after
+      const gateway = McpGatewayClient.isEnabled() ? new McpGatewayClient() : null;
+      if (mcpConfigs.length > 0 && !gateway) {
+        throw new Error("MCP servers configured but MCP_GATEWAY_URL is not set — cannot proceed without gateway");
+      }
+      if (gateway && mcpConfigs.length > 0) {
+        await log("info", "Registering MCP servers with gateway", { count: mcpConfigs.length, servers: mcpConfigs.map((s) => s.name) });
+        await gateway.purgeAll();
+        for (const config of mcpConfigs) await gateway.registerServer(config);
+      }
+
+      let result;
+      try {
+        result = await runACPSession(message, {
+          command: "claude-code-acp",
+          args: [],
+          env,
+          cwd: this.workspacePath!,
+          onLog: async (msg) => {
+            await log("debug", msg);
+          },
+          mcpServers: gateway && mcpConfigs.length > 0
+            ? [{ type: "http" as const, name: "mcp-gateway", url: gateway.mcpEndpoint }]
+            : [],
+        });
+      } finally {
+        if (gateway && mcpConfigs.length > 0) {
+          await Promise.all(mcpConfigs.map((c) => gateway.deregisterServer(c.name).catch(() => {})));
+        }
+      }
 
       await log("info", "Claude Code processing complete", { 
         stopReason: result.stopReason,

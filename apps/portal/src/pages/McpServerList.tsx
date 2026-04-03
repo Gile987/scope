@@ -71,7 +71,8 @@ export function McpServerList() {
                 <TableHead>Slug</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Type</TableHead>
-                <TableHead>URL</TableHead>
+                <TableHead>URL / Command</TableHead>
+                <TableHead>Version</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -92,7 +93,10 @@ export function McpServerList() {
                     </Badge>
                   </TableCell>
                   <TableCell className="max-w-[300px] truncate text-xs text-muted-foreground font-mono">
-                    {server.url}
+                    {server.type === "stdio" ? server.command : server.url}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground font-mono">
+                    {server.version ?? <span className="text-muted-foreground/40">&mdash;</span>}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatDate(server.createdAt)}

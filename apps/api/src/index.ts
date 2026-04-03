@@ -4677,8 +4677,13 @@ const CreateMcpServerBodySchema = z.object({
     .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/),
   name: z.string(),
   type: McpTransportTypeSchema,
-  url: z.string(),
+  url: z.string().optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   headers: z.array(McpServerHeaderSchema).optional(),
+  sessionMode: z.enum(["stateful", "stateless"]).optional(),
+  version: z.string().optional(),
   description: z.string().optional(),
 });
 
@@ -4728,7 +4733,7 @@ apiRoute(app, registry, {
   body: CreateMcpServerBodySchema,
   response: McpServerResponseSchema,
   handler: async (req, res) => {
-    const { _id, name, type, url, headers, description } = req.body;
+    const { _id, name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
     const now = new Date();
     const existing = await mcpServerCollection.findOne({ _id });
 
@@ -4740,8 +4745,13 @@ apiRoute(app, registry, {
           $set: {
             name,
             type,
-            url,
+            ...(url !== undefined ? { url } : {}),
+            ...(command !== undefined ? { command } : {}),
+            ...(args !== undefined ? { args } : {}),
+            ...(env !== undefined ? { env } : {}),
             ...(headers !== undefined ? { headers } : {}),
+            ...(sessionMode !== undefined ? { sessionMode } : {}),
+            ...(version !== undefined ? { version } : {}),
             ...(description !== undefined ? { description } : {}),
             updatedAt: now,
           },
@@ -4755,8 +4765,13 @@ apiRoute(app, registry, {
         _id,
         name,
         type,
-        url,
+        ...(url ? { url } : {}),
+        ...(command ? { command } : {}),
+        ...(args ? { args } : {}),
+        ...(env ? { env } : {}),
         ...(headers ? { headers } : {}),
+        ...(sessionMode ? { sessionMode } : {}),
+        ...(version ? { version } : {}),
         ...(description ? { description } : {}),
         createdAt: now,
       };
@@ -4777,7 +4792,7 @@ apiRoute(app, registry, {
   response: McpServerResponseSchema,
   handler: async (req, res) => {
     const { id } = req.params;
-    const { name, type, url, headers, description } = req.body;
+    const { name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
 
     const existing = await mcpServerCollection.findOne({
       _id: id,
@@ -4792,7 +4807,12 @@ apiRoute(app, registry, {
     if (name !== undefined) updateFields.name = name;
     if (type !== undefined) updateFields.type = type;
     if (url !== undefined) updateFields.url = url;
+    if (command !== undefined) updateFields.command = command;
+    if (args !== undefined) updateFields.args = args;
+    if (env !== undefined) updateFields.env = env;
     if (headers !== undefined) updateFields.headers = headers;
+    if (sessionMode !== undefined) updateFields.sessionMode = sessionMode;
+    if (version !== undefined) updateFields.version = version;
     if (description !== undefined) updateFields.description = description;
 
     await mcpServerCollection.updateOne({ _id: id }, { $set: updateFields });

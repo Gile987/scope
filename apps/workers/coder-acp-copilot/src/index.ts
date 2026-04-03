@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, McpGatewayClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -19,12 +19,17 @@ export function buildSubprocessEnv(
   githubToken: string,
   devProxyEnabled: boolean,
   currentNodeOptions?: string,
+  gatewayUrl?: string,
 ): Record<string, string> {
+  const gatewayHost = gatewayUrl ? new URL(gatewayUrl).hostname : null;
+  const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
   return {
     GITHUB_TOKEN: githubToken,
     ...(devProxyEnabled ? {
       NODE_OPTIONS: [currentNodeOptions, "--use-env-proxy"].filter(Boolean).join(" "),
       NODE_TLS_REJECT_UNAUTHORIZED: "0",
+      NO_PROXY: noProxy,
+      no_proxy: noProxy,
     } : {
       HTTP_PROXY: "",
       HTTPS_PROXY: "",
@@ -116,21 +121,48 @@ class CopilotProcessor implements WorkerProcessor {
         preview: `${githubToken.substring(0, 7)}...(${githubToken.length} chars)`,
       });
 
+      // MCP gateway lifecycle — register servers before ACP session, deregister after
+      const gateway = McpGatewayClient.isEnabled() ? new McpGatewayClient() : null;
+      if (mcpConfigs.length > 0 && !gateway) {
+        throw new Error("MCP servers configured but MCP_GATEWAY_URL is not set — cannot proceed without gateway");
+      }
+      if (gateway && mcpConfigs.length > 0) {
+        await log("info", "Registering MCP servers with gateway", { count: mcpConfigs.length, servers: mcpConfigs.map((s) => s.name) });
+        await gateway.purgeAll();
+        for (const config of mcpConfigs) await gateway.registerServer(config);
+      }
+
       // Run ACP session with GitHub Copilot
       const args = ["--acp", "--yolo"];
       if (options?.model) {
         args.push("--model", options.model);
       }
-      const result = await runACPSession(message, {
-        command: "copilot",
-        args,
-        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS),
-        cwd: this.workspacePath!,
-        onLog: async (msg) => {
-          await log("debug", msg);
-        },
-        mcpServers: options?.mcpServerConfigs,
-      });
+      // The Copilot CLI does not support MCP servers via ACP newSession.mcpServers
+      // (agentCapabilities.mcpCapabilities is undefined). Instead, pass the gateway
+      // endpoint via --additional-mcp-config so the CLI initializes it at startup.
+      if (gateway && mcpConfigs.length > 0) {
+        const mcpConfigJson = JSON.stringify({
+          mcpServers: { "mcp-gateway": { type: "http", url: gateway.mcpEndpoint } },
+        });
+        args.push("--additional-mcp-config", mcpConfigJson);
+      }
+      let result;
+      try {
+        result = await runACPSession(message, {
+          command: "copilot",
+          args,
+          env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL),
+          cwd: this.workspacePath!,
+          onLog: async (msg) => {
+            await log("debug", msg);
+          },
+          mcpServers: [],
+        });
+      } finally {
+        if (gateway && mcpConfigs.length > 0) {
+          await Promise.all(mcpConfigs.map((c) => gateway.deregisterServer(c.name).catch(() => {})));
+        }
+      }
 
       await log("info", "Copilot processing complete", { 
         stopReason: result.stopReason,

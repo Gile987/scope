@@ -102,7 +102,12 @@ services:
     volumes:
       - lowkey_vault_data:/import
       - ./config/lowkey-vault/import.json.hbs:/import/seed.json.hbs:ro
-    entrypoint: ["/bin/sh", "-c", "[ -f /import/export.json ] || cp /import/seed.json.hbs /import/export.json; exec java -jar /lowkey-vault.jar $$LOWKEY_ARGS"]
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "[ -f /import/export.json ] || cp /import/seed.json.hbs /import/export.json; exec java -jar /lowkey-vault.jar $$LOWKEY_ARGS",
+      ]
     healthcheck:
       test: ["CMD", "curl", "-fk", "https://localhost:8443/ping"]
       interval: 10s
@@ -113,16 +118,22 @@ services:
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite
     ports:
-      - "${AZURITE_BLOB_PORT:-10100}:10000"  # Blob
-      - "${AZURITE_QUEUE_PORT:-10200}:10001"  # Queue
-      - "${AZURITE_TABLE_PORT:-10300}:10002"  # Table
+      - "${AZURITE_BLOB_PORT:-10100}:10000" # Blob
+      - "${AZURITE_QUEUE_PORT:-10200}:10001" # Queue
+      - "${AZURITE_TABLE_PORT:-10300}:10002" # Table
     command: azurite --loose --skipApiVersionCheck --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --silent --location /data
     environment:
       APPLICATIONINSIGHTS_CONNECTION_STRING: ""
     volumes:
       - azurite_data:/data
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:10001', (r) => process.exit(r.statusCode === 400 ? 0 : 1)).on('error', () => process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:10001', (r) => process.exit(r.statusCode === 400 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -261,7 +272,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ""
       # Criteria system configuration
-      JUDGE_STRATEGY: ${JUDGE_STRATEGY:-bundled}  # bundled or independent
+      JUDGE_STRATEGY: ${JUDGE_STRATEGY:-bundled} # bundled or independent
       JUDGE_MAX_PARALLELISM: ${JUDGE_MAX_PARALLELISM:-3}
       FEEDBACK_MAX_CRITERIA: ${FEEDBACK_MAX_CRITERIA:-1}
       FEEDBACK_DESCENDANT_GUARD: ${FEEDBACK_DESCENDANT_GUARD:-true}
@@ -333,16 +344,20 @@ services:
       DEV_PROXY_HAR_DIR: /har-output
       HTTP_PROXY: http://devproxy-claude-code:18000
       HTTPS_PROXY: http://devproxy-claude-code:18000
-      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-claude-code"
+      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-claude-code,mcp-gateway-claude-code"
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
+      MCP_GATEWAY_URL: http://mcp-gateway-claude-code:8080
     volumes:
       - claude_har_output:/har-output
+      - claude_workspace:/workspace
     depends_on:
       <<: *worker-deps
       devproxy-claude-code:
         condition: service_healthy
       devproxy-claude-code-init:
         condition: service_completed_successfully
+      mcp-gateway-claude-code:
+        condition: service_healthy
 
   # DevProxy sidecar for Claude Code worker (HAR capture)
   devproxy-claude-code:
@@ -372,10 +387,30 @@ services:
   devproxy-claude-code-init:
     image: busybox:1.37
     profiles: [claude-code]
-    command: ["sh", "-c", "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'"]
+    command:
+      [
+        "sh",
+        "-c",
+        "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'",
+      ]
     volumes:
       - claude_har_output:/har-output
       - claude_devproxy_cert:/certs
+
+  # MCPJungle sidecar for Claude Code worker (stdio + remote HTTP MCP aggregation)
+  mcp-gateway-claude-code:
+    image: ghcr.io/mcpjungle/mcpjungle:latest-stdio
+    profiles: [claude-code]
+    environment:
+      SESSION_IDLE_TIMEOUT_SEC: "0"
+    volumes:
+      - claude_workspace:/workspace
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 60s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   # GitHub Copilot worker (via ACP)
   coder-acp-copilot:
@@ -394,12 +429,16 @@ services:
       DEV_PROXY_HAR_DIR: /har-output
       HTTP_PROXY: http://devproxy-copilot:18000
       HTTPS_PROXY: http://devproxy-copilot:18000
-      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-copilot"
+      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-copilot,mcp-gateway-copilot"
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
+      MCP_GATEWAY_URL: http://mcp-gateway-copilot:8080
     volumes:
       - copilot_har_output:/har-output
+      - copilot_workspace:/workspace
     depends_on:
       <<: *worker-deps
+      mcp-gateway-copilot:
+        condition: service_healthy
       devproxy-copilot:
         condition: service_healthy
       devproxy-copilot-init:
@@ -433,10 +472,30 @@ services:
   devproxy-copilot-init:
     image: busybox:1.37
     profiles: [copilot]
-    command: ["sh", "-c", "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'"]
+    command:
+      [
+        "sh",
+        "-c",
+        "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'",
+      ]
     volumes:
       - copilot_har_output:/har-output
       - copilot_devproxy_cert:/certs
+
+  # MCPJungle sidecar for Copilot worker (stdio + remote HTTP MCP aggregation)
+  mcp-gateway-copilot:
+    image: ghcr.io/mcpjungle/mcpjungle:latest-stdio
+    profiles: [copilot]
+    environment:
+      SESSION_IDLE_TIMEOUT_SEC: "0"
+    volumes:
+      - copilot_workspace:/workspace
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 60s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   devproxy-vscode-electron:
     image: ghcr.io/dotnet/dev-proxy:2.1.0
@@ -460,7 +519,12 @@ services:
   devproxy-vscode-electron-init:
     image: busybox:1.37
     profiles: [vscode-electron-driver-ext]
-    command: ["sh", "-c", "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'"]
+    command:
+      [
+        "sh",
+        "-c",
+        "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'",
+      ]
     volumes:
       - vscode_electron_har_output:/har-output
       - vscode_electron_devproxy_cert:/certs
@@ -496,8 +560,10 @@ volumes:
   lowkey_vault_data:
   copilot_har_output:
   copilot_devproxy_cert:
+  copilot_workspace:
   claude_har_output:
   claude_devproxy_cert:
+  claude_workspace:
   vscode_electron_har_output:
   vscode_electron_devproxy_cert:
 

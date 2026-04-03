@@ -588,7 +588,8 @@ export interface CodingAgent {
 }
 
 // MCP Server types
-export type McpTransportType = "sse" | "http";
+export type McpTransportType = "sse" | "http" | "stdio";
+export type McpSessionMode = "stateful" | "stateless";
 
 export interface McpServerHeader {
   name: string;
@@ -599,8 +600,13 @@ export interface McpServerDocument {
   _id: string;
   name: string;
   type: McpTransportType;
-  url: string;
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   headers?: McpServerHeader[];
+  sessionMode?: McpSessionMode;
+  version?: string;
   description?: string;
   createdAt: string;
   updatedAt?: string;
@@ -611,8 +617,13 @@ export interface CreateMcpServerRequest {
   _id: string;
   name: string;
   type: McpTransportType;
-  url: string;
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   headers?: McpServerHeader[];
+  sessionMode?: McpSessionMode;
+  version?: string;
   description?: string;
 }
 
@@ -620,7 +631,12 @@ export interface UpdateMcpServerRequest {
   name?: string;
   type?: McpTransportType;
   url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   headers?: McpServerHeader[];
+  sessionMode?: McpSessionMode;
+  version?: string;
   description?: string;
 }
 
