@@ -34,8 +34,6 @@ VS Code will appear on your Mac desktop when the worker processes a run. Submit 
 ```bash
 xhost +
 
-# Delete stale image to pick up code changes
-
 # Run with X11 forwarding
 X11_FORWARD=true pnpm test:integration vscode-electron
 ```
