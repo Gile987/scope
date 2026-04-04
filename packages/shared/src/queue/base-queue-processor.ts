@@ -1,12 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { randomUUID } from "node:crypto";
 import { MongoClient, Collection, Db } from "mongodb";
 import { QueueClient, DequeuedMessageItem } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { LogEvent, BaseQueueProcessorConfig } from "../types/types.js";
 import { LogPublisher } from "../logging/log-publisher.js";
 import { withRetry } from "../utils/retry.js";
+
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 /**
  * Generic queue processor that polls an Azure Storage Queue and processes messages.
@@ -23,12 +26,16 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
   protected config: BaseQueueProcessorConfig;
   protected logPublisher!: LogPublisher;
   protected workerName: string;
+  readonly workerId: string;
   private stopping = false;
   private processing = false;
+  private inFlightDocumentId: string | undefined;
+  private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(config: BaseQueueProcessorConfig, workerName: string) {
     this.config = config;
     this.workerName = workerName;
+    this.workerId = randomUUID();
 
     // MongoDB client
     this.mongoClient = new MongoClient(config.mongoUri);
@@ -55,22 +62,32 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
 
   /**
    * Signal the worker to stop after finishing the current message.
-   * Closes MongoDB and Redis connections, then exits.
+   * If a document is in-flight, marks it as "interrupted" before exiting.
    */
   private async shutdown(): Promise<void> {
     if (this.stopping) return; // prevent double shutdown
     this.stopping = true;
     console.log(`[${this.workerName}] Shutdown signal received, finishing current work...`);
 
-    // If currently processing a message, wait briefly for it to finish
-    if (this.processing) {
-      console.log(`[${this.workerName}] Waiting for in-flight message to complete...`);
-      const deadline = Date.now() + 10_000; // 10s grace period
-      while (this.processing && Date.now() < deadline) {
-        await this.sleep(250);
-      }
-      if (this.processing) {
-        console.warn(`[${this.workerName}] Grace period expired, forcing shutdown`);
+    // Stop heartbeat immediately
+    this.stopHeartbeat();
+
+    // If a document is in-flight, mark it as interrupted so the sweeper can recover it
+    if (this.inFlightDocumentId) {
+      console.log(`[${this.workerName}] Marking in-flight document ${this.inFlightDocumentId} as interrupted`);
+      try {
+        await withRetry(() => this.collection.updateOne(
+          { _id: this.inFlightDocumentId } as any,
+          {
+            $set: {
+              status: "interrupted",
+              error: "Worker shut down (SIGTERM)",
+              updatedAt: new Date(),
+            },
+          } as any
+        ));
+      } catch (err) {
+        console.error(`[${this.workerName}] Failed to mark document as interrupted:`, err);
       }
     }
 
@@ -100,7 +117,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
   }
 
   async start(): Promise<void> {
-    console.log(`[${this.workerName}] Starting worker...`);
+    console.log(`[${this.workerName}] Starting worker (workerId=${this.workerId})...`);
     console.log(`[${this.workerName}] MongoDB: ${this.config.mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
     console.log(`[${this.workerName}] Queue: ${this.config.storageAccountName}/${this.config.queueName}`);
     console.log(`[${this.workerName}] Redis: ${this.config.redisHost}:${this.config.redisPort}`);
@@ -181,6 +198,19 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
         return;
       }
 
+      // Status guard: only process documents that are still pending.
+      // If the message re-appeared (visibility timeout expired) but another worker
+      // already picked it up, or it was already processed, skip it.
+      if (doc.status !== "pending") {
+        console.warn(`[${this.workerName}] Document ${documentId} is '${doc.status}', expected 'pending' — skipping`);
+        await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+        return;
+      }
+
+      // Track in-flight document for SIGTERM handler
+      this.inFlightDocumentId = documentId;
+      this.startHeartbeat(documentId);
+
       // Create log function for this document
       const log = async (
         level: LogEvent["level"],
@@ -190,9 +220,18 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
         await this.logPublisher.publish(documentId!, level, msg, data);
       };
 
-      await this.handleRequest(doc as TDocument, message, currentPopReceipt, log);
+      try {
+        await this.handleRequest(doc as TDocument, message, currentPopReceipt, log);
+      } finally {
+        this.stopHeartbeat();
+        this.inFlightDocumentId = undefined;
+      }
     } catch (error) {
       console.error(`[${this.workerName}] Error processing message:`, error);
+
+      // Stop heartbeat on error path (may already be stopped by inner finally)
+      this.stopHeartbeat();
+      this.inFlightDocumentId = undefined;
 
       if (documentId) {
         try {
@@ -219,6 +258,32 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
       }
 
       await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    }
+  }
+
+  /**
+   * Start a periodic heartbeat that stamps `heartbeatAt` on the in-flight document.
+   * This lets external observers (sweeper, portal) detect when a worker is alive.
+   */
+  private startHeartbeat(documentId: string): void {
+    this.stopHeartbeat(); // clear any stale timer
+    this.heartbeatTimer = setInterval(() => {
+      this.collection.updateOne(
+        { _id: documentId } as any,
+        { $set: { heartbeatAt: new Date() } } as any
+      ).catch((err) => {
+        console.warn(`[${this.workerName}] Heartbeat update failed for ${documentId}:`, err);
+      });
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  /**
+   * Stop the heartbeat interval.
+   */
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
     }
   }
 
