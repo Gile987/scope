@@ -67,6 +67,7 @@ export const RequestStatusSchema = z.enum([
   "completed",
   "failed",
   "exhausted",
+  "interrupted",
 ]);
 
 export const VALID_WORKERS = [
@@ -101,6 +102,8 @@ export const RequestResponseSchema = z
     logs: z.array(LogEventSchema).optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
+    workerId: z.string().optional(),
+    heartbeatAt: z.coerce.date().optional(),
     maxIterations: z.number().optional(),
     turns: z.array(ConversationTurnSchema).optional(),
     personaInstructions: z.string().optional(),

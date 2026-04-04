@@ -116,12 +116,14 @@ export interface RequestDocument {
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
   model?: string;              // Model selected for this run
-  status: "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
+  status: "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted" | "interrupted";
   result?: string;
   error?: string;
   logs?: LogEvent[];
   createdAt: Date;
   updatedAt?: Date;
+  workerId?: string;             // UUID of the worker instance processing this run
+  heartbeatAt?: Date;            // Last heartbeat timestamp from the worker
   // Multi-turn fields
   maxIterations?: number;
   turns?: ConversationTurn[];
