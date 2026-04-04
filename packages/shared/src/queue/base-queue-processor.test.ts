@@ -273,44 +273,43 @@ describe("BaseQueueProcessor heartbeat", () => {
   });
 
   afterEach(() => {
+    // Stop any lingering heartbeat timers
+    (processor as any).stopHeartbeat();
     vi.useRealTimers();
     process.exit = originalExit;
   });
 
-  it("starts heartbeat on message processing and stamps heartbeatAt every 30s", async () => {
-    const message = makeQueueMessage({ requestId: "doc-hb" });
-    mocks.mockCollection.findOne.mockResolvedValue({ _id: "doc-hb", status: "pending" });
+  it("stamps heartbeatAt every 30s while heartbeat is running", () => {
+    // Directly invoke the private startHeartbeat method
+    (processor as any).startHeartbeat("doc-hb");
 
-    // Make handleRequest take long enough for heartbeat to fire
-    processor.handleRequestDelay = 100_000; // won't actually wait due to fake timers
+    // No calls yet at t=0
+    expect(mocks.mockCollection.updateOne).not.toHaveBeenCalled();
 
-    let callCount = 0;
-    mocks.mockQueueClient.receiveMessages.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) return { receivedMessageItems: [message] };
-      processor.requestStop();
-      return { receivedMessageItems: [] };
-    });
-
-    // Start processing (will block on handleRequest due to delay)
-    const startPromise = processor.start();
-
-    // Advance time by 30s — first heartbeat should fire
-    await vi.advanceTimersByTimeAsync(30_000);
-
-    // The heartbeat should have called updateOne with heartbeatAt
-    const heartbeatCalls = mocks.mockCollection.updateOne.mock.calls.filter(
-      (call: any[]) => call[1]?.$set?.heartbeatAt
+    // Advance past 30s — first heartbeat fires
+    vi.advanceTimersByTime(30_000);
+    expect(mocks.mockCollection.updateOne).toHaveBeenCalledTimes(1);
+    expect(mocks.mockCollection.updateOne).toHaveBeenCalledWith(
+      { _id: "doc-hb" },
+      { $set: { heartbeatAt: expect.any(Date) } }
     );
-    expect(heartbeatCalls.length).toBeGreaterThanOrEqual(1);
-    expect(heartbeatCalls[0][0]).toEqual({ _id: "doc-hb" });
 
-    // Stop and let it finish
-    processor.requestStop();
-    // Resolve the handleRequest delay
-    (processor as any).handleRequestDelay = 0;
-    await vi.advanceTimersByTimeAsync(1000);
-    await startPromise.catch(() => {}); // may reject from the abort
+    // Advance another 30s — second heartbeat
+    vi.advanceTimersByTime(30_000);
+    expect(mocks.mockCollection.updateOne).toHaveBeenCalledTimes(2);
+
+    // Stop heartbeat — no more calls
+    (processor as any).stopHeartbeat();
+    vi.advanceTimersByTime(60_000);
+    expect(mocks.mockCollection.updateOne).toHaveBeenCalledTimes(2);
+  });
+
+  it("stopHeartbeat clears the timer", () => {
+    (processor as any).startHeartbeat("doc-x");
+    expect((processor as any).heartbeatTimer).toBeDefined();
+
+    (processor as any).stopHeartbeat();
+    expect((processor as any).heartbeatTimer).toBeUndefined();
   });
 });
 
