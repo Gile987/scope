@@ -3,7 +3,7 @@
 
 // Types mirroring the API response shapes (from shared/src/types.ts)
 
-export type RunStatus = "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
+export type RunStatus = "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted" | "interrupted";
 
 export interface TokenUsage {
   promptTokens: number;
@@ -82,6 +82,8 @@ export interface Run {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
+  workerId?: string;
+  heartbeatAt?: string;
   taskPromptId?: string;
   /** @deprecated — use taskPromptId instead */
   promptFeatureExtractionId?: string;
@@ -110,6 +112,7 @@ export const STATUS_LIST: RunStatus[] = [
   "completed",
   "failed",
   "exhausted",
+  "interrupted",
 ];
 
 // Criteria types

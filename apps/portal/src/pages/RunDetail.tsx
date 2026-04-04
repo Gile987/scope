@@ -166,7 +166,7 @@ export function RunDetail() {
               </button>
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <StatusBadge status={run.status} />
+              <StatusBadge status={run.status} heartbeatAt={run.heartbeatAt} />
               <span className="font-mono">{run.workerType}</span>
               {run.model && (
                 <>

@@ -894,7 +894,7 @@ export function RunsList() {
                   )}
                 </TableCell>
                 <TableCell>
-                  <StatusBadge status={run.status} />
+                  <StatusBadge status={run.status} heartbeatAt={run.heartbeatAt} />
                 </TableCell>
                 <TableCell>
                   {reportStatuses?.[run._id] ? (
