@@ -164,7 +164,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     const versionFields = this.getVersionFields();
     await withRetry(() => this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "processing", updatedAt: new Date(), ...versionFields } }
+      { $set: { status: "processing", updatedAt: new Date(), workerId: this.workerId, heartbeatAt: new Date(), ...versionFields } }
     ));
 
     await log("info", `Starting processing with ${this.processor.workerName}`);
@@ -334,7 +334,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     const versionFields = this.getVersionFields();
     await withRetry(() => this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "iterating", turns: [], updatedAt: new Date(), ...versionFields } }
+      { $set: { status: "iterating", turns: [], updatedAt: new Date(), workerId: this.workerId, heartbeatAt: new Date(), ...versionFields } }
     ));
 
     // Extend queue message visibility for long-running multi-turn.
