@@ -37,7 +37,7 @@ xhost +
 # Delete stale image to pick up code changes
 
 # Run with X11 forwarding
-X11_FORWARD=true pnpm test:integration -- --run \
+X11_FORWARD=true pnpm test:integration vscode-electron
 ```
 
 ## How It Works
