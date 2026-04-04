@@ -20,8 +20,8 @@ defaults write org.xquartz.X11 nolisten_tcp -bool false
 ## Docker Compose Dev Mode
 
 ```bash
-# Authorize Docker containers to connect to XQuartz (once per XQuartz session)
-pnpm x11:auth
+# Disable X11 access control (once per XQuartz session)
+xhost +
 
 # Launch with X11 forwarding
 pnpm docker:dev:vscode-electron:x11
@@ -32,7 +32,7 @@ VS Code will appear on your Mac desktop when the worker processes a run. Submit 
 ## Integration Tests
 
 ```bash
-pnpm x11:auth
+xhost +
 
 # Delete stale image to pick up code changes
 
@@ -65,7 +65,7 @@ XQuartz isn't accepting connections. Verify:
 
 ### `Authorization required, but no authorization protocol specified`
 
-Run `pnpm x11:auth` to disable X11 access control.
+Run `xhost +` to disable X11 access control.
 
 ### Black rectangles / rendering artifacts
 
