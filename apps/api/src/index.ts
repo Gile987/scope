@@ -3237,34 +3237,42 @@ apiRoute(app, registry, {
         return;
       }
 
-      const reports = await reportCollection
-        .find({ requestId: { $in: requestIds } })
-        .sort({ createdAt: -1 })
-        .project({ requestId: 1, templateId: 1, status: 1 })
-        .toArray();
+      // Aggregation: group by (requestId, templateId), keep latest status per
+      // template, then roll up into per-requestId status counts.
+      const pipeline = [
+        { $match: { requestId: { $in: requestIds } } },
+        { $sort: { createdAt: -1 as const } },
+        // Keep only the latest report per (requestId, templateId)
+        {
+          $group: {
+            _id: { requestId: "$requestId", templateId: { $ifNull: ["$templateId", ""] } },
+            status: { $first: "$status" },
+          },
+        },
+        // Roll up into per-requestId status counts
+        {
+          $group: {
+            _id: "$_id.requestId",
+            total: { $sum: 1 },
+            pending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
+            generating: { $sum: { $cond: [{ $eq: ["$status", "generating"] }, 1, 0] } },
+            completed: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+            failed: { $sum: { $cond: [{ $eq: ["$status", "failed"] }, 1, 0] } },
+          },
+        },
+      ];
 
-      // Deduplicate: keep only the latest report per (requestId, templateId)
-      const seen = new Set<string>();
-      const dedupedReports: typeof reports = [];
-      for (const report of reports) {
-        const key = `${report.requestId}:${report.templateId ?? ""}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          dedupedReports.push(report);
-        }
-      }
+      const results = await reportCollection.aggregate(pipeline).toArray();
 
       const summaryMap: Record<string, { total: number; pending: number; generating: number; completed: number; failed: number }> = {};
-
-      for (const report of dedupedReports) {
-        if (!summaryMap[report.requestId]) {
-          summaryMap[report.requestId] = { total: 0, pending: 0, generating: 0, completed: 0, failed: 0 };
-        }
-        const entry = summaryMap[report.requestId];
-        entry.total++;
-        if (report.status in entry) {
-          (entry as any)[report.status]++;
-        }
+      for (const row of results) {
+        summaryMap[row._id as string] = {
+          total: row.total,
+          pending: row.pending,
+          generating: row.generating,
+          completed: row.completed,
+          failed: row.failed,
+        };
       }
 
       res.json(summaryMap);
