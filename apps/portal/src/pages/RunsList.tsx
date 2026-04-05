@@ -23,7 +23,7 @@ import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
-import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent } from "@/types";
+import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportStatus } from "@/types";
 import { groupRuns, formatStatRange, type GroupByKey, type RunGroup } from "@/lib/grouping";
 
 export function RunsList() {
@@ -914,7 +914,7 @@ function RunRow({
   run: Run;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
-  reportStatuses: Record<string, { reportId: string; status: string }> | undefined;
+  reportStatuses: BulkReportStatus | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
 }) {
   return (
@@ -1085,7 +1085,7 @@ function GroupRows({
   onToggleGroupSelect: () => void;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
-  reportStatuses: Record<string, { reportId: string; status: string }> | undefined;
+  reportStatuses: BulkReportStatus | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   groupBy: GroupByKey;
 }) {
