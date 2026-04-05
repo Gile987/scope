@@ -6,9 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Bot, Scale, CheckCircle2, AlertCircle, Brain, Wrench, ChevronRight, ChevronDown, Loader2 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import type { ConversationTurn, ToolCall } from "@/types";
 import { useHarExtraction, type ConversationSegment } from "@/hooks/useHarExtraction";
 
@@ -53,7 +51,7 @@ export function ConversationView({ turns, task, runId }: ConversationViewProps) 
                 </Badge>
               </div>
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{task}</ReactMarkdown>
+                <MarkdownRenderer>{task}</MarkdownRenderer>
               </div>
             </CardContent>
           </Card>
@@ -233,7 +231,7 @@ function TurnMessages({ turn, runId }: { turn: ConversationTurn; runId: string }
               )}
             </div>
             <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{turn.judgeFeedback}</ReactMarkdown>
+              <MarkdownRenderer>{turn.judgeFeedback}</MarkdownRenderer>
             </div>
 
             {/* Criteria results inline */}
@@ -275,7 +273,7 @@ function SegmentBlock({ segment, turn }: { segment: ConversationSegment; turn: C
               <Card className="bg-violet-500/5 border-violet-200 dark:border-violet-800">
                 <CardContent className="p-3">
                   <div className="prose prose-sm dark:prose-invert max-w-none max-h-64 overflow-y-auto text-muted-foreground italic text-xs">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{segment.content}</ReactMarkdown>
+                    <MarkdownRenderer>{segment.content}</MarkdownRenderer>
                   </div>
                 </CardContent>
               </Card>
@@ -330,7 +328,7 @@ function AgentResponseBlock({ content, turn }: { content: string; turn: Conversa
             </span>
           </div>
           <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{content}</ReactMarkdown>
+            <MarkdownRenderer>{content}</MarkdownRenderer>
           </div>
         </CardContent>
       </Card>
