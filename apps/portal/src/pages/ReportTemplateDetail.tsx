@@ -4,9 +4,7 @@
 import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { api } from "@/lib/api";
 import type { ReportTrigger } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -50,7 +48,7 @@ function DefaultSystemPromptViewer() {
       </button>
       {open && data && (
         <div className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted p-3 prose prose-sm dark:prose-invert max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{data.content}</ReactMarkdown>
+          <MarkdownRenderer>{data.content}</MarkdownRenderer>
         </div>
       )}
     </div>
@@ -369,7 +367,7 @@ export function ReportTemplateDetail() {
             </CardHeader>
             <CardContent>
               <div className="prose prose-sm dark:prose-invert max-w-none bg-muted p-3 rounded-md">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{template.userPrompt}</ReactMarkdown>
+                <MarkdownRenderer>{template.userPrompt}</MarkdownRenderer>
               </div>
             </CardContent>
           </Card>
@@ -386,7 +384,7 @@ export function ReportTemplateDetail() {
               </CardHeader>
               <CardContent>
                 <div className="prose prose-sm dark:prose-invert max-w-none bg-muted p-3 rounded-md">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{template.systemPrompt.content}</ReactMarkdown>
+                  <MarkdownRenderer>{template.systemPrompt.content}</MarkdownRenderer>
                 </div>
               </CardContent>
             </Card>

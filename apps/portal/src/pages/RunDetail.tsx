@@ -20,9 +20,7 @@ import { ConversationView } from "@/components/ConversationView";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState } from "react";
@@ -581,7 +579,7 @@ export function RunDetail() {
                   <CardTitle className="text-lg">Result</CardTitle>
                 </CardHeader>
                 <CardContent className="prose prose-sm dark:prose-invert max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{run.result}</ReactMarkdown>
+                  <MarkdownRenderer>{run.result}</MarkdownRenderer>
                 </CardContent>
               </Card>
             )}

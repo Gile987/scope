@@ -14,9 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Trash2, RefreshCw, Loader2, BookOpen, GitCommit, ExternalLink } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -169,9 +167,9 @@ export function SkillDetail() {
               </div>
             ) : latestRevision ? (
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                <MarkdownRenderer>
                   {latestRevision.content.replace(/^---\n[\s\S]*?\n---\n*/, "")}
-                </ReactMarkdown>
+                </MarkdownRenderer>
               </div>
             ) : (
               <div className="text-center py-12 text-muted-foreground text-sm">
