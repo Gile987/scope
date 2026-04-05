@@ -1204,7 +1204,7 @@ function GroupRows({
           ) : (
             (() => {
               const completed = group.runs.filter((r) => r.status === "completed").length;
-              const failed = group.runs.filter((r) => r.status === "failed" || r.status === "exhausted").length;
+              const failed = group.runs.filter((r) => r.status === "failed").length;
               const total = group.runs.length;
               const pctCompleted = (completed / total) * 100;
               const pctFailed = (failed / total) * 100;
