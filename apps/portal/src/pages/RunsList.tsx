@@ -1208,7 +1208,7 @@ function GroupRows({
               exhausted: "bg-orange-400",
               failed: "bg-red-500",
             };
-            const completed = group.runs.filter((r) => r.status === "completed").length;
+            const completed = group.runs.filter((r) => r.status === "completed" || r.status === "exhausted").length;
             const total = group.runs.length;
             const segments = Object.entries(
               group.runs.reduce<Record<string, number>>((acc, r) => {
