@@ -30,8 +30,9 @@ export interface MultiTurnConfig {
   scenarioVersion?: 'v1' | 'v2';
   /** Maximum number of iterations before giving up */
   maxIterations: number;
-  /** Path to the workspace directory to snapshot */
-  workspacePath: string;
+  /** Path to the workspace directory to snapshot. If omitted, resolved from
+   *  processor.workspacePath after setup(), then WORKSPACE_PATH env, then /workspace. */
+  workspacePath?: string;
   /** Judge REST API client */
   judgeClient: JudgeClient;
   /** Blob storage client for workspace snapshots */
@@ -87,7 +88,6 @@ export async function runMultiTurnLoop(
     criteria,
     scenarioVersion,
     maxIterations,
-    workspacePath,
     judgeClient,
     blobStorage,
     requestId,
@@ -164,6 +164,13 @@ export async function runMultiTurnLoop(
       await uploadSetupVideos(setupResult, "success");
     }
   }
+
+  // Resolve workspace path after setup() so processors that create temp directories
+  // (e.g. Electron worker) have their workspacePath set by the time we read it.
+  const workspacePath = config.workspacePath
+    || processor.workspacePath
+    || process.env.WORKSPACE_PATH
+    || "/workspace";
 
   try {
 

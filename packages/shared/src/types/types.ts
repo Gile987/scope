@@ -194,6 +194,9 @@ export interface SetupResult {
 // Worker processor interface - each worker implements this
 export interface WorkerProcessor {
   readonly workerName: string;
+  /** The workspace directory used by this worker for the current run. When set,
+   *  the queue processor uses this instead of the WORKSPACE_PATH env var. */
+  readonly workspacePath?: string;
   processMessage(message: string, log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<WorkerResult>;
   /** Return the agent version prefix from versions.env components (e.g. "copilot-0.0.415"). */
   getAgentVersion?(): string;

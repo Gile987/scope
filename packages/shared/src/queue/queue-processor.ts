@@ -81,7 +81,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolved skills: ${skillConfigs.map(s => s.name).join(", ")}`);
 
       // Extract skill archives to workspace filesystem for agent discovery
-      const workspacePath = process.env.WORKSPACE_PATH || "/workspace";
+      const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
       // Derive agent type from workerType for agent-specific skill directories
       const agentType = requestDoc.workerType.includes("claude") ? "claude-code"
         : requestDoc.workerType.includes("copilot") ? "copilot"
@@ -363,7 +363,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       storageConnectionString: this.config.storageConnectionString,
     });
 
-    const workspacePath = process.env.WORKSPACE_PATH || "/workspace";
+    const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
     const maxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
 
     const result = await runMultiTurnLoop({
@@ -372,7 +372,6 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       criteria: requestDoc.scenario.criteria,
       scenarioVersion: requestDoc.scenario.version,
       maxIterations,
-      workspacePath,
       judgeClient,
       blobStorage,
       requestId,
