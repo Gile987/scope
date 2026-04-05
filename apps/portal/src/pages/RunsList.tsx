@@ -1117,7 +1117,16 @@ function GroupRows({
         {/* Submission */}
         <TableCell className="font-mono text-xs">
           {groupBy === "submissionId" ? (
-            <span className="font-medium" title={group.label}>{truncate(group.label, 30)}</span>
+            group.key !== "no-submission" ? (
+              <Link
+                to={`/runs?submissionId=${group.key}`}
+                className="text-primary hover:underline font-medium"
+                title={group.key}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {formatId(group.key)}
+              </Link>
+            ) : <span className="font-medium text-muted-foreground">{group.label}</span>
           ) : uniform.submissionId ? (
             <Link
               to={`/runs?submissionId=${uniform.submissionId}`}
