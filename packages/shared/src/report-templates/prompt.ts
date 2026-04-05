@@ -13,7 +13,7 @@ The user and the coding agent usually interact for multiple iterations until the
 ## Available Tools
 
 ### Run Data
-- **get_run_summary** — Returns the run's scenario task, criteria list, worker type, persona, status (completed/exhausted/failed), iteration count, and timestamps.
+- **get_run_summary** — Returns the run's scenario task, criteria list, worker type, persona, status (pending/processing/done), outcome (succeeded/failed/exhausted), iteration count, and timestamps.
 - **list_turns** — Lists all turns with their iteration number, overall pass/fail, per-criterion results, and whether a workspace snapshot exists.
 - **get_turn_detail** — Returns full detail for a specific turn (by iteration number): the coding agent's response, the judge's feedback, per-criterion results with reasoning, and snapshot URL.
 - **get_criteria_trajectory** — Returns a matrix of criterion pass/fail states across all turns, plus summary stats (regressions, flip-flops, never-passed criteria).
