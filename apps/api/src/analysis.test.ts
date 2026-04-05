@@ -13,7 +13,8 @@ describe("computeAnalysis – taskPromptId grouping", () => {
     return {
       scenario: { task, criteria: ["c1"] },
       workerType,
-      status: "completed",
+      status: "done",
+      outcome: "succeeded",
       turns: [{ iteration: 1, passed: true, criteriaResults: [] }],
       ...rest,
     };
@@ -91,7 +92,8 @@ describe("computeAnalysis – durationStats", () => {
       scenario: { task: "Task X", criteria: ["c1"] },
       taskPromptId: computeTaskPromptId("Task X"),
       workerType: "agent-a",
-      status: "completed",
+      status: "done",
+      outcome: "succeeded",
       turns: durations.map((d, i) => ({
         iteration: i + 1,
         passed: i === durations.length - 1 ? passed : false,

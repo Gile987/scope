@@ -18,6 +18,7 @@ import {
   CreateRequestInputSchema,
   RequestResponseSchema,
   RequestStatusSchema,
+  RequestOutcomeSchema,
   WorkerTypeSchema,
   LogEventSchema,
   TokenUsageSchema,
@@ -199,15 +200,36 @@ describe("request schemas", () => {
   const validScenario = { task: "Build it", criteria: ["c1"] };
 
   describe("RequestStatusSchema", () => {
-    it.each(["pending", "processing", "iterating", "completed", "failed", "exhausted"])(
+    it.each(["pending", "processing", "done"])(
       "accepts '%s'",
       (status) => {
         expect(RequestStatusSchema.parse(status)).toBe(status);
       },
     );
 
+    it("rejects old status values", () => {
+      expect(() => RequestStatusSchema.parse("completed")).toThrow();
+      expect(() => RequestStatusSchema.parse("iterating")).toThrow();
+      expect(() => RequestStatusSchema.parse("exhausted")).toThrow();
+      expect(() => RequestStatusSchema.parse("failed")).toThrow();
+    });
+
     it("rejects unknown status", () => {
       expect(() => RequestStatusSchema.parse("cancelled")).toThrow();
+    });
+  });
+
+  describe("RequestOutcomeSchema", () => {
+    it.each(["succeeded", "failed", "exhausted"])(
+      "accepts '%s'",
+      (outcome) => {
+        expect(RequestOutcomeSchema.parse(outcome)).toBe(outcome);
+      },
+    );
+
+    it("rejects unknown outcome", () => {
+      expect(() => RequestOutcomeSchema.parse("completed")).toThrow();
+      expect(() => RequestOutcomeSchema.parse("cancelled")).toThrow();
     });
   });
 
@@ -355,8 +377,8 @@ describe("request schemas", () => {
     });
 
     it("accepts status filter", () => {
-      const result = ListRequestsQuerySchema.parse({ status: "completed" });
-      expect(result.status).toBe("completed");
+      const result = ListRequestsQuerySchema.parse({ status: "done" });
+      expect(result.status).toBe("done");
     });
   });
 
