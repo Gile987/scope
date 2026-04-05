@@ -1218,7 +1218,7 @@ function GroupRows({
             );
             return (
               <div className="flex flex-col gap-1 min-w-[80px]">
-                <span className="text-xs font-medium">{completed}/{total} completed</span>
+                <span className="text-xs font-medium">{completed}/{total} done</span>
                 <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
                   {segments.map(([status, count]) => (
                     <div
