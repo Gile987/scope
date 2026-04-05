@@ -7,7 +7,7 @@ import type { RunStatus } from "@/types";
 const statusConfig: Record<RunStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info" }> = {
   pending: { label: "Pending", variant: "secondary" },
   processing: { label: "Processing", variant: "info" },
-  iterating: { label: "Iterating", variant: "warning" },
+  iterating: { label: "Iterating", variant: "info" },
   completed: { label: "Completed", variant: "success" },
   failed: { label: "Failed", variant: "destructive" },
   exhausted: { label: "Exhausted", variant: "warning" },
