@@ -19,7 +19,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
@@ -997,22 +996,9 @@ function RunRow({
       </TableCell>
       <TableCell>
         {reportSummaries?.[run._id] ? (
-          (() => {
-            const s = reportSummaries[run._id];
-            if (s.total === 1) {
-              const status = s.completed ? "completed" : s.failed ? "failed" : s.generating ? "generating" : "pending";
-              return (
-                <Link to={`/runs/${run._id}?tab=reports`}>
-                  <ReportStatusBadge status={status} />
-                </Link>
-              );
-            }
-            return (
-              <Link to={`/runs/${run._id}?tab=reports`} className="text-xs font-medium hover:underline">
-                {s.completed}/{s.total} done
-              </Link>
-            );
-          })()
+          <Link to={`/runs/${run._id}?tab=reports`} className="block">
+            <ReportProgressBar summary={reportSummaries[run._id]} />
+          </Link>
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
@@ -1249,15 +1235,8 @@ function GroupRows({
         {/* Report */}
         <TableCell>
           {(() => {
-            const reportColors: Record<string, string> = {
-              pending: "bg-gray-500",
-              generating: "bg-blue-500",
-              completed: "bg-green-500",
-              failed: "bg-red-500",
-            };
             const runsWithReports = group.runs.filter((r) => reportSummaries?.[r._id]);
             if (runsWithReports.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
-            // Aggregate all report statuses across the group
             let total = 0, completed = 0, pending = 0, generating = 0, failed = 0;
             for (const r of group.runs) {
               const s = reportSummaries?.[r._id];
@@ -1268,27 +1247,7 @@ function GroupRows({
               generating += s.generating;
               failed += s.failed;
             }
-            const segments = [
-              { status: "completed", count: completed },
-              { status: "generating", count: generating },
-              { status: "pending", count: pending },
-              { status: "failed", count: failed },
-            ].filter((s) => s.count > 0);
-            return (
-              <div className="flex flex-col gap-1 min-w-[80px]">
-                <span className="text-xs font-medium">{completed}/{total} done</span>
-                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
-                  {segments.map(({ status, count }) => (
-                    <div
-                      key={status}
-                      className={`h-full ${reportColors[status] ?? "bg-gray-400"} transition-all`}
-                      style={{ width: `${(count / total) * 100}%` }}
-                      title={`${status}: ${count}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
+            return <ReportProgressBar summary={{ total, completed, pending, generating, failed }} />;
           })()}
         </TableCell>
         {/* Turns */}
@@ -1373,6 +1332,38 @@ function GroupRows({
         />
       ))}
     </>
+  );
+}
+
+const REPORT_COLORS: Record<string, string> = {
+  pending: "bg-gray-500",
+  generating: "bg-blue-500",
+  completed: "bg-green-500",
+  failed: "bg-red-500",
+};
+
+function ReportProgressBar({ summary }: { summary: { total: number; pending: number; generating: number; completed: number; failed: number } }) {
+  const { total, completed, generating, pending, failed } = summary;
+  const segments = [
+    { status: "completed", count: completed },
+    { status: "generating", count: generating },
+    { status: "pending", count: pending },
+    { status: "failed", count: failed },
+  ].filter((s) => s.count > 0);
+  return (
+    <div className="flex flex-col gap-1 min-w-[80px]">
+      <span className="text-xs font-medium">{completed}/{total} done</span>
+      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
+        {segments.map(({ status, count }) => (
+          <div
+            key={status}
+            className={`h-full ${REPORT_COLORS[status] ?? "bg-gray-400"} transition-all`}
+            style={{ width: `${(count / total) * 100}%` }}
+            title={`${status}: ${count}`}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
