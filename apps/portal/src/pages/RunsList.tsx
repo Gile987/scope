@@ -23,7 +23,7 @@ import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
-import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportStatus } from "@/types";
+import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary } from "@/types";
 import { groupRuns, formatStatRange, type GroupByKey, type RunGroup } from "@/lib/grouping";
 
 export function RunsList() {
@@ -66,11 +66,11 @@ export function RunsList() {
   });
   const activeAgents = useMemo(() => agents.filter((a) => !a.deletedAt), [agents]);
 
-  // Fetch bulk report status for all visible runs
+  // Fetch bulk report summary for all visible runs
   const runIds = useMemo(() => runs.map((r) => r._id), [runs]);
-  const { data: reportStatuses } = useQuery({
-    queryKey: ["report-statuses", runIds],
-    queryFn: () => api.bulkReportStatus(runIds),
+  const { data: reportSummaries } = useQuery({
+    queryKey: ["report-summaries", runIds],
+    queryFn: () => api.bulkReportSummary(runIds),
     enabled: runIds.length > 0,
     refetchInterval: 10_000,
   });
@@ -879,7 +879,7 @@ export function RunsList() {
                     onToggleGroupSelect={() => toggleGroupSelect(group)}
                     selectedIds={selectedIds}
                     onToggleSelect={toggleSelect}
-                    reportStatuses={reportStatuses}
+                    reportSummaries={reportSummaries}
                     deleteMutation={deleteMutation}
                     bulkDeleteMutation={bulkDeleteMutation}
                     bulkReportMutation={bulkReportMutation}
@@ -894,7 +894,7 @@ export function RunsList() {
                   run={run}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
-                  reportStatuses={reportStatuses}
+                  reportSummaries={reportSummaries}
                   deleteMutation={deleteMutation}
                 />
               ))
@@ -910,13 +910,13 @@ function RunRow({
   run,
   selectedIds,
   onToggleSelect,
-  reportStatuses,
+  reportSummaries,
   deleteMutation,
 }: {
   run: Run;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
-  reportStatuses: BulkReportStatus | undefined;
+  reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
 }) {
   return (
@@ -996,10 +996,23 @@ function RunRow({
         <StatusBadge status={run.status} />
       </TableCell>
       <TableCell>
-        {reportStatuses?.[run._id] ? (
-          <Link to={`/reports/${reportStatuses[run._id].reportId}`}>
-            <ReportStatusBadge status={reportStatuses[run._id].status} />
-          </Link>
+        {reportSummaries?.[run._id] ? (
+          (() => {
+            const s = reportSummaries[run._id];
+            if (s.total === 1) {
+              const status = s.completed ? "completed" : s.failed ? "failed" : s.generating ? "generating" : "pending";
+              return (
+                <Link to={`/runs/${run._id}?tab=reports`}>
+                  <ReportStatusBadge status={status} />
+                </Link>
+              );
+            }
+            return (
+              <Link to={`/runs/${run._id}?tab=reports`} className="text-xs font-medium hover:underline">
+                {s.completed}/{s.total} done
+              </Link>
+            );
+          })()
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
@@ -1075,7 +1088,7 @@ function GroupRows({
   onToggleGroupSelect,
   selectedIds,
   onToggleSelect,
-  reportStatuses,
+  reportSummaries,
   deleteMutation,
   bulkDeleteMutation,
   bulkReportMutation,
@@ -1089,7 +1102,7 @@ function GroupRows({
   onToggleGroupSelect: () => void;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
-  reportStatuses: BulkReportStatus | undefined;
+  reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   bulkDeleteMutation: { mutate: (ids: string[]) => void; isPending: boolean };
   bulkReportMutation: { mutate: (ids: string[]) => void; isPending: boolean };
@@ -1234,7 +1247,50 @@ function GroupRows({
           })()}
         </TableCell>
         {/* Report */}
-        <TableCell />
+        <TableCell>
+          {(() => {
+            const reportColors: Record<string, string> = {
+              pending: "bg-gray-500",
+              generating: "bg-blue-500",
+              completed: "bg-green-500",
+              failed: "bg-red-500",
+            };
+            const runsWithReports = group.runs.filter((r) => reportSummaries?.[r._id]);
+            if (runsWithReports.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
+            // Aggregate all report statuses across the group
+            let total = 0, completed = 0, pending = 0, generating = 0, failed = 0;
+            for (const r of group.runs) {
+              const s = reportSummaries?.[r._id];
+              if (!s) continue;
+              total += s.total;
+              completed += s.completed;
+              pending += s.pending;
+              generating += s.generating;
+              failed += s.failed;
+            }
+            const segments = [
+              { status: "completed", count: completed },
+              { status: "generating", count: generating },
+              { status: "pending", count: pending },
+              { status: "failed", count: failed },
+            ].filter((s) => s.count > 0);
+            return (
+              <div className="flex flex-col gap-1 min-w-[80px]">
+                <span className="text-xs font-medium">{completed}/{total} done</span>
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
+                  {segments.map(({ status, count }) => (
+                    <div
+                      key={status}
+                      className={`h-full ${reportColors[status] ?? "bg-gray-400"} transition-all`}
+                      style={{ width: `${(count / total) * 100}%` }}
+                      title={`${status}: ${count}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </TableCell>
         {/* Turns */}
         <TableCell className="text-center font-mono text-xs">
           {formatStatRange(aggregates.turns, fmtNum)}
@@ -1312,7 +1368,7 @@ function GroupRows({
           run={run}
           selectedIds={selectedIds}
           onToggleSelect={onToggleSelect}
-          reportStatuses={reportStatuses}
+          reportSummaries={reportSummaries}
           deleteMutation={deleteMutation}
         />
       ))}

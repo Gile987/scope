@@ -65,6 +65,8 @@ import {
   CreateReportInputSchema,
   BulkCreateReportsInputSchema,
   BulkReportStatusInputSchema,
+  BulkReportSummaryInputSchema,
+  BulkReportSummaryResponseSchema,
   TriggerReportsInputSchema,
   BulkTriggerReportsInputSchema,
   CreatePromptFeatureInputSchema,
@@ -3209,6 +3211,51 @@ apiRoute(app, registry, {
       }
 
       res.json(statusMap);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/bulk-summary",
+  tags: ["Reports"],
+  summary: "Bulk get report summary per run",
+  description: "Returns aggregated report status counts per run, covering all reports (not just the latest).",
+  body: BulkReportSummaryInputSchema,
+  response: BulkReportSummaryResponseSchema,
+  errorResponses: {
+    400: { description: "Invalid input" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestIds } = req.body as { requestIds?: string[] };
+
+      if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+        res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+        return;
+      }
+
+      const reports = await reportCollection
+        .find({ requestId: { $in: requestIds } })
+        .project({ requestId: 1, status: 1 })
+        .toArray();
+
+      const summaryMap: Record<string, { total: number; pending: number; generating: number; completed: number; failed: number }> = {};
+
+      for (const report of reports) {
+        if (!summaryMap[report.requestId]) {
+          summaryMap[report.requestId] = { total: 0, pending: 0, generating: 0, completed: 0, failed: 0 };
+        }
+        const entry = summaryMap[report.requestId];
+        entry.total++;
+        if (report.status in entry) {
+          (entry as any)[report.status]++;
+        }
+      }
+
+      res.json(summaryMap);
     } catch (error) {
       next(error);
     }
