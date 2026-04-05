@@ -1077,6 +1077,8 @@ function GroupRows({
   onToggleSelect,
   reportStatuses,
   deleteMutation,
+  bulkDeleteMutation,
+  bulkReportMutation,
   groupBy,
 }: {
   group: RunGroup;
