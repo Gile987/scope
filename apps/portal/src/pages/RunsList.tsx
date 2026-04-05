@@ -1204,7 +1204,7 @@ function GroupRows({
           ) : (
             (() => {
               const statusColors: Record<string, string> = {
-                pending: "bg-yellow-400",
+                pending: "bg-gray-500",
                 processing: "bg-blue-500",
                 iterating: "bg-blue-500",
                 completed: "bg-green-500",
