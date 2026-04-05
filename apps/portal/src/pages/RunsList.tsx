@@ -881,6 +881,8 @@ export function RunsList() {
                     onToggleSelect={toggleSelect}
                     reportStatuses={reportStatuses}
                     deleteMutation={deleteMutation}
+                    bulkDeleteMutation={bulkDeleteMutation}
+                    bulkReportMutation={bulkReportMutation}
                     groupBy={groupBy}
                   />
                 );
@@ -1087,6 +1089,8 @@ function GroupRows({
   onToggleSelect: (id: string) => void;
   reportStatuses: BulkReportStatus | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
+  bulkDeleteMutation: { mutate: (ids: string[]) => void; isPending: boolean };
+  bulkReportMutation: { mutate: (ids: string[]) => void; isPending: boolean };
   groupBy: GroupByKey;
 }) {
   const { aggregates, uniform } = group;
@@ -1214,7 +1218,59 @@ function GroupRows({
         {/* Created */}
         <TableCell />
         {/* Actions */}
-        <TableCell />
+        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-end gap-1">
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Generate reports for group">
+                  <FileText className="h-4 w-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Generate reports for {group.aggregates.count} run{group.aggregates.count !== 1 ? "s" : ""}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will queue report generation for all runs in this group.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => bulkReportMutation.mutate(group.runs.map((r) => r._id))}
+                    disabled={bulkReportMutation.isPending}
+                  >
+                    {bulkReportMutation.isPending ? "Generating…" : "Generate"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="Delete all runs in group">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete {group.aggregates.count} run{group.aggregates.count !== 1 ? "s" : ""} in this group?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will soft-delete all runs in this group. They can be recovered later if needed.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => bulkDeleteMutation.mutate(group.runs.map((r) => r._id))}
+                    disabled={bulkDeleteMutation.isPending}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {bulkDeleteMutation.isPending ? "Deleting…" : "Delete"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </TableCell>
       </TableRow>
       {isExpanded && group.runs.map((run) => (
         <RunRow
