@@ -63,8 +63,11 @@ export const ConversationTurnSchema = z
 export const RequestStatusSchema = z.enum([
   "pending",
   "processing",
-  "iterating",
-  "completed",
+  "done",
+]);
+
+export const RequestOutcomeSchema = z.enum([
+  "succeeded",
   "failed",
   "exhausted",
 ]);
@@ -96,6 +99,7 @@ export const RequestResponseSchema = z
     workerType: z.string(),
     model: z.string().optional(),
     status: RequestStatusSchema,
+    outcome: RequestOutcomeSchema.optional(),
     result: z.string().optional(),
     error: z.string().optional(),
     logs: z.array(LogEventSchema).optional(),
@@ -129,6 +133,7 @@ export const ListRequestsQuerySchema = z
     criteria: z.string().optional(),
     submissionId: z.string().optional(),
     status: RequestStatusSchema.optional(),
+    outcome: RequestOutcomeSchema.optional(),
     page: z.coerce.number().int().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
   })
