@@ -1203,17 +1203,34 @@ function GroupRows({
             <StatusBadge status={uniform.status} />
           ) : (
             (() => {
+              const statusColors: Record<string, string> = {
+                pending: "bg-yellow-400",
+                processing: "bg-blue-500",
+                iterating: "bg-blue-500",
+                completed: "bg-green-500",
+                exhausted: "bg-orange-400",
+                failed: "bg-red-500",
+              };
               const completed = group.runs.filter((r) => r.status === "completed").length;
-              const failed = group.runs.filter((r) => r.status === "failed").length;
               const total = group.runs.length;
-              const pctCompleted = (completed / total) * 100;
-              const pctFailed = (failed / total) * 100;
+              const segments = Object.entries(
+                group.runs.reduce<Record<string, number>>((acc, r) => {
+                  acc[r.status] = (acc[r.status] ?? 0) + 1;
+                  return acc;
+                }, {}),
+              );
               return (
                 <div className="flex flex-col gap-1 min-w-[80px]">
                   <span className="text-xs font-medium">{completed}/{total} completed</span>
-                  <div className="h-1.5 w-full rounded-full bg-blue-400/40 overflow-hidden flex">
-                    <div className="h-full bg-green-500 transition-all" style={{ width: `${pctCompleted}%` }} />
-                    <div className="h-full bg-destructive transition-all" style={{ width: `${pctFailed}%` }} />
+                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
+                    {segments.map(([status, count]) => (
+                      <div
+                        key={status}
+                        className={`h-full ${statusColors[status] ?? "bg-gray-400"} transition-all`}
+                        style={{ width: `${(count / total) * 100}%` }}
+                        title={`${status}: ${count}`}
+                      />
+                    ))}
                   </div>
                 </div>
               );
