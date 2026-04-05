@@ -3222,7 +3222,7 @@ apiRoute(app, registry, {
   path: "/api/v1/reports/bulk-summary",
   tags: ["Reports"],
   summary: "Bulk get report summary per run",
-  description: "Returns aggregated report status counts per run, covering all reports (not just the latest).",
+  description: "Returns aggregated report status counts per run. Only the latest report per template is counted (re-triggers are deduplicated).",
   body: BulkReportSummaryInputSchema,
   response: BulkReportSummaryResponseSchema,
   errorResponses: {
@@ -3239,12 +3239,24 @@ apiRoute(app, registry, {
 
       const reports = await reportCollection
         .find({ requestId: { $in: requestIds } })
-        .project({ requestId: 1, status: 1 })
+        .sort({ createdAt: -1 })
+        .project({ requestId: 1, templateId: 1, status: 1 })
         .toArray();
+
+      // Deduplicate: keep only the latest report per (requestId, templateId)
+      const seen = new Set<string>();
+      const dedupedReports: typeof reports = [];
+      for (const report of reports) {
+        const key = `${report.requestId}:${report.templateId ?? ""}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          dedupedReports.push(report);
+        }
+      }
 
       const summaryMap: Record<string, { total: number; pending: number; generating: number; completed: number; failed: number }> = {};
 
-      for (const report of reports) {
+      for (const report of dedupedReports) {
         if (!summaryMap[report.requestId]) {
           summaryMap[report.requestId] = { total: 0, pending: 0, generating: 0, completed: 0, failed: 0 };
         }
