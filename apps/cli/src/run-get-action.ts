@@ -50,7 +50,7 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
     const row = {
       ...run,
       turnsCount: run.turns?.length ?? 0,
-      passed: run.status === 'completed' ? 'yes' : run.status === 'failed' || run.status === 'exhausted' ? 'no' : '-',
+      passed: run.outcome === 'succeeded' ? 'yes' : run.outcome === 'failed' || run.outcome === 'exhausted' ? 'no' : '-',
       task: run.scenario?.task ?? '',
       criteriaCount: run.scenario?.criteria?.length ?? 0,
       logsCount: run.logs?.length ?? 0,
@@ -64,10 +64,11 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   console.log(`${label('Worker:')}         ${value(run.workerType)}`);
   if (run.model) console.log(`${label('Model:')}          ${value(run.model)}`);
 
-  const statusColor = run.status === 'completed' ? successText
-    : (run.status === 'failed' || run.status === 'exhausted') ? errorText
+  const statusColor = run.outcome === 'succeeded' ? successText
+    : (run.outcome === 'failed' || run.outcome === 'exhausted') ? errorText
     : value;
   console.log(`${label('Status:')}         ${statusColor(run.status)}`);
+  if (run.outcome) console.log(`${label('Outcome:')}        ${statusColor(run.outcome)}`);
 
   if (run.maxIterations != null) console.log(`${label('Max Iterations:')} ${value(String(run.maxIterations))}`);
   if (run.createdAt) console.log(`${label('Created:')}        ${dimTimestamp(new Date(run.createdAt).toLocaleString())}`);

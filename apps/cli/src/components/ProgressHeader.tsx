@@ -42,7 +42,7 @@ function ProgressBar({ completed, total, width = 20 }: { completed: number; tota
 export function ProgressHeader({ requests, workers }: ProgressHeaderProps): React.ReactElement {
   const totalRequests = requests.length;
   const completedRequests = requests.filter(
-    (r) => r.status === "completed" || r.status === "failed"
+    (r) => r.status === "done"
   ).length;
   const runningRequests = requests.filter(
     (r) => r.status === "submitted" || r.status === "processing"
@@ -51,8 +51,8 @@ export function ProgressHeader({ requests, workers }: ProgressHeaderProps): Reac
   // Per-worker breakdown
   const workerStats = workers.map((worker) => {
     const workerRequests = requests.filter((r) => r.worker === worker);
-    const completed = workerRequests.filter((r) => r.status === "completed").length;
-    const failed = workerRequests.filter((r) => r.status === "failed").length;
+    const completed = workerRequests.filter((r) => r.outcome === "succeeded").length;
+    const failed = workerRequests.filter((r) => r.outcome === "failed" || r.outcome === "exhausted").length;
     const running = workerRequests.filter(
       (r) => r.status === "submitted" || r.status === "processing"
     ).length;
