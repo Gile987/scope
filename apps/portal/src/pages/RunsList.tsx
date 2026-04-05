@@ -1199,43 +1199,39 @@ function GroupRows({
         </TableCell>
         {/* Status */}
         <TableCell>
-          {uniform.status ? (
-            <StatusBadge status={uniform.status} />
-          ) : (
-            (() => {
-              const statusColors: Record<string, string> = {
-                pending: "bg-gray-500",
-                processing: "bg-blue-500",
-                iterating: "bg-blue-500",
-                completed: "bg-green-500",
-                exhausted: "bg-orange-400",
-                failed: "bg-red-500",
-              };
-              const completed = group.runs.filter((r) => r.status === "completed").length;
-              const total = group.runs.length;
-              const segments = Object.entries(
-                group.runs.reduce<Record<string, number>>((acc, r) => {
-                  acc[r.status] = (acc[r.status] ?? 0) + 1;
-                  return acc;
-                }, {}),
-              );
-              return (
-                <div className="flex flex-col gap-1 min-w-[80px]">
-                  <span className="text-xs font-medium">{completed}/{total} completed</span>
-                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
-                    {segments.map(([status, count]) => (
-                      <div
-                        key={status}
-                        className={`h-full ${statusColors[status] ?? "bg-gray-400"} transition-all`}
-                        style={{ width: `${(count / total) * 100}%` }}
-                        title={`${status}: ${count}`}
-                      />
-                    ))}
-                  </div>
+          {(() => {
+            const statusColors: Record<string, string> = {
+              pending: "bg-gray-500",
+              processing: "bg-blue-500",
+              iterating: "bg-blue-500",
+              completed: "bg-green-500",
+              exhausted: "bg-orange-400",
+              failed: "bg-red-500",
+            };
+            const completed = group.runs.filter((r) => r.status === "completed").length;
+            const total = group.runs.length;
+            const segments = Object.entries(
+              group.runs.reduce<Record<string, number>>((acc, r) => {
+                acc[r.status] = (acc[r.status] ?? 0) + 1;
+                return acc;
+              }, {}),
+            );
+            return (
+              <div className="flex flex-col gap-1 min-w-[80px]">
+                <span className="text-xs font-medium">{completed}/{total} completed</span>
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
+                  {segments.map(([status, count]) => (
+                    <div
+                      key={status}
+                      className={`h-full ${statusColors[status] ?? "bg-gray-400"} transition-all`}
+                      style={{ width: `${(count / total) * 100}%` }}
+                      title={`${status}: ${count}`}
+                    />
+                  ))}
                 </div>
-              );
-            })()
-          )}
+              </div>
+            );
+          })()}
         </TableCell>
         {/* Report */}
         <TableCell />
