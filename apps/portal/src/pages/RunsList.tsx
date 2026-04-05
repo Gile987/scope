@@ -20,10 +20,11 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent } from "@/types";
+import { groupRuns, formatStatRange, type GroupByKey, type RunGroup } from "@/lib/grouping";
 
 export function RunsList() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -34,6 +35,8 @@ export function RunsList() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [taskFilter, setTaskFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [groupBy, setGroupBy] = useState<GroupByKey>("none");
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [resubmitCount, setResubmitCount] = useState(1);
   const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
   const [resubmitOverrides, setResubmitOverrides] = useState<BulkResubmitOverrides>({});
@@ -176,6 +179,31 @@ export function RunsList() {
     return true;
   });
 
+  const runGroups = useMemo(() => groupRuns(filteredRuns, groupBy), [filteredRuns, groupBy]);
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleGroupSelect = (group: RunGroup) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const groupIds = group.runs.map((r) => r._id);
+      const allInGroupSelected = groupIds.every((id) => prev.has(id));
+      if (allInGroupSelected) {
+        groupIds.forEach((id) => next.delete(id));
+      } else {
+        groupIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
   const allSelected = filteredRuns.length > 0 && filteredRuns.every((r) => selectedIds.has(r._id));
   const someSelected = filteredRuns.some((r) => selectedIds.has(r._id));
 
@@ -260,10 +288,24 @@ export function RunsList() {
             </SelectContent>
           </Select>
         </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Group by:</span>
+          <Select value={groupBy} onValueChange={(v) => { setGroupBy(v as GroupByKey); setExpandedGroups(new Set()); }}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="None" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">None</SelectItem>
+              <SelectItem value="task">Task</SelectItem>
+              <SelectItem value="submissionId">Submission ID</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="flex-1" />
         {isRefetching && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
         <span className="text-sm text-muted-foreground">
           {filteredRuns.length} run{filteredRuns.length !== 1 ? "s" : ""}
+          {groupBy !== "none" && ` in ${runGroups.length} group${runGroups.length !== 1 ? "s" : ""}`}
         </span>
       </div>
 
@@ -820,155 +862,285 @@ export function RunsList() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredRuns.map((run: Run) => (
-              <TableRow key={run._id} data-state={selectedIds.has(run._id) ? "selected" : undefined}>
-                <TableCell>
-                  <Checkbox
-                    checked={selectedIds.has(run._id)}
-                    onCheckedChange={() => toggleSelect(run._id)}
-                    aria-label={`Select run ${formatId(run._id)}`}
+            {groupBy !== "none" ? (
+              runGroups.map((group) => {
+                const isExpanded = expandedGroups.has(group.key);
+                const groupIds = group.runs.map((r) => r._id);
+                const allGroupSelected = groupIds.length > 0 && groupIds.every((id) => selectedIds.has(id));
+                const someGroupSelected = groupIds.some((id) => selectedIds.has(id));
+                return (
+                  <GroupRows
+                    key={group.key}
+                    group={group}
+                    isExpanded={isExpanded}
+                    onToggleExpand={() => toggleGroup(group.key)}
+                    allGroupSelected={allGroupSelected}
+                    someGroupSelected={someGroupSelected}
+                    onToggleGroupSelect={() => toggleGroupSelect(group)}
+                    selectedIds={selectedIds}
+                    onToggleSelect={toggleSelect}
+                    reportStatuses={reportStatuses}
+                    deleteMutation={deleteMutation}
+                    groupBy={groupBy}
                   />
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  <Link to={`/runs/${run._id}`} className="text-primary hover:underline">
-                    {formatId(run._id)}
-                  </Link>
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {run.submissionId ? (
-                    <Link
-                      to={`/runs?submissionId=${run.submissionId}`}
-                      className="text-primary hover:underline"
-                      title={run.submissionId}
-                    >
-                      {formatId(run.submissionId)}
-                    </Link>
-                  ) : (
-                    <span className="text-muted-foreground">–</span>
-                  )}
-                </TableCell>
-                <TableCell className="max-w-[300px]">
-                  <span title={run.scenario?.task ?? "–"}>{truncate(run.scenario?.task ?? "–", 60)}</span>
-                </TableCell>
-                <TableCell>
-                  <span className="font-mono text-xs">{run.workerType}</span>
-                  {run.model && (
-                    <span className="block font-mono text-xs text-muted-foreground">{run.model}</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {run.agentVersion ? (
-                    <span className="font-mono text-xs">{run.agentVersion}</span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">–</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {run.mcpServers && run.mcpServers.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {run.mcpServers.map((slug) => (
-                        <Link key={slug} to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
-                          {slug}
-                        </Link>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">–</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {run.skillRevisions && run.skillRevisions.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {run.skillRevisions.map((ref) => {
-                        const skillName = ref.split("@")[0].split("/").pop() ?? ref;
-                        const skillSlug = ref.split("@")[0];
-                        return (
-                          <Link key={ref} to={`/skills/${skillSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={ref}>
-                            {skillName}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">–</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <StatusBadge status={run.status} />
-                </TableCell>
-                <TableCell>
-                  {reportStatuses?.[run._id] ? (
-                    <Link to={`/reports/${reportStatuses[run._id].reportId}`}>
-                      <ReportStatusBadge status={reportStatuses[run._id].status} />
-                    </Link>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">–</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-center">
-                  {run.turns?.length ?? "–"}
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {(() => {
-                    const totalDuration = run.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
-                    return totalDuration ? formatDuration(totalDuration) : <span className="text-muted-foreground">–</span>;
-                  })()}
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {(() => {
-                    const usage = run.tokenUsage
-                      ?? (run.turns?.some(t => t.tokenUsage)
-                        ? run.turns!.reduce(
-                            (acc, t) => {
-                              if (!t.tokenUsage) return acc;
-                              return {
-                                promptTokens: acc.promptTokens + t.tokenUsage.promptTokens,
-                                completionTokens: acc.completionTokens + t.tokenUsage.completionTokens,
-                                totalTokens: acc.totalTokens + t.tokenUsage.totalTokens,
-                              };
-                            },
-                            { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
-                          )
-                        : undefined);
-                    return usage
-                      ? <>{usage.promptTokens.toLocaleString()}↑ · {usage.completionTokens.toLocaleString()}↓</>
-                      : <span className="text-muted-foreground">–</span>;
-                  })()}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {formatDate(run.createdAt)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <Link to={`/runs/${run._id}`}>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                    </Link>
-                    {run.turns && run.turns.some(t => t.snapshotUrl) && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        title="Download archive"
-                        onClick={() => window.open(api.archiveUrl(run._id), "_blank")}
-                      >
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    )}
-                    <DeleteRunButton
-                      runId={run._id}
-                      onDelete={() => deleteMutation.mutate(run._id)}
-                      isDeleting={deleteMutation.isPending}
-                    />
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
+                );
+              })
+            ) : (
+              filteredRuns.map((run: Run) => (
+                <RunRow
+                  key={run._id}
+                  run={run}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                  reportStatuses={reportStatuses}
+                  deleteMutation={deleteMutation}
+                />
+              ))
+            )}
           </TableBody>
         </Table>
       )}
     </div>
+  );
+}
+
+function RunRow({
+  run,
+  selectedIds,
+  onToggleSelect,
+  reportStatuses,
+  deleteMutation,
+}: {
+  run: Run;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  reportStatuses: Record<string, { reportId: string; status: string }> | undefined;
+  deleteMutation: { mutate: (id: string) => void; isPending: boolean };
+}) {
+  return (
+    <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
+      <TableCell>
+        <Checkbox
+          checked={selectedIds.has(run._id)}
+          onCheckedChange={() => onToggleSelect(run._id)}
+          aria-label={`Select run ${formatId(run._id)}`}
+        />
+      </TableCell>
+      <TableCell className="font-mono text-xs">
+        <Link to={`/runs/${run._id}`} className="text-primary hover:underline">
+          {formatId(run._id)}
+        </Link>
+      </TableCell>
+      <TableCell className="font-mono text-xs">
+        {run.submissionId ? (
+          <Link
+            to={`/runs?submissionId=${run.submissionId}`}
+            className="text-primary hover:underline"
+            title={run.submissionId}
+          >
+            {formatId(run.submissionId)}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell className="max-w-[300px]">
+        <span title={run.scenario?.task ?? "–"}>{truncate(run.scenario?.task ?? "–", 60)}</span>
+      </TableCell>
+      <TableCell>
+        <span className="font-mono text-xs">{run.workerType}</span>
+        {run.model && (
+          <span className="block font-mono text-xs text-muted-foreground">{run.model}</span>
+        )}
+      </TableCell>
+      <TableCell>
+        {run.agentVersion ? (
+          <span className="font-mono text-xs">{run.agentVersion}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell>
+        {run.mcpServers && run.mcpServers.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {run.mcpServers.map((slug) => (
+              <Link key={slug} to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                {slug}
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell>
+        {run.skillRevisions && run.skillRevisions.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {run.skillRevisions.map((ref) => {
+              const skillName = ref.split("@")[0].split("/").pop() ?? ref;
+              const skillSlug = ref.split("@")[0];
+              return (
+                <Link key={ref} to={`/skills/${skillSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={ref}>
+                  {skillName}
+                </Link>
+              );
+            })}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell>
+        <StatusBadge status={run.status} />
+      </TableCell>
+      <TableCell>
+        {reportStatuses?.[run._id] ? (
+          <Link to={`/reports/${reportStatuses[run._id].reportId}`}>
+            <ReportStatusBadge status={reportStatuses[run._id].status} />
+          </Link>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell className="text-center">
+        {run.turns?.length ?? "–"}
+      </TableCell>
+      <TableCell className="font-mono text-xs">
+        {(() => {
+          const totalDuration = run.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+          return totalDuration ? formatDuration(totalDuration) : <span className="text-muted-foreground">–</span>;
+        })()}
+      </TableCell>
+      <TableCell className="font-mono text-xs">
+        {(() => {
+          const usage = run.tokenUsage
+            ?? (run.turns?.some(t => t.tokenUsage)
+              ? run.turns!.reduce(
+                  (acc, t) => {
+                    if (!t.tokenUsage) return acc;
+                    return {
+                      promptTokens: acc.promptTokens + t.tokenUsage.promptTokens,
+                      completionTokens: acc.completionTokens + t.tokenUsage.completionTokens,
+                      totalTokens: acc.totalTokens + t.tokenUsage.totalTokens,
+                    };
+                  },
+                  { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+                )
+              : undefined);
+          return usage
+            ? <>{usage.promptTokens.toLocaleString()}↑ · {usage.completionTokens.toLocaleString()}↓</>
+            : <span className="text-muted-foreground">–</span>;
+        })()}
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">
+        {formatDate(run.createdAt)}
+      </TableCell>
+      <TableCell className="text-right">
+        <div className="flex items-center justify-end gap-1">
+          <Link to={`/runs/${run._id}`}>
+            <Button variant="ghost" size="icon" className="h-8 w-8">
+              <Eye className="h-4 w-4" />
+            </Button>
+          </Link>
+          {run.turns && run.turns.some(t => t.snapshotUrl) && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Download archive"
+              onClick={() => window.open(api.archiveUrl(run._id), "_blank")}
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          )}
+          <DeleteRunButton
+            runId={run._id}
+            onDelete={() => deleteMutation.mutate(run._id)}
+            isDeleting={deleteMutation.isPending}
+          />
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function GroupRows({
+  group,
+  isExpanded,
+  onToggleExpand,
+  allGroupSelected,
+  someGroupSelected,
+  onToggleGroupSelect,
+  selectedIds,
+  onToggleSelect,
+  reportStatuses,
+  deleteMutation,
+  groupBy,
+}: {
+  group: RunGroup;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  allGroupSelected: boolean;
+  someGroupSelected: boolean;
+  onToggleGroupSelect: () => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  reportStatuses: Record<string, { reportId: string; status: string }> | undefined;
+  deleteMutation: { mutate: (id: string) => void; isPending: boolean };
+  groupBy: GroupByKey;
+}) {
+  const { aggregates } = group;
+  const fmtDur = (v: number) => formatDuration(Math.round(v));
+  const fmtNum = (v: number) => Math.round(v).toLocaleString();
+
+  return (
+    <>
+      <TableRow
+        className="bg-muted/50 hover:bg-muted/70 cursor-pointer"
+        onClick={onToggleExpand}
+      >
+        <TableCell onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            checked={allGroupSelected ? true : someGroupSelected ? "indeterminate" : false}
+            onCheckedChange={onToggleGroupSelect}
+            aria-label={`Select all in group ${group.label}`}
+          />
+        </TableCell>
+        <TableCell colSpan={2} className="font-medium">
+          <div className="flex items-center gap-2">
+            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            <span>{aggregates.count} run{aggregates.count !== 1 ? "s" : ""}</span>
+          </div>
+        </TableCell>
+        <TableCell colSpan={groupBy === "task" ? 1 : 2}>
+          <span className="font-medium" title={group.label}>{truncate(group.label, 80)}</span>
+        </TableCell>
+        {groupBy === "task" && <TableCell />}
+        <TableCell colSpan={4} />
+        <TableCell className="text-center font-mono text-xs">
+          {formatStatRange(aggregates.turns, fmtNum)}
+        </TableCell>
+        <TableCell className="font-mono text-xs">
+          {formatStatRange(aggregates.duration, fmtDur)}
+        </TableCell>
+        <TableCell className="font-mono text-xs">
+          {aggregates.promptTokens
+            ? <>{formatStatRange(aggregates.promptTokens, fmtNum)}↑</>
+            : <span className="text-muted-foreground">–</span>}
+        </TableCell>
+        <TableCell colSpan={2} />
+      </TableRow>
+      {isExpanded && group.runs.map((run) => (
+        <RunRow
+          key={run._id}
+          run={run}
+          selectedIds={selectedIds}
+          onToggleSelect={onToggleSelect}
+          reportStatuses={reportStatuses}
+          deleteMutation={deleteMutation}
+        />
+      ))}
+    </>
   );
 }
 
