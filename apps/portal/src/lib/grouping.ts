@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run } from "../types";
+import type { Run, RunStatus } from "../types";
 
 export type GroupByKey = "none" | "task" | "submissionId";
 
@@ -10,6 +10,17 @@ export interface AggregateStats {
   max: number;
   mean: number;
   stdDev: number;
+}
+
+export interface GroupUniformValues {
+  workerType?: string;
+  model?: string;
+  agentVersion?: string;
+  mcpServers?: string[];
+  skillRevisions?: string[];
+  status?: RunStatus;
+  submissionId?: string;
+  task?: string;
 }
 
 export interface GroupAggregates {
@@ -25,6 +36,7 @@ export interface RunGroup {
   label: string;
   runs: Run[];
   aggregates: GroupAggregates;
+  uniform: GroupUniformValues;
 }
 
 function computeStats(values: number[]): AggregateStats | null {
@@ -81,6 +93,49 @@ function computeAggregates(runs: Run[]): GroupAggregates {
   };
 }
 
+function arrKey(arr: string[] | undefined): string {
+  return (arr ?? []).slice().sort().join(",");
+}
+
+function uniform<T>(runs: Run[], getter: (r: Run) => T): T | undefined {
+  if (runs.length === 0) return undefined;
+  const first = getter(runs[0]);
+  return runs.every((r) => getter(r) === first) ? first : undefined;
+}
+
+function computeUniformValues(runs: Run[]): GroupUniformValues {
+  if (runs.length === 0) return {};
+
+  const result: GroupUniformValues = {};
+
+  const wt = uniform(runs, (r) => r.workerType);
+  if (wt !== undefined) result.workerType = wt;
+
+  const model = uniform(runs, (r) => r.model ?? "");
+  if (model !== undefined && model !== "") result.model = model;
+
+  const ver = uniform(runs, (r) => r.agentVersion ?? "");
+  if (ver !== undefined && ver !== "") result.agentVersion = ver;
+
+  const status = uniform(runs, (r) => r.status);
+  if (status !== undefined) result.status = status;
+
+  const sub = uniform(runs, (r) => r.submissionId ?? "");
+  if (sub !== undefined && sub !== "") result.submissionId = sub;
+
+  const task = uniform(runs, (r) => r.scenario?.task ?? "");
+  if (task !== undefined && task !== "") result.task = task;
+
+  // Array fields: compare by sorted join
+  const mcpKey = uniform(runs, (r) => arrKey(r.mcpServers));
+  if (mcpKey !== undefined && mcpKey !== "") result.mcpServers = runs[0].mcpServers;
+
+  const skillKey = uniform(runs, (r) => arrKey(r.skillRevisions));
+  if (skillKey !== undefined && skillKey !== "") result.skillRevisions = runs[0].skillRevisions;
+
+  return result;
+}
+
 export function groupRuns(runs: Run[], groupBy: GroupByKey): RunGroup[] {
   if (groupBy === "none") return [];
 
@@ -114,6 +169,7 @@ export function groupRuns(runs: Run[], groupBy: GroupByKey): RunGroup[] {
       label,
       runs: groupRuns,
       aggregates: computeAggregates(groupRuns),
+      uniform: computeUniformValues(groupRuns),
     });
   }
 

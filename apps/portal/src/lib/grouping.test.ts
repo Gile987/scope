@@ -185,3 +185,115 @@ describe("formatStatRange", () => {
     expect(result).toContain("200ms");
   });
 });
+
+describe("uniform values", () => {
+  it("detects uniform workerType", () => {
+    const runs = [
+      makeRun({ taskPromptId: "t1", workerType: "coder-acp-copilot" }),
+      makeRun({ taskPromptId: "t1", workerType: "coder-acp-copilot" }),
+    ];
+    const groups = groupRuns(runs, "task");
+    expect(groups[0].uniform.workerType).toBe("coder-acp-copilot");
+  });
+
+  it("returns undefined for mixed workerType", () => {
+    const runs = [
+      makeRun({ taskPromptId: "t1", workerType: "coder-acp-copilot" }),
+      makeRun({ taskPromptId: "t1", workerType: "coder-vscode-web" }),
+    ];
+    const groups = groupRuns(runs, "task");
+    expect(groups[0].uniform.workerType).toBeUndefined();
+  });
+
+  it("detects uniform model", () => {
+    const runs = [
+      makeRun({ taskPromptId: "t1", model: "gpt-4o" }),
+      makeRun({ taskPromptId: "t1", model: "gpt-4o" }),
+    ];
+    const groups = groupRuns(runs, "task");
+    expect(groups[0].uniform.model).toBe("gpt-4o");
+  });
+
+  it("omits model when all undefined", () => {
+    const runs = [
+      makeRun({ taskPromptId: "t1" }),
+      makeRun({ taskPromptId: "t1" }),
+    ];
+    const groups = groupRuns(runs, "task");
+    expect(groups[0].uniform.model).toBeUndefined();
+  });
+
+  it("detects uniform status", () => {
+    const runs = [
+      makeRun({ taskPromptId: "t1", status: "completed" }),
+      makeRun({ taskPromptId: "t1", status: "completed" }),
+    ];
+    const groups = groupRuns(runs, "task");
+    expect(groups[0].uniform.status).toBe("completed");
+  });
+
+  it("returns undefined for mixed status", () => {
+    const runs = [
+      makeRun({ taskPromptId: "t1", status: "completed" }),
+      makeRun({ taskPromptId: "t1", status: "failed" }),
+    ];
+    const groups = groupRuns(runs, "task");
+    expect(groups[0].uniform.status).toBeUndefined();
+  });
+
+  it("detects uniform mcpServers (order-independent)", () => {
+    const runs = [
+      makeRun({ taskPromptId: "t1", mcpServers: ["b", "a"] }),
+      makeRun({ taskPromptId: "t1", mcpServers: ["a", "b"] }),
+    ];
+    const groups = groupRuns(runs, "task");
+    expect(groups[0].uniform.mcpServers).toEqual(["b", "a"]);
+  });
+
+  it("returns undefined for mixed mcpServers", () => {
+    const runs = [
+      makeRun({ taskPromptId: "t1", mcpServers: ["a"] }),
+      makeRun({ taskPromptId: "t1", mcpServers: ["b"] }),
+    ];
+    const groups = groupRuns(runs, "task");
+    expect(groups[0].uniform.mcpServers).toBeUndefined();
+  });
+
+  it("detects uniform skillRevisions", () => {
+    const runs = [
+      makeRun({ taskPromptId: "t1", skillRevisions: ["org/repo/skill@abc"] }),
+      makeRun({ taskPromptId: "t1", skillRevisions: ["org/repo/skill@abc"] }),
+    ];
+    const groups = groupRuns(runs, "task");
+    expect(groups[0].uniform.skillRevisions).toEqual(["org/repo/skill@abc"]);
+  });
+
+  it("detects uniform agentVersion", () => {
+    const runs = [
+      makeRun({ taskPromptId: "t1", agentVersion: "copilot-0.0.415" }),
+      makeRun({ taskPromptId: "t1", agentVersion: "copilot-0.0.415" }),
+    ];
+    const groups = groupRuns(runs, "task");
+    expect(groups[0].uniform.agentVersion).toBe("copilot-0.0.415");
+  });
+
+  it("single-run group always shows uniform values", () => {
+    const runs = [
+      makeRun({
+        taskPromptId: "t1",
+        workerType: "coder-vscode-web",
+        model: "gpt-4o",
+        status: "completed",
+        mcpServers: ["fs"],
+        agentVersion: "v1",
+      }),
+    ];
+    const groups = groupRuns(runs, "task");
+    const u = groups[0].uniform;
+    expect(u.workerType).toBe("coder-vscode-web");
+    expect(u.model).toBe("gpt-4o");
+    expect(u.status).toBe("completed");
+    expect(u.mcpServers).toEqual(["fs"]);
+    expect(u.agentVersion).toBe("v1");
+  });
+});

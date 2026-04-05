@@ -1089,7 +1089,7 @@ function GroupRows({
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   groupBy: GroupByKey;
 }) {
-  const { aggregates } = group;
+  const { aggregates, uniform } = group;
   const fmtDur = (v: number) => formatDuration(Math.round(v));
   const fmtNum = (v: number) => Math.round(v).toLocaleString();
 
@@ -1115,8 +1115,65 @@ function GroupRows({
         <TableCell colSpan={groupBy === "task" ? 1 : 2}>
           <span className="font-medium" title={group.label}>{truncate(group.label, 80)}</span>
         </TableCell>
-        {groupBy === "task" && <TableCell />}
-        <TableCell colSpan={4} />
+        {groupBy === "task" && (
+          <TableCell className="font-mono text-xs">
+            {uniform.submissionId ? (
+              <Link
+                to={`/runs?submissionId=${uniform.submissionId}`}
+                className="text-primary hover:underline"
+                title={uniform.submissionId}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {formatId(uniform.submissionId)}
+              </Link>
+            ) : <span className="text-muted-foreground">–</span>}
+          </TableCell>
+        )}
+        <TableCell>
+          {uniform.workerType ? (
+            <>
+              <span className="font-mono text-xs">{uniform.workerType}</span>
+              {uniform.model && (
+                <span className="block font-mono text-xs text-muted-foreground">{uniform.model}</span>
+              )}
+            </>
+          ) : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>
+        <TableCell>
+          {uniform.agentVersion ? (
+            <span className="font-mono text-xs">{uniform.agentVersion}</span>
+          ) : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>
+        <TableCell>
+          {uniform.mcpServers && uniform.mcpServers.length > 0 ? (
+            <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+              {uniform.mcpServers.map((slug) => (
+                <Link key={slug} to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                  {slug}
+                </Link>
+              ))}
+            </div>
+          ) : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>
+        <TableCell>
+          {uniform.skillRevisions && uniform.skillRevisions.length > 0 ? (
+            <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+              {uniform.skillRevisions.map((ref) => {
+                const skillName = ref.split("@")[0].split("/").pop() ?? ref;
+                const skillSlug = ref.split("@")[0];
+                return (
+                  <Link key={ref} to={`/skills/${skillSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={ref}>
+                    {skillName}
+                  </Link>
+                );
+              })}
+            </div>
+          ) : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>
+        <TableCell>
+          {uniform.status ? <StatusBadge status={uniform.status} /> : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>
+        <TableCell />
         <TableCell className="text-center font-mono text-xs">
           {formatStatRange(aggregates.turns, fmtNum)}
         </TableCell>
