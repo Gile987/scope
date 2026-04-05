@@ -1099,6 +1099,7 @@ function GroupRows({
         className="bg-muted/50 hover:bg-muted/70 cursor-pointer"
         onClick={onToggleExpand}
       >
+        {/* Checkbox */}
         <TableCell onClick={(e) => e.stopPropagation()}>
           <Checkbox
             checked={allGroupSelected ? true : someGroupSelected ? "indeterminate" : false}
@@ -1106,29 +1107,37 @@ function GroupRows({
             aria-label={`Select all in group ${group.label}`}
           />
         </TableCell>
-        <TableCell colSpan={2} className="font-medium">
+        {/* ID */}
+        <TableCell className="font-medium">
           <div className="flex items-center gap-2">
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             <span>{aggregates.count} run{aggregates.count !== 1 ? "s" : ""}</span>
           </div>
         </TableCell>
-        <TableCell colSpan={groupBy === "task" ? 1 : 2}>
-          <span className="font-medium" title={group.label}>{truncate(group.label, 80)}</span>
+        {/* Submission */}
+        <TableCell className="font-mono text-xs">
+          {groupBy === "submissionId" ? (
+            <span className="font-medium" title={group.label}>{truncate(group.label, 30)}</span>
+          ) : uniform.submissionId ? (
+            <Link
+              to={`/runs?submissionId=${uniform.submissionId}`}
+              className="text-primary hover:underline"
+              title={uniform.submissionId}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {formatId(uniform.submissionId)}
+            </Link>
+          ) : <span className="text-muted-foreground">–</span>}
         </TableCell>
-        {groupBy === "task" && (
-          <TableCell className="font-mono text-xs">
-            {uniform.submissionId ? (
-              <Link
-                to={`/runs?submissionId=${uniform.submissionId}`}
-                className="text-primary hover:underline"
-                title={uniform.submissionId}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {formatId(uniform.submissionId)}
-              </Link>
-            ) : <span className="text-muted-foreground">–</span>}
-          </TableCell>
-        )}
+        {/* Task */}
+        <TableCell className="max-w-[300px]">
+          {groupBy === "task" ? (
+            <span className="font-medium" title={group.label}>{truncate(group.label, 60)}</span>
+          ) : uniform.task ? (
+            <span title={uniform.task}>{truncate(uniform.task, 60)}</span>
+          ) : <span className="text-muted-foreground">–</span>}
+        </TableCell>
+        {/* Worker */}
         <TableCell>
           {uniform.workerType ? (
             <>
@@ -1139,11 +1148,13 @@ function GroupRows({
             </>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
+        {/* Version */}
         <TableCell>
           {uniform.agentVersion ? (
             <span className="font-mono text-xs">{uniform.agentVersion}</span>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
+        {/* MCP */}
         <TableCell>
           {uniform.mcpServers && uniform.mcpServers.length > 0 ? (
             <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
@@ -1155,6 +1166,7 @@ function GroupRows({
             </div>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
+        {/* Skills */}
         <TableCell>
           {uniform.skillRevisions && uniform.skillRevisions.length > 0 ? (
             <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
@@ -1170,22 +1182,30 @@ function GroupRows({
             </div>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
+        {/* Status */}
         <TableCell>
           {uniform.status ? <StatusBadge status={uniform.status} /> : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
+        {/* Report */}
         <TableCell />
+        {/* Turns */}
         <TableCell className="text-center font-mono text-xs">
           {formatStatRange(aggregates.turns, fmtNum)}
         </TableCell>
+        {/* Duration */}
         <TableCell className="font-mono text-xs">
           {formatStatRange(aggregates.duration, fmtDur)}
         </TableCell>
+        {/* Tokens */}
         <TableCell className="font-mono text-xs">
           {aggregates.promptTokens
             ? <>{formatStatRange(aggregates.promptTokens, fmtNum)}↑</>
             : <span className="text-muted-foreground">–</span>}
         </TableCell>
-        <TableCell colSpan={2} />
+        {/* Created */}
+        <TableCell />
+        {/* Actions */}
+        <TableCell />
       </TableRow>
       {isExpanded && group.runs.map((run) => (
         <RunRow
