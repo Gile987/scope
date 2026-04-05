@@ -36,14 +36,14 @@ export function RunDetail() {
     enabled: !!id,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      // Stop polling once terminal (completed, failed, or exhausted)
-      if (status === "completed" || status === "failed" || status === "exhausted") return false;
+      // Stop polling once terminal (done)
+      if (status === "done") return false;
       return 5_000;
     },
   });
 
-  const isActive = run?.status === "pending" || run?.status === "processing" || run?.status === "iterating";
-  // Note: "exhausted" is terminal — not active, no log streaming needed
+  const isActive = run?.status === "pending" || run?.status === "processing";
+  // Note: "done" is terminal — not active, no log streaming needed
 
   // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
   // Must be called unconditionally (before any early returns) per Rules of Hooks
@@ -164,7 +164,7 @@ export function RunDetail() {
               </button>
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <StatusBadge status={run.status} />
+              <StatusBadge status={run.status} outcome={run.outcome} />
               <span className="font-mono">{run.workerType}</span>
               {run.model && (
                 <>
