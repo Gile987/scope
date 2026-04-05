@@ -1211,7 +1211,7 @@ function GroupRows({
               return (
                 <div className="flex flex-col gap-1 min-w-[80px]">
                   <span className="text-xs font-medium">{completed}/{total} completed</span>
-                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
+                  <div className="h-1.5 w-full rounded-full bg-blue-400/40 overflow-hidden flex">
                     <div className="h-full bg-green-500 transition-all" style={{ width: `${pctCompleted}%` }} />
                     <div className="h-full bg-destructive transition-all" style={{ width: `${pctFailed}%` }} />
                   </div>
