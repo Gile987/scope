@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import { toast } from "sonner";
 
 export function RunDetail() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [copied, setCopied] = useState(false);
 
   const { data: run, isLoading, error } = useQuery({
@@ -255,7 +256,10 @@ export function RunDetail() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue={run.turns && run.turns.length > 0 ? "turns" : "logs"}>
+      <Tabs
+        value={searchParams.get("tab") || (run.turns && run.turns.length > 0 ? "turns" : "logs")}
+        onValueChange={(value) => setSearchParams({ tab: value }, { replace: false })}
+      >
         <TabsList>
           <TabsTrigger value="turns">
             Turns {run.turns ? `(${run.turns.length})` : ""}
