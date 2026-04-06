@@ -27,17 +27,13 @@ import { KbdBadge } from "@/components/KbdBadge";
 
 const STEPS = ["Configure", "Review & Submit"];
 
-const enableV1CriteriaType = import.meta.env.VITE_ENABLE_V1_SINGLE_SHOT_CRITERIA === "true";
-
 export function SubmitRun() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
 
   // Form state
   const [task, setTask] = useState("");
-  const [criteriaText, setCriteriaText] = useState("");
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
-  const [version, setVersion] = useState<"v1" | "v2">("v2");
   const [worker, setWorker] = useState<string>("coder-acp-copilot");
   const [model, setModel] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<string>("10");
@@ -168,19 +164,12 @@ export function SubmitRun() {
   const doSubmit = () => {
     if (!task.trim()) return;
 
-    const criteria =
-      version === "v2"
-        ? pickedCriteria
-        : criteriaText
-            .split("\n")
-            .map((c) => c.trim())
-            .filter(Boolean);
+    const criteria = pickedCriteria;
 
     submitMutation.mutate({
       scenario: {
         task: task.trim(),
         criteria,
-        version,
       },
       worker,
       ...(model ? { model } : {}),
@@ -299,21 +288,7 @@ export function SubmitRun() {
                 )}
               </div>
 
-              <div className={enableV1CriteriaType ? "grid grid-cols-2 gap-4" : "grid grid-cols-1 gap-4"}>
-                {enableV1CriteriaType && (
-                  <div className="space-y-2">
-                    <Label htmlFor="version">Criteria Version</Label>
-                    <Select value={version} onValueChange={(v) => setVersion(v as "v1" | "v2")}>
-                      <SelectTrigger id="version">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="v1">v1 — free-text prompts</SelectItem>
-                        <SelectItem value="v2">v2 — criteria IDs</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+              <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="maxIterations">Max Iterations</Label>
                   <Input
@@ -334,24 +309,9 @@ export function SubmitRun() {
               <div className="space-y-2">
                 <Label htmlFor="criteria">
                   Criteria *{" "}
-                  {version === "v2" ? (
-                    <span className="text-muted-foreground font-normal">(select from registry)</span>
-                  ) : (
-                    <span className="text-muted-foreground font-normal">(one per line)</span>
-                  )}
+                  <span className="text-muted-foreground font-normal">(select from registry)</span>
                 </Label>
-                {version === "v2" ? (
-                  <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
-                ) : (
-                  <Textarea
-                    id="criteria"
-                    placeholder="The code must include unit tests&#10;The API should return JSON responses"
-                    value={criteriaText}
-                    onChange={(e) => setCriteriaText(e.target.value)}
-                    rows={4}
-                    className="font-mono text-sm"
-                  />
-                )}
+                <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
               </div>
             </CardContent>
           </Card>
@@ -517,7 +477,7 @@ export function SubmitRun() {
 
           {/* Continue */}
           <div className="flex justify-end">
-            <Button type="button" onClick={handleContinue} disabled={!task.trim() || (selectedAgent && selectedAgent.supportedModels.length > 0 && !model) || (version === "v2" ? pickedCriteria.length === 0 : !criteriaText.trim())} className="gap-1.5">
+            <Button type="button" onClick={handleContinue} disabled={!task.trim() || (selectedAgent && selectedAgent.supportedModels.length > 0 && !model) || pickedCriteria.length === 0} className="gap-1.5">
               Continue <ArrowRight className="h-4 w-4" /> <KbdBadge />
             </Button>
           </div>
