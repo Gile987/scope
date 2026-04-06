@@ -51,6 +51,7 @@ export const CreateReportTemplateInputSchema = z
     userPrompt: z.string(),
     systemPrompt: ReportTemplateSystemPromptSchema.optional(),
     trigger: ReportTriggerSchema.optional(),
+    model: z.string().optional(),
   })
   .openapi("CreateReportTemplateInput");
 
@@ -61,6 +62,7 @@ export const UpdateReportTemplateInputSchema = z
     userPrompt: z.string().optional(),
     systemPrompt: ReportTemplateSystemPromptSchema.optional(),
     trigger: ReportTriggerSchema.optional(),
+    model: z.string().optional(),
   })
   .openapi("UpdateReportTemplateInput");
 
@@ -73,6 +75,7 @@ export const ReportTemplateResponseSchema = z
     userPrompt: z.string(),
     systemPrompt: ReportTemplateSystemPromptSchema.optional(),
     trigger: ReportTriggerSchema.optional(),
+    model: z.string().optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     deletedAt: z.coerce.date().optional(),
