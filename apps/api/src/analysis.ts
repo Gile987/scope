@@ -219,7 +219,7 @@ export function computeAnalysis(
     const [taskPromptId, workerType] = key.split('|||');
     const task = groupRuns[0].scenario.task;  // Use task text from first run in group
     
-    const completed = groupRuns.filter(r => r.status === 'completed');
+    const completed = groupRuns.filter(r => r.status === 'completed' || r.status === 'exhausted');
     const passedRuns = completed.filter(r => isPassedRun(r, selectedCriteria));
     const passedIterations = passedRuns
       .map(r => getPassedIteration(r, selectedCriteria))
@@ -292,7 +292,7 @@ export function computeAnalysis(
   for (const group of groups) {
     const tpId = group.taskPromptId;
     const groupRuns = groupMap.get(`${tpId}|||${group.workerType}`)!;
-    const passedRuns = groupRuns.filter(r => r.status === 'completed').filter(r => isPassedRun(r, selectedCriteria));
+    const passedRuns = groupRuns.filter(r => r.status === 'completed' || r.status === 'exhausted').filter(r => isPassedRun(r, selectedCriteria));
     const passedIterations = passedRuns
       .map(r => getPassedIteration(r, selectedCriteria))
       .filter((iter): iter is number => iter !== null);
@@ -303,7 +303,7 @@ export function computeAnalysis(
   }
 
   // Compute summary
-  const allCompleted = validRuns.filter(r => r.status === 'completed');
+  const allCompleted = validRuns.filter(r => r.status === 'completed' || r.status === 'exhausted');
   const allPassed = allCompleted.filter(r => isPassedRun(r, selectedCriteria));
   const allPassedIterations = allPassed
     .map(r => getPassedIteration(r, selectedCriteria))

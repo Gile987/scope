@@ -128,3 +128,87 @@ describe("computeAnalysis – durationStats", () => {
     expect(result.groups[0].durationStats).toBeNull();
   });
 });
+
+describe("computeAnalysis – exhausted runs", () => {
+  const kValues = [1, 2];
+
+  function makeRun(overrides: Partial<AnalyzableRun> = {}): AnalyzableRun {
+    return {
+      scenario: { task: "task-1" },
+      workerType: "worker-a",
+      status: "completed",
+      turns: [{ iteration: 1, passed: true }],
+      ...overrides,
+    };
+  }
+
+  it("counts exhausted runs in completedRuns", () => {
+    const runs: AnalyzableRun[] = [
+      makeRun({ status: "completed" }),
+      makeRun({ status: "exhausted", turns: [{ iteration: 1, passed: false }] }),
+    ];
+    const result = computeAnalysis(runs, kValues);
+
+    expect(result.summary.completedRuns).toBe(2);
+    expect(result.summary.totalRuns).toBe(2);
+  });
+
+  it("counts exhausted run with no passed turn as rejected", () => {
+    const runs: AnalyzableRun[] = [
+      makeRun({ status: "completed" }),
+      makeRun({
+        status: "exhausted",
+        turns: [
+          { iteration: 1, passed: false },
+          { iteration: 2, passed: false },
+        ],
+      }),
+    ];
+    const result = computeAnalysis(runs, kValues);
+
+    expect(result.summary.completedRuns).toBe(2);
+    expect(result.summary.passedRuns).toBe(1);
+    expect(result.groups[0].rejected).toBe(1);
+  });
+
+  it("counts exhausted run with a passed last turn as passed", () => {
+    const runs: AnalyzableRun[] = [
+      makeRun({
+        status: "exhausted",
+        turns: [
+          { iteration: 1, passed: false },
+          { iteration: 2, passed: true },
+        ],
+      }),
+    ];
+    const result = computeAnalysis(runs, kValues);
+
+    expect(result.summary.completedRuns).toBe(1);
+    expect(result.summary.passedRuns).toBe(1);
+    expect(result.summary.overallPassRate).toBe(1);
+  });
+
+  it("includes exhausted runs in pass@k calculation", () => {
+    const runs: AnalyzableRun[] = [
+      makeRun({ status: "completed", turns: [{ iteration: 1, passed: true }] }),
+      makeRun({ status: "completed", turns: [{ iteration: 1, passed: true }] }),
+      makeRun({ status: "exhausted", turns: [{ iteration: 1, passed: false }] }),
+    ];
+    const result = computeAnalysis(runs, kValues);
+
+    // pass@1 with n=3, c=2: 1 - C(1,1)/C(3,1) = 1 - 1/3 ≈ 0.667
+    expect(result.groups[0].passAtK[1]).toBeCloseTo(2 / 3, 5);
+  });
+
+  it("excludes failed runs from completedRuns (only completed + exhausted)", () => {
+    const runs: AnalyzableRun[] = [
+      makeRun({ status: "completed" }),
+      makeRun({ status: "exhausted", turns: [{ iteration: 1, passed: false }] }),
+      makeRun({ status: "failed", turns: [] }),
+    ];
+    const result = computeAnalysis(runs, kValues);
+
+    expect(result.summary.totalRuns).toBe(3);
+    expect(result.summary.completedRuns).toBe(2);
+  });
+});
