@@ -1,11 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
-import crypto from "crypto";
-import { existsSync, mkdirSync, rmSync } from "fs";
-import path from "path";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -57,27 +54,16 @@ class CopilotProcessor implements WorkerProcessor {
   }
 
   async setup(log: WorkerLogFn): Promise<void> {
-    // Create a fresh workspace directory per run to prevent cross-run contamination.
-    // Clean the parent directory first so leftovers from crashed runs are always removed.
-    const workspacesRoot = "/tmp/workspaces";
-    if (existsSync(workspacesRoot)) {
-      rmSync(workspacesRoot, { recursive: true, force: true });
-    }
-    const suffix = crypto.randomBytes(4).toString("hex");
-    this.workspacePath = path.join(workspacesRoot, `project-${suffix}`);
-    mkdirSync(this.workspacePath, { recursive: true });
+    this.workspacePath = createFreshWorkspace();
     await log("info", "Fresh workspace created", { workspacePath: this.workspacePath });
   }
 
   async teardown(log: WorkerLogFn): Promise<void> {
-    const workspacesRoot = "/tmp/workspaces";
-    if (existsSync(workspacesRoot)) {
-      try {
-        rmSync(workspacesRoot, { recursive: true, force: true });
-        await log("info", "Workspaces directory cleaned");
-      } catch (error) {
-        await log("warn", `Failed to clean workspaces directory: ${error instanceof Error ? error.message : String(error)}`);
-      }
+    try {
+      cleanupWorkspaces();
+      await log("info", "Workspaces directory cleaned");
+    } catch (error) {
+      await log("warn", `Failed to clean workspaces directory: ${error instanceof Error ? error.message : String(error)}`);
     }
     this.workspacePath = undefined;
   }
