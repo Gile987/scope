@@ -5,7 +5,7 @@ import { memo } from "react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 const MAX_CHARS = 2000;
-const SCALE = 0.3;
+const SCALE = 0.45;
 const WIDTH = 280;
 const HEIGHT = 360;
 
