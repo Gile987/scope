@@ -49,6 +49,9 @@ export interface MultiTurnConfig {
   onTurnComplete?: (turn: ConversationTurn) => Promise<void>;
   /** Called after setup-phase videos are uploaded, to persist URLs to MongoDB */
   onSetupVideosUploaded?: (setupVideoUrls: string[]) => Promise<void>;
+  /** Called after setup() completes and workspace path is resolved.
+   *  Use for operations that need the actual workspace path (e.g. skill extraction). */
+  onAfterSetup?: () => Promise<void>;
   /** Persona instructions for the judge (resolved prose from traits) */
   personaInstructions?: string;
   /** Model to pass to the coding agent */
@@ -94,6 +97,7 @@ export async function runMultiTurnLoop(
     log,
     onTurnComplete,
     onSetupVideosUploaded,
+    onAfterSetup,
     personaInstructions,
     model,
     mcpServerConfigs,
@@ -171,6 +175,11 @@ export async function runMultiTurnLoop(
     || processor.workspacePath
     || process.env.WORKSPACE_PATH
     || "/workspace";
+
+  // Run post-setup hook (e.g. skill extraction) now that workspacePath is resolved
+  if (onAfterSetup) {
+    await onAfterSetup();
+  }
 
   try {
 
