@@ -21,7 +21,8 @@ import { VideoPlayer } from "@/components/VideoPlayer";
 import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video } from "lucide-react";
+import { ReportThumbnail } from "@/components/ReportThumbnail";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -29,6 +30,7 @@ import { toast } from "sonner";
 export function RunDetail() {
   const { id } = useParams<{ id: string }>();
   const [copied, setCopied] = useState(false);
+  const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ["run", id],
@@ -348,44 +350,100 @@ export function RunDetail() {
         <TabsContent value="reports" className="mt-4 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-medium">Reports</h3>
-            <Button
-              size="sm"
-              onClick={() => generateReport.mutate()}
-              disabled={generateReport.isPending}
-              className="gap-1.5"
-            >
-              <Plus className="h-4 w-4" />
-              Generate Report
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-md border">
+                <Button
+                  variant={reportsView === "grid" ? "secondary" : "ghost"}
+                  size="icon"
+                  className="h-8 w-8 rounded-r-none"
+                  onClick={() => setReportsView("grid")}
+                  aria-label="Grid view"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={reportsView === "list" ? "secondary" : "ghost"}
+                  size="icon"
+                  className="h-8 w-8 rounded-l-none"
+                  onClick={() => setReportsView("list")}
+                  aria-label="List view"
+                >
+                  <List className="h-4 w-4" />
+                </Button>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => generateReport.mutate()}
+                disabled={generateReport.isPending}
+                className="gap-1.5"
+              >
+                <Plus className="h-4 w-4" />
+                Generate Report
+              </Button>
+            </div>
           </div>
 
           {reports && reports.length > 0 ? (
-            <div className="space-y-3">
-              {reports.map((report) => (
-                <Card key={report._id}>
-                  <CardContent className="flex items-center justify-between py-4">
-                    <div className="flex items-center gap-4">
-                      <FileText className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <Link
-                          to={`/reports/${report._id}`}
-                          className="text-sm font-medium text-primary hover:underline"
-                        >
+            reportsView === "grid" ? (
+              <div className="flex flex-wrap gap-4">
+                {reports.map((report) => (
+                  <Link
+                    key={report._id}
+                    to={`/reports/${report._id}`}
+                    className="group block"
+                  >
+                    <div className="flex flex-col items-center gap-2 w-[160px]">
+                      {report.status === "completed" && report.content ? (
+                        <ReportThumbnail content={report.content} />
+                      ) : (
+                        <div className="flex items-center justify-center rounded border bg-muted/30 shadow-sm" style={{ width: 160, height: 200 }}>
+                          {report.status === "generating" ? (
+                            <Loader2 className="h-8 w-8 text-muted-foreground animate-spin" />
+                          ) : (
+                            <FileText className="h-8 w-8 text-muted-foreground opacity-50" />
+                          )}
+                        </div>
+                      )}
+                      <div className="text-center w-full">
+                        <p className="text-xs font-medium truncate group-hover:underline">
                           {report.templateId ? (templateMap.get(report.templateId) ?? report.templateId) : "Manual report"}
-                        </Link>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDate(report.createdAt)}
-                          {report.reporter?.model && ` · ${report.reporter.model}`}
-                          {" · "}
-                          <span className="font-mono">{formatId(report._id)}</span>
                         </p>
+                        <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                          <ReportStatusBadge status={report.status} />
+                        </div>
                       </div>
                     </div>
-                    <ReportStatusBadge status={report.status} />
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {reports.map((report) => (
+                  <Card key={report._id}>
+                    <CardContent className="flex items-center justify-between py-4">
+                      <div className="flex items-center gap-4">
+                        <FileText className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <Link
+                            to={`/reports/${report._id}`}
+                            className="text-sm font-medium text-primary hover:underline"
+                          >
+                            {report.templateId ? (templateMap.get(report.templateId) ?? report.templateId) : "Manual report"}
+                          </Link>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDate(report.createdAt)}
+                            {report.reporter?.model && ` · ${report.reporter.model}`}
+                            {" · "}
+                            <span className="font-mono">{formatId(report._id)}</span>
+                          </p>
+                        </div>
+                      </div>
+                      <ReportStatusBadge status={report.status} />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
