@@ -385,41 +385,79 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     const maxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
 
-    const result = await runMultiTurnLoop({
-      processor: this.processor,
-      task: requestDoc.scenario.task,
-      criteria: requestDoc.scenario.criteria,
-      scenarioVersion: requestDoc.scenario.version,
-      maxIterations,
-      judgeClient,
-      blobStorage,
-      requestId,
-      log,
-      personaInstructions: requestDoc.personaInstructions,
-      model: requestDoc.model,
-      mcpServerConfigs,
-      skillConfigs,
-      extensionConfigs,
-      onAfterSetup: skillConfigs
-        ? async () => { await this.extractSkills(requestDoc, skillConfigs, log); }
-        : undefined,
-      onTurnComplete: async (turn: ConversationTurn) => {
-        // Persist each turn incrementally to MongoDB (retry on CosmosDB 429)
-        await withRetry(() => this.collection.updateOne(
-          { _id: requestId },
-          {
-            $push: { turns: turn },
-            $set: { updatedAt: new Date() },
+    // Setup: create workspace, extract skills, upload setup videos
+    if (this.processor.setup) {
+      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
+
+      if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
+        try {
+          const setupVideoUrls: string[] = [];
+          for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
+            const videoBlobName = `${requestId}/setup/video-${i}.webm`;
+            const videoUrl = await blobStorage.uploadFile(
+              setupResult.videoFilePaths[i],
+              videoBlobName,
+              "video/webm"
+            );
+            setupVideoUrls.push(videoUrl);
           }
-        ));
-      },
-      onSetupVideosUploaded: async (setupVideoUrls: string[]) => {
-        await withRetry(() => this.collection.updateOne(
-          { _id: requestId },
-          { $set: { setupVideoUrls, updatedAt: new Date() } }
-        ));
-      },
-    });
+          await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
+          if (setupVideoUrls.length > 0) {
+            await withRetry(() => this.collection.updateOne(
+              { _id: requestId },
+              { $set: { setupVideoUrls, updatedAt: new Date() } }
+            ));
+          }
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await log("warn", `Failed to upload setup video files: ${msg}`);
+        }
+      }
+    }
+
+    // Extract skills to the workspace (after setup so workspacePath is resolved)
+    if (skillConfigs) {
+      await this.extractSkills(requestDoc, skillConfigs, log);
+    }
+
+    // Resolve workspace path after setup
+    const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+
+    let result;
+    try {
+      result = await runMultiTurnLoop({
+        processor: this.processor,
+        task: requestDoc.scenario.task,
+        criteria: requestDoc.scenario.criteria,
+        scenarioVersion: requestDoc.scenario.version,
+        maxIterations,
+        workspacePath,
+        judgeClient,
+        blobStorage,
+        requestId,
+        log,
+        personaInstructions: requestDoc.personaInstructions,
+        model: requestDoc.model,
+        mcpServerConfigs,
+        skillConfigs,
+        extensionConfigs,
+        onTurnComplete: async (turn: ConversationTurn) => {
+          // Persist each turn incrementally to MongoDB (retry on CosmosDB 429)
+          await withRetry(() => this.collection.updateOne(
+            { _id: requestId },
+            {
+              $push: { turns: turn },
+              $set: { updatedAt: new Date() },
+            }
+          ));
+        },
+      });
+    } finally {
+      // Lifecycle: always call teardown() if setup() exists, even on error
+      if (this.processor.teardown) {
+        await this.processor.teardown(log);
+      }
+    }
 
     const finalStatus = result.passed
       ? "completed"

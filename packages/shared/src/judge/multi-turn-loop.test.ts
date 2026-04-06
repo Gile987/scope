@@ -156,25 +156,22 @@ describe("runMultiTurnLoop — lifecycle hooks", () => {
     };
   }
 
-  it("calls setup before first processMessage and teardown after", async () => {
-    const callOrder: string[] = [];
+  it("does not call setup or teardown (caller owns lifecycle)", async () => {
     const processor = {
       workerName: "test-worker",
-      setup: vi.fn(async () => { callOrder.push("setup"); }),
-      teardown: vi.fn(async () => { callOrder.push("teardown"); }),
-      processMessage: vi.fn(async () => { callOrder.push("processMessage"); return { response: "done" }; }),
+      setup: vi.fn().mockResolvedValue(undefined),
+      teardown: vi.fn().mockResolvedValue(undefined),
+      processMessage: vi.fn(async () => ({ response: "done" })),
     };
 
     await runMultiTurnLoop(makeConfig(processor));
 
-    expect(processor.setup).toHaveBeenCalledTimes(1);
-    expect(processor.teardown).toHaveBeenCalledTimes(1);
+    expect(processor.setup).not.toHaveBeenCalled();
+    expect(processor.teardown).not.toHaveBeenCalled();
     expect(processor.processMessage).toHaveBeenCalled();
-    expect(callOrder[0]).toBe("setup");
-    expect(callOrder[callOrder.length - 1]).toBe("teardown");
   });
 
-  it("calls teardown even when processMessage throws", async () => {
+  it("handles processMessage error without calling teardown", async () => {
     const processor = {
       workerName: "test-worker",
       setup: vi.fn().mockResolvedValue(undefined),
@@ -186,7 +183,7 @@ describe("runMultiTurnLoop — lifecycle hooks", () => {
 
     // Multi-turn loop catches processMessage errors and returns a failed result
     expect(result.passed).toBe(false);
-    expect(processor.teardown).toHaveBeenCalledTimes(1);
+    expect(processor.teardown).not.toHaveBeenCalled();
   });
 
   it("works without setup/teardown (backward compatible)", async () => {
@@ -201,7 +198,7 @@ describe("runMultiTurnLoop — lifecycle hooks", () => {
     expect(processor.processMessage).toHaveBeenCalled();
   });
 
-  it("calls setup once even with multiple iterations", async () => {
+  it("runs multiple iterations without managing lifecycle", async () => {
     let iteration = 0;
     const processor = {
       workerName: "test-worker",
@@ -226,8 +223,8 @@ describe("runMultiTurnLoop — lifecycle hooks", () => {
 
     expect(result.passed).toBe(true);
     expect(result.turns).toHaveLength(3);
-    expect(processor.setup).toHaveBeenCalledTimes(1);
-    expect(processor.teardown).toHaveBeenCalledTimes(1);
+    expect(processor.setup).not.toHaveBeenCalled();
+    expect(processor.teardown).not.toHaveBeenCalled();
     expect(processor.processMessage).toHaveBeenCalledTimes(3);
   });
 });
