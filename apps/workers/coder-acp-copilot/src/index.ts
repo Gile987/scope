@@ -3,6 +3,7 @@
 
 import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient } from "shared";
 import { runACPSession } from "./acp-client.js";
+import fs from "node:fs/promises";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -67,7 +68,17 @@ class CopilotProcessor implements WorkerProcessor {
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
     });
-    
+
+    // Clear workspace between runs to prevent stale files from a reused pod
+    // contaminating the next run's results.
+    // Clear contents rather than remove+recreate — the directory is owned by root
+    // but the worker has write permission inside it.
+    const staleEntries = await fs.readdir("/workspace").catch(() => []);
+    for (const entry of staleEntries) {
+      await fs.rm(`/workspace/${entry}`, { recursive: true, force: true });
+    }
+    await log("info", "Workspace cleared", { removedEntries: staleEntries.length });
+
     // DevProxy integration — start recording if enabled
     let devProxy: DevProxyClient | null = null;
     let sslCertFile: string | undefined;
