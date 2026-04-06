@@ -75,6 +75,13 @@ export function RunDetail() {
     refetchInterval: 10_000,
   });
 
+  // Fetch report templates for name resolution
+  const { data: reportTemplates } = useQuery({
+    queryKey: ["report-templates"],
+    queryFn: () => api.listReportTemplates(),
+  });
+  const templateMap = new Map(reportTemplates?.map((t) => [t.id, t.name]));
+
   const generateReport = useMutation({
     mutationFn: () => api.triggerReports(id!),
     onSuccess: (data) => {
@@ -362,13 +369,15 @@ export function RunDetail() {
                       <div>
                         <Link
                           to={`/reports/${report._id}`}
-                          className="font-mono text-sm text-primary hover:underline"
+                          className="text-sm font-medium text-primary hover:underline"
                         >
-                          {formatId(report._id)}
+                          {report.templateId ? (templateMap.get(report.templateId) ?? report.templateId) : "Manual report"}
                         </Link>
                         <p className="text-xs text-muted-foreground">
                           {formatDate(report.createdAt)}
                           {report.reporter?.model && ` · ${report.reporter.model}`}
+                          {" · "}
+                          <span className="font-mono">{formatId(report._id)}</span>
                         </p>
                       </div>
                     </div>
