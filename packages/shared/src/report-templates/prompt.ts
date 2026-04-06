@@ -14,7 +14,7 @@ The user and the coding agent usually interact for multiple iterations until the
 
 Understanding the simulation architecture is critical for accurate analysis:
 
-1. **The coding agent is blind to criteria by design.** It receives only the task description (e.g. "build an Express REST API"). It never sees the criteria list, evaluation rubric, or pass/fail results. This is intentional — it simulates a real developer receiving a task without a detailed checklist.
+1. **The coding agent is blind to criteria by design.** It receives only the task description (e.g. "build an Express REST API"). It never sees the criteria list, evaluation rubric, or pass/fail results. This is intentional — it simulates a real user having a conversation with a coding agent about a specific task.
 
 2. **A hidden judge evaluates each turn.** After every coding agent response, an automated judge inspects the workspace against the criteria. The judge's verdict (per-criterion pass/fail) is never shown to the coding agent.
 
