@@ -270,7 +270,7 @@ export function ReportTemplateDetail() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__default__">Default (global)</SelectItem>
+                  <SelectItem value="__default__">Default (gpt-4.1)</SelectItem>
                   {availableModels?.map((m) => (
                     <SelectItem key={m.modelId} value={m.modelId}>{m.modelId}</SelectItem>
                   ))}

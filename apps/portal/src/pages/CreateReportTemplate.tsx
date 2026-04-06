@@ -207,14 +207,14 @@ export function CreateReportTemplate() {
           <div className="space-y-2">
             <Label>Model (optional)</Label>
             <p className="text-xs text-muted-foreground mb-2">
-              Override the default model used for report generation. Leave as default to use the global REPORT_MODEL.
+              Override the model used for report generation. The default is <code className="text-xs bg-muted px-1 py-0.5 rounded">gpt-4.1</code> (configurable via <code className="text-xs bg-muted px-1 py-0.5 rounded">REPORT_MODEL</code> env var).
             </p>
             <Select value={model || "__default__"} onValueChange={(v) => setModel(v === "__default__" ? "" : v)}>
               <SelectTrigger className="w-64">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__default__">Default (global)</SelectItem>
+                <SelectItem value="__default__">Default (gpt-4.1)</SelectItem>
                 {availableModels?.map((m) => (
                   <SelectItem key={m.modelId} value={m.modelId}>{m.modelId}</SelectItem>
                 ))}
