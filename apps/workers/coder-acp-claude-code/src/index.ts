@@ -1,9 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient } from "shared";
 import { runACPSession } from "./acp-client.js";
-import fs from "node:fs/promises";
+import crypto from "crypto";
+import { existsSync, mkdirSync, rmSync } from "fs";
+import path from "path";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -14,6 +16,7 @@ const AGENT_VERSION = `claude-code-acp-${process.env.CLAUDE_CODE_ACP_VERSION || 
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
+  workspacePath: string | undefined = undefined;
 
   getAgentVersion(): string {
     return AGENT_VERSION;
@@ -24,6 +27,32 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       ...(process.env.CLAUDE_CODE_ACP_VERSION ? { CLAUDE_CODE_ACP_VERSION: process.env.CLAUDE_CODE_ACP_VERSION } : {}),
       ...(process.env.CLAUDE_AGENT_SDK_VERSION ? { CLAUDE_AGENT_SDK_VERSION: process.env.CLAUDE_AGENT_SDK_VERSION } : {}),
     };
+  }
+
+  async setup(log: WorkerLogFn): Promise<void> {
+    // Create a fresh workspace directory per run to prevent cross-run contamination.
+    // Clean the parent directory first so leftovers from crashed runs are always removed.
+    const workspacesRoot = "/tmp/claude-code-workspaces";
+    if (existsSync(workspacesRoot)) {
+      rmSync(workspacesRoot, { recursive: true, force: true });
+    }
+    const suffix = crypto.randomBytes(4).toString("hex");
+    this.workspacePath = path.join(workspacesRoot, `project-${suffix}`);
+    mkdirSync(this.workspacePath, { recursive: true });
+    await log("info", "Fresh workspace created", { workspacePath: this.workspacePath });
+  }
+
+  async teardown(log: WorkerLogFn): Promise<void> {
+    const workspacesRoot = "/tmp/claude-code-workspaces";
+    if (existsSync(workspacesRoot)) {
+      try {
+        rmSync(workspacesRoot, { recursive: true, force: true });
+        await log("info", "Workspaces directory cleaned");
+      } catch (error) {
+        await log("warn", `Failed to clean workspaces directory: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    this.workspacePath = undefined;
   }
 
   async processMessage(
@@ -41,16 +70,6 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
     });
-
-    // Clear workspace between runs to prevent stale files from a reused pod
-    // contaminating the next run's results.
-    // Clear contents rather than remove+recreate — the directory is owned by root
-    // but the worker has write permission inside it.
-    const staleEntries = await fs.readdir("/workspace").catch(() => []);
-    for (const entry of staleEntries) {
-      await fs.rm(`/workspace/${entry}`, { recursive: true, force: true });
-    }
-    await log("info", "Workspace cleared", { removedEntries: staleEntries.length });
 
     // DevProxy integration — start recording if enabled
     let devProxy: DevProxyClient | null = null;
@@ -106,7 +125,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         command: "claude-code-acp",
         args: [],
         env,
-        cwd: "/workspace",
+        cwd: this.workspacePath,
         onLog: async (msg) => {
           await log("debug", msg);
         },
