@@ -427,11 +427,11 @@ export function RunDetail() {
                     to={`/reports/${report._id}`}
                     className="group block"
                   >
-                    <div className="flex flex-col items-center gap-2 w-[200px]">
+                    <div className="flex flex-col items-center gap-2 w-[280px]">
                       {report.status === "completed" && report.content ? (
                         <ReportThumbnail content={report.content} />
                       ) : (
-                        <div className="flex items-center justify-center rounded border bg-muted/30 shadow-sm" style={{ width: 200, height: 260 }}>
+                        <div className="flex items-center justify-center rounded border bg-muted/30 shadow-sm" style={{ width: 280, height: 360 }}>
                           {report.status === "generating" ? (
                             <Loader2 className="h-8 w-8 text-muted-foreground animate-spin" />
                           ) : (

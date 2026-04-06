@@ -6,10 +6,10 @@ import { MarkdownRenderer } from "./MarkdownRenderer";
 
 const MAX_CHARS = 2000;
 const SCALE = 0.3;
-const WIDTH = 200;
-const HEIGHT = 260;
+const WIDTH = 280;
+const HEIGHT = 360;
 
-// Inner dimensions before scaling (≈667×867 — similar to A4 proportions)
+// Inner dimensions before scaling
 const INNER_WIDTH = WIDTH / SCALE;
 const INNER_HEIGHT = HEIGHT / SCALE;
 
