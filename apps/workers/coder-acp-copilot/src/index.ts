@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -41,6 +41,7 @@ const AGENT_VERSION = `copilot-${process.env.COPILOT_CLI_VERSION || "unknown"}`;
 
 class CopilotProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
+  workspacePath: string | undefined = undefined;
 
   getAgentVersion(): string {
     return AGENT_VERSION;
@@ -50,6 +51,21 @@ class CopilotProcessor implements WorkerProcessor {
     return {
       ...(process.env.COPILOT_CLI_VERSION ? { COPILOT_CLI_VERSION: process.env.COPILOT_CLI_VERSION } : {}),
     };
+  }
+
+  async setup(log: WorkerLogFn): Promise<void> {
+    this.workspacePath = createFreshWorkspace();
+    await log("info", "Fresh workspace created", { workspacePath: this.workspacePath });
+  }
+
+  async teardown(log: WorkerLogFn): Promise<void> {
+    try {
+      cleanupWorkspaces();
+      await log("info", "Workspaces directory cleaned");
+    } catch (error) {
+      await log("warn", `Failed to clean workspaces directory: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    this.workspacePath = undefined;
   }
 
   async processMessage(
@@ -67,7 +83,7 @@ class CopilotProcessor implements WorkerProcessor {
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
     });
-    
+
     // DevProxy integration — start recording if enabled
     let devProxy: DevProxyClient | null = null;
     let sslCertFile: string | undefined;
@@ -109,7 +125,7 @@ class CopilotProcessor implements WorkerProcessor {
         command: "copilot",
         args,
         env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS),
-        cwd: "/workspace",
+        cwd: this.workspacePath!,
         onLog: async (msg) => {
           await log("debug", msg);
         },
