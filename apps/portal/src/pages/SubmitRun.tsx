@@ -508,7 +508,7 @@ export function SubmitRun() {
                 <span>{maxIterations}</span>
                 <span className="text-muted-foreground">Occurrences</span>
                 <span>{occurrences}</span>
-                {version === "v2" && pickedCriteria.length > 0 && (
+                {pickedCriteria.length > 0 && (
                   <>
                     <span className="text-muted-foreground">Criteria</span>
                     <div className="flex flex-wrap gap-1">
