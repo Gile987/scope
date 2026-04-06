@@ -3729,6 +3729,8 @@ apiRoute(app, registry, {
   handler: async (req, res, next) => {
     try {
       const { id, name, description, userPrompt, systemPrompt, trigger, model, timeoutMs } = req.body;
+
+      if (!id || typeof id !== "string") {
         res.status(400).json({ error: "id is required and must be a string" });
         return;
       }
@@ -3846,6 +3848,8 @@ apiRoute(app, registry, {
     try {
       const { id } = req.params;
       const { name, description, userPrompt, systemPrompt, trigger, model, timeoutMs } = req.body;
+
+      const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
       if (!existing) {
         res.status(404).json({ error: `Report template '${id}' not found` });
         return;
