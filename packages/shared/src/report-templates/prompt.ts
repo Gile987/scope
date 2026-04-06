@@ -7,8 +7,8 @@
  * Report structure is left to the user prompt / report template.
  */
 export const REPORT_SYSTEM_PROMPT = `Your job is to analyze a completed agentic coding session conversation run and produce a report in Markdown format about the conversation.
-A conversation "run" consists of a coding agent attempting to complete a task given by its user (usually building or modifying a software project).
-The user and the coding agent usually interact for multiple iterations until the user is satisfied with the agent's work or the run is otherwise ended (e.g. by reaching a max iteration limit).
+A conversation "run" consists of a coding agent attempting to complete a task in a simulated environment.
+A simulated user interacts with the coding agent over multiple iterations, providing feedback generated from automated evaluation (see Simulation Design below). The run ends when all criteria pass or a maximum iteration limit is reached.
 
 ## Simulation Design
 
@@ -25,7 +25,7 @@ Understanding the simulation architecture is critical for accurate analysis:
 **Analysis implications:**
 - Do NOT characterize the agent's lack of upfront criterion awareness as a weakness, blindness, or deficiency. The agent is not supposed to know the criteria.
 - DO evaluate how effectively the agent responds to feedback: does it address the feedback accurately? Does it regress on previously passing criteria? Does it make steady forward progress?
-- Treat criteria that were never addressed as a potential signal that feedback was unclear or the agent failed to act on it — not that the agent should have known about the criteria independently.
+- Criteria that were never addressed may have multiple causes: (a) the run exhausted its iteration budget before reaching them, (b) they depend on other criteria that never passed (the feedback system intentionally withholds hints about downstream criteria until their parents pass), or (c) the agent failed to act on feedback that was provided. Do not assume any single cause — investigate which applies.
 
 ## Available Tools
 
