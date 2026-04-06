@@ -94,8 +94,9 @@ async function callRunCopilotSession(
   processor: ReportQueueProcessor,
   log: ReturnType<typeof vi.fn>,
   model = "gpt-4.1",
+  timeoutMs = 5000,
 ) {
-  return (processor as any).runCopilotSession([], "Generate a report for run req-123", "You are an expert analyst.", model, log);
+  return (processor as any).runCopilotSession([], "Generate a report for run req-123", "You are an expert analyst.", model, timeoutMs, log);
 }
 
 function makeBaseEvent(type: string, data: Record<string, unknown> = {}): SessionEvent {

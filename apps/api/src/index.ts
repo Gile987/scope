@@ -3728,9 +3728,7 @@ apiRoute(app, registry, {
   },
   handler: async (req, res, next) => {
     try {
-      const { id, name, description, userPrompt, systemPrompt, trigger, model } = req.body;
-
-      if (!id || typeof id !== "string") {
+      const { id, name, description, userPrompt, systemPrompt, trigger, model, timeoutMs } = req.body;
         res.status(400).json({ error: "id is required and must be a string" });
         return;
       }
@@ -3803,6 +3801,7 @@ apiRoute(app, registry, {
               ...(systemPrompt !== undefined ? { systemPrompt } : {}),
               ...(trigger !== undefined ? { trigger } : {}),
               ...(model !== undefined ? { model } : {}),
+              ...(timeoutMs !== undefined ? { timeoutMs } : {}),
               updatedAt: now,
             },
             $unset: { deletedAt: "" },
@@ -3819,6 +3818,7 @@ apiRoute(app, registry, {
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(trigger ? { trigger } : {}),
           ...(model ? { model } : {}),
+          ...(timeoutMs ? { timeoutMs } : {}),
           createdAt: now,
         };
         await reportTemplateCollection.insertOne(templateDoc as any);
@@ -3845,9 +3845,7 @@ apiRoute(app, registry, {
   handler: async (req, res, next) => {
     try {
       const { id } = req.params;
-      const { name, description, userPrompt, systemPrompt, trigger, model } = req.body;
-
-      const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
+      const { name, description, userPrompt, systemPrompt, trigger, model, timeoutMs } = req.body;
       if (!existing) {
         res.status(404).json({ error: `Report template '${id}' not found` });
         return;
@@ -3904,6 +3902,13 @@ apiRoute(app, registry, {
             return;
           }
           updateFields.model = model;
+        }
+      }
+      if (timeoutMs !== undefined) {
+        if (timeoutMs === null) {
+          updateFields.timeoutMs = undefined;
+        } else {
+          updateFields.timeoutMs = timeoutMs;
         }
       }
 

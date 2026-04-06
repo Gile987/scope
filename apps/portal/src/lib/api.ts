@@ -469,6 +469,7 @@ export const api = {
     systemPrompt?: ReportTemplateSystemPrompt;
     trigger?: ReportTrigger;
     model?: string;
+    timeoutMs?: number;
   }): Promise<ReportTemplate> => {
     return request("/report-templates", {
       method: "POST",
@@ -484,6 +485,7 @@ export const api = {
     systemPrompt?: ReportTemplateSystemPrompt | null;
     trigger?: ReportTrigger | null;
     model?: string | null;
+    timeoutMs?: number | null;
   }): Promise<ReportTemplate> => {
     return request(`/report-templates/${id}`, {
       method: "PUT",

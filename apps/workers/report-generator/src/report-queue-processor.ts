@@ -132,11 +132,13 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       }
 
       // --- Run Copilot SDK session ---
+      const resolvedTimeoutMs = template.timeoutMs ?? this.reportConfig.sessionTimeoutMs ?? 5 * 60 * 1000;
       const content = await this.runCopilotSession(
         tools,
         resolvedUserPrompt,
         resolvedSystemPrompt,
         resolvedModel,
+        resolvedTimeoutMs,
         log
       );
 
@@ -182,6 +184,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     userPrompt: string,
     systemPrompt: string,
     model: string,
+    timeoutMs: number,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<string> {
     const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
@@ -270,9 +273,9 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         }
       });
 
-      const timeout = this.reportConfig.sessionTimeoutMs ?? 5 * 60 * 1000;
+      const timeout = timeoutMs;
 
-      await log("info", "Sending prompt to Copilot SDK, awaiting response...");
+      await log("info", `Sending prompt to Copilot SDK, awaiting response (timeout: ${Math.round(timeout / 1000)}s)...`);
       await session.sendAndWait({ prompt: userPrompt }, timeout);
       await client.stop();
 

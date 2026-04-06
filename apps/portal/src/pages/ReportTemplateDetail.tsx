@@ -94,6 +94,7 @@ export function ReportTemplateDetail() {
   const [editTriggerTaskPromptIds, setEditTriggerTaskPromptIds] = useState<string[]>([]);
   const [editTriggerMatch, setEditTriggerMatch] = useState<"any" | "all">("all");
   const [editModel, setEditModel] = useState<string>("");
+  const [editTimeoutSeconds, setEditTimeoutSeconds] = useState<string>("");
 
   const { data: availableModels } = useQuery({
     queryKey: ["available-report-models"],
@@ -122,6 +123,7 @@ export function ReportTemplateDetail() {
         : "all"
     );
     setEditModel(template.model ?? "");
+    setEditTimeoutSeconds(template.timeoutMs ? String(template.timeoutMs / 1000) : "");
     setEditing(true);
   };
 
@@ -151,6 +153,11 @@ export function ReportTemplateDetail() {
 
     // Model
     body.model = editModel || null;
+
+    // Timeout
+    body.timeoutMs = editTimeoutSeconds && Number(editTimeoutSeconds) > 0
+      ? Number(editTimeoutSeconds) * 1000
+      : null;
 
     // System prompt
     if (editSysMode !== "none" && editSysContent.trim()) {
@@ -277,6 +284,19 @@ export function ReportTemplateDetail() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="editTimeout">Timeout (seconds)</Label>
+              <Input
+                id="editTimeout"
+                type="number"
+                min={1}
+                value={editTimeoutSeconds}
+                onChange={(e) => setEditTimeoutSeconds(e.target.value)}
+                placeholder="300"
+                className="w-32"
+              />
+              <p className="text-xs text-muted-foreground">Default: 300 (5 minutes)</p>
+            </div>
             <Separator />
             <div className="space-y-2">
               <Label>System Prompt</Label>
@@ -382,6 +402,10 @@ export function ReportTemplateDetail() {
               <div>
                 <Label className="text-muted-foreground text-xs">Model</Label>
                 <p className="text-sm font-mono">{template.model ?? "default (gpt-4.1)"}</p>
+              </div>
+              <div>
+                <Label className="text-muted-foreground text-xs">Timeout</Label>
+                <p className="text-sm font-mono">{template.timeoutMs ? `${template.timeoutMs / 1000}s` : "default (300s)"}</p>
               </div>
               <Separator />
               <div className="flex gap-6 text-xs text-muted-foreground">

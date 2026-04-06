@@ -411,6 +411,7 @@ export interface ReportTemplate {
   systemPrompt?: ReportTemplateSystemPrompt;
   trigger?: ReportTrigger;
   model?: string;
+  timeoutMs?: number;
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;

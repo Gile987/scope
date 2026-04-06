@@ -75,6 +75,7 @@ export function CreateReportTemplate() {
   const [triggerTaskPromptIds, setTriggerTaskPromptIds] = useState<string[]>([]);
   const [triggerMatch, setTriggerMatch] = useState<"any" | "all">("all");
   const [model, setModel] = useState<string>("");
+  const [timeoutSeconds, setTimeoutSeconds] = useState<string>("");
 
   const { data: availableModels } = useQuery({
     queryKey: ["available-report-models"],
@@ -111,6 +112,10 @@ export function CreateReportTemplate() {
     if (description.trim()) body.description = description.trim();
 
     if (model) body.model = model;
+
+    if (timeoutSeconds && Number(timeoutSeconds) > 0) {
+      body.timeoutMs = Number(timeoutSeconds) * 1000;
+    }
 
     // System prompt
     if (sysMode !== "none" && sysContent.trim()) {
@@ -220,6 +225,23 @@ export function CreateReportTemplate() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Timeout */}
+          <div className="space-y-2">
+            <Label htmlFor="timeout">Timeout (optional)</Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Maximum time for report generation in seconds. Default is <code className="text-xs bg-muted px-1 py-0.5 rounded">300</code> (5 minutes).
+            </p>
+            <Input
+              id="timeout"
+              type="number"
+              min={1}
+              value={timeoutSeconds}
+              onChange={(e) => setTimeoutSeconds(e.target.value)}
+              placeholder="300"
+              className="w-32"
+            />
           </div>
 
           <Separator />

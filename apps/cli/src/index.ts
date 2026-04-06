@@ -2033,6 +2033,7 @@ reportTemplate
   .option("--system-prompt-mode <mode>", "System prompt mode: append or override")
   .option("--system-prompt-content <content>", "System prompt content")
   .option("--model <model>", "LLM model to use for this template (overrides global REPORT_MODEL)")
+  .option("--timeout-ms <ms>", "Session timeout in milliseconds (overrides global SESSION_TIMEOUT_MS)")
   .option("--trigger-type <type>", "Trigger type: always, criteria, taskPrompt, promptFeature")
   .option("--trigger-ids <ids...>", "Trigger IDs (criteria IDs, task prompt IDs, or feature IDs)")
   .option("--trigger-match <match>", "Trigger match mode: any or all (default: all)")
@@ -2046,6 +2047,7 @@ reportTemplate
       };
       if (options.description) body.description = options.description;
       if (options.model) body.model = options.model;
+      if (options.timeoutMs) body.timeoutMs = Number(options.timeoutMs);
       if (options.systemPromptMode && options.systemPromptContent) {
         body.systemPrompt = {
           mode: options.systemPromptMode,
@@ -2096,6 +2098,7 @@ reportTemplate
   .option("--system-prompt-mode <mode>", "System prompt mode: append or override")
   .option("--system-prompt-content <content>", "System prompt content")
   .option("--model <model>", "LLM model to use for this template (overrides global REPORT_MODEL)")
+  .option("--timeout-ms <ms>", "Session timeout in milliseconds (overrides global SESSION_TIMEOUT_MS)")
   .option("--trigger-type <type>", "New trigger type: always, criteria, taskPrompt, promptFeature")
   .option("--trigger-ids <ids...>", "Trigger IDs")
   .option("--trigger-match <match>", "Trigger match mode: any or all")
@@ -2107,6 +2110,7 @@ reportTemplate
       if (options.description !== undefined) body.description = options.description;
       if (options.userPrompt !== undefined) body.userPrompt = options.userPrompt;
       if (options.model !== undefined) body.model = options.model;
+      if (options.timeoutMs !== undefined) body.timeoutMs = Number(options.timeoutMs);
       if (options.systemPromptMode && options.systemPromptContent) {
         body.systemPrompt = {
           mode: options.systemPromptMode,
@@ -2334,6 +2338,9 @@ function mapYamlReportTemplate(
 
   const model = doc.model as string | undefined;
   if (model) result.model = model.trim();
+
+  const timeoutMs = (doc.timeout_ms ?? doc.timeoutMs) as number | undefined;
+  if (timeoutMs) result.timeoutMs = Number(timeoutMs);
 
   // System prompt: support snake_case YAML
   const sysCfg = (doc.system_prompt ?? doc.systemPrompt) as Record<string, unknown> | undefined;
