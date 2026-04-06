@@ -421,8 +421,8 @@ describe("ReportQueueProcessor – handleRequest template validation", () => {
       (processor as any).handleRequest(doc, makeMessage(), "pop-1", log)
     ).rejects.toThrow("has no templateId");
 
-    // Should have set status to "generating" before the throw
-    expect(mockUpdateOne).toHaveBeenCalled();
+    // Status should NOT be set to "generating" since template validation fails first
+    expect(mockUpdateOne).not.toHaveBeenCalled();
   });
 
   it("throws when templateId points to a non-existent template", async () => {
