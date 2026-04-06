@@ -93,6 +93,13 @@ export function ReportTemplateDetail() {
   const [editTriggerCriteriaIds, setEditTriggerCriteriaIds] = useState<string[]>([]);
   const [editTriggerTaskPromptIds, setEditTriggerTaskPromptIds] = useState<string[]>([]);
   const [editTriggerMatch, setEditTriggerMatch] = useState<"any" | "all">("all");
+  const [editModel, setEditModel] = useState<string>("");
+
+  const { data: availableModels } = useQuery({
+    queryKey: ["available-report-models"],
+    queryFn: () => api.listAvailableReportModels(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const startEditing = () => {
     if (!template) return;
@@ -114,6 +121,7 @@ export function ReportTemplateDetail() {
         ? (template.trigger as any).match ?? "all"
         : "all"
     );
+    setEditModel(template.model ?? "");
     setEditing(true);
   };
 
@@ -140,6 +148,9 @@ export function ReportTemplateDetail() {
     if (editName.trim()) body.name = editName.trim();
     body.description = editDescription.trim() || undefined;
     if (editUserPrompt.trim()) body.userPrompt = editUserPrompt.trim();
+
+    // Model
+    body.model = editModel || null;
 
     // System prompt
     if (editSysMode !== "none" && editSysContent.trim()) {
@@ -253,6 +264,21 @@ export function ReportTemplateDetail() {
             </div>
             <Separator />
             <div className="space-y-2">
+              <Label>Model (optional)</Label>
+              <Select value={editModel || "__default__"} onValueChange={(v) => setEditModel(v === "__default__" ? "" : v)}>
+                <SelectTrigger className="w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">Default (global)</SelectItem>
+                  {availableModels?.map((m) => (
+                    <SelectItem key={m.modelId} value={m.modelId}>{m.modelId}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Separator />
+            <div className="space-y-2">
               <Label>System Prompt</Label>
               <Select value={editSysMode} onValueChange={(v) => setEditSysMode(v as "none" | "append" | "override")}>
                 <SelectTrigger className="w-48">
@@ -352,6 +378,10 @@ export function ReportTemplateDetail() {
                     {triggerSummary(template.trigger)}
                   </Badge>
                 </div>
+              </div>
+              <div>
+                <Label className="text-muted-foreground text-xs">Model</Label>
+                <p className="text-sm font-mono">{template.model ?? "default (global)"}</p>
               </div>
               <Separator />
               <div className="flex gap-6 text-xs text-muted-foreground">

@@ -410,6 +410,7 @@ export interface ReportTemplate {
   userPrompt: string;
   systemPrompt?: ReportTemplateSystemPrompt;
   trigger?: ReportTrigger;
+  model?: string;
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;

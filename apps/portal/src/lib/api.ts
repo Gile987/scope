@@ -455,6 +455,11 @@ export const api = {
     return request(`/report-templates/${id}`);
   },
 
+  /** List models available for report generation */
+  listAvailableReportModels: (): Promise<Array<{ modelId: string }>> => {
+    return request("/report-templates/available-models");
+  },
+
   /** Create a new report template */
   createReportTemplate: (body: {
     id: string;
@@ -463,6 +468,7 @@ export const api = {
     description?: string;
     systemPrompt?: ReportTemplateSystemPrompt;
     trigger?: ReportTrigger;
+    model?: string;
   }): Promise<ReportTemplate> => {
     return request("/report-templates", {
       method: "POST",
@@ -477,6 +483,7 @@ export const api = {
     userPrompt?: string;
     systemPrompt?: ReportTemplateSystemPrompt | null;
     trigger?: ReportTrigger | null;
+    model?: string | null;
   }): Promise<ReportTemplate> => {
     return request(`/report-templates/${id}`, {
       method: "PUT",

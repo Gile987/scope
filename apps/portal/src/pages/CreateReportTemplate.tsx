@@ -74,6 +74,13 @@ export function CreateReportTemplate() {
   const [triggerCriteriaIds, setTriggerCriteriaIds] = useState<string[]>([]);
   const [triggerTaskPromptIds, setTriggerTaskPromptIds] = useState<string[]>([]);
   const [triggerMatch, setTriggerMatch] = useState<"any" | "all">("all");
+  const [model, setModel] = useState<string>("");
+
+  const { data: availableModels } = useQuery({
+    queryKey: ["available-report-models"],
+    queryFn: () => api.listAvailableReportModels(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const idValid = useMemo(() => /^[a-z][a-z0-9-]*$/.test(id), [id]);
   const canSubmit = name.trim().length > 0 && id.trim().length > 0 && idValid && userPrompt.trim().length > 0;
@@ -102,6 +109,8 @@ export function CreateReportTemplate() {
     };
 
     if (description.trim()) body.description = description.trim();
+
+    if (model) body.model = model;
 
     // System prompt
     if (sysMode !== "none" && sysContent.trim()) {
@@ -190,6 +199,27 @@ export function CreateReportTemplate() {
               rows={8}
               className="font-mono text-sm"
             />
+          </div>
+
+          <Separator />
+
+          {/* Model */}
+          <div className="space-y-2">
+            <Label>Model (optional)</Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Override the default model used for report generation. Leave as default to use the global REPORT_MODEL.
+            </p>
+            <Select value={model || "__default__"} onValueChange={(v) => setModel(v === "__default__" ? "" : v)}>
+              <SelectTrigger className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">Default (global)</SelectItem>
+                {availableModels?.map((m) => (
+                  <SelectItem key={m.modelId} value={m.modelId}>{m.modelId}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <Separator />
