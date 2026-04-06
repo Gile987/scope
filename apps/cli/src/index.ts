@@ -2840,14 +2840,27 @@ mcpServer
       console.log(`${label('Slug:')} ${value(server._id)}`);
       console.log(`${label('Name:')} ${value(server.name)}`);
       console.log(`${label('Type:')} ${value(server.type)}`);
-      console.log(`${label('URL:')} ${value(server.url)}`);
-      if (server.description) console.log(`${label('Description:')} ${server.description}`);
-      if (server.headers && server.headers.length > 0) {
-        console.log(`${label('Headers:')}`);
-        for (const h of server.headers) {
-          console.log(`  ${h.name}: ${h.value}`);
+      if (server.type === 'stdio') {
+        console.log(`${label('Command:')} ${value(server.command)}`);
+        if (server.args && server.args.length > 0) {
+          console.log(`${label('Args:')} ${value(server.args.join(' '))}`);
+        }
+        if (server.env && Object.keys(server.env).length > 0) {
+          console.log(`${label('Env:')}`);
+          for (const [k, v] of Object.entries(server.env)) {
+            console.log(`  ${k}=${v}`);
+          }
+        }
+      } else {
+        console.log(`${label('URL:')} ${value(server.url)}`);
+        if (server.headers && server.headers.length > 0) {
+          console.log(`${label('Headers:')}`);
+          for (const h of server.headers) {
+            console.log(`  ${h.name}: ${h.value}`);
+          }
         }
       }
+      if (server.description) console.log(`${label('Description:')} ${server.description}`);
       console.log(`${label('Created:')} ${new Date(server.createdAt).toLocaleString()}`);
       if (server.updatedAt) console.log(`${label('Updated:')} ${new Date(server.updatedAt).toLocaleString()}`);
     } catch (error) {
@@ -2861,13 +2874,27 @@ mcpServer
   .description("Create a new MCP server")
   .requiredOption("--id <slug>", "Slug identifier (lowercase, hyphens allowed)")
   .requiredOption("--name <name>", "Display name")
-  .requiredOption("--type <type>", "Transport type (sse or http)")
-  .requiredOption("--url <url>", "Server URL")
+  .requiredOption("--type <type>", "Transport type (sse, http, or stdio)")
+  .option("--url <url>", "Server URL (required for sse/http)")
+  .option("--command <command>", "Executable to spawn (required for stdio)")
+  .option("--args <args>", "Space-separated CLI arguments for stdio command")
+  .option("--env <env...>", "Environment variables in KEY=VALUE format (repeatable)")
   .option("--description <desc>", "Description")
   .option("--header <header...>", "Headers in name:value format (repeatable)")
   .option("-u, --api-url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
+      const isStdio = options.type === "stdio";
+
+      if (isStdio && !options.command) {
+        console.error(errorText("Error: --command is required for stdio transport"));
+        process.exit(1);
+      }
+      if (!isStdio && !options.url) {
+        console.error(errorText("Error: --url is required for sse/http transport"));
+        process.exit(1);
+      }
+
       const headers = options.header?.map((h: string) => {
         const idx = h.indexOf(':');
         if (idx === -1) {
@@ -2877,14 +2904,30 @@ mcpServer
         return { name: h.substring(0, idx).trim(), value: h.substring(idx + 1).trim() };
       });
 
+      const env = options.env?.reduce((acc: Record<string, string>, pair: string) => {
+        const idx = pair.indexOf('=');
+        if (idx === -1) {
+          console.error(errorText(`Invalid env format: "${pair}". Expected KEY=VALUE`));
+          process.exit(1);
+        }
+        acc[pair.substring(0, idx)] = pair.substring(idx + 1);
+        return acc;
+      }, {} as Record<string, string>);
+
       const body: Record<string, unknown> = {
         _id: options.id,
         name: options.name,
         type: options.type,
-        url: options.url,
       };
+      if (isStdio) {
+        body.command = options.command;
+        if (options.args) body.args = options.args.trim().split(/\s+/);
+        if (env && Object.keys(env).length > 0) body.env = env;
+      } else {
+        body.url = options.url;
+        if (headers && headers.length > 0) body.headers = headers;
+      }
       if (options.description) body.description = options.description;
-      if (headers && headers.length > 0) body.headers = headers;
 
       const response = await fetch(`${normalizeUrl(options.apiUrl)}/api/v1/mcp/servers`, {
         method: "POST",
@@ -2909,8 +2952,11 @@ mcpServer
   .description("Update an MCP server")
   .requiredOption("-i, --id <id>", "MCP server slug")
   .option("--name <name>", "Display name")
-  .option("--type <type>", "Transport type (sse or http)")
+  .option("--type <type>", "Transport type (sse, http, or stdio)")
   .option("--url <url>", "Server URL")
+  .option("--command <command>", "Executable to spawn (stdio)")
+  .option("--args <args>", "Space-separated CLI arguments for stdio command")
+  .option("--env <env...>", "Environment variables in KEY=VALUE format (replaces all env vars)")
   .option("--description <desc>", "Description")
   .option("--header <header...>", "Headers in name:value format (replaces all headers)")
   .option("-u, --api-url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
@@ -2920,6 +2966,19 @@ mcpServer
       if (options.name) body.name = options.name;
       if (options.type) body.type = options.type;
       if (options.url) body.url = options.url;
+      if (options.command) body.command = options.command;
+      if (options.args) body.args = options.args.trim().split(/\s+/);
+      if (options.env) {
+        body.env = options.env.reduce((acc: Record<string, string>, pair: string) => {
+          const idx = pair.indexOf('=');
+          if (idx === -1) {
+            console.error(errorText(`Invalid env format: "${pair}". Expected KEY=VALUE`));
+            process.exit(1);
+          }
+          acc[pair.substring(0, idx)] = pair.substring(idx + 1);
+          return acc;
+        }, {} as Record<string, string>);
+      }
       if (options.description) body.description = options.description;
       if (options.header) {
         body.headers = options.header.map((h: string) => {
