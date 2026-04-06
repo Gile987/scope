@@ -59,7 +59,7 @@ class CopilotProcessor implements WorkerProcessor {
   async setup(log: WorkerLogFn): Promise<void> {
     // Create a fresh workspace directory per run to prevent cross-run contamination.
     // Clean the parent directory first so leftovers from crashed runs are always removed.
-    const workspacesRoot = "/tmp/copilot-workspaces";
+    const workspacesRoot = "/tmp/workspaces";
     if (existsSync(workspacesRoot)) {
       rmSync(workspacesRoot, { recursive: true, force: true });
     }
@@ -70,7 +70,7 @@ class CopilotProcessor implements WorkerProcessor {
   }
 
   async teardown(log: WorkerLogFn): Promise<void> {
-    const workspacesRoot = "/tmp/copilot-workspaces";
+    const workspacesRoot = "/tmp/workspaces";
     if (existsSync(workspacesRoot)) {
       try {
         rmSync(workspacesRoot, { recursive: true, force: true });
