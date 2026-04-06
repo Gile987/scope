@@ -138,7 +138,11 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         });
       } finally {
         if (gateway && mcpConfigs.length > 0) {
-          await Promise.all(mcpConfigs.map((c) => gateway.deregisterServer(c.name).catch(() => {})));
+          await Promise.all(mcpConfigs.map((c) =>
+            gateway.deregisterServer(c.name).catch((err) => {
+              log("warn", `Failed to deregister MCP server "${c.name}" — will be purged on next run`, { error: String(err) });
+            })
+          ));
         }
       }
 
