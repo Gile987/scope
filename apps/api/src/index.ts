@@ -65,6 +65,8 @@ import {
   CreateReportInputSchema,
   BulkCreateReportsInputSchema,
   BulkReportStatusInputSchema,
+  BulkReportSummaryInputSchema,
+  BulkReportSummaryResponseSchema,
   TriggerReportsInputSchema,
   BulkTriggerReportsInputSchema,
   CreatePromptFeatureInputSchema,
@@ -3209,6 +3211,71 @@ apiRoute(app, registry, {
       }
 
       res.json(statusMap);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/reports/bulk-summary",
+  tags: ["Reports"],
+  summary: "Bulk get report summary per run",
+  description: "Returns aggregated report status counts per run. Only the latest report per template is counted (re-triggers are deduplicated).",
+  body: BulkReportSummaryInputSchema,
+  response: BulkReportSummaryResponseSchema,
+  errorResponses: {
+    400: { description: "Invalid input" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { requestIds } = req.body as { requestIds?: string[] };
+
+      if (!requestIds || !Array.isArray(requestIds) || requestIds.length === 0) {
+        res.status(400).json({ error: "requestIds must be a non-empty array of strings" });
+        return;
+      }
+
+      // Aggregation: group by (requestId, templateId), keep latest status per
+      // template, then roll up into per-requestId status counts.
+      const pipeline = [
+        { $match: { requestId: { $in: requestIds } } },
+        { $sort: { createdAt: -1 as const } },
+        // Keep only the latest report per (requestId, templateId)
+        {
+          $group: {
+            _id: { requestId: "$requestId", templateId: { $ifNull: ["$templateId", ""] } },
+            status: { $first: "$status" },
+          },
+        },
+        // Roll up into per-requestId status counts
+        {
+          $group: {
+            _id: "$_id.requestId",
+            total: { $sum: 1 },
+            pending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
+            generating: { $sum: { $cond: [{ $eq: ["$status", "generating"] }, 1, 0] } },
+            completed: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+            failed: { $sum: { $cond: [{ $eq: ["$status", "failed"] }, 1, 0] } },
+          },
+        },
+      ];
+
+      const results = await reportCollection.aggregate(pipeline).toArray();
+
+      const summaryMap: Record<string, { total: number; pending: number; generating: number; completed: number; failed: number }> = {};
+      for (const row of results) {
+        summaryMap[row._id as string] = {
+          total: row.total,
+          pending: row.pending,
+          generating: row.generating,
+          completed: row.completed,
+          failed: row.failed,
+        };
+      }
+
+      res.json(summaryMap);
     } catch (error) {
       next(error);
     }

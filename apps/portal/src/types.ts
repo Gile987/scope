@@ -352,6 +352,18 @@ export interface BulkReportStatus {
   [requestId: string]: { reportId: string; status: ReportStatus };
 }
 
+export interface ReportSummary {
+  total: number;
+  pending: number;
+  generating: number;
+  completed: number;
+  failed: number;
+}
+
+export interface BulkReportSummary {
+  [requestId: string]: ReportSummary;
+}
+
 // =============================================================================
 // Report Template types
 // =============================================================================
