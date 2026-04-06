@@ -149,7 +149,7 @@ export function ReportTemplateList() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {t.model ?? <span className="italic">default</span>}
+                      {t.model ?? <span className="italic">default (gpt-4.1)</span>}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {t.systemPrompt ? t.systemPrompt.mode : "—"}

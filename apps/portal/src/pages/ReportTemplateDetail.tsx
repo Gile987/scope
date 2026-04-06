@@ -381,7 +381,7 @@ export function ReportTemplateDetail() {
               </div>
               <div>
                 <Label className="text-muted-foreground text-xs">Model</Label>
-                <p className="text-sm font-mono">{template.model ?? "default (global)"}</p>
+                <p className="text-sm font-mono">{template.model ?? "default (gpt-4.1)"}</p>
               </div>
               <Separator />
               <div className="flex gap-6 text-xs text-muted-foreground">
