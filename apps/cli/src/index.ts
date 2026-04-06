@@ -1876,6 +1876,33 @@ const reportTemplate = program
 
 configureHelp(reportTemplate);
 
+reportTemplate
+  .command("models")
+  .description("List models available for report generation")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/available-models`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const models = await response.json() as Array<{ modelId: string }>;
+      if (models.length === 0) {
+        console.log(warnBanner("No models available. Run the copilot model scanner first."));
+        return;
+      }
+      console.log(label(`Available models for report generation:\n`));
+      for (const m of models) {
+        console.log(`  ${value(m.modelId)}`);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 withOutputOption(
 reportTemplate
   .command("list")
