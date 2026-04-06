@@ -2759,6 +2759,31 @@ const mcp = program
 
 configureHelp(mcp);
 
+/** Parse KEY=VALUE strings into a Record, exiting on bad format */
+function parseEnvPairs(pairs: string[]): Record<string, string> {
+  return pairs.reduce((acc: Record<string, string>, pair: string) => {
+    const idx = pair.indexOf('=');
+    if (idx === -1) {
+      console.error(errorText(`Invalid env format: "${pair}". Expected KEY=VALUE`));
+      process.exit(1);
+    }
+    acc[pair.substring(0, idx)] = pair.substring(idx + 1);
+    return acc;
+  }, {});
+}
+
+/** Parse name:value strings into header objects, exiting on bad format */
+function parseHeaderPairs(pairs: string[]): { name: string; value: string }[] {
+  return pairs.map((h: string) => {
+    const idx = h.indexOf(':');
+    if (idx === -1) {
+      console.error(errorText(`Invalid header format: "${h}". Expected name:value`));
+      process.exit(1);
+    }
+    return { name: h.substring(0, idx).trim(), value: h.substring(idx + 1).trim() };
+  });
+}
+
 const mcpServer = mcp
   .command("server")
   .description("Manage remote MCP servers (SSE and streamable HTTP)")
@@ -2895,24 +2920,8 @@ mcpServer
         process.exit(1);
       }
 
-      const headers = options.header?.map((h: string) => {
-        const idx = h.indexOf(':');
-        if (idx === -1) {
-          console.error(errorText(`Invalid header format: "${h}". Expected name:value`));
-          process.exit(1);
-        }
-        return { name: h.substring(0, idx).trim(), value: h.substring(idx + 1).trim() };
-      });
-
-      const env = options.env?.reduce((acc: Record<string, string>, pair: string) => {
-        const idx = pair.indexOf('=');
-        if (idx === -1) {
-          console.error(errorText(`Invalid env format: "${pair}". Expected KEY=VALUE`));
-          process.exit(1);
-        }
-        acc[pair.substring(0, idx)] = pair.substring(idx + 1);
-        return acc;
-      }, {} as Record<string, string>);
+      const headers = options.header ? parseHeaderPairs(options.header) : undefined;
+      const env = options.env ? parseEnvPairs(options.env) : undefined;
 
       const body: Record<string, unknown> = {
         _id: options.id,
@@ -2968,28 +2977,9 @@ mcpServer
       if (options.url) body.url = options.url;
       if (options.command) body.command = options.command;
       if (options.args) body.args = options.args.trim().split(/\s+/);
-      if (options.env) {
-        body.env = options.env.reduce((acc: Record<string, string>, pair: string) => {
-          const idx = pair.indexOf('=');
-          if (idx === -1) {
-            console.error(errorText(`Invalid env format: "${pair}". Expected KEY=VALUE`));
-            process.exit(1);
-          }
-          acc[pair.substring(0, idx)] = pair.substring(idx + 1);
-          return acc;
-        }, {} as Record<string, string>);
-      }
+      if (options.env) body.env = parseEnvPairs(options.env);
       if (options.description) body.description = options.description;
-      if (options.header) {
-        body.headers = options.header.map((h: string) => {
-          const idx = h.indexOf(':');
-          if (idx === -1) {
-            console.error(errorText(`Invalid header format: "${h}". Expected name:value`));
-            process.exit(1);
-          }
-          return { name: h.substring(0, idx).trim(), value: h.substring(idx + 1).trim() };
-        });
-      }
+      if (options.header) body.headers = parseHeaderPairs(options.header);
       if (Object.keys(body).length === 0) {
         console.error(errorText("Error: provide at least one field to update"));
         process.exit(1);
