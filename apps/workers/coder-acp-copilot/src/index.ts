@@ -125,7 +125,7 @@ class CopilotProcessor implements WorkerProcessor {
         command: "copilot",
         args,
         env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS),
-        cwd: this.workspacePath,
+        cwd: this.workspacePath!,
         onLog: async (msg) => {
           await log("debug", msg);
         },

@@ -17,7 +17,7 @@ export interface ACPClientOptions {
   command: string;
   args?: string[];
   env?: Record<string, string>;
-  cwd?: string;
+  cwd: string;
   onLog?: (message: string) => void;
   mcpServers?: McpServerConfig[];
 }
@@ -192,7 +192,7 @@ export async function runACPSession(
       onLog(`No MCP servers configured for this session`);
     }
     const sessionResult = await connection.newSession({
-      cwd: cwd || "/workspace",
+      cwd,
       mcpServers: mcpServers.map((s) => ({
         type: s.type,
         name: s.name,

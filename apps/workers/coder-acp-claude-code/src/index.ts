@@ -111,7 +111,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         command: "claude-code-acp",
         args: [],
         env,
-        cwd: this.workspacePath,
+        cwd: this.workspacePath!,
         onLog: async (msg) => {
           await log("debug", msg);
         },

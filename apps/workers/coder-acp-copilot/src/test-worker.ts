@@ -16,6 +16,7 @@
  *   TEST_PROMPT_2 — Optional second prompt (tests session reuse)
  */
 import { runACPSession } from "./acp-client.js";
+import { createFreshWorkspace } from "shared";
 
 interface PromptResult {
   success: boolean;
@@ -57,6 +58,8 @@ async function main(): Promise<void> {
   }
 
   const result: TestResult = { prompts: [] };
+  const workspacePath = createFreshWorkspace();
+  emit(`Created workspace: ${workspacePath}`);
 
   for (let i = 0; i < prompts.length; i++) {
     const prompt = prompts[i];
@@ -77,7 +80,7 @@ async function main(): Promise<void> {
           https_proxy: "",
           NODE_EXTRA_CA_CERTS: "",
         },
-        cwd: "/workspace",
+        cwd: workspacePath,
         onLog: (msg) => emit(`[acp] ${msg}`),
       });
       emit(`runACPSession (${label}) completed — stopReason=${acpResult.stopReason}`);
