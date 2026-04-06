@@ -108,7 +108,6 @@ run
       // Resolve scenario + persona YAML if provided
       let message = options.message;
       let criteria = options.criteria;
-      let scenarioVersion: 'v1' | 'v2' | undefined;
       let personaInstructions: string | undefined;
       let personaObj: Record<string, unknown> | undefined;
 
@@ -117,11 +116,10 @@ run
         // Scenario provides task and criteria (CLI flags override)
         if (!message) message = resolved.task;
         if (!criteria || criteria.length === 0) criteria = resolved.criteria;
-        scenarioVersion = resolved.version;
         personaInstructions = resolved.personaInstructions;
         personaObj = resolved.persona;
 
-        console.log(`${label('Scenario:')} ${value(scenario)} (version: ${value(scenarioVersion || 'v1')})`);
+        console.log(`${label('Scenario:')} ${value(scenario)}`);
         if (persona) console.log(`${label('Persona:')} ${value(persona)}`);
         console.log(`${label('Task:')} ${message.substring(0, 100)}${message.length > 100 ? '...' : ''}`);
         console.log(`${label('Criteria:')} ${value(String(criteria.length))} items`);
@@ -136,7 +134,6 @@ run
       // Build request body — scenario is the source of truth
       const body: Record<string, unknown> = {
         scenario: {
-          ...(scenarioVersion ? { version: scenarioVersion } : {}),
           task: message,
           criteria: criteria || [],
         },

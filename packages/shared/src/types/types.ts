@@ -57,9 +57,8 @@ export interface Persona {
 }
 
 export interface Scenario {
-  version?: 'v1' | 'v2';  // v1 = simple strings (default), v2 = criteria IDs
   task: string;
-  criteria: string[];  // v1: prompts, v2: criteria IDs
+  criteria: string[];  // criteria IDs
 }
 
 export interface TraitDescriptions {
