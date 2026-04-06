@@ -5,11 +5,11 @@ import { memo } from "react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 const MAX_CHARS = 2000;
-const SCALE = 0.12;
-const WIDTH = 160;
-const HEIGHT = 200;
+const SCALE = 0.3;
+const WIDTH = 200;
+const HEIGHT = 260;
 
-// Inner dimensions before scaling
+// Inner dimensions before scaling (≈667×867 — similar to A4 proportions)
 const INNER_WIDTH = WIDTH / SCALE;
 const INNER_HEIGHT = HEIGHT / SCALE;
 
