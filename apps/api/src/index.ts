@@ -3643,6 +3643,24 @@ apiRoute(app, registry, {
   },
 });
 
+// List models available for report generation (github-copilot provider)
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/report-templates/available-models",
+  tags: ["Report Templates"],
+  summary: "List models available for report generation",
+  response: z.array(z.object({ modelId: z.string() })),
+  handler: async (_req, res, next) => {
+    try {
+      const models = await modelCollection.find({ provider: "github-copilot", disappearedAt: { $exists: false } }).toArray();
+      const result = models.map(m => ({ modelId: m._id.split(":").slice(1).join(":") }));
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
 // List all report templates
 apiRoute(app, registry, {
   method: "get",
@@ -3710,7 +3728,7 @@ apiRoute(app, registry, {
   },
   handler: async (req, res, next) => {
     try {
-      const { id, name, description, userPrompt, systemPrompt, trigger } = req.body;
+      const { id, name, description, userPrompt, systemPrompt, trigger, model, timeoutMs } = req.body;
 
       if (!id || typeof id !== "string") {
         res.status(400).json({ error: "id is required and must be a string" });
@@ -3754,6 +3772,16 @@ apiRoute(app, registry, {
         }
       }
 
+      // Validate model against available github-copilot provider models
+      if (model !== undefined) {
+        const available = await modelCollection.find({ provider: "github-copilot", disappearedAt: { $exists: false } }).toArray();
+        const validIds = available.map(m => m._id.split(":").slice(1).join(":"));
+        if (!validIds.includes(model)) {
+          res.status(400).json({ error: `Invalid model "${model}". Available models: ${validIds.join(", ")}` });
+          return;
+        }
+      }
+
       // Check for duplicate id
       const existing = await reportTemplateCollection.findOne({ id });
       if (existing && !existing.deletedAt) {
@@ -3774,6 +3802,8 @@ apiRoute(app, registry, {
               userPrompt,
               ...(systemPrompt !== undefined ? { systemPrompt } : {}),
               ...(trigger !== undefined ? { trigger } : {}),
+              ...(model !== undefined ? { model } : {}),
+              ...(timeoutMs !== undefined ? { timeoutMs } : {}),
               updatedAt: now,
             },
             $unset: { deletedAt: "" },
@@ -3789,6 +3819,8 @@ apiRoute(app, registry, {
           userPrompt,
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(trigger ? { trigger } : {}),
+          ...(model ? { model } : {}),
+          ...(timeoutMs ? { timeoutMs } : {}),
           createdAt: now,
         };
         await reportTemplateCollection.insertOne(templateDoc as any);
@@ -3815,7 +3847,7 @@ apiRoute(app, registry, {
   handler: async (req, res, next) => {
     try {
       const { id } = req.params;
-      const { name, description, userPrompt, systemPrompt, trigger } = req.body;
+      const { name, description, userPrompt, systemPrompt, trigger, model, timeoutMs } = req.body;
 
       const existing = await reportTemplateCollection.findOne({ id, deletedAt: { $exists: false } });
       if (!existing) {
@@ -3860,6 +3892,27 @@ apiRoute(app, registry, {
             return;
           }
           updateFields.trigger = trigger;
+        }
+      }
+      if (model !== undefined) {
+        if (model === null) {
+          // Allow removing model (reverts to global REPORT_MODEL)
+          updateFields.model = undefined;
+        } else {
+          const available = await modelCollection.find({ provider: "github-copilot", disappearedAt: { $exists: false } }).toArray();
+          const validIds = available.map(m => m._id.split(":").slice(1).join(":"));
+          if (!validIds.includes(model)) {
+            res.status(400).json({ error: `Invalid model "${model}". Available models: ${validIds.join(", ")}` });
+            return;
+          }
+          updateFields.model = model;
+        }
+      }
+      if (timeoutMs !== undefined) {
+        if (timeoutMs === null) {
+          updateFields.timeoutMs = undefined;
+        } else {
+          updateFields.timeoutMs = timeoutMs;
         }
       }
 

@@ -74,6 +74,14 @@ export function CreateReportTemplate() {
   const [triggerCriteriaIds, setTriggerCriteriaIds] = useState<string[]>([]);
   const [triggerTaskPromptIds, setTriggerTaskPromptIds] = useState<string[]>([]);
   const [triggerMatch, setTriggerMatch] = useState<"any" | "all">("all");
+  const [model, setModel] = useState<string>("");
+  const [timeoutSeconds, setTimeoutSeconds] = useState<string>("");
+
+  const { data: availableModels } = useQuery({
+    queryKey: ["available-report-models"],
+    queryFn: () => api.listAvailableReportModels(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const idValid = useMemo(() => /^[a-z][a-z0-9-]*$/.test(id), [id]);
   const canSubmit = name.trim().length > 0 && id.trim().length > 0 && idValid && userPrompt.trim().length > 0;
@@ -102,6 +110,12 @@ export function CreateReportTemplate() {
     };
 
     if (description.trim()) body.description = description.trim();
+
+    if (model) body.model = model;
+
+    if (timeoutSeconds && Number(timeoutSeconds) > 0) {
+      body.timeoutMs = Number(timeoutSeconds) * 1000;
+    }
 
     // System prompt
     if (sysMode !== "none" && sysContent.trim()) {
@@ -189,6 +203,44 @@ export function CreateReportTemplate() {
               onChange={(e) => setUserPrompt(e.target.value)}
               rows={8}
               className="font-mono text-sm"
+            />
+          </div>
+
+          <Separator />
+
+          {/* Model */}
+          <div className="space-y-2">
+            <Label>Model (optional)</Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Override the model used for report generation. The default is <code className="text-xs bg-muted px-1 py-0.5 rounded">gpt-4.1</code> (configurable via <code className="text-xs bg-muted px-1 py-0.5 rounded">REPORT_MODEL</code> env var).
+            </p>
+            <Select value={model || "__default__"} onValueChange={(v) => setModel(v === "__default__" ? "" : v)}>
+              <SelectTrigger className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">Default (gpt-4.1)</SelectItem>
+                {availableModels?.map((m) => (
+                  <SelectItem key={m.modelId} value={m.modelId}>{m.modelId}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Timeout */}
+          <div className="space-y-2">
+            <Label htmlFor="timeout">Timeout (optional)</Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Maximum time for report generation in seconds. Default is <code className="text-xs bg-muted px-1 py-0.5 rounded">300</code> (5 minutes).
+            </p>
+            <Input
+              id="timeout"
+              type="number"
+              min={1}
+              value={timeoutSeconds}
+              onChange={(e) => setTimeoutSeconds(e.target.value)}
+              placeholder="300"
+              className="w-32"
             />
           </div>
 

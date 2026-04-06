@@ -123,6 +123,7 @@ export function ReportTemplateList() {
                 <TableHead className="w-[180px]">ID</TableHead>
                 <TableHead className="w-[200px]">Name</TableHead>
                 <TableHead>Trigger</TableHead>
+                <TableHead className="w-[120px]">Model</TableHead>
                 <TableHead className="w-[100px]">Sys Prompt</TableHead>
                 <TableHead>User Prompt</TableHead>
                 <TableHead className="w-[80px]" />
@@ -146,6 +147,9 @@ export function ReportTemplateList() {
                       <Badge variant={triggerVariant(tType)} className="text-xs font-mono">
                         {triggerSummary(t.trigger)}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {t.model ?? <span className="italic">default (gpt-4.1)</span>}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {t.systemPrompt ? t.systemPrompt.mode : "—"}
