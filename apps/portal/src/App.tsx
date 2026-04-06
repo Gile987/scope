@@ -56,7 +56,7 @@ export function App() {
         <Route path="/" element={<Navigate to="/statistics" replace />} />
         <Route path="/runs" element={<RunsList />} />
         <Route path="/runs/new" element={<SubmitRun />} />
-        <Route path="/runs/:id" element={<RunDetail />} />
+        <Route path="/runs/:id/:tab?" element={<RunDetail />} />
         <Route path="/reports" element={<ReportsLayout />}>
           <Route index element={<ReportsList />} />
           <Route path=":id" element={<ReportDetail />} />

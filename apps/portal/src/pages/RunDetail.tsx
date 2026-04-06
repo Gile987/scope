@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,8 @@ import { useState, useMemo } from "react";
 import { toast } from "sonner";
 
 export function RunDetail() {
-  const { id } = useParams<{ id: string }>();
+  const { id, tab } = useParams<{ id: string; tab?: string }>();
+  const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
   const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
@@ -281,7 +282,10 @@ export function RunDetail() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue={run.turns && run.turns.length > 0 ? "turns" : "logs"}>
+      <Tabs
+        value={tab || (run.turns && run.turns.length > 0 ? "turns" : "logs")}
+        onValueChange={(value) => navigate(`/runs/${id}/${value}`)}
+      >
         <TabsList>
           <TabsTrigger value="turns">
             Turns {run.turns ? `(${run.turns.length})` : ""}
