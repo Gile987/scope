@@ -429,7 +429,6 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         processor: this.processor,
         task: requestDoc.scenario.task,
         criteria: requestDoc.scenario.criteria,
-        scenarioVersion: requestDoc.scenario.version,
         maxIterations,
         workspacePath,
         judgeClient,

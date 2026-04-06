@@ -108,7 +108,6 @@ run
       // Resolve scenario + persona YAML if provided
       let message = options.message;
       let criteria = options.criteria;
-      let scenarioVersion: 'v1' | 'v2' | undefined;
       let personaInstructions: string | undefined;
       let personaObj: Record<string, unknown> | undefined;
 
@@ -117,11 +116,10 @@ run
         // Scenario provides task and criteria (CLI flags override)
         if (!message) message = resolved.task;
         if (!criteria || criteria.length === 0) criteria = resolved.criteria;
-        scenarioVersion = resolved.version;
         personaInstructions = resolved.personaInstructions;
         personaObj = resolved.persona;
 
-        console.log(`${label('Scenario:')} ${value(scenario)} (version: ${value(scenarioVersion || 'v1')})`);
+        console.log(`${label('Scenario:')} ${value(scenario)}`);
         if (persona) console.log(`${label('Persona:')} ${value(persona)}`);
         console.log(`${label('Task:')} ${message.substring(0, 100)}${message.length > 100 ? '...' : ''}`);
         console.log(`${label('Criteria:')} ${value(String(criteria.length))} items`);
@@ -136,7 +134,6 @@ run
       // Build request body — scenario is the source of truth
       const body: Record<string, unknown> = {
         scenario: {
-          ...(scenarioVersion ? { version: scenarioVersion } : {}),
           task: message,
           criteria: criteria || [],
         },
@@ -1876,6 +1873,33 @@ const reportTemplate = program
 
 configureHelp(reportTemplate);
 
+reportTemplate
+  .command("models")
+  .description("List models available for report generation")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/available-models`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const models = await response.json() as Array<{ modelId: string }>;
+      if (models.length === 0) {
+        console.log(warnBanner("No models available. Run the copilot model scanner first."));
+        return;
+      }
+      console.log(label(`Available models for report generation:\n`));
+      for (const m of models) {
+        console.log(`  ${value(m.modelId)}`);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 withOutputOption(
 reportTemplate
   .command("list")
@@ -2005,6 +2029,8 @@ reportTemplate
   .option("--description <desc>", "Optional description")
   .option("--system-prompt-mode <mode>", "System prompt mode: append or override")
   .option("--system-prompt-content <content>", "System prompt content")
+  .option("--model <model>", "LLM model to use for this template (overrides global REPORT_MODEL)")
+  .option("--timeout-ms <ms>", "Session timeout in milliseconds (overrides global SESSION_TIMEOUT_MS)")
   .option("--trigger-type <type>", "Trigger type: always, criteria, taskPrompt, promptFeature")
   .option("--trigger-ids <ids...>", "Trigger IDs (criteria IDs, task prompt IDs, or feature IDs)")
   .option("--trigger-match <match>", "Trigger match mode: any or all (default: all)")
@@ -2017,6 +2043,8 @@ reportTemplate
         userPrompt: options.userPrompt,
       };
       if (options.description) body.description = options.description;
+      if (options.model) body.model = options.model;
+      if (options.timeoutMs) body.timeoutMs = Number(options.timeoutMs);
       if (options.systemPromptMode && options.systemPromptContent) {
         body.systemPrompt = {
           mode: options.systemPromptMode,
@@ -2066,6 +2094,8 @@ reportTemplate
   .option("--user-prompt <prompt>", "New user prompt")
   .option("--system-prompt-mode <mode>", "System prompt mode: append or override")
   .option("--system-prompt-content <content>", "System prompt content")
+  .option("--model <model>", "LLM model to use for this template (overrides global REPORT_MODEL)")
+  .option("--timeout-ms <ms>", "Session timeout in milliseconds (overrides global SESSION_TIMEOUT_MS)")
   .option("--trigger-type <type>", "New trigger type: always, criteria, taskPrompt, promptFeature")
   .option("--trigger-ids <ids...>", "Trigger IDs")
   .option("--trigger-match <match>", "Trigger match mode: any or all")
@@ -2076,6 +2106,8 @@ reportTemplate
       if (options.name !== undefined) body.name = options.name;
       if (options.description !== undefined) body.description = options.description;
       if (options.userPrompt !== undefined) body.userPrompt = options.userPrompt;
+      if (options.model !== undefined) body.model = options.model;
+      if (options.timeoutMs !== undefined) body.timeoutMs = Number(options.timeoutMs);
       if (options.systemPromptMode && options.systemPromptContent) {
         body.systemPrompt = {
           mode: options.systemPromptMode,
@@ -2300,6 +2332,12 @@ function mapYamlReportTemplate(
 
   const description = doc.description as string | undefined;
   if (description) result.description = description.trim();
+
+  const model = doc.model as string | undefined;
+  if (model) result.model = model.trim();
+
+  const timeoutMs = (doc.timeout_ms ?? doc.timeoutMs) as number | undefined;
+  if (timeoutMs) result.timeoutMs = Number(timeoutMs);
 
   // System prompt: support snake_case YAML
   const sysCfg = (doc.system_prompt ?? doc.systemPrompt) as Record<string, unknown> | undefined;

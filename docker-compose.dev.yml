@@ -86,7 +86,6 @@ services:
       target: dev
     environment:
       VITE_API_PROXY_TARGET: http://api:80
-      VITE_ENABLE_V1_SINGLE_SHOT_CRITERIA: "true"
       GIT_BRANCH: ${GIT_BRANCH:-}
       GIT_COMMIT: ${GIT_COMMIT:-}
       BUILD_TIME: ${BUILD_TIME:-}

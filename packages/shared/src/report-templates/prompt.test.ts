@@ -27,4 +27,11 @@ describe('REPORT_SYSTEM_PROMPT', () => {
     expect(REPORT_SYSTEM_PROMPT).toContain('create_insight');
     expect(REPORT_SYSTEM_PROMPT).toContain('reference_insight');
   });
+
+  it('explains simulation design and criterion blindness', () => {
+    expect(REPORT_SYSTEM_PROMPT).toContain('Simulation Design');
+    expect(REPORT_SYSTEM_PROMPT).toContain('blind to criteria by design');
+    expect(REPORT_SYSTEM_PROMPT).toContain('never sees the criteria list');
+    expect(REPORT_SYSTEM_PROMPT).toContain('Iterative discovery is the expected pattern');
+  });
 });

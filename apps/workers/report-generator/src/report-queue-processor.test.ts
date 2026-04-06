@@ -93,8 +93,10 @@ function makeConfig() {
 async function callRunCopilotSession(
   processor: ReportQueueProcessor,
   log: ReturnType<typeof vi.fn>,
+  model = "gpt-4.1",
+  timeoutMs = 5000,
 ) {
-  return (processor as any).runCopilotSession([], "Generate a report for run req-123", "You are an expert analyst.", log);
+  return (processor as any).runCopilotSession([], "Generate a report for run req-123", "You are an expert analyst.", model, timeoutMs, log);
 }
 
 function makeBaseEvent(type: string, data: Record<string, unknown> = {}): SessionEvent {
@@ -419,8 +421,8 @@ describe("ReportQueueProcessor – handleRequest template validation", () => {
       (processor as any).handleRequest(doc, makeMessage(), "pop-1", log)
     ).rejects.toThrow("has no templateId");
 
-    // Should have set status to "generating" before the throw
-    expect(mockUpdateOne).toHaveBeenCalled();
+    // Status should NOT be set to "generating" since template validation fails first
+    expect(mockUpdateOne).not.toHaveBeenCalled();
   });
 
   it("throws when templateId points to a non-existent template", async () => {
@@ -435,5 +437,49 @@ describe("ReportQueueProcessor – handleRequest template validation", () => {
     await expect(
       (processor as any).handleRequest(doc, makeMessage(), "pop-1", log)
     ).rejects.toThrow("Report template 'nonexistent-template' not found");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runCopilotSession – model parameter
+// ---------------------------------------------------------------------------
+
+describe("ReportQueueProcessor – model selection", () => {
+  let processor: ReportQueueProcessor;
+  let log: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    capturedEventHandler = undefined;
+    log = vi.fn().mockResolvedValue(undefined);
+    processor = new ReportQueueProcessor(makeConfig());
+
+    mockSendAndWait.mockImplementation(async () => {
+      if (capturedEventHandler) {
+        capturedEventHandler(makeBaseEvent("assistant.message_delta", {
+          messageId: "m1",
+          deltaContent: "report content",
+        }));
+      }
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("passes the provided model to createSession", async () => {
+    await callRunCopilotSession(processor, log, "claude-sonnet-4");
+
+    expect(mockCreateSession).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "claude-sonnet-4" })
+    );
+  });
+
+  it("uses default config model when called with config model", async () => {
+    await callRunCopilotSession(processor, log, "gpt-4.1");
+
+    expect(mockCreateSession).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gpt-4.1" })
+    );
   });
 });

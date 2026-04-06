@@ -7,7 +7,6 @@ import {
   ConversationTurn,
   DetailedEvaluationResult,
   DependencyGraph,
-  normalizeCriteria,
 } from "shared";
 import { getCriteriaProvider } from "shared/criteria-provider-factory";
 import { createJudgeStrategy } from "./judge-strategies.js";
@@ -18,7 +17,6 @@ export interface EvaluationInput {
   criteria: string[];
   conversationHistory: ConversationTurn[];
   personaInstructions?: string;
-  scenarioVersion?: "v1" | "v2";  // v1 = inline prompts, v2 = criteria IDs
   /** Called when an individual criterion result is available (for real-time progress) */
   onProgress?: (result: CriterionResult) => void;
 }
@@ -33,7 +31,7 @@ export interface EvaluationResult {
  * Evaluate workspace against criteria using the sophisticated DAG system
  *
  * This function:
- * 1. Normalizes criteria based on scenario version (v1 or v2)
+ * 1. Resolves criteria IDs from the provider (with ancestor dependencies)
  * 2. Builds criteria graph and validates DAG
  * 3. Selects judge strategy from environment (bundled or independent)
  * 4. Runs judge evaluation
@@ -52,29 +50,18 @@ export async function evaluateWorkspace(
   const includeDescendantGuard =
     process.env.FEEDBACK_DESCENDANT_GUARD !== "false";
 
-  // 3. Determine scenario version and normalize criteria
-  const scenarioVersion = input.scenarioVersion || "v1";
+  // 3. Resolve criteria IDs from provider (with ancestor dependencies)
   let normalizedCriteria: CriteriaConfig[];
-
-  if (scenarioVersion === "v2") {
-    // v2: criteria are IDs, resolve from provider (API or filesystem)
-    try {
-      const provider = getCriteriaProvider();
-      normalizedCriteria = await provider.resolveWithAncestors(input.criteria);
-      console.log(
-        `[judge-agent] Loaded ${normalizedCriteria.length} criteria (including ancestors) from provider (v2 format)`
-      );
-    } catch (error) {
-      console.error("[judge-agent] Failed to resolve criteria:", error);
-      throw new Error(
-        `Failed to resolve criteria: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-  } else {
-    // v1: criteria are prompts, auto-generate IDs
-    normalizedCriteria = normalizeCriteria(input.criteria);
+  try {
+    const provider = getCriteriaProvider();
+    normalizedCriteria = await provider.resolveWithAncestors(input.criteria);
     console.log(
-      `[judge-agent] Using ${normalizedCriteria.length} criteria (v1 format)`
+      `[judge-agent] Loaded ${normalizedCriteria.length} criteria (including ancestors) from provider`
+    );
+  } catch (error) {
+    console.error("[judge-agent] Failed to resolve criteria:", error);
+    throw new Error(
+      `Failed to resolve criteria: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 

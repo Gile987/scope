@@ -307,8 +307,6 @@ services:
     build:
       context: .
       dockerfile: apps/portal/Dockerfile
-      args:
-        VITE_ENABLE_V1_SINGLE_SHOT_CRITERIA: ${VITE_ENABLE_V1_SINGLE_SHOT_CRITERIA:-false}
     profiles: [portal]
     ports:
       - "${PORTAL_PORT:-5100}:80"
