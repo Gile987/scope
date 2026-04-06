@@ -996,7 +996,7 @@ function RunRow({
       </TableCell>
       <TableCell>
         {reportSummaries?.[run._id] ? (
-          <Link to={`/runs/${run._id}?tab=reports`} className="block">
+          <Link to={`/runs/${run._id}/reports`} className="block">
             <ReportProgressBar summary={reportSummaries[run._id]} />
           </Link>
         ) : (
