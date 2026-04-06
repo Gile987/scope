@@ -408,6 +408,7 @@ export function RunDetail() {
                         <p className="text-xs font-medium truncate group-hover:underline">
                           {report.templateId ? (templateMap.get(report.templateId) ?? report.templateId) : "Manual report"}
                         </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{formatDate(report.createdAt)}</p>
                         <div className="flex items-center justify-center gap-1.5 mt-0.5">
                           <ReportStatusBadge status={report.status} />
                         </div>
