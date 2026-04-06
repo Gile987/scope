@@ -24,13 +24,14 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 
 export function RunDetail() {
   const { id } = useParams<{ id: string }>();
   const [copied, setCopied] = useState(false);
   const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
+  const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ["run", id],
@@ -83,6 +84,22 @@ export function RunDetail() {
     queryFn: () => api.listReportTemplates(),
   });
   const templateMap = new Map(reportTemplates?.map((t) => [t.id, t.name]));
+
+  // Filter reports: "latest" keeps only the most recent per templateId
+  const filteredReports = useMemo(() => {
+    if (!reports) return [];
+    if (reportsFilter === "all") return reports;
+    const seen = new Map<string, boolean>();
+    return reports
+      .slice()
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .filter((r) => {
+        const key = r.templateId ?? r._id; // manual reports always shown
+        if (seen.has(key)) return false;
+        seen.set(key, true);
+        return true;
+      });
+  }, [reports, reportsFilter]);
 
   const generateReport = useMutation({
     mutationFn: () => api.triggerReports(id!),
@@ -353,6 +370,24 @@ export function RunDetail() {
             <div className="flex items-center gap-2">
               <div className="flex items-center rounded-md border">
                 <Button
+                  variant={reportsFilter === "latest" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 rounded-r-none text-xs"
+                  onClick={() => setReportsFilter("latest")}
+                >
+                  Latest
+                </Button>
+                <Button
+                  variant={reportsFilter === "all" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 rounded-l-none text-xs"
+                  onClick={() => setReportsFilter("all")}
+                >
+                  All{reports && reports.length > 0 ? ` (${reports.length})` : ""}
+                </Button>
+              </div>
+              <div className="flex items-center rounded-md border">
+                <Button
                   variant={reportsView === "grid" ? "secondary" : "ghost"}
                   size="icon"
                   className="h-8 w-8 rounded-r-none"
@@ -383,10 +418,10 @@ export function RunDetail() {
             </div>
           </div>
 
-          {reports && reports.length > 0 ? (
+          {filteredReports.length > 0 ? (
             reportsView === "grid" ? (
               <div className="flex flex-wrap gap-4">
-                {reports.map((report) => (
+                {filteredReports.map((report) => (
                   <Link
                     key={report._id}
                     to={`/reports/${report._id}`}
@@ -419,7 +454,7 @@ export function RunDetail() {
               </div>
             ) : (
               <div className="space-y-3">
-                {reports.map((report) => (
+                {filteredReports.map((report) => (
                   <Card key={report._id}>
                     <CardContent className="flex items-center justify-between py-4">
                       <div className="flex items-center gap-4">
