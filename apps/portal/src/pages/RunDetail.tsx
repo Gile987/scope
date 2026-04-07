@@ -57,7 +57,7 @@ export function RunDetail() {
     fromStart: true,
   });
 
-  // For completed/failed/exhausted runs, use REST-fetched logs instead of SSE
+  // For completed/failed/finished runs, use REST-fetched logs instead of SSE
   const effectiveLogs = isActive ? logStream.logs : (run?.logs ?? []);
   const effectiveIsConnected = isActive ? logStream.isConnected : false;
   const effectiveIsDone = isActive ? logStream.isDone : true;

@@ -4,7 +4,7 @@
 // Types mirroring the API response shapes (from shared/src/types.ts)
 
 export type RunStatus = "pending" | "processing" | "done";
-export type RunOutcome = "succeeded" | "failed" | "exhausted";
+export type RunOutcome = "succeeded" | "failed" | "finished";
 
 export interface TokenUsage {
   promptTokens: number;
@@ -114,7 +114,7 @@ export const STATUS_LIST: RunStatus[] = [
 export const OUTCOME_LIST: RunOutcome[] = [
   "succeeded",
   "failed",
-  "exhausted",
+  "finished",
 ];
 
 // Criteria types

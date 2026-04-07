@@ -15,7 +15,7 @@ const statusConfig: Record<RunStatus, { label: string; variant: BadgeVariant }> 
 const outcomeConfig: Record<RunOutcome, { label: string; variant: BadgeVariant }> = {
   succeeded: { label: "Succeeded", variant: "success" },
   failed: { label: "Failed", variant: "destructive" },
-  exhausted: { label: "Exhausted", variant: "warning" },
+  finished: { label: "Finished", variant: "warning" },
 };
 
 export function StatusBadge({ status, outcome }: { status: RunStatus; outcome?: RunOutcome }) {
