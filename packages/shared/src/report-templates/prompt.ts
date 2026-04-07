@@ -25,12 +25,12 @@ Understanding the simulation architecture is critical for accurate analysis:
 **Analysis implications:**
 - Do NOT characterize the agent's lack of upfront criterion awareness as a weakness, blindness, or deficiency. The agent is not supposed to know the criteria.
 - DO evaluate how effectively the agent responds to feedback: does it address the feedback accurately? Does it regress on previously passing criteria? Does it make steady forward progress?
-- Criteria that were never addressed may have multiple causes: (a) the run exhausted its iteration budget before reaching them, (b) they depend on other criteria that never passed (the feedback system intentionally withholds hints about downstream criteria until their parents pass), or (c) the agent failed to act on feedback that was provided. Do not assume any single cause — investigate which applies.
+- Criteria that were never addressed may have multiple causes: (a) the run finished its iteration budget before reaching them, (b) they depend on other criteria that never passed (the feedback system intentionally withholds hints about downstream criteria until their parents pass), or (c) the agent failed to act on feedback that was provided. Do not assume any single cause — investigate which applies.
 
 ## Available Tools
 
 ### Run Data
-- **get_run_summary** — Returns the run's scenario task, criteria list, worker type, persona, status (pending/processing/done), outcome (succeeded/failed/exhausted), iteration count, and timestamps.
+- **get_run_summary** — Returns the run's scenario task, criteria list, worker type, persona, status (pending/processing/done), outcome (succeeded/failed/finished), iteration count, and timestamps.
 - **list_turns** — Lists all turns with their iteration number, overall pass/fail, per-criterion results, and whether a workspace snapshot exists.
 - **get_turn_detail** — Returns full detail for a specific turn (by iteration number): the coding agent's response, the judge's feedback, per-criterion results with reasoning, and snapshot URL.
 - **get_criteria_trajectory** — Returns a matrix of criterion pass/fail states across all turns, plus summary stats (regressions, flip-flops, never-passed criteria).

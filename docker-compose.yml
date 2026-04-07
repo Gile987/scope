@@ -131,6 +131,23 @@ services:
   # Application services
   # ===========================================================================
 
+  # Database migrations — runs once before the API starts.
+  # Reuses the API builder stage (has tsx + source + compiled output).
+  db-migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: builder
+    environment:
+      MONGO_CONNECTION_STRING: mongodb://mongodb:27017
+      MONGO_DATABASE: requests-db
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: "no"
+    working_dir: /app
+    command: ["pnpm", "--filter", "db-migrations", "migrate:up"]
+
   # API - REST + SSE endpoint (always starts)
   api:
     build:
@@ -158,6 +175,8 @@ services:
         condition: service_healthy
       azurite:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
 
   # Register agent definitions and versions (local dev — no real version env vars)
   register-agents:

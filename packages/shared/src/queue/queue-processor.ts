@@ -463,7 +463,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     const finalOutcome = result.passed
       ? "succeeded"
       : result.turns.length >= maxIterations
-        ? "exhausted"
+        ? "finished"
         : "failed";
     await log("info", `Multi-turn processing ${finalOutcome}`, {
       passed: result.passed,

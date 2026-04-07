@@ -50,7 +50,7 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
     const row = {
       ...run,
       turnsCount: run.turns?.length ?? 0,
-      passed: run.outcome === 'succeeded' ? 'yes' : run.outcome === 'failed' || run.outcome === 'exhausted' ? 'no' : '-',
+      passed: run.outcome === 'succeeded' ? 'yes' : run.outcome === 'failed' || run.outcome === 'finished' ? 'no' : '-',
       task: run.scenario?.task ?? '',
       criteriaCount: run.scenario?.criteria?.length ?? 0,
       logsCount: run.logs?.length ?? 0,
@@ -65,7 +65,7 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   if (run.model) console.log(`${label('Model:')}          ${value(run.model)}`);
 
   const statusColor = run.outcome === 'succeeded' ? successText
-    : (run.outcome === 'failed' || run.outcome === 'exhausted') ? errorText
+    : (run.outcome === 'failed' || run.outcome === 'finished') ? errorText
     : value;
   console.log(`${label('Status:')}         ${statusColor(run.status)}`);
   if (run.outcome) console.log(`${label('Outcome:')}        ${statusColor(run.outcome)}`);

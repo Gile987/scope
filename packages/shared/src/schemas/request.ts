@@ -69,7 +69,7 @@ export const RequestStatusSchema = z.enum([
 export const RequestOutcomeSchema = z.enum([
   "succeeded",
   "failed",
-  "exhausted",
+  "finished",
 ]);
 
 export const VALID_WORKERS = [
