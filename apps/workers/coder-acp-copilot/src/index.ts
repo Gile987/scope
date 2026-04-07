@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, McpGatewayClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -47,6 +47,8 @@ const AGENT_VERSION = `copilot-${process.env.COPILOT_CLI_VERSION || "unknown"}`;
 class CopilotProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
   workspacePath: string | undefined = undefined;
+  private gateway: McpGatewayClient | null = null;
+  private mcpConfigs: McpServerConfig[] = [];
 
   getAgentVersion(): string {
     return AGENT_VERSION;
@@ -58,12 +60,31 @@ class CopilotProcessor implements WorkerProcessor {
     };
   }
 
-  async setup(log: WorkerLogFn): Promise<void> {
+  async setup(log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<void> {
     this.workspacePath = createFreshWorkspace();
     await log("info", "Fresh workspace created", { workspacePath: this.workspacePath });
+
+    this.mcpConfigs = options?.mcpServerConfigs ?? [];
+    if (this.mcpConfigs.length > 0) {
+      if (!McpGatewayClient.isEnabled()) {
+        throw new Error("MCP servers configured but MCP_GATEWAY_URL is not set — cannot proceed without gateway");
+      }
+      this.gateway = new McpGatewayClient();
+      await log("info", "Registering MCP servers with gateway", { count: this.mcpConfigs.length, servers: this.mcpConfigs.map((s) => s.name) });
+      await this.gateway.purgeAll();
+      for (const config of this.mcpConfigs) await this.gateway.registerServer(config);
+    }
   }
 
   async teardown(log: WorkerLogFn): Promise<void> {
+    if (this.gateway && this.mcpConfigs.length > 0) {
+      await Promise.all(this.mcpConfigs.map((c) =>
+        this.gateway!.deregisterServer(c.name).catch((err) => {
+          log("warn", `Failed to deregister MCP server "${c.name}" — will be purged on next run`, { error: String(err) });
+        })
+      ));
+      this.gateway = null;
+    }
     try {
       cleanupWorkspaces();
       await log("info", "Workspaces directory cleaned");
@@ -71,6 +92,7 @@ class CopilotProcessor implements WorkerProcessor {
       await log("warn", `Failed to clean workspaces directory: ${error instanceof Error ? error.message : String(error)}`);
     }
     this.workspacePath = undefined;
+    this.mcpConfigs = [];
   }
 
   async processMessage(
@@ -78,13 +100,12 @@ class CopilotProcessor implements WorkerProcessor {
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
-    const mcpConfigs = options?.mcpServerConfigs ?? [];
     const skillConfigs = options?.skillConfigs ?? [];
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
       model: options?.model,
-      mcpServerCount: mcpConfigs.length,
-      mcpServers: mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
+      mcpServerCount: this.mcpConfigs.length,
+      mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
     });
@@ -121,17 +142,6 @@ class CopilotProcessor implements WorkerProcessor {
         preview: `${githubToken.substring(0, 7)}...(${githubToken.length} chars)`,
       });
 
-      // MCP gateway lifecycle — register servers before ACP session, deregister after
-      const gateway = McpGatewayClient.isEnabled() ? new McpGatewayClient() : null;
-      if (mcpConfigs.length > 0 && !gateway) {
-        throw new Error("MCP servers configured but MCP_GATEWAY_URL is not set — cannot proceed without gateway");
-      }
-      if (gateway && mcpConfigs.length > 0) {
-        await log("info", "Registering MCP servers with gateway", { count: mcpConfigs.length, servers: mcpConfigs.map((s) => s.name) });
-        await gateway.purgeAll();
-        for (const config of mcpConfigs) await gateway.registerServer(config);
-      }
-
       // Run ACP session with GitHub Copilot
       const args = ["--acp", "--yolo"];
       if (options?.model) {
@@ -140,33 +150,22 @@ class CopilotProcessor implements WorkerProcessor {
       // The Copilot CLI does not support MCP servers via ACP newSession.mcpServers
       // (agentCapabilities.mcpCapabilities is undefined). Instead, pass the gateway
       // endpoint via --additional-mcp-config so the CLI initializes it at startup.
-      if (gateway && mcpConfigs.length > 0) {
+      if (this.gateway && this.mcpConfigs.length > 0) {
         const mcpConfigJson = JSON.stringify({
-          mcpServers: { "mcp-gateway": { type: "http", url: gateway.mcpEndpoint } },
+          mcpServers: { "mcp-gateway": { type: "http", url: this.gateway.mcpEndpoint } },
         });
         args.push("--additional-mcp-config", mcpConfigJson);
       }
-      let result;
-      try {
-        result = await runACPSession(message, {
-          command: "copilot",
-          args,
-          env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL),
-          cwd: this.workspacePath!,
-          onLog: async (msg) => {
-            await log("debug", msg);
-          },
-          mcpServers: [],
-        });
-      } finally {
-        if (gateway && mcpConfigs.length > 0) {
-          await Promise.all(mcpConfigs.map((c) =>
-            gateway.deregisterServer(c.name).catch((err) => {
-              log("warn", `Failed to deregister MCP server "${c.name}" — will be purged on next run`, { error: String(err) });
-            })
-          ));
-        }
-      }
+      const result = await runACPSession(message, {
+        command: "copilot",
+        args,
+        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL),
+        cwd: this.workspacePath!,
+        onLog: async (msg) => {
+          await log("debug", msg);
+        },
+        mcpServers: [],
+      });
 
       await log("info", "Copilot processing complete", { 
         stopReason: result.stopReason,
