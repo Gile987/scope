@@ -22,7 +22,7 @@
  * Uses cursor-based batching to avoid CosmosDB 429 (RU exhaustion) on large collections.
  */
 
-import type { Db, Collection } from "mongodb";
+import type { Db, Collection, ObjectId } from "mongodb";
 import type { MigrationInterface } from "mongo-migrate-ts";
 
 const BATCH_SIZE = 50;
@@ -43,7 +43,7 @@ async function batchUpdate(
   label: string,
 ): Promise<number> {
   let total = 0;
-  const ids: unknown[] = [];
+  const ids: ObjectId[] = [];
 
   // Collect matching _id values first (lightweight projection)
   const cursor = col.find(filter, { projection: { _id: 1 } });
