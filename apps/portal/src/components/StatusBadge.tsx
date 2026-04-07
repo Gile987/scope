@@ -18,12 +18,13 @@ const outcomeConfig: Record<RunOutcome, { label: string; variant: BadgeVariant }
   exhausted: { label: "Exhausted", variant: "warning" },
 };
 
-export function StatusBadge({ status, outcome }: { status: RunStatus; outcome?: RunOutcome }) {
-  // When done, show the outcome badge instead of generic "Done"
-  if (status === "done" && outcome) {
-    const config = outcomeConfig[outcome] ?? { label: outcome, variant: "outline" as const };
-    return <Badge variant={config.variant}>{config.label}</Badge>;
-  }
+export function StatusBadge({ status }: { status: RunStatus }) {
   const config = statusConfig[status] ?? { label: status, variant: "outline" as const };
+  return <Badge variant={config.variant}>{config.label}</Badge>;
+}
+
+export function OutcomeBadge({ outcome }: { outcome?: RunOutcome }) {
+  if (!outcome) return <span className="text-xs text-muted-foreground">–</span>;
+  const config = outcomeConfig[outcome] ?? { label: outcome, variant: "outline" as const };
   return <Badge variant={config.variant}>{config.label}</Badge>;
 }
