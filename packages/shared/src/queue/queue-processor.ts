@@ -313,7 +313,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       { _id: requestId },
       {
         $set: {
-          status: "completed",
+          status: "done",
+          outcome: "succeeded",
           result: workerResult.response,
           ...(harUrl && { harUrl }),
           ...(videoUrls && videoUrls.length > 0 && { videoUrls }),
@@ -354,7 +355,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     const versionFields = this.getVersionFields();
     await withRetry(() => this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "iterating", turns: [], updatedAt: new Date(), ...versionFields } }
+      { $set: { status: "processing", turns: [], updatedAt: new Date(), ...versionFields } }
     ));
 
     // Extend queue message visibility for long-running multi-turn.
@@ -458,12 +459,13 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
     }
 
-    const finalStatus = result.passed
-      ? "completed"
+    const finalStatus = "done";
+    const finalOutcome = result.passed
+      ? "succeeded"
       : result.turns.length >= maxIterations
         ? "exhausted"
         : "failed";
-    await log("info", `Multi-turn processing ${finalStatus}`, {
+    await log("info", `Multi-turn processing ${finalOutcome}`, {
       passed: result.passed,
       totalIterations: result.turns.length,
       final: true,
@@ -474,6 +476,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       {
         $set: {
           status: finalStatus,
+          outcome: finalOutcome,
           result: result.finalResult,
           updatedAt: new Date(),
           ...(result.passed ? {} : { error: result.finalResult }),

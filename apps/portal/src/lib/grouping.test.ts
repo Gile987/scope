@@ -13,7 +13,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     _id: Math.random().toString(36).slice(2),
     id: "",
     workerType: "coder-acp-copilot",
-    status: "completed",
+    status: "done",
     createdAt: new Date().toISOString(),
     scenario: { task: "Default task", criteria: [] },
     ...overrides,
@@ -225,17 +225,17 @@ describe("uniform values", () => {
 
   it("detects uniform status", () => {
     const runs = [
-      makeRun({ taskPromptId: "t1", status: "completed" }),
-      makeRun({ taskPromptId: "t1", status: "completed" }),
+      makeRun({ taskPromptId: "t1", status: "done" }),
+      makeRun({ taskPromptId: "t1", status: "done" }),
     ];
     const groups = groupRuns(runs, "task");
-    expect(groups[0].uniform.status).toBe("completed");
+    expect(groups[0].uniform.status).toBe("done");
   });
 
   it("returns undefined for mixed status", () => {
     const runs = [
-      makeRun({ taskPromptId: "t1", status: "completed" }),
-      makeRun({ taskPromptId: "t1", status: "failed" }),
+      makeRun({ taskPromptId: "t1", status: "done" }),
+      makeRun({ taskPromptId: "t1", status: "pending" }),
     ];
     const groups = groupRuns(runs, "task");
     expect(groups[0].uniform.status).toBeUndefined();
@@ -283,7 +283,7 @@ describe("uniform values", () => {
         taskPromptId: "t1",
         workerType: "coder-vscode-web",
         model: "gpt-4o",
-        status: "completed",
+        status: "done",
         mcpServers: ["fs"],
         agentVersion: "v1",
       }),
@@ -292,7 +292,7 @@ describe("uniform values", () => {
     const u = groups[0].uniform;
     expect(u.workerType).toBe("coder-vscode-web");
     expect(u.model).toBe("gpt-4o");
-    expect(u.status).toBe("completed");
+    expect(u.status).toBe("done");
     expect(u.mcpServers).toEqual(["fs"]);
     expect(u.agentVersion).toBe("v1");
   });

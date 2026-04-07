@@ -207,7 +207,8 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
             { _id: documentId } as any,
             {
               $set: {
-                status: "failed",
+                status: "done",
+                outcome: "failed",
                 error: error instanceof Error ? error.message : String(error),
                 updatedAt: new Date(),
               },

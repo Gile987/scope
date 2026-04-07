@@ -224,7 +224,7 @@ function getOrCreateSubscriber(): InstanceType<typeof Redis> {
           try {
             const logEvent = JSON.parse(message) as LogEvent;
             if (logEvent.data?.final === true) {
-              client.res.write(`event: done\ndata: {"status":"completed"}\n\n`);
+              client.res.write(`event: done\ndata: {"status":"done"}\n\n`);
               client.cleanup();
             }
           } catch {
@@ -937,13 +937,13 @@ apiRoute(app, registry, {
       }
     }
 
-    // If request already completed/failed/exhausted, send final event and close
-    if (resource.status === "completed" || resource.status === "failed" || resource.status === "exhausted") {
-      // For completed multi-turn requests, send turns summary
+    // If request already done, send final event and close
+    if (resource.status === "done") {
+      // For done multi-turn requests, send turns summary
       if (resource.turns && resource.turns.length > 0) {
-        res.write(`data: ${JSON.stringify({ type: "turns_summary", turns: resource.turns.length, passed: resource.status === "completed" })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "turns_summary", turns: resource.turns.length, passed: resource.outcome === "succeeded" })}\n\n`);
       }
-      res.write(`event: done\ndata: {"status":"${resource.status}"}\n\n`);
+      res.write(`event: done\ndata: ${JSON.stringify({ status: resource.status, outcome: resource.outcome })}\n\n`);
       res.end();
       return;
     }
@@ -1014,8 +1014,8 @@ apiRoute(app, registry, {
       changeStream.on("change", (change) => {
         if (change.operationType === "update" && change.fullDocument) {
           const doc = change.fullDocument;
-          if (doc.status === "completed" || doc.status === "failed" || doc.status === "exhausted") {
-            res.write(`event: done\ndata: {"status":"${doc.status}"}\n\n`);
+          if (doc.status === "done") {
+            res.write(`event: done\ndata: ${JSON.stringify({ status: doc.status, outcome: doc.outcome })}\n\n`);
             client.cleanup();
           }
         }
@@ -1120,10 +1120,10 @@ apiRoute(app, registry, {
       ? criteriaParam.split(",").map(c => c.trim()).filter(Boolean)
       : undefined;
 
-    // Fetch all completed/failed runs (exclude pending/processing, exclude deleted)
+    // Fetch all done runs (exclude pending/processing, exclude deleted)
     const runs = await collection
       .find({
-        status: { $in: ["completed", "failed", "exhausted"] },
+        status: "done",
         deletedAt: { $exists: false },
       })
       .project({
@@ -1131,6 +1131,7 @@ apiRoute(app, registry, {
         scenario: 1,
         workerType: 1,
         status: 1,
+        outcome: 1,
         turns: 1,
       })
       .toArray();
@@ -1140,6 +1141,7 @@ apiRoute(app, registry, {
       scenario: r.scenario,
       workerType: r.workerType,
       status: r.status,
+      outcome: r.outcome,
       turns: r.turns,
     }));
 
@@ -1869,7 +1871,7 @@ apiRoute(app, registry, {
     }
 
     // Validate status is terminal (cannot import in-flight runs)
-    const terminalStatuses = ["completed", "failed", "exhausted"];
+    const terminalStatuses = ["done"];
     if (!terminalStatuses.includes(runDoc.status)) {
       res.status(400).json({
         error: `Cannot upload in-flight run (status: ${runDoc.status}). Only terminal runs can be uploaded.`,
@@ -2152,7 +2154,7 @@ apiRoute(app, registry, {
     const sinceDate = req.query.since ? new Date(req.query.since) : undefined;
 
     const mdpFilter: Record<string, unknown> = {
-      status: { $in: ["completed", "failed", "exhausted"] },
+      status: "done",
       deletedAt: { $exists: false },
     };
     if (req.query.worker) mdpFilter.workerType = req.query.worker;

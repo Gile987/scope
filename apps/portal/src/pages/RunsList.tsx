@@ -992,7 +992,7 @@ function RunRow({
         )}
       </TableCell>
       <TableCell>
-        <StatusBadge status={run.status} />
+        <StatusBadge status={run.status} outcome={run.outcome} />
       </TableCell>
       <TableCell>
         {reportSummaries?.[run._id] ? (
@@ -1202,12 +1202,9 @@ function GroupRows({
             const statusColors: Record<string, string> = {
               pending: "bg-gray-500",
               processing: "bg-blue-500",
-              iterating: "bg-blue-500",
-              completed: "bg-green-500",
-              exhausted: "bg-orange-400",
-              failed: "bg-red-500",
+              done: "bg-green-500",
             };
-            const completed = group.runs.filter((r) => r.status === "completed" || r.status === "exhausted").length;
+            const completed = group.runs.filter((r) => r.status === "done").length;
             const total = group.runs.length;
             const segments = Object.entries(
               group.runs.reduce<Record<string, number>>((acc, r) => {

@@ -442,7 +442,8 @@ run
             formatter: (req: any) => req.status ?? 'unknown',
             tableFormatter: (req: any) => {
               const s = req.status ?? 'unknown';
-              return s === 'completed' ? successText(s) : s === 'failed' ? errorText(s) : value(s);
+              const o = req.outcome;
+              return o === 'succeeded' ? successText(s) : o === 'failed' || o === 'exhausted' ? errorText(s) : value(s);
             },
           },
           { key: 'submissionId', label: 'Submission',

@@ -3,7 +3,8 @@
 
 // Types mirroring the API response shapes (from shared/src/types.ts)
 
-export type RunStatus = "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
+export type RunStatus = "pending" | "processing" | "done";
+export type RunOutcome = "succeeded" | "failed" | "exhausted";
 
 export interface TokenUsage {
   promptTokens: number;
@@ -72,6 +73,7 @@ export interface Run {
   agentVersion?: string;
   workerVersion?: string;
   status: RunStatus;
+  outcome?: RunOutcome;
   result?: string;
   error?: string;
   logs?: LogEvent[];
@@ -106,8 +108,11 @@ export type WorkerType = (typeof WORKER_TYPES)[number];
 export const STATUS_LIST: RunStatus[] = [
   "pending",
   "processing",
-  "iterating",
-  "completed",
+  "done",
+];
+
+export const OUTCOME_LIST: RunOutcome[] = [
+  "succeeded",
   "failed",
   "exhausted",
 ];

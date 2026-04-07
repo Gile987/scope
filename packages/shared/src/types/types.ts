@@ -115,7 +115,8 @@ export interface RequestDocument {
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
   model?: string;              // Model selected for this run
-  status: "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
+  status: "pending" | "processing" | "done";
+  outcome?: "succeeded" | "failed" | "exhausted";
   result?: string;
   error?: string;
   logs?: LogEvent[];
