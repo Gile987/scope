@@ -505,6 +505,16 @@ export const api = {
     return request("/version");
   },
 
+  /** Get API readiness and migration status (hits root-level /ready, not /api/v1) */
+  getReadiness: async (): Promise<{ status: string; migrations: { ready: boolean; applied: string[]; pending: string[] } }> => {
+    const res = await fetch("/ready");
+    // /ready returns 503 when not ready — we still want the JSON body
+    if (!res.ok && res.status !== 503) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
   // ─── Key Manager ──────────────────────────────────────────────────────────
 
   /** List all keys (metadata only), optionally filtered by capability */
