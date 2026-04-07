@@ -210,7 +210,7 @@ describe("request schemas", () => {
     it("rejects old status values", () => {
       expect(() => RequestStatusSchema.parse("completed")).toThrow();
       expect(() => RequestStatusSchema.parse("iterating")).toThrow();
-      expect(() => RequestStatusSchema.parse("exhausted")).toThrow();
+      expect(() => RequestStatusSchema.parse("finished")).toThrow();
       expect(() => RequestStatusSchema.parse("failed")).toThrow();
     });
 
@@ -220,7 +220,7 @@ describe("request schemas", () => {
   });
 
   describe("RequestOutcomeSchema", () => {
-    it.each(["succeeded", "failed", "exhausted"])(
+    it.each(["succeeded", "failed", "finished"])(
       "accepts '%s'",
       (outcome) => {
         expect(RequestOutcomeSchema.parse(outcome)).toBe(outcome);
