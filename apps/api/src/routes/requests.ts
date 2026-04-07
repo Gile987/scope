@@ -511,9 +511,10 @@ apiRoute(ctx.app, ctx.registry, {
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
-    // If fromStart=true, send existing logs from MongoDB first
-    if (fromStart && resource.logs && resource.logs.length > 0) {
-      for (const log of resource.logs) {
+    // If fromStart=true, replay existing logs from blob storage
+    if (fromStart) {
+      const pastLogs = await ctx.blobStorage.getLogEvents(id);
+      for (const log of pastLogs) {
         res.write(`data: ${JSON.stringify(log)}\n\n`);
       }
     }

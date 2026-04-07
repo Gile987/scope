@@ -57,14 +57,14 @@ export function RunDetail() {
 
   // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
   // Must be called unconditionally (before any early returns) per Rules of Hooks
+  // The SSE endpoint handles completed runs by replaying blob logs then closing.
   const logStream = useLogStream({
     id: run?._id ?? "",
-    enabled: isActive && !!run,
+    enabled: !!run,
     fromStart: true,
   });
 
-  // For completed/failed/finished runs, use REST-fetched logs instead of SSE
-  const effectiveLogs = isActive ? logStream.logs : (run?.logs ?? []);
+  const effectiveLogs = logStream.logs;
   const effectiveIsConnected = isActive ? logStream.isConnected : false;
   const effectiveIsDone = isActive ? logStream.isDone : true;
   const effectiveError = isActive ? logStream.error : null;

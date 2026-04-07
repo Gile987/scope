@@ -14,8 +14,10 @@ import { join, basename } from "path";
 import { pipeline } from "stream/promises";
 import { createGunzip } from "zlib";
 import { extract } from "tar";
+import type { LogEvent } from "../types/types.js";
 
 const SNAPSHOTS_CONTAINER = "snapshots";
+const LOGS_CONTAINER = "logs";
 
 // Directories/patterns to exclude from workspace snapshots
 const EXCLUDE_PATTERNS = [
@@ -36,6 +38,8 @@ export interface BlobStorageConfig {
 
 export class BlobStorage {
   private containerClient: ContainerClient;
+  private logsContainerClient: ContainerClient;
+  private blobServiceClient: BlobServiceClient;
 
   constructor(config: BlobStorageConfig) {
     let blobServiceClient: BlobServiceClient;
@@ -52,7 +56,9 @@ export class BlobStorage {
       );
     }
 
+    this.blobServiceClient = blobServiceClient;
     this.containerClient = blobServiceClient.getContainerClient(SNAPSHOTS_CONTAINER);
+    this.logsContainerClient = blobServiceClient.getContainerClient(LOGS_CONTAINER);
   }
 
   /**
@@ -60,6 +66,48 @@ export class BlobStorage {
    */
   async ensureContainer(): Promise<void> {
     await this.containerClient.createIfNotExists();
+  }
+
+  /**
+   * Appends a single log event as a JSON line to the run's append blob.
+   * Creates the blob and container on first use.
+   */
+  async appendLogEvent(requestId: string, logEvent: LogEvent): Promise<void> {
+    await this.logsContainerClient.createIfNotExists();
+    const blobName = `${requestId}/run.jsonl`;
+    const appendBlobClient = this.logsContainerClient.getAppendBlobClient(blobName);
+    await appendBlobClient.createIfNotExists();
+    const line = JSON.stringify(logEvent) + "\n";
+    await appendBlobClient.appendBlock(line, Buffer.byteLength(line));
+  }
+
+  /**
+   * Downloads all persisted log events for a run.
+   * Returns an empty array if no log blob exists yet.
+   */
+  async getLogEvents(requestId: string): Promise<LogEvent[]> {
+    await this.logsContainerClient.createIfNotExists();
+    const blobName = `${requestId}/run.jsonl`;
+    const appendBlobClient = this.logsContainerClient.getAppendBlobClient(blobName);
+
+    try {
+      const download = await appendBlobClient.download();
+      if (!download.readableStreamBody) return [];
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of download.readableStreamBody as AsyncIterable<Buffer>) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const text = Buffer.concat(chunks).toString("utf-8");
+      return text
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as LogEvent);
+    } catch (err: any) {
+      // Blob not found — log stream hasn't started yet
+      if (err?.statusCode === 404) return [];
+      throw err;
+    }
   }
 
   /**

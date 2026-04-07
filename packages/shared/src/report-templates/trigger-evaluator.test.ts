@@ -17,7 +17,6 @@ function makeRun(overrides: Partial<RequestDocument> = {}): RequestDocument {
     scenario: { task: 'Build an Express API', criteria: ['has_azure', 'has_cloud'] },
     workerType: 'coder-acp-copilot',
     status: 'completed',
-    logs: [],
     createdAt: new Date(),
     taskPromptId: 'tp-uuid-1',
     ...overrides,
