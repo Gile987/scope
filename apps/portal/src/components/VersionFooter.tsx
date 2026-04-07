@@ -9,13 +9,26 @@ interface VersionInfo {
   buildTime: string;
 }
 
+interface ReadinessInfo {
+  status: string;
+  migrations: { ready: boolean; applied: string[]; pending: string[] };
+}
+
 export function VersionFooter() {
   const [apiVersion, setApiVersion] = useState<VersionInfo | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessInfo | null>(null);
+  const [apiReachable, setApiReachable] = useState(true);
 
   useEffect(() => {
     api.getVersion()
       .then(setApiVersion)
-      .catch(() => setApiVersion(null));
+      .catch(() => {
+        setApiVersion(null);
+        setApiReachable(false);
+      });
+    api.getReadiness()
+      .then(setReadiness)
+      .catch(() => setReadiness(null));
   }, []);
 
   const portalCommit = __GIT_COMMIT__;
@@ -47,10 +60,22 @@ export function VersionFooter() {
           Portal: <code className="font-mono">{shortCommit(portalCommit)}</code>{" "}
           <span className="text-muted-foreground/70">({formatDate(portalBuildTime)})</span>
         </span>
-        {apiVersion && (
+        {apiVersion ? (
           <span>
             API: <code className="font-mono">{shortCommit(apiVersion.commit)}</code>{" "}
             <span className="text-muted-foreground/70">({formatDate(apiVersion.buildTime)})</span>
+          </span>
+        ) : !apiReachable ? (
+          <span className="text-destructive">API: unavailable</span>
+        ) : null}
+        {readiness && (
+          <span>
+            DB: <code className="font-mono">v{readiness.migrations.applied.length}</code>
+            {readiness.migrations.pending.length > 0 && (
+              <span className="ml-1 text-yellow-600 dark:text-yellow-400">
+                · {readiness.migrations.pending.length} pending
+              </span>
+            )}
           </span>
         )}
       </div>
