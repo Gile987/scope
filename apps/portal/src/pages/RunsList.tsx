@@ -871,6 +871,7 @@ export function RunsList() {
               <TableHead className="w-[100px]">Outcome</TableHead>
               <TableHead className="w-[100px]">Report</TableHead>
               <TableHead className="w-[80px]">Turns</TableHead>
+              <TableHead className="w-[80px]">LLM Calls</TableHead>
               <TableHead className="w-[100px]">Duration</TableHead>
               <TableHead className="w-[120px]">Tokens</TableHead>
               <TableHead className="w-[160px]">Created</TableHead>
@@ -1025,6 +1026,9 @@ function RunRow({
       </TableCell>
       <TableCell className="text-center">
         {run.turns?.length ?? "–"}
+      </TableCell>
+      <TableCell className="text-center font-mono text-xs">
+        {run.aiCallCount !== undefined ? run.aiCallCount : <span className="text-muted-foreground">–</span>}
       </TableCell>
       <TableCell className="font-mono text-xs">
         {(() => {

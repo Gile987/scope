@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent, extractTokenUsage } from "./har-parser.js";
+import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent, extractTokenUsage, extractAiCallCount } from "./har-parser.js";
 import type { HarFile, ToolCall } from "./types.js";
 
 // Mock fs/promises for parseHarFile tests
@@ -1009,5 +1009,53 @@ describe("extractTokenUsage", () => {
       makeEntry({}),
     ]);
     expect(extractTokenUsage(har)).toBeUndefined();
+  });
+});
+
+describe("extractAiCallCount", () => {
+  it("counts GitHub Copilot completion entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(2);
+  });
+
+  it("counts GitHub Models completion entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://models.inference.ai.azure.com/chat/completions" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("counts Anthropic messages entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(3);
+  });
+
+  it("counts mixed providers", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(2);
+  });
+
+  it("ignores non-completion entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+      makeEntry({ url: "https://api.githubcopilot.com/models" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/tokenize" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("returns 0 for empty HAR", () => {
+    const har = makeHar([]);
+    expect(extractAiCallCount(har)).toBe(0);
   });
 });

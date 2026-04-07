@@ -572,3 +572,28 @@ export async function extractTokenUsageFromFile(filePath: string): Promise<Token
   const har = await parseHarFile(filePath);
   return extractTokenUsage(har);
 }
+
+/**
+ * URL patterns that identify AI completion endpoints.
+ * Matches the path suffix so it works across all known providers:
+ * - GitHub Copilot:  https://api.githubcopilot.com/chat/completions
+ * - GitHub Models:   https://models.inference.ai.azure.com/chat/completions
+ * - Anthropic:       https://api.anthropic.com/v1/messages
+ */
+const AI_COMPLETION_URL_PATTERNS: ReadonlyArray<RegExp> = [
+  /\/chat\/completions$/,
+  /\/v1\/messages$/,
+];
+
+/**
+ * Count the number of AI completion calls captured in a HAR file.
+ *
+ * Each HTTP entry whose request URL matches a known completion endpoint
+ * counts as one AI call. Streaming and non-streaming requests each count
+ * as a single call regardless of how many SSE chunks they produce.
+ */
+export function extractAiCallCount(har: HarFile): number {
+  return har.log.entries.filter((entry) =>
+    AI_COMPLETION_URL_PATTERNS.some((p) => p.test(entry.request.url)),
+  ).length;
+}

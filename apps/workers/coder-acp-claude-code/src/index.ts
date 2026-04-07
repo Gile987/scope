@@ -152,10 +152,10 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       });
 
       const response = result.response || `[${this.workerName}] No response from Claude Code`;
-      const { harFilePath, tokenUsage } = devProxy
+      const { harFilePath, tokenUsage, aiCallCount } = devProxy
         ? await devProxy.stopAndCollectHar(log)
-        : { harFilePath: null, tokenUsage: undefined };
-      return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }) };
+        : { harFilePath: null, tokenUsage: undefined, aiCallCount: undefined };
+      return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }), ...(aiCallCount !== undefined && { aiCallCount }) };
     } catch (error) {
       if (devProxy) {
         const { harFilePath } = await devProxy.stopAndCollectHar(log);

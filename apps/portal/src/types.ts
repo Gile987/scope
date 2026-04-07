@@ -41,6 +41,7 @@ export interface ConversationTurn {
   startedAt?: string;
   durationMs?: number;
   toolCalls?: ToolCall[];
+  aiCallCount?: number;
 }
 
 export interface Scenario {
@@ -96,6 +97,7 @@ export interface Run {
   setupVideoUrls?: string[];
   submissionId?: string;
   tokenUsage?: TokenUsage;
+  aiCallCount?: number;
 }
 
 export const WORKER_TYPES = [
