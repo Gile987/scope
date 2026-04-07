@@ -25,11 +25,20 @@
 import type { Db, Collection, ObjectId } from "mongodb";
 import type { MigrationInterface } from "mongo-migrate-ts";
 
-const BATCH_SIZE = 50;
+const BATCH_SIZE = 10;
+const INTER_BATCH_DELAY_MS = 500;
 
 /** Sleep helper for retry backoff. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Extract RetryAfterMs from a CosmosDB error (may be a property or in the message string). */
+function getRetryAfterMs(err: any): number {
+  if (typeof err?.retryAfterMs === "number") return err.retryAfterMs;
+  const match = String(err?.message ?? "").match(/RetryAfterMs=(\d+)/);
+  if (match) return parseInt(match[1], 10);
+  return 2000;
 }
 
 /**
@@ -51,11 +60,23 @@ async function batchUpdate(
     ids.push(doc._id);
   }
 
+  if (ids.length === 0) {
+    console.log(`  ${label}: 0 documents`);
+    return 0;
+  }
+
+  console.log(`  ${label}: ${ids.length} documents to process in ${Math.ceil(ids.length / BATCH_SIZE)} batches`);
+
   // Process in batches
   for (let i = 0; i < ids.length; i += BATCH_SIZE) {
     const batch = ids.slice(i, i + BATCH_SIZE);
     let retries = 0;
-    const maxRetries = 5;
+    const maxRetries = 10;
+
+    // Pace batches to avoid saturating RUs
+    if (i > 0) {
+      await sleep(INTER_BATCH_DELAY_MS);
+    }
 
     while (retries < maxRetries) {
       try {
@@ -65,9 +86,8 @@ async function batchUpdate(
       } catch (err: any) {
         // CosmosDB 429: error code 16500
         if (err?.code === 16500 && retries < maxRetries - 1) {
-          const retryAfterMs = err?.retryAfterMs ?? err?.errorLabels?.RetryAfterMs ?? 2000;
-          const delay = Math.max(retryAfterMs, 1000);
-          console.log(`  ${label}: 429 on batch ${i / BATCH_SIZE + 1}, retrying in ${delay}ms...`);
+          const delay = Math.max(getRetryAfterMs(err), 500);
+          console.log(`  ${label}: 429 on batch ${Math.floor(i / BATCH_SIZE) + 1}, retry ${retries + 1}/${maxRetries - 1}, waiting ${delay}ms...`);
           await sleep(delay);
           retries++;
         } else {
@@ -77,7 +97,7 @@ async function batchUpdate(
     }
   }
 
-  console.log(`  ${label}: ${total} documents`);
+  console.log(`  ${label}: ${total} documents updated`);
   return total;
 }
 
