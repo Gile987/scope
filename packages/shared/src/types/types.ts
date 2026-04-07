@@ -116,7 +116,7 @@ export interface RequestDocument {
   workerType: string;
   model?: string;              // Model selected for this run
   status: "pending" | "processing" | "done";
-  outcome?: "succeeded" | "failed" | "exhausted";
+  outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;
   logs?: LogEvent[];
