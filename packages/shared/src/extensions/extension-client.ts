@@ -165,6 +165,7 @@ export class ExtensionClient {
     const ext = data.results?.[0]?.extensions?.[0];
     if (!ext?.versions) return [];
 
+    const seen = new Set<string>();
     return ext.versions
       .map((v) => {
         const isPreRelease = v.properties?.some(
@@ -176,6 +177,10 @@ export class ExtensionClient {
           lastUpdated: v.lastUpdated ?? "",
         };
       })
-      .filter((v) => includePreRelease || !v.preRelease);
+      .filter((v) => {
+        if (seen.has(v.version)) return false;
+        seen.add(v.version);
+        return includePreRelease || !v.preRelease;
+      });
   }
 }

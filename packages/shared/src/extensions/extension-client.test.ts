@@ -295,5 +295,35 @@ describe('ExtensionClient', () => {
       await expect(client.getVersions('invalid'))
         .rejects.toThrow('Invalid extension ID: invalid');
     });
+
+    it('deduplicates versions with the same version string (platform-specific builds)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          results: [{
+            extensions: [{
+              publisher: { publisherName: 'ms-windows-ai-studio' },
+              extensionName: 'windows-ai-studio',
+              displayName: 'AI Toolkit',
+              versions: [
+                { version: '0.34.0', lastUpdated: '2026-04-01T00:00:00Z', properties: [], targetPlatform: 'win32-x64' },
+                { version: '0.34.0', lastUpdated: '2026-04-01T00:00:00Z', properties: [], targetPlatform: 'linux-x64' },
+                { version: '0.34.0', lastUpdated: '2026-04-01T00:00:00Z', properties: [], targetPlatform: 'darwin-arm64' },
+                { version: '0.33.0', lastUpdated: '2026-03-15T00:00:00Z', properties: [], targetPlatform: 'win32-x64' },
+                { version: '0.33.0', lastUpdated: '2026-03-15T00:00:00Z', properties: [], targetPlatform: 'linux-x64' },
+                { version: '0.33.0', lastUpdated: '2026-03-15T00:00:00Z', properties: [], targetPlatform: 'darwin-arm64' },
+              ],
+            }],
+          }],
+        }),
+      });
+
+      const versions = await client.getVersions('ms-windows-ai-studio.windows-ai-studio');
+
+      expect(versions).toHaveLength(2);
+      expect(versions[0]!.version).toBe('0.34.0');
+      expect(versions[1]!.version).toBe('0.33.0');
+    });
   });
 });
