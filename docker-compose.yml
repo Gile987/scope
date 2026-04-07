@@ -146,7 +146,7 @@ services:
         condition: service_healthy
     restart: "no"
     working_dir: /app
-    command: ["npx", "tsx", "packages/db-migrations/src/migrate.ts", "up"]
+    command: ["pnpm", "--filter", "db-migrations", "migrate:up"]
 
   # API - REST + SSE endpoint (always starts)
   api:
