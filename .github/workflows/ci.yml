@@ -139,9 +139,12 @@ jobs:
     name: Integration Tests (${{ matrix.worker.name }})
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
-      needs.detect-changes.outputs.shared == 'true'
+      github.repository == 'growth-ecosystems/scope-core' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
+        needs.detect-changes.outputs.shared == 'true'
+      )
     runs-on: ubuntu-latest
 
     strategy:
@@ -399,6 +402,7 @@ jobs:
     if: >-
       always() &&
       !cancelled() &&
+      github.repository == 'growth-ecosystems/scope-core' &&
       needs.test.result == 'success' &&
       needs.build.result == 'success' &&
       (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped') &&
