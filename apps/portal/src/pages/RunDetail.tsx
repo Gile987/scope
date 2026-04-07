@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { StatusBadge } from "@/components/StatusBadge";
+import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { LogViewer } from "@/components/LogViewer";
 import { TurnTimeline } from "@/components/TurnTimeline";
@@ -191,7 +191,8 @@ export function RunDetail() {
               </button>
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <StatusBadge status={run.status} outcome={run.outcome} />
+              <StatusBadge status={run.status} />
+              {run.status === "done" && <OutcomeBadge outcome={run.outcome} />}
               <span className="font-mono">{run.workerType}</span>
               {run.model && (
                 <>
