@@ -18,10 +18,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusBadge } from "@/components/StatusBadge";
+import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
-import { WORKER_TYPES, STATUS_LIST } from "@/types";
+import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary } from "@/types";
 import { groupRuns, formatStatRange, type GroupByKey, type RunGroup } from "@/lib/grouping";
 
@@ -32,6 +32,7 @@ export function RunsList() {
   const submissionId = searchParams.get("submissionId") ?? undefined;
   const [workerFilter, setWorkerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [taskFilter, setTaskFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [groupBy, setGroupBy] = useState<GroupByKey>("none");
@@ -174,6 +175,7 @@ export function RunsList() {
 
   const filteredRuns = runs.filter((r) => {
     if (statusFilter !== "all" && r.status !== statusFilter) return false;
+    if (outcomeFilter !== "all" && r.outcome !== outcomeFilter) return false;
     if (taskFilter !== "all" && r.scenario?.task !== taskFilter) return false;
     return true;
   });
@@ -267,6 +269,20 @@ export function RunsList() {
               <SelectItem value="all">All statuses</SelectItem>
               {STATUS_LIST.map((s) => (
                 <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Outcome:</span>
+          <Select value={outcomeFilter} onValueChange={setOutcomeFilter}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="All outcomes" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All outcomes</SelectItem>
+              {OUTCOME_LIST.map((o) => (
+                <SelectItem key={o} value={o}>{o}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -851,7 +867,8 @@ export function RunsList() {
               <TableHead>Version</TableHead>
               <TableHead>MCP</TableHead>
               <TableHead>Skills</TableHead>
-              <TableHead className="w-[120px]">Status</TableHead>
+              <TableHead className="w-[100px]">Status</TableHead>
+              <TableHead className="w-[100px]">Outcome</TableHead>
               <TableHead className="w-[100px]">Report</TableHead>
               <TableHead className="w-[80px]">Turns</TableHead>
               <TableHead className="w-[100px]">Duration</TableHead>
@@ -992,7 +1009,10 @@ function RunRow({
         )}
       </TableCell>
       <TableCell>
-        <StatusBadge status={run.status} outcome={run.outcome} />
+        <StatusBadge status={run.status} />
+      </TableCell>
+      <TableCell>
+        <OutcomeBadge outcome={run.outcome} />
       </TableCell>
       <TableCell>
         {reportSummaries?.[run._id] ? (
@@ -1222,6 +1242,40 @@ function GroupRows({
                       className={`h-full ${statusColors[status] ?? "bg-gray-400"} transition-all`}
                       style={{ width: `${(count / total) * 100}%` }}
                       title={`${status}: ${count}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </TableCell>
+        {/* Outcome */}
+        <TableCell>
+          {(() => {
+            const outcomeColors: Record<string, string> = {
+              succeeded: "bg-green-500",
+              failed: "bg-red-500",
+              exhausted: "bg-yellow-500",
+            };
+            const doneRuns = group.runs.filter((r) => r.status === "done" && r.outcome);
+            if (doneRuns.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
+            const segments = Object.entries(
+              doneRuns.reduce<Record<string, number>>((acc, r) => {
+                acc[r.outcome!] = (acc[r.outcome!] ?? 0) + 1;
+                return acc;
+              }, {}),
+            );
+            const succeeded = doneRuns.filter((r) => r.outcome === "succeeded").length;
+            return (
+              <div className="flex flex-col gap-1 min-w-[80px]">
+                <span className="text-xs font-medium">{succeeded}/{doneRuns.length} pass</span>
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
+                  {segments.map(([outcome, count]) => (
+                    <div
+                      key={outcome}
+                      className={`h-full ${outcomeColors[outcome] ?? "bg-gray-400"} transition-all`}
+                      style={{ width: `${(count / doneRuns.length) * 100}%` }}
+                      title={`${outcome}: ${count}`}
                     />
                   ))}
                 </div>
