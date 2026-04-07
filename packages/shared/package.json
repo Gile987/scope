@@ -6,18 +6,22 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./criteria-store": {
+      "source": "./src/criteria/criteria-store.ts",
       "types": "./dist/criteria/criteria-store.d.ts",
       "import": "./dist/criteria/criteria-store.js"
     },
     "./criteria-provider": {
+      "source": "./src/criteria/criteria-provider.ts",
       "types": "./dist/criteria/criteria-provider.d.ts",
       "import": "./dist/criteria/criteria-provider.js"
     },
     "./criteria-provider-factory": {
+      "source": "./src/criteria/criteria-provider-factory.ts",
       "types": "./dist/criteria/criteria-provider-factory.d.ts",
       "import": "./dist/criteria/criteria-provider-factory.js"
     }

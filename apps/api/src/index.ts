@@ -1196,6 +1196,16 @@ apiRoute(app, registry, {
         // Strip extensions for non-vscode workers (they don't support VS Code extensions)
         const isVscodeWorker = effectiveWorkerType.includes("vscode");
 
+        // Resolve agent version for re-submitted run (latest active for the effective worker)
+        let resolvedAgentVersion: string | undefined;
+        const agentDoc = await agentCollection.findOne({ _id: effectiveWorkerType, deletedAt: { $exists: false } });
+        if (agentDoc) {
+          const versionResult = resolveAgentVersion(agentDoc.versions, undefined);
+          if (!("error" in versionResult)) {
+            resolvedAgentVersion = versionResult.agentVersion;
+          }
+        }
+
         const newDoc: RequestDocument = {
           _id: requestId,
           scenario: original.scenario,
@@ -1209,6 +1219,8 @@ apiRoute(app, registry, {
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(effectiveSkillRevisions && effectiveSkillRevisions.length > 0 ? { skillRevisions: effectiveSkillRevisions } : {}),
           ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
+          ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+          ...(original.taskPromptId ? { taskPromptId: original.taskPromptId } : {}),
           submissionId,
         };
 

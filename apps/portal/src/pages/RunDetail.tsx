@@ -22,7 +22,7 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
@@ -595,6 +595,31 @@ export function RunDetail() {
                       <span className="font-mono font-medium">{run.model}</span>
                     </div>
                   )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Extensions card */}
+            {run.extensions && run.extensions.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Puzzle className="h-4 w-4" /> Extensions ({run.extensions.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-1.5">
+                    {run.extensions.map((ext) => {
+                      const at = ext.lastIndexOf("@");
+                      const id = at > 0 ? ext.substring(0, at) : ext;
+                      const version = at > 0 ? ext.substring(at + 1) : undefined;
+                      return (
+                        <Badge key={ext} variant="secondary" className="font-mono text-xs">
+                          {id}{version && <span className="text-muted-foreground ml-1">@{version}</span>}
+                        </Badge>
+                      );
+                    })}
+                  </div>
                 </CardContent>
               </Card>
             )}

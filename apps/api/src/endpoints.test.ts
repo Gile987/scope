@@ -672,4 +672,57 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(400);
     });
   });
+
+  // ===================================================================
+  // Bulk resubmit
+  // ===================================================================
+
+  describe("POST /api/v1/requests/bulk-resubmit", () => {
+    it("preserves agentVersion and taskPromptId from original run", async () => {
+      const originalRun = {
+        _id: "run-original",
+        scenario: { task: "Build a form", criteria: ["has_react"] },
+        workerType: "coder-acp-copilot",
+        status: "completed",
+        model: "gpt-4o",
+        agentVersion: "copilot-0.0.415",
+        taskPromptId: "tp-123",
+        personaInstructions: "Be helpful",
+        createdAt: new Date(),
+        maxIterations: 5,
+      };
+
+      // Mock collection.find to return the original run
+      const mockCursor = {
+        toArray: vi.fn().mockResolvedValue([originalRun]),
+        sort: vi.fn().mockReturnThis(),
+        skip: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+      };
+      (mocks.collection.find as any).mockReturnValue(mockCursor);
+
+      // Mock agentCollection.findOne to return an agent with an active version
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [
+          { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
+        ],
+        supportedModels: ["gpt-4o"],
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-resubmit")
+        .send({ ids: ["run-original"], count: 1 });
+
+      expect(res.status).toBe(201);
+
+      // Verify the inserted document includes agentVersion and taskPromptId
+      const insertCall = (mocks.collection.insertMany as any).mock.calls[0][0];
+      expect(insertCall).toHaveLength(1);
+      expect(insertCall[0]).toHaveProperty("agentVersion", "copilot-0.0.420");
+      expect(insertCall[0]).toHaveProperty("taskPromptId", "tp-123");
+      expect(insertCall[0]).toHaveProperty("model", "gpt-4o");
+      expect(insertCall[0]).toHaveProperty("maxIterations", 5);
+    });
+  });
 });
