@@ -19,4 +19,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "004-add-submission-id-index.ts",
   "005-backfill-iteration-durations.ts",
   "006-split-status-outcome.ts",
+  "007-rename-exhausted-to-finished.ts",
 ];
