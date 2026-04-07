@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, TokenManagerClient, DevProxyClient } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -13,6 +13,7 @@ const AGENT_VERSION = `claude-code-acp-${process.env.CLAUDE_CODE_ACP_VERSION || 
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
+  workspacePath: string | undefined = undefined;
 
   getAgentVersion(): string {
     return AGENT_VERSION;
@@ -23,6 +24,21 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       ...(process.env.CLAUDE_CODE_ACP_VERSION ? { CLAUDE_CODE_ACP_VERSION: process.env.CLAUDE_CODE_ACP_VERSION } : {}),
       ...(process.env.CLAUDE_AGENT_SDK_VERSION ? { CLAUDE_AGENT_SDK_VERSION: process.env.CLAUDE_AGENT_SDK_VERSION } : {}),
     };
+  }
+
+  async setup(log: WorkerLogFn): Promise<void> {
+    this.workspacePath = createFreshWorkspace();
+    await log("info", "Fresh workspace created", { workspacePath: this.workspacePath });
+  }
+
+  async teardown(log: WorkerLogFn): Promise<void> {
+    try {
+      cleanupWorkspaces();
+      await log("info", "Workspaces directory cleaned");
+    } catch (error) {
+      await log("warn", `Failed to clean workspaces directory: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    this.workspacePath = undefined;
   }
 
   async processMessage(
@@ -40,7 +56,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
     });
-    
+
     // DevProxy integration — start recording if enabled
     let devProxy: DevProxyClient | null = null;
     if (DevProxyClient.isEnabled()) {
@@ -95,7 +111,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         command: "claude-code-acp",
         args: [],
         env,
-        cwd: "/workspace",
+        cwd: this.workspacePath!,
         onLog: async (msg) => {
           await log("debug", msg);
         },

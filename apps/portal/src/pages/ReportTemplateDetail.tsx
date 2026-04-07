@@ -93,6 +93,14 @@ export function ReportTemplateDetail() {
   const [editTriggerCriteriaIds, setEditTriggerCriteriaIds] = useState<string[]>([]);
   const [editTriggerTaskPromptIds, setEditTriggerTaskPromptIds] = useState<string[]>([]);
   const [editTriggerMatch, setEditTriggerMatch] = useState<"any" | "all">("all");
+  const [editModel, setEditModel] = useState<string>("");
+  const [editTimeoutSeconds, setEditTimeoutSeconds] = useState<string>("");
+
+  const { data: availableModels } = useQuery({
+    queryKey: ["available-report-models"],
+    queryFn: () => api.listAvailableReportModels(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const startEditing = () => {
     if (!template) return;
@@ -114,6 +122,8 @@ export function ReportTemplateDetail() {
         ? (template.trigger as any).match ?? "all"
         : "all"
     );
+    setEditModel(template.model ?? "");
+    setEditTimeoutSeconds(template.timeoutMs ? String(template.timeoutMs / 1000) : "");
     setEditing(true);
   };
 
@@ -140,6 +150,14 @@ export function ReportTemplateDetail() {
     if (editName.trim()) body.name = editName.trim();
     body.description = editDescription.trim() || undefined;
     if (editUserPrompt.trim()) body.userPrompt = editUserPrompt.trim();
+
+    // Model
+    body.model = editModel || null;
+
+    // Timeout
+    body.timeoutMs = editTimeoutSeconds && Number(editTimeoutSeconds) > 0
+      ? Number(editTimeoutSeconds) * 1000
+      : null;
 
     // System prompt
     if (editSysMode !== "none" && editSysContent.trim()) {
@@ -253,6 +271,34 @@ export function ReportTemplateDetail() {
             </div>
             <Separator />
             <div className="space-y-2">
+              <Label>Model (optional)</Label>
+              <Select value={editModel || "__default__"} onValueChange={(v) => setEditModel(v === "__default__" ? "" : v)}>
+                <SelectTrigger className="w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">Default (gpt-4.1)</SelectItem>
+                  {availableModels?.map((m) => (
+                    <SelectItem key={m.modelId} value={m.modelId}>{m.modelId}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="editTimeout">Timeout (seconds)</Label>
+              <Input
+                id="editTimeout"
+                type="number"
+                min={1}
+                value={editTimeoutSeconds}
+                onChange={(e) => setEditTimeoutSeconds(e.target.value)}
+                placeholder="300"
+                className="w-32"
+              />
+              <p className="text-xs text-muted-foreground">Default: 300 (5 minutes)</p>
+            </div>
+            <Separator />
+            <div className="space-y-2">
               <Label>System Prompt</Label>
               <Select value={editSysMode} onValueChange={(v) => setEditSysMode(v as "none" | "append" | "override")}>
                 <SelectTrigger className="w-48">
@@ -352,6 +398,14 @@ export function ReportTemplateDetail() {
                     {triggerSummary(template.trigger)}
                   </Badge>
                 </div>
+              </div>
+              <div>
+                <Label className="text-muted-foreground text-xs">Model</Label>
+                <p className="text-sm font-mono">{template.model ?? "default (gpt-4.1)"}</p>
+              </div>
+              <div>
+                <Label className="text-muted-foreground text-xs">Timeout</Label>
+                <p className="text-sm font-mono">{template.timeoutMs ? `${template.timeoutMs / 1000}s` : "default (300s)"}</p>
               </div>
               <Separator />
               <div className="flex gap-6 text-xs text-muted-foreground">

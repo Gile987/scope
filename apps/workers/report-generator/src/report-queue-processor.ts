@@ -62,30 +62,6 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
 
     await log("info", `Starting report generation for run ${requestId}`);
 
-    // --- Build reporter identity ---
-    const reporter: Reporter = {
-      id: "report-generator",
-      name: "Report Generator",
-      gitHash: process.env.GIT_COMMIT || "unknown",
-      model: this.reportConfig.reportModel,
-      agentId: "copilot-sdk",
-      agentVersion: this.getAgentVersion(),
-    };
-
-    // Update status to "generating" and set reporter
-    await withRetry(() => this.collection.updateOne(
-      { _id: reportId } as any,
-      {
-        $set: {
-          status: "generating",
-          reporter,
-          updatedAt: new Date(),
-        },
-      } as any
-    ));
-
-    await log("info", `Reporter: ${reporter.agentId}@${reporter.agentVersion}, model: ${reporter.model}`);
-
     // --- Prepare snapshots temp directory ---
     const snapshotsDir = join(tmpdir(), `report-${reportId}`);
     mkdirSync(snapshotsDir, { recursive: true });
@@ -113,7 +89,33 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
 
       await log("info", `Using report template '${template.id}' (${template.name})`);
 
-      // Resolve user prompt — substitute {{requestId}} or {requestId} placeholder
+      // Resolve model: template override → global config fallback
+      const resolvedModel = template.model ?? this.reportConfig.reportModel;
+
+      // --- Build reporter identity ---
+      const reporter: Reporter = {
+        id: "report-generator",
+        name: "Report Generator",
+        gitHash: process.env.GIT_COMMIT || "unknown",
+        model: resolvedModel,
+        agentId: "copilot-sdk",
+        agentVersion: this.getAgentVersion(),
+      };
+
+      // Update status to "generating" and set reporter
+      await withRetry(() => this.collection.updateOne(
+        { _id: reportId } as any,
+        {
+          $set: {
+            status: "generating",
+            reporter,
+            updatedAt: new Date(),
+          },
+        } as any
+      ));
+
+      await log("info", `Reporter: ${reporter.agentId}@${reporter.agentVersion}, model: ${reporter.model}`);
+
       const resolvedUserPrompt = template.userPrompt.replace(/\{\{requestId\}\}|\{requestId\}/g, requestId);
 
       // Resolve system prompt
@@ -130,10 +132,13 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       }
 
       // --- Run Copilot SDK session ---
+      const resolvedTimeoutMs = template.timeoutMs ?? this.reportConfig.sessionTimeoutMs ?? 5 * 60 * 1000;
       const content = await this.runCopilotSession(
         tools,
         resolvedUserPrompt,
         resolvedSystemPrompt,
+        resolvedModel,
+        resolvedTimeoutMs,
         log
       );
 
@@ -178,6 +183,8 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     tools: ReturnType<typeof createReportTools>,
     userPrompt: string,
     systemPrompt: string,
+    model: string,
+    timeoutMs: number,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<string> {
     const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
@@ -192,7 +199,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
 
     try {
       const session = await client.createSession({
-        model: this.reportConfig.reportModel,
+        model,
         streaming: true,
         tools,
         systemMessage: { mode: "replace", content: systemPrompt },
@@ -266,9 +273,9 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         }
       });
 
-      const timeout = this.reportConfig.sessionTimeoutMs ?? 5 * 60 * 1000;
+      const timeout = timeoutMs;
 
-      await log("info", "Sending prompt to Copilot SDK, awaiting response...");
+      await log("info", `Sending prompt to Copilot SDK, awaiting response (timeout: ${Math.round(timeout / 1000)}s)...`);
       await session.sendAndWait({ prompt: userPrompt }, timeout);
       await client.stop();
 

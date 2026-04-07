@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -425,6 +425,14 @@ export const api = {
     });
   },
 
+  /** Bulk report summary for multiple runs (returns status counts per requestId) */
+  bulkReportSummary: (requestIds: string[]): Promise<BulkReportSummary> => {
+    return request("/reports/bulk-summary", {
+      method: "POST",
+      body: JSON.stringify({ requestIds }),
+    });
+  },
+
   /** SSE endpoint URL for report log streaming */
   reportLogsUrl: (id: string, fromStart = true): string => {
     return `${BASE}/reports/${id}/logs?fromStart=${fromStart}`;
@@ -447,6 +455,11 @@ export const api = {
     return request(`/report-templates/${id}`);
   },
 
+  /** List models available for report generation */
+  listAvailableReportModels: (): Promise<Array<{ modelId: string }>> => {
+    return request("/report-templates/available-models");
+  },
+
   /** Create a new report template */
   createReportTemplate: (body: {
     id: string;
@@ -455,6 +468,8 @@ export const api = {
     description?: string;
     systemPrompt?: ReportTemplateSystemPrompt;
     trigger?: ReportTrigger;
+    model?: string;
+    timeoutMs?: number;
   }): Promise<ReportTemplate> => {
     return request("/report-templates", {
       method: "POST",
@@ -469,6 +484,8 @@ export const api = {
     userPrompt?: string;
     systemPrompt?: ReportTemplateSystemPrompt | null;
     trigger?: ReportTrigger | null;
+    model?: string | null;
+    timeoutMs?: number | null;
   }): Promise<ReportTemplate> => {
     return request(`/report-templates/${id}`, {
       method: "PUT",

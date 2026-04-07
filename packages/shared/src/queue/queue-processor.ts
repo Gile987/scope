@@ -79,22 +79,6 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolving ${requestDoc.skillRevisions.length} skill revision(s)`, { skillRevisions: requestDoc.skillRevisions });
       skillConfigs = await skillClient.resolveSkills(requestDoc.skillRevisions);
       await log("info", `Resolved skills: ${skillConfigs.map(s => s.name).join(", ")}`);
-
-      // Extract skill archives to workspace filesystem for agent discovery
-      const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
-      // Derive agent type from workerType for agent-specific skill directories
-      const agentType = requestDoc.workerType.includes("claude") ? "claude-code"
-        : requestDoc.workerType.includes("copilot") ? "copilot"
-        : undefined;
-      const installedPaths = await extractSkillsToWorkspace({
-        refs: requestDoc.skillRevisions,
-        skillConfigs,
-        skillClient,
-        workspacePath,
-        agentType,
-        log: async (msg) => { await log("info", msg); },
-      });
-      await log("info", `Installed ${installedPaths.length} skill path(s) to workspace`, { installedPaths });
     }
 
     // Resolve extension specs (id or id@version) to configs via API
@@ -144,6 +128,37 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     } catch (error) {
       console.warn(`[${this.workerName}] Failed to trigger report generation: ${error}`);
     }
+  }
+
+  /**
+   * Extract skill archives to the workspace filesystem so agents can discover them.
+   * Must be called after setup() so that processor.workspacePath points to the
+   * freshly-created temp directory rather than the stale default.
+   */
+  private async extractSkills(
+    requestDoc: RequestDocument,
+    skillConfigs: SkillConfig[],
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+  ): Promise<void> {
+    if (!requestDoc.skillRevisions || requestDoc.skillRevisions.length === 0) return;
+
+    const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+    if (!apiBaseUrl) return;
+
+    const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+    const agentType = requestDoc.workerType.includes("claude") ? "claude-code"
+      : requestDoc.workerType.includes("copilot") ? "copilot"
+      : undefined;
+    const skillClient = new SkillClient(apiBaseUrl);
+    const installedPaths = await extractSkillsToWorkspace({
+      refs: requestDoc.skillRevisions,
+      skillConfigs,
+      skillClient,
+      workspacePath,
+      agentType,
+      log: async (msg) => { await log("info", msg); },
+    });
+    await log("info", `Installed ${installedPaths.length} skill path(s) to workspace`, { installedPaths });
   }
 
   /**
@@ -202,6 +217,11 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           await log("warn", `Failed to upload setup video files: ${msg}`);
         }
       }
+    }
+
+    // Extract skills after setup() so workspacePath points to the fresh temp directory
+    if (skillConfigs) {
+      await this.extractSkills(requestDoc, skillConfigs, log);
     }
 
     let workerResult;
@@ -364,41 +384,80 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       storageConnectionString: this.config.storageConnectionString,
     });
 
-    const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
     const maxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
 
-    const result = await runMultiTurnLoop({
-      processor: this.processor,
-      task: requestDoc.scenario.task,
-      criteria: requestDoc.scenario.criteria,
-      scenarioVersion: requestDoc.scenario.version,
-      maxIterations,
-      judgeClient,
-      blobStorage,
-      requestId,
-      log,
-      personaInstructions: requestDoc.personaInstructions,
-      model: requestDoc.model,
-      mcpServerConfigs,
-      skillConfigs,
-      extensionConfigs,
-      onTurnComplete: async (turn: ConversationTurn) => {
-        // Persist each turn incrementally to MongoDB (retry on CosmosDB 429)
-        await withRetry(() => this.collection.updateOne(
-          { _id: requestId },
-          {
-            $push: { turns: turn },
-            $set: { updatedAt: new Date() },
+    // Setup: create workspace, extract skills, upload setup videos
+    if (this.processor.setup) {
+      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
+
+      if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
+        try {
+          const setupVideoUrls: string[] = [];
+          for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
+            const videoBlobName = `${requestId}/setup/video-${i}.webm`;
+            const videoUrl = await blobStorage.uploadFile(
+              setupResult.videoFilePaths[i],
+              videoBlobName,
+              "video/webm"
+            );
+            setupVideoUrls.push(videoUrl);
           }
-        ));
-      },
-      onSetupVideosUploaded: async (setupVideoUrls: string[]) => {
-        await withRetry(() => this.collection.updateOne(
-          { _id: requestId },
-          { $set: { setupVideoUrls, updatedAt: new Date() } }
-        ));
-      },
-    });
+          await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
+          if (setupVideoUrls.length > 0) {
+            await withRetry(() => this.collection.updateOne(
+              { _id: requestId },
+              { $set: { setupVideoUrls, updatedAt: new Date() } }
+            ));
+          }
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await log("warn", `Failed to upload setup video files: ${msg}`);
+        }
+      }
+    }
+
+    // Extract skills to the workspace (after setup so workspacePath is resolved)
+    if (skillConfigs) {
+      await this.extractSkills(requestDoc, skillConfigs, log);
+    }
+
+    // Resolve workspace path after setup
+    const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+
+    let result;
+    try {
+      result = await runMultiTurnLoop({
+        processor: this.processor,
+        task: requestDoc.scenario.task,
+        criteria: requestDoc.scenario.criteria,
+        maxIterations,
+        workspacePath,
+        judgeClient,
+        blobStorage,
+        requestId,
+        log,
+        personaInstructions: requestDoc.personaInstructions,
+        model: requestDoc.model,
+        mcpServerConfigs,
+        skillConfigs,
+        extensionConfigs,
+        onTurnComplete: async (turn: ConversationTurn) => {
+          // Persist each turn incrementally to MongoDB (retry on CosmosDB 429)
+          await withRetry(() => this.collection.updateOne(
+            { _id: requestId },
+            {
+              $push: { turns: turn },
+              $set: { updatedAt: new Date() },
+            }
+          ));
+        },
+      });
+    } finally {
+      // Lifecycle: always call teardown() if setup() exists, even on error
+      if (this.processor.teardown) {
+        await this.processor.teardown(log);
+      }
+    }
 
     const finalStatus = "done";
     const finalOutcome = result.passed

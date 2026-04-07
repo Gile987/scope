@@ -57,9 +57,8 @@ export interface Persona {
 }
 
 export interface Scenario {
-  version?: 'v1' | 'v2';  // v1 = simple strings (default), v2 = criteria IDs
   task: string;
-  criteria: string[];  // v1: prompts, v2: criteria IDs
+  criteria: string[];  // criteria IDs
 }
 
 export interface TraitDescriptions {
@@ -356,6 +355,8 @@ export interface ReportTemplateDocument {
   userPrompt: string;                    // REQUIRED — the instruction sent to the agent
   systemPrompt?: ReportTemplateSystemPrompt;  // OPTIONAL — customize base system prompt
   trigger?: ReportTrigger;               // OPTIONAL — omit = always trigger
+  model?: string;                        // OPTIONAL — LLM model override (falls back to REPORT_MODEL env var)
+  timeoutMs?: number;                    // OPTIONAL — session timeout override in ms (falls back to SESSION_TIMEOUT_MS env var)
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;                      // Soft-delete timestamp

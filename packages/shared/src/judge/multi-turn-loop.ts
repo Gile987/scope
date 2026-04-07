@@ -4,7 +4,6 @@
 import {
   ConversationTurn,
   CriterionResult,
-  SetupResult,
   TokenUsage,
   WorkerProcessor,
   WorkerProcessorOptions,
@@ -26,13 +25,10 @@ export interface MultiTurnConfig {
   task: string;
   /** Judge evaluation criteria */
   criteria: string[];
-  /** Scenario version (v1 = inline prompts, v2 = criteria IDs) */
-  scenarioVersion?: 'v1' | 'v2';
   /** Maximum number of iterations before giving up */
   maxIterations: number;
-  /** Path to the workspace directory to snapshot. If omitted, resolved from
-   *  processor.workspacePath after setup(), then WORKSPACE_PATH env, then /workspace. */
-  workspacePath?: string;
+  /** Workspace directory to snapshot (must be resolved by caller after setup) */
+  workspacePath: string;
   /** Judge REST API client */
   judgeClient: JudgeClient;
   /** Blob storage client for workspace snapshots */
@@ -47,8 +43,6 @@ export interface MultiTurnConfig {
   ) => Promise<void>;
   /** Called after each iteration to persist the turn to MongoDB */
   onTurnComplete?: (turn: ConversationTurn) => Promise<void>;
-  /** Called after setup-phase videos are uploaded, to persist URLs to MongoDB */
-  onSetupVideosUploaded?: (setupVideoUrls: string[]) => Promise<void>;
   /** Persona instructions for the judge (resolved prose from traits) */
   personaInstructions?: string;
   /** Model to pass to the coding agent */
@@ -86,19 +80,18 @@ export async function runMultiTurnLoop(
     processor,
     task,
     criteria,
-    scenarioVersion,
     maxIterations,
     judgeClient,
     blobStorage,
     requestId,
     log,
     onTurnComplete,
-    onSetupVideosUploaded,
     personaInstructions,
     model,
     mcpServerConfigs,
     skillConfigs,
     extensionConfigs,
+    workspacePath,
   } = config;
 
   const turns: ConversationTurn[] = [];
@@ -115,64 +108,6 @@ export async function runMultiTurnLoop(
     extensionCount: extensionConfigs?.length ?? 0,
     extensions: extensionConfigs?.map((e) => e.id) ?? [],
   });
-
-  // Lifecycle: call setup() once before all iterations so workers can acquire expensive resources
-  let setupVideoUrls: string[] | undefined;
-
-  const uploadSetupVideos = async (result: SetupResult, label: string) => {
-    if (!result.videoFilePaths || result.videoFilePaths.length === 0) return;
-    try {
-      setupVideoUrls = [];
-      for (let i = 0; i < result.videoFilePaths.length; i++) {
-        const videoBlobName = `${requestId}/setup/video-${i}.webm`;
-        const videoUrl = await blobStorage.uploadFile(
-          result.videoFilePaths[i],
-          videoBlobName,
-          "video/webm"
-        );
-        setupVideoUrls.push(videoUrl);
-      }
-      await log("info", `Setup video files uploaded (${label})`, { videoCount: result.videoFilePaths.length });
-      if (onSetupVideosUploaded && setupVideoUrls.length > 0) {
-        await onSetupVideosUploaded(setupVideoUrls);
-      }
-    } catch (uploadError) {
-      const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-      await log("warn", `Failed to upload setup video files: ${msg}`);
-    }
-  };
-
-  if (processor.setup) {
-    await log("info", "Calling processor setup...", { phase: "setup" });
-    let setupResult: SetupResult | void;
-    try {
-      setupResult = await processor.setup(log, { model, mcpServerConfigs, skillConfigs, extensionConfigs });
-    } catch (setupError) {
-      // Even on setup failure, try to upload setup videos (e.g. TOTP login recording)
-      const errorResult = (setupError as any)?.setupResult as SetupResult | undefined;
-      if (errorResult) {
-        await uploadSetupVideos(errorResult, "from failed setup");
-      }
-      // Call teardown to clean up any resources setup() partially acquired (e.g. port, browser)
-      if (processor.teardown) {
-        await processor.teardown(log).catch(() => {});
-      }
-      throw setupError;
-    }
-
-    if (setupResult) {
-      await uploadSetupVideos(setupResult, "success");
-    }
-  }
-
-  // Resolve workspace path after setup() so processors that create temp directories
-  // (e.g. Electron worker) have their workspacePath set by the time we read it.
-  const workspacePath = config.workspacePath
-    || processor.workspacePath
-    || process.env.WORKSPACE_PATH
-    || "/workspace";
-
-  try {
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     // Create a per-iteration logger that automatically injects the iteration number
@@ -402,7 +337,6 @@ export async function runMultiTurnLoop(
         criteria,
         conversationHistory: turns,
         personaInstructions,
-        scenarioVersion,
         requestId,
       });
       judgePassed = judgeResult.passed;
@@ -513,12 +447,4 @@ export async function runMultiTurnLoop(
       turns[turns.length - 1]?.codingAgentResponse?.substring(0, 200) || "none"
     }`,
   };
-
-  } finally {
-    // Lifecycle: always call teardown() if setup() was called, even on error
-    if (processor.teardown) {
-      await log("info", "Calling processor teardown...");
-      await processor.teardown(log);
-    }
-  }
 }

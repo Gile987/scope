@@ -80,3 +80,23 @@ export const BulkTriggerReportsInputSchema = z
     requestIds: z.array(z.string()),
   })
   .openapi("BulkTriggerReportsInput");
+
+export const BulkReportSummaryInputSchema = z
+  .object({
+    requestIds: z.array(z.string()),
+  })
+  .openapi("BulkReportSummaryInput");
+
+export const ReportSummarySchema = z
+  .object({
+    total: z.number(),
+    pending: z.number(),
+    generating: z.number(),
+    completed: z.number(),
+    failed: z.number(),
+  })
+  .openapi("ReportSummary");
+
+export const BulkReportSummaryResponseSchema = z
+  .record(z.string(), ReportSummarySchema)
+  .openapi("BulkReportSummaryResponse");

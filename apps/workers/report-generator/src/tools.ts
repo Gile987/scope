@@ -34,7 +34,6 @@ export function createReportTools(
           id: run._id,
           task: run.scenario?.task,
           criteria: run.scenario?.criteria,
-          scenarioVersion: run.scenario?.version,
           workerType: run.workerType,
           status: run.status,
           persona: run.persona,
