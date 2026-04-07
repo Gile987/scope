@@ -18,65 +18,130 @@
  *   exhausted → status: "done", outcome: "exhausted"
  *
  * "pending" and "processing" are unchanged.
+ *
+ * Uses cursor-based batching to avoid CosmosDB 429 (RU exhaustion) on large collections.
  */
 
-import type { Db } from "mongodb";
+import type { Db, Collection } from "mongodb";
 import type { MigrationInterface } from "mongo-migrate-ts";
+
+const BATCH_SIZE = 50;
+
+/** Sleep helper for retry backoff. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Update documents matching `filter` in batches, applying `update` to each batch.
+ * Retries on CosmosDB 429 (error code 16500) with the server-suggested delay.
+ */
+async function batchUpdate(
+  col: Collection,
+  filter: Record<string, unknown>,
+  update: Record<string, unknown>,
+  label: string,
+): Promise<number> {
+  let total = 0;
+  const ids: unknown[] = [];
+
+  // Collect matching _id values first (lightweight projection)
+  const cursor = col.find(filter, { projection: { _id: 1 } });
+  for await (const doc of cursor) {
+    ids.push(doc._id);
+  }
+
+  // Process in batches
+  for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+    const batch = ids.slice(i, i + BATCH_SIZE);
+    let retries = 0;
+    const maxRetries = 5;
+
+    while (retries < maxRetries) {
+      try {
+        const result = await col.updateMany({ _id: { $in: batch } }, update);
+        total += result.modifiedCount;
+        break;
+      } catch (err: any) {
+        // CosmosDB 429: error code 16500
+        if (err?.code === 16500 && retries < maxRetries - 1) {
+          const retryAfterMs = err?.retryAfterMs ?? err?.errorLabels?.RetryAfterMs ?? 2000;
+          const delay = Math.max(retryAfterMs, 1000);
+          console.log(`  ${label}: 429 on batch ${i / BATCH_SIZE + 1}, retrying in ${delay}ms...`);
+          await sleep(delay);
+          retries++;
+        } else {
+          throw err;
+        }
+      }
+    }
+  }
+
+  console.log(`  ${label}: ${total} documents`);
+  return total;
+}
 
 export class SplitStatusOutcome implements MigrationInterface {
   async up(db: Db): Promise<void> {
     const col = db.collection("requests");
 
     // 1. iterating → processing (still in-flight, no outcome)
-    const r1 = await col.updateMany(
+    await batchUpdate(
+      col,
       { status: "iterating" },
       { $set: { status: "processing" } },
+      "iterating → processing",
     );
-    console.log(`iterating → processing: ${r1.modifiedCount} documents`);
 
     // 2. completed → done + succeeded
-    const r2 = await col.updateMany(
+    await batchUpdate(
+      col,
       { status: "completed" },
       { $set: { status: "done", outcome: "succeeded" } },
+      "completed → done/succeeded",
     );
-    console.log(`completed → done/succeeded: ${r2.modifiedCount} documents`);
 
     // 3. failed → done + failed
-    const r3 = await col.updateMany(
+    await batchUpdate(
+      col,
       { status: "failed" },
       { $set: { status: "done", outcome: "failed" } },
+      "failed → done/failed",
     );
-    console.log(`failed → done/failed: ${r3.modifiedCount} documents`);
 
     // 4. exhausted → done + exhausted
-    const r4 = await col.updateMany(
+    await batchUpdate(
+      col,
       { status: "exhausted" },
       { $set: { status: "done", outcome: "exhausted" } },
+      "exhausted → done/exhausted",
     );
-    console.log(`exhausted → done/exhausted: ${r4.modifiedCount} documents`);
   }
 
   async down(db: Db): Promise<void> {
     const col = db.collection("requests");
 
     // Reverse: done + outcome → old terminal status
-    const r1 = await col.updateMany(
+    await batchUpdate(
+      col,
       { status: "done", outcome: "succeeded" },
       { $set: { status: "completed" }, $unset: { outcome: "" } },
+      "done/succeeded → completed",
     );
-    console.log(`done/succeeded → completed: ${r1.modifiedCount} documents`);
 
-    const r2 = await col.updateMany(
+    await batchUpdate(
+      col,
       { status: "done", outcome: "failed" },
       { $set: { status: "failed" }, $unset: { outcome: "" } },
+      "done/failed → failed",
     );
-    console.log(`done/failed → failed: ${r2.modifiedCount} documents`);
 
-    const r3 = await col.updateMany(
+    await batchUpdate(
+      col,
       { status: "done", outcome: "exhausted" },
       { $set: { status: "exhausted" }, $unset: { outcome: "" } },
+      "done/exhausted → exhausted",
     );
-    console.log(`done/exhausted → exhausted: ${r3.modifiedCount} documents`);
 
     // Note: "processing" stays as-is — we can't reliably distinguish which
     // ones were previously "iterating" vs. originally "processing".
