@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "skills": {
+    "git-guardrails": {
+      "source": "cedricvidal/coding-skills",
+      "sourceType": "github",
+      "computedHash": "c00aebba067d3b073dd1124d88b02635d6f096b91cbf5ca3279377533ad3c9da"
+    },
+    "github-cli": {
+      "source": "cedricvidal/coding-skills",
+      "sourceType": "github",
+      "computedHash": "c32f7ed7251709a0d62c3436237f84b4c96ce2bcd896cce33beb28fa78fe9202"
+    },
+    "wtm": {
+      "source": "cedricvidal/coding-skills",
+      "sourceType": "github",
+      "computedHash": "fd4346f766bb5c8c98bdc5303be4e36016c562d5ada53f40c0a0d1bb95b95e77"
+    }
+  }
+}
