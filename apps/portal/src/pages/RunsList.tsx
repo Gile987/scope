@@ -866,7 +866,7 @@ export function RunsList() {
               <TableHead>Task</TableHead>
               <TableHead className="w-[180px]">Worker</TableHead>
               <TableHead>Version</TableHead>
-              <TableHead className="w-[80px]">Platform</TableHead>
+              <TableHead className="w-[80px]">OS</TableHead>
               <TableHead>MCP</TableHead>
               <TableHead>Skills</TableHead>
               <TableHead className="w-[100px]">Status</TableHead>
