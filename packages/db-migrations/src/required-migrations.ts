@@ -20,4 +20,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "005-backfill-iteration-durations.ts",
   "006-split-status-outcome.ts",
   "007-rename-exhausted-to-finished.ts",
+  "008-backfill-ai-call-count.ts",
 ];
