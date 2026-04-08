@@ -865,6 +865,7 @@ export function RunsList() {
               <TableHead>Task</TableHead>
               <TableHead className="w-[180px]">Worker</TableHead>
               <TableHead>Version</TableHead>
+              <TableHead className="w-[80px]">Platform</TableHead>
               <TableHead>MCP</TableHead>
               <TableHead>Skills</TableHead>
               <TableHead className="w-[100px]">Status</TableHead>
@@ -974,6 +975,13 @@ function RunRow({
       <TableCell>
         {run.agentVersion ? (
           <span className="font-mono text-xs">{run.agentVersion}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell>
+        {run.os ? (
+          <span className="font-mono text-xs">{run.os.platform}</span>
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
@@ -1186,6 +1194,12 @@ function GroupRows({
         <TableCell>
           {uniform.agentVersion ? (
             <span className="font-mono text-xs">{uniform.agentVersion}</span>
+          ) : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>
+        {/* Platform */}
+        <TableCell>
+          {uniform.platform ? (
+            <span className="font-mono text-xs">{uniform.platform}</span>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
         {/* MCP */}
