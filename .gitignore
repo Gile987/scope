@@ -1,10 +1,12 @@
 node_modules/
 dist/
+*.tsbuildinfo
 .env
 .env.local
 .port-offset
 *.log
 .DS_Store
+.vscode/settings.json
 .azure/
 .venv/
 downloads/

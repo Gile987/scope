@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -14,6 +14,8 @@ const AGENT_VERSION = `claude-code-acp-${process.env.CLAUDE_CODE_ACP_VERSION || 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
   workspacePath: string | undefined = undefined;
+  private gateway: McpGatewayClient | null = null;
+  private mcpConfigs: McpServerConfig[] = [];
 
   getAgentVersion(): string {
     return AGENT_VERSION;
@@ -26,12 +28,31 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     };
   }
 
-  async setup(log: WorkerLogFn): Promise<void> {
+  async setup(log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<void> {
     this.workspacePath = createFreshWorkspace();
     await log("info", "Fresh workspace created", { workspacePath: this.workspacePath });
+
+    this.mcpConfigs = options?.mcpServerConfigs ?? [];
+    if (this.mcpConfigs.length > 0) {
+      if (!McpGatewayClient.isEnabled()) {
+        throw new Error("MCP servers configured but MCP_GATEWAY_URL is not set — cannot proceed without gateway");
+      }
+      this.gateway = new McpGatewayClient();
+      await log("info", "Registering MCP servers with gateway", { count: this.mcpConfigs.length, servers: this.mcpConfigs.map((s) => s.name) });
+      await this.gateway.purgeAll();
+      for (const config of this.mcpConfigs) await this.gateway.registerServer(config);
+    }
   }
 
   async teardown(log: WorkerLogFn): Promise<void> {
+    if (this.gateway && this.mcpConfigs.length > 0) {
+      await Promise.all(this.mcpConfigs.map((c) =>
+        this.gateway!.deregisterServer(c.name).catch((err) => {
+          log("warn", `Failed to deregister MCP server "${c.name}" — will be purged on next run`, { error: String(err) });
+        })
+      ));
+      this.gateway = null;
+    }
     try {
       cleanupWorkspaces();
       await log("info", "Workspaces directory cleaned");
@@ -39,6 +60,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       await log("warn", `Failed to clean workspaces directory: ${error instanceof Error ? error.message : String(error)}`);
     }
     this.workspacePath = undefined;
+    this.mcpConfigs = [];
   }
 
   async processMessage(
@@ -46,13 +68,12 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
-    const mcpConfigs = options?.mcpServerConfigs ?? [];
     const skillConfigs = options?.skillConfigs ?? [];
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
       model: options?.model,
-      mcpServerCount: mcpConfigs.length,
-      mcpServers: mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
+      mcpServerCount: this.mcpConfigs.length,
+      mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
     });
@@ -99,6 +120,10 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         const existingNodeOptions = process.env.NODE_OPTIONS || "";
         env.NODE_OPTIONS = [existingNodeOptions, "--use-env-proxy"].filter(Boolean).join(" ");
         env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+        const gatewayHost = process.env.MCP_GATEWAY_URL ? new URL(process.env.MCP_GATEWAY_URL).hostname : null;
+        const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
+        env.NO_PROXY = noProxy;
+        env.no_proxy = noProxy;
       } else if (!DevProxyClient.isEnabled()) {
         // DevProxy not configured — clear proxy vars so subprocess makes direct calls
         env.HTTP_PROXY = "";
@@ -107,6 +132,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         env.https_proxy = "";
         env.NODE_EXTRA_CA_CERTS = "";
       }
+      // MCP gateway lifecycle is handled in setup()/teardown() — servers are already registered
       const result = await runACPSession(message, {
         command: "claude-code-acp",
         args: [],
@@ -115,7 +141,9 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         onLog: async (msg) => {
           await log("debug", msg);
         },
-        mcpServers: options?.mcpServerConfigs,
+        mcpServers: this.gateway && this.mcpConfigs.length > 0
+          ? [{ type: "http" as const, name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
+          : [],
       });
 
       await log("info", "Claude Code processing complete", { 

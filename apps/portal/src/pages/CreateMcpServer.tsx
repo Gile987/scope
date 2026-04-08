@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { McpTransportType, McpServerHeader } from "@/types";
+import type { McpTransportType, McpServerHeader, McpSessionMode } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,8 +46,15 @@ export function CreateMcpServer() {
   const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
   const [type, setType] = useState<McpTransportType>("http");
   const [url, setUrl] = useState("");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
+  const [envPairs, setEnvPairs] = useState<McpServerHeader[]>([]);
+  const [sessionMode, setSessionMode] = useState<McpSessionMode>("stateless");
+  const [version, setVersion] = useState("");
   const [description, setDescription] = useState("");
   const [headers, setHeaders] = useState<McpServerHeader[]>([]);
+
+  const isStdio = type === "stdio";
 
   const handleNameChange = (value: string) => {
     setName(value);
@@ -77,20 +84,34 @@ export function CreateMcpServer() {
     },
   });
 
-  const isValid = slug && SLUG_REGEX.test(slug) && name && url;
+  const isValid = slug && SLUG_REGEX.test(slug) && name && (isStdio ? !!command : !!url);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValid) return;
 
-    createMutation.mutate({
-      _id: slug,
-      name,
-      type,
-      url,
-      ...(description ? { description } : {}),
-      ...(headers.length > 0 ? { headers: headers.filter(h => h.name && h.value) } : {}),
-    });
+    if (isStdio) {
+      createMutation.mutate({
+        _id: slug,
+        name,
+        type,
+        command,
+        args: args.trim() ? args.trim().split(/\s+/) : undefined,
+        env: envPairs.length > 0 ? Object.fromEntries(envPairs.filter(p => p.name && p.value).map(p => [p.name, p.value])) : undefined,
+        sessionMode,
+        version: version.trim() || undefined,
+        ...(description ? { description } : {}),
+      });
+    } else {
+      createMutation.mutate({
+        _id: slug,
+        name,
+        type,
+        url,
+        ...(description ? { description } : {}),
+        ...(headers.length > 0 ? { headers: headers.filter(h => h.name && h.value) } : {}),
+      });
+    }
   };
 
   const addHeader = () => {
@@ -106,6 +127,14 @@ export function CreateMcpServer() {
   const removeHeader = (index: number) => {
     setHeaders(headers.filter((_, i) => i !== index));
   };
+
+  const addEnvPair = () => setEnvPairs([...envPairs, { name: "", value: "" }]);
+  const updateEnvPair = (index: number, field: "name" | "value", val: string) => {
+    const updated = [...envPairs];
+    updated[index] = { ...updated[index], [field]: val };
+    setEnvPairs(updated);
+  };
+  const removeEnvPair = (index: number) => setEnvPairs(envPairs.filter((_, i) => i !== index));
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -167,21 +196,76 @@ export function CreateMcpServer() {
                   <SelectContent>
                     <SelectItem value="http">HTTP (Streamable)</SelectItem>
                     <SelectItem value="sse">SSE</SelectItem>
+                    <SelectItem value="stdio">stdio</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="url">URL *</Label>
-                <Input
-                  id="url"
-                  type="url"
-                  placeholder="https://example.com/mcp"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  className="font-mono text-sm"
-                />
-              </div>
+              {!isStdio ? (
+                <div className="space-y-2">
+                  <Label htmlFor="url">URL *</Label>
+                  <Input
+                    id="url"
+                    type="url"
+                    placeholder="https://example.com/mcp"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    className="font-mono text-sm"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="command">Command *</Label>
+                  <Input
+                    id="command"
+                    placeholder="e.g., npx"
+                    value={command}
+                    onChange={(e) => setCommand(e.target.value)}
+                    className="font-mono text-sm"
+                  />
+                </div>
+              )}
             </div>
+
+            {isStdio && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="args">Arguments</Label>
+                  <Input
+                    id="args"
+                    placeholder="e.g., -y @modelcontextprotocol/server-filesystem /workspace"
+                    value={args}
+                    onChange={(e) => setArgs(e.target.value)}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">Space-separated arguments</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="version">Version pin</Label>
+                    <Input
+                      id="version"
+                      placeholder="e.g., 2026.1.14"
+                      value={version}
+                      onChange={(e) => setVersion(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground">Pins npm package version</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="sessionMode">Session Mode</Label>
+                    <Select value={sessionMode} onValueChange={(v) => setSessionMode(v as McpSessionMode)}>
+                      <SelectTrigger id="sessionMode">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="stateful">Stateful (stdio default)</SelectItem>
+                        <SelectItem value="stateless">Stateless</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
@@ -196,7 +280,8 @@ export function CreateMcpServer() {
           </CardContent>
         </Card>
 
-        {/* Headers */}
+        {/* Headers (http/sse only) */}
+        {!isStdio && (
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -233,6 +318,47 @@ export function CreateMcpServer() {
             </CardContent>
           )}
         </Card>
+        )}
+
+        {/* Environment variables (stdio only) */}
+        {isStdio && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Environment Variables</CardTitle>
+                <CardDescription>Optional env vars passed to the stdio subprocess</CardDescription>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={addEnvPair} className="gap-1">
+                <Plus className="h-3.5 w-3.5" /> Add Variable
+              </Button>
+            </div>
+          </CardHeader>
+          {envPairs.length > 0 && (
+            <CardContent className="space-y-3">
+              {envPairs.map((pair, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <Input
+                    placeholder="KEY"
+                    value={pair.name}
+                    onChange={(e) => updateEnvPair(idx, "name", e.target.value)}
+                    className="font-mono text-sm"
+                  />
+                  <Input
+                    placeholder="value"
+                    value={pair.value}
+                    onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
+                    className="font-mono text-sm"
+                  />
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => removeEnvPair(idx)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </CardContent>
+          )}
+        </Card>
+        )}
 
         <div className="flex justify-end">
           <Button type="submit" disabled={!isValid || createMutation.isPending} className="gap-1.5">

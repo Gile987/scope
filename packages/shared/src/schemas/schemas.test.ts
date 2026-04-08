@@ -1009,7 +1009,7 @@ describe("mcp-server schemas", () => {
   });
 
   describe("CreateMcpServerInputSchema", () => {
-    it("accepts valid input", () => {
+    it("accepts valid http input", () => {
       const result = CreateMcpServerInputSchema.parse({
         name: "My Server",
         type: "sse",
@@ -1018,9 +1018,20 @@ describe("mcp-server schemas", () => {
       expect(result.name).toBe("My Server");
     });
 
-    it("rejects missing url", () => {
+    it("accepts valid stdio input", () => {
+      const result = CreateMcpServerInputSchema.parse({
+        name: "filesystem",
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      });
+      expect(result.name).toBe("filesystem");
+      expect(result.type).toBe("stdio");
+    });
+
+    it("rejects unknown type", () => {
       expect(() =>
-        CreateMcpServerInputSchema.parse({ name: "s", type: "http" }),
+        CreateMcpServerInputSchema.parse({ name: "s", type: "websocket", url: "https://x.com" }),
       ).toThrow();
     });
   });

@@ -3,8 +3,11 @@
 
 // --- MCP Server types ---
 
-/** Supported remote MCP transport types */
-export type McpTransportType = "sse" | "http";
+/** Supported MCP transport types */
+export type McpTransportType = "sse" | "http" | "stdio";
+
+/** MCP server session mode */
+export type McpSessionMode = "stateful" | "stateless";
 
 /** MCP server HTTP header (name-value pair) */
 export interface McpServerHeader {
@@ -17,8 +20,13 @@ export interface McpServerDocument {
   _id: string;                    // Slug identifier (e.g. "my-search-server")
   name: string;                   // Human-readable display name
   type: McpTransportType;         // Transport type
-  url: string;                    // Server URL
-  headers?: McpServerHeader[];    // Auth headers, API keys, etc.
+  url?: string;                   // Server URL (required for sse/http)
+  command?: string;               // Executable to spawn (required for stdio)
+  args?: string[];                // CLI arguments for stdio command
+  env?: Record<string, string>;   // Environment variables for stdio command
+  headers?: McpServerHeader[];    // Auth headers, API keys, etc. (sse/http)
+  sessionMode?: McpSessionMode;   // Gateway session mode (default: stateless for http, stateful for stdio)
+  version?: string;               // Package version pin for stdio npm packages
   description?: string;
   createdAt: Date;
   updatedAt?: Date;
@@ -29,6 +37,11 @@ export interface McpServerDocument {
 export interface McpServerConfig {
   type: McpTransportType;
   name: string;
-  url: string;
+  url?: string;                   // required for sse/http
+  command?: string;               // required for stdio
+  args?: string[];
+  env?: Record<string, string>;
   headers?: McpServerHeader[];
+  sessionMode?: McpSessionMode;
+  version?: string;
 }

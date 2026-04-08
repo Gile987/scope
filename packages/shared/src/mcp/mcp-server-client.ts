@@ -55,7 +55,12 @@ function mapToMcpServerConfig(data: McpServerDocument): McpServerConfig {
   return {
     type: data.type,
     name: data.name,
-    url: data.url,
+    ...(data.url ? { url: data.url } : {}),
+    ...(data.command ? { command: data.command } : {}),
+    ...(data.args && data.args.length > 0 ? { args: data.args } : {}),
+    ...(data.env && Object.keys(data.env).length > 0 ? { env: data.env } : {}),
     ...(data.headers && data.headers.length > 0 ? { headers: data.headers } : {}),
+    ...(data.sessionMode ? { sessionMode: data.sessionMode } : {}),
+    ...(data.version ? { version: data.version } : {}),
   };
 }
