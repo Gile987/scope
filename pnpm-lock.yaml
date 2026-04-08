@@ -586,6 +586,12 @@ importers:
 
   packages/db-migrations:
     dependencies:
+      '@azure/identity':
+        specifier: ^4.5.0
+        version: 4.13.0
+      '@azure/storage-blob':
+        specifier: ^12.26.0
+        version: 12.30.0
       mongo-migrate-ts:
         specifier: ^2.0.0
         version: 2.0.0(mongodb@6.21.0)
