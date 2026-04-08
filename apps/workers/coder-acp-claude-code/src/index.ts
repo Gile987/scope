@@ -158,9 +158,12 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }), ...(aiCallCount !== undefined && { aiCallCount }) };
     } catch (error) {
       if (devProxy) {
-        const { harFilePath } = await devProxy.stopAndCollectHar(log);
+        const { harFilePath, aiCallCount } = await devProxy.stopAndCollectHar(log);
         if (harFilePath) {
           (error as any).harFilePath = harFilePath;
+        }
+        if (aiCallCount !== undefined) {
+          (error as any).aiCallCount = aiCallCount;
         }
       }
       const errorMessage = error instanceof Error ? error.message : String(error);

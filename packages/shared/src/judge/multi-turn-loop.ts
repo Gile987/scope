@@ -236,6 +236,9 @@ export async function runMultiTurnLoop(
         }
       }
 
+      // Extract aiCallCount from the error if the worker attached it
+      const errorAiCallCount: number | undefined = (error as any)?.aiCallCount;
+
       // Extract video paths from the error if the worker attached them
       const errorVideoPaths: string[] = (error as any)?.videoFilePaths ?? [];
       let errorVideoUrls: string[] = [];
@@ -269,6 +272,7 @@ export async function runMultiTurnLoop(
         durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(errorHarUrl && { harUrl: errorHarUrl }),
         ...(errorVideoUrls.length > 0 && { videoUrls: errorVideoUrls }),
+        ...(errorAiCallCount !== undefined && { aiCallCount: errorAiCallCount }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
