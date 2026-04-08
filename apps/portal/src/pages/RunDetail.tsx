@@ -588,7 +588,13 @@ export function RunDetail() {
                   {run.os && (
                     <div>
                       <span className="text-muted-foreground">OS:</span>{" "}
-                      <span className="font-mono font-medium">{run.os.platform} {run.os.release} ({run.os.arch})</span>
+                      <span className="font-mono font-medium">
+                        {run.os.platform}
+                        <span className="text-muted-foreground mx-1">release</span>
+                        {run.os.release}
+                        <span className="text-muted-foreground mx-1">arch</span>
+                        {run.os.arch}
+                      </span>
                     </div>
                   )}
                   <div>
