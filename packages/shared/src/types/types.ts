@@ -109,6 +109,12 @@ export interface ModelDocument {
   metadata?: Record<string, unknown>; // Additional provider-specific metadata
 }
 
+export interface OsInfo {
+  platform: string;   // os.platform() → "linux", "darwin", "win32"
+  release: string;    // os.release() → kernel/OS version string
+  arch: string;       // os.arch() → "x64", "arm64"
+}
+
 // Request document stored in MongoDB
 export interface RequestDocument {
   _id: string;  // UUID as _id (for CosmosDB sharding compatibility)
@@ -135,6 +141,7 @@ export interface RequestDocument {
   extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   workerVersion?: string;          // Exact build that processed this run (e.g. "copilot-0.0.415-20260318T163740Z-44d16d6")
+  os?: OsInfo;                     // Worker OS info captured at processing time
   harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
   videoUrls?: string[];            // Blob storage URLs to session recording videos (one-shot)
   setupVideoUrls?: string[];       // Blob storage URLs to setup-phase videos (e.g. TOTP login recording)
