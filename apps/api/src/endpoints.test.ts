@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import { app, _injectTestDependencies } from "./index.js";
 import { createAllMockDependencies, createMockCollection } from "./test-helpers.js";
@@ -723,6 +723,194 @@ describe("API Endpoints", () => {
       expect(insertCall[0]).toHaveProperty("taskPromptId", "tp-123");
       expect(insertCall[0]).toHaveProperty("model", "gpt-4o");
       expect(insertCall[0]).toHaveProperty("maxIterations", 5);
+    });
+  });
+
+  // ===================================================================
+  // MCP Servers endpoints
+  // ===================================================================
+
+  describe("MCP Servers endpoints", () => {
+    afterEach(() => {
+      // Reset KV manager to disabled (null) after each test so KV-enabled
+      // tests don't bleed into subsequent tests
+      _injectTestDependencies({ mcpSecretManager: null });
+    });
+
+    describe("GET /api/v1/mcp/servers", () => {
+      it("returns 200 with docs where @kv: refs are masked", async () => {
+        const serverDoc = {
+          _id: "my-server",
+          name: "My Server",
+          type: "http",
+          url: "https://example.com/mcp",
+          env: { API_KEY: "@kv:mcp-my-server-env-api-key" },
+          createdAt: new Date(),
+        };
+        (mocks.mcpServerCollection.find as any).mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([serverDoc]),
+        });
+
+        const res = await request(app).get("/api/v1/mcp/servers");
+        expect(res.status).toBe(200);
+        expect(Array.isArray(res.body)).toBe(true);
+        expect(res.body[0].env.API_KEY).toBe("<secret>");
+      });
+    });
+
+    describe("GET /api/v1/mcp/servers/:id", () => {
+      it("returns 404 when server does not exist", async () => {
+        (mocks.mcpServerCollection.findOne as any).mockResolvedValue(null);
+
+        const res = await request(app).get("/api/v1/mcp/servers/missing");
+        expect(res.status).toBe(404);
+      });
+
+      it("returns 200 with masked env by default", async () => {
+        const serverDoc = {
+          _id: "my-server",
+          name: "My Server",
+          type: "http",
+          url: "https://example.com/mcp",
+          env: { TOKEN: "@kv:mcp-my-server-env-token" },
+          createdAt: new Date(),
+        };
+        (mocks.mcpServerCollection.findOne as any).mockResolvedValue(serverDoc);
+
+        const res = await request(app).get("/api/v1/mcp/servers/my-server");
+        expect(res.status).toBe(200);
+        expect(res.body.env.TOKEN).toBe("<secret>");
+      });
+
+      it("resolves @kv: refs when ?resolve=true and KV is enabled", async () => {
+        const serverDoc = {
+          _id: "my-server",
+          name: "My Server",
+          type: "http",
+          url: "https://example.com/mcp",
+          env: { TOKEN: "@kv:mcp-my-server-env-token" },
+          createdAt: new Date(),
+        };
+        (mocks.mcpServerCollection.findOne as any).mockResolvedValue(serverDoc);
+
+        const mockKv = {
+          storeEnv: vi.fn(),
+          storeHeaders: vi.fn(),
+          resolveEnv: vi.fn().mockResolvedValue({ TOKEN: "actual-token-value" }),
+          resolveHeaders: vi.fn().mockResolvedValue([]),
+          deleteAll: vi.fn(),
+        };
+        _injectTestDependencies({ mcpSecretManager: mockKv as any });
+
+        const res = await request(app).get("/api/v1/mcp/servers/my-server?resolve=true");
+        expect(res.status).toBe(200);
+        expect(mockKv.resolveEnv).toHaveBeenCalledWith(serverDoc.env);
+        expect(res.body.env.TOKEN).toBe("actual-token-value");
+      });
+
+      it("still returns masked env when ?resolve=true but KV is disabled", async () => {
+        const serverDoc = {
+          _id: "my-server",
+          name: "My Server",
+          type: "http",
+          url: "https://example.com/mcp",
+          env: { TOKEN: "@kv:mcp-my-server-env-token" },
+          createdAt: new Date(),
+        };
+        (mocks.mcpServerCollection.findOne as any).mockResolvedValue(serverDoc);
+        // mcpSecretManager is null (reset by afterEach → default disabled)
+
+        const res = await request(app).get("/api/v1/mcp/servers/my-server?resolve=true");
+        expect(res.status).toBe(200);
+        expect(res.body.env.TOKEN).toBe("<secret>");
+      });
+    });
+
+    describe("POST /api/v1/mcp/servers", () => {
+      it("returns 201 and stores env as-is when KV is disabled", async () => {
+        (mocks.mcpServerCollection.findOne as any).mockResolvedValue(null);
+
+        const res = await request(app)
+          .post("/api/v1/mcp/servers")
+          .send({
+            _id: "new-server",
+            name: "New Server",
+            type: "http",
+            url: "https://example.com/mcp",
+            env: { PLAIN_KEY: "plain-value" },
+          });
+
+        expect(res.status).toBe(201);
+        // No masking needed — plain values stay as-is (no @kv: prefix)
+        expect(res.body.env.PLAIN_KEY).toBe("plain-value");
+        expect(mocks.mcpServerCollection.insertOne).toHaveBeenCalled();
+      });
+
+      it("calls storeEnv() and returns masked env when KV is enabled", async () => {
+        (mocks.mcpServerCollection.findOne as any).mockResolvedValue(null);
+
+        const mockKv = {
+          storeEnv: vi.fn().mockResolvedValue({ API_KEY: "@kv:mcp-new-server-env-api-key" }),
+          storeHeaders: vi.fn().mockResolvedValue([]),
+          resolveEnv: vi.fn(),
+          resolveHeaders: vi.fn(),
+          deleteAll: vi.fn(),
+        };
+        _injectTestDependencies({ mcpSecretManager: mockKv as any });
+
+        const res = await request(app)
+          .post("/api/v1/mcp/servers")
+          .send({
+            _id: "new-server",
+            name: "New Server",
+            type: "http",
+            url: "https://example.com/mcp",
+            env: { API_KEY: "supersecret" },
+          });
+
+        expect(res.status).toBe(201);
+        expect(mockKv.storeEnv).toHaveBeenCalledWith("new-server", { API_KEY: "supersecret" });
+        expect(res.body.env.API_KEY).toBe("<secret>");
+      });
+    });
+
+    describe("DELETE /api/v1/mcp/servers/:id", () => {
+      it("returns 404 when server does not exist", async () => {
+        (mocks.mcpServerCollection.findOne as any).mockResolvedValue(null);
+
+        const res = await request(app).delete("/api/v1/mcp/servers/missing");
+        expect(res.status).toBe(404);
+      });
+
+      it("soft-deletes and calls deleteAll() when KV is enabled", async () => {
+        const existingDoc = {
+          _id: "my-server",
+          name: "My Server",
+          type: "http",
+          url: "https://example.com/mcp",
+          env: { API_KEY: "@kv:mcp-my-server-env-api-key" },
+          createdAt: new Date(),
+        };
+        (mocks.mcpServerCollection.findOne as any).mockResolvedValue(existingDoc);
+
+        const mockKv = {
+          storeEnv: vi.fn(),
+          storeHeaders: vi.fn(),
+          resolveEnv: vi.fn(),
+          resolveHeaders: vi.fn(),
+          deleteAll: vi.fn().mockResolvedValue(undefined),
+        };
+        _injectTestDependencies({ mcpSecretManager: mockKv as any });
+
+        const res = await request(app).delete("/api/v1/mcp/servers/my-server");
+        expect(res.status).toBe(204);
+        expect(mocks.mcpServerCollection.updateOne).toHaveBeenCalled();
+        expect(mockKv.deleteAll).toHaveBeenCalledWith(
+          "my-server",
+          existingDoc.env,
+          undefined, // no headers on this doc
+        );
+      });
     });
   });
 });

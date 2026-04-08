@@ -22,6 +22,7 @@ import { pack as tarPack } from "tar-stream";
 import { createGzip } from "zlib";
 import { pipeline } from "stream/promises";
 import { isLlmAvailable, generateCriteriaPrompt } from "./llm.js";
+import { McpSecretManager, isKvEnabled, maskEnv, maskHeaders } from "./mcp-secret-manager.js";
 import {
   isLlmAvailable as isPromptFeatureLlmAvailable,
   generatePromptFeaturePrompt,
@@ -160,6 +161,7 @@ let reportCollection: Collection<ReportDocument>;
 let agentCollection: Collection<CodingAgentDocument>;
 let modelCollection: Collection<ModelDocument>;
 let mcpServerCollection: Collection<McpServerDocument>;
+let mcpSecretManager: McpSecretManager | null = null;
 let insightsCollection: Collection<InsightDocument>;
 let taskPromptCollection: Collection<TaskPromptDocument>;
 let taskPromptStore: TaskPromptStore;
@@ -301,6 +303,12 @@ async function initializeClients(): Promise<void> {
   agentCollection = db.collection<CodingAgentDocument>("agents");
   modelCollection = db.collection<ModelDocument>("models");
   mcpServerCollection = db.collection<McpServerDocument>("mcp-servers");
+  if (isKvEnabled()) {
+    mcpSecretManager = new McpSecretManager();
+    console.log("MCP secret manager: Key Vault enabled");
+  } else {
+    console.log("MCP secret manager: Key Vault disabled (AZURE_KEYVAULT_URI not set) — secrets stored plaintext");
+  }
   insightsCollection = db.collection<InsightDocument>("insights");
   taskPromptCollection = db.collection<TaskPromptDocument>("task-prompts");
   taskPromptStore = new TaskPromptStore(taskPromptCollection);
@@ -4701,7 +4709,7 @@ const CreateMcpServerBodySchema = z.object({
   description: z.string().optional(),
 });
 
-// GET /api/v1/mcp/servers — list MCP servers
+// GET /api/v1/mcp/servers — list MCP servers (secrets masked)
 apiRoute(app, registry, {
   method: "get",
   path: "/api/v1/mcp/servers",
@@ -4713,11 +4721,18 @@ apiRoute(app, registry, {
       .find({ deletedAt: { $exists: false } })
       .toArray();
     servers.sort((a, b) => a._id.localeCompare(b._id));
-    res.json(servers.map((s) => ({ ...s, id: s._id })));
+    res.json(servers.map((s) => ({
+      ...s,
+      id: s._id,
+      ...(s.env ? { env: maskEnv(s.env) } : {}),
+      ...(s.headers ? { headers: maskHeaders(s.headers) } : {}),
+    })));
   },
 });
 
 // GET /api/v1/mcp/servers/:id — get MCP server by slug
+// ?resolve=true  — return actual secret values (workers only, internal use)
+// default        — return masked values ("<secret>") for UI/CLI
 apiRoute(app, registry, {
   method: "get",
   path: "/api/v1/mcp/servers/:id",
@@ -4734,7 +4749,26 @@ apiRoute(app, registry, {
       res.status(404).json({ error: "MCP server not found" });
       return;
     }
-    res.json({ ...server, id: server._id });
+
+    const shouldResolve = req.query.resolve === "true" && mcpSecretManager !== null;
+
+    let env = server.env;
+    let headers = server.headers;
+
+    if (shouldResolve) {
+      if (env) env = await mcpSecretManager!.resolveEnv(env);
+      if (headers) headers = await mcpSecretManager!.resolveHeaders(headers);
+    } else {
+      if (env) env = maskEnv(env);
+      if (headers) headers = maskHeaders(headers);
+    }
+
+    res.json({
+      ...server,
+      id: server._id,
+      ...(env !== undefined ? { env } : {}),
+      ...(headers !== undefined ? { headers } : {}),
+    });
   },
 });
 
@@ -4747,8 +4781,15 @@ apiRoute(app, registry, {
   body: CreateMcpServerBodySchema,
   response: McpServerResponseSchema,
   handler: async (req, res) => {
-    const { _id, name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
+    let { _id, name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
     const now = new Date();
+
+    // Store secrets in KV if enabled
+    if (mcpSecretManager) {
+      if (env && Object.keys(env).length > 0) env = await mcpSecretManager.storeEnv(_id, env);
+      if (headers && headers.length > 0) headers = await mcpSecretManager.storeHeaders(_id, headers);
+    }
+
     const existing = await mcpServerCollection.findOne({ _id });
 
     if (existing) {
@@ -4773,7 +4814,12 @@ apiRoute(app, registry, {
         },
       );
       const updated = await mcpServerCollection.findOne({ _id });
-      res.json({ ...updated, id: updated!._id });
+      res.json({
+        ...updated,
+        id: updated!._id,
+        ...(updated!.env ? { env: maskEnv(updated!.env) } : {}),
+        ...(updated!.headers ? { headers: maskHeaders(updated!.headers) } : {}),
+      });
     } else {
       const serverDoc: McpServerDocument = {
         _id,
@@ -4790,7 +4836,12 @@ apiRoute(app, registry, {
         createdAt: now,
       };
       await mcpServerCollection.insertOne(serverDoc);
-      res.status(201).json({ ...serverDoc, id: serverDoc._id });
+      res.status(201).json({
+        ...serverDoc,
+        id: serverDoc._id,
+        ...(serverDoc.env ? { env: maskEnv(serverDoc.env) } : {}),
+        ...(serverDoc.headers ? { headers: maskHeaders(serverDoc.headers) } : {}),
+      });
     }
   },
 });
@@ -4806,7 +4857,7 @@ apiRoute(app, registry, {
   response: McpServerResponseSchema,
   handler: async (req, res) => {
     const { id } = req.params;
-    const { name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
+    let { name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
 
     const existing = await mcpServerCollection.findOne({
       _id: id,
@@ -4815,6 +4866,12 @@ apiRoute(app, registry, {
     if (!existing) {
       res.status(404).json({ error: "MCP server not found" });
       return;
+    }
+
+    // Store new secret values in KV; existing @kv: refs are preserved as-is
+    if (mcpSecretManager) {
+      if (env && Object.keys(env).length > 0) env = await mcpSecretManager.storeEnv(id, env);
+      if (headers && headers.length > 0) headers = await mcpSecretManager.storeHeaders(id, headers);
     }
 
     const updateFields: Record<string, unknown> = { updatedAt: new Date() };
@@ -4831,7 +4888,12 @@ apiRoute(app, registry, {
 
     await mcpServerCollection.updateOne({ _id: id }, { $set: updateFields });
     const updated = await mcpServerCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
+    res.json({
+      ...updated,
+      id: updated!._id,
+      ...(updated!.env ? { env: maskEnv(updated!.env) } : {}),
+      ...(updated!.headers ? { headers: maskHeaders(updated!.headers) } : {}),
+    });
   },
 });
 
@@ -4860,6 +4922,11 @@ apiRoute(app, registry, {
       { _id: id },
       { $set: { deletedAt: new Date(), updatedAt: new Date() } },
     );
+
+    // Best-effort KV cleanup — log failures but don't fail the request
+    if (mcpSecretManager) {
+      await mcpSecretManager.deleteAll(id, existing.env, existing.headers);
+    }
 
     res.status(204).send();
   },
@@ -6231,6 +6298,7 @@ export interface TestDependencies {
   skillResolver?: SkillResolver;
   queueClients?: Map<WorkerType, QueueClient>;
   reportQueueClient?: QueueClient;
+  mcpSecretManager?: McpSecretManager | null;
 }
 
 /** @internal — used by tests only to inject mock dependencies */
@@ -6255,6 +6323,7 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.skillResolver) skillResolver = deps.skillResolver;
   if (deps.queueClients) queueClients.clear(), deps.queueClients.forEach((v, k) => queueClients.set(k, v));
   if (deps.reportQueueClient) reportQueueClient = deps.reportQueueClient;
+  if (deps.mcpSecretManager !== undefined) mcpSecretManager = deps.mcpSecretManager;
 }
 
 // ─── Start server (skipped in test environment) ──────────────────────────────
