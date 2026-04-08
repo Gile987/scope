@@ -44,7 +44,7 @@ describe("McpServerClient", () => {
     await c.resolveServers(["test-server"]);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "https://api.scope-mt.dev/api/v1/mcp/servers/test-server"
+      "https://api.scope-mt.dev/api/v1/mcp/servers/test-server?resolve=true"
     );
   });
 
@@ -161,7 +161,7 @@ describe("McpServerClient", () => {
     await client.resolveServers(["server/special"]);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "https://api.scope-mt.dev/api/v1/mcp/servers/server%2Fspecial"
+      "https://api.scope-mt.dev/api/v1/mcp/servers/server%2Fspecial?resolve=true"
     );
   });
 

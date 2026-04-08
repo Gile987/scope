@@ -29,7 +29,7 @@ export class McpServerClient {
     const configs: McpServerConfig[] = [];
 
     for (const slug of slugs) {
-      const url = `${this.apiUrl}/api/v1/mcp/servers/${encodeURIComponent(slug)}`;
+      const url = `${this.apiUrl}/api/v1/mcp/servers/${encodeURIComponent(slug)}?resolve=true`;
       const res = await fetch(url);
 
       if (res.status === 404) {
