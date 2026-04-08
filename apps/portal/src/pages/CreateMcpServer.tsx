@@ -287,7 +287,7 @@ export function CreateMcpServer() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Headers</CardTitle>
-                <CardDescription>Optional HTTP headers sent with every request (e.g., Authorization)</CardDescription>
+                <CardDescription>Optional HTTP headers sent with every request (e.g., Authorization). Values are stored encrypted in Key Vault.</CardDescription>
               </div>
               <Button type="button" variant="outline" size="sm" onClick={addHeader} className="gap-1">
                 <Plus className="h-3.5 w-3.5" /> Add Header
@@ -305,6 +305,7 @@ export function CreateMcpServer() {
                     className="font-mono text-sm"
                   />
                   <Input
+                    type="password"
                     placeholder="Header value"
                     value={header.value}
                     onChange={(e) => updateHeader(idx, "value", e.target.value)}
@@ -327,7 +328,7 @@ export function CreateMcpServer() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Environment Variables</CardTitle>
-                <CardDescription>Optional env vars passed to the stdio subprocess</CardDescription>
+                <CardDescription>Optional env vars passed to the stdio subprocess. Values are stored encrypted in Key Vault.</CardDescription>
               </div>
               <Button type="button" variant="outline" size="sm" onClick={addEnvPair} className="gap-1">
                 <Plus className="h-3.5 w-3.5" /> Add Variable
@@ -345,6 +346,7 @@ export function CreateMcpServer() {
                     className="font-mono text-sm"
                   />
                   <Input
+                    type="password"
                     placeholder="value"
                     value={pair.value}
                     onChange={(e) => updateEnvPair(idx, "value", e.target.value)}

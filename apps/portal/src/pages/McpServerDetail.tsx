@@ -388,7 +388,7 @@ export function McpServerDetail() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-base">Headers</CardTitle>
-            <CardDescription>HTTP headers sent with every request</CardDescription>
+            <CardDescription>HTTP headers sent with every request. Values are stored encrypted in Key Vault.</CardDescription>
           </div>
           {editing && (
             <Button type="button" variant="outline" size="sm" onClick={addHeader} className="gap-1">
@@ -411,8 +411,9 @@ export function McpServerDetail() {
                       className="font-mono text-sm"
                     />
                     <Input
-                      placeholder="Header value"
-                      value={header.value}
+                      type="password"
+                      placeholder="leave blank to keep existing value"
+                      value={header.value === "<secret>" ? "" : header.value}
                       onChange={(e) => updateHeader(idx, "value", e.target.value)}
                       className="font-mono text-sm"
                     />
@@ -429,9 +430,11 @@ export function McpServerDetail() {
                 {server.headers.map((h, idx) => (
                   <div key={idx} className="flex items-center gap-2 text-sm">
                     <Badge variant="secondary" className="font-mono text-xs">{h.name}</Badge>
-                    <span className="text-muted-foreground font-mono text-xs">
-                      {h.name.toLowerCase() === "authorization" ? "••••••••" : h.value}
-                    </span>
+                    {h.value === "<secret>" ? (
+                      <Badge variant="outline" className="text-xs text-muted-foreground">secret</Badge>
+                    ) : (
+                      <span className="text-muted-foreground font-mono text-xs">{h.value}</span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -449,7 +452,7 @@ export function McpServerDetail() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-base">Environment Variables</CardTitle>
-            <CardDescription>Env vars passed to the stdio subprocess</CardDescription>
+            <CardDescription>Env vars passed to the stdio subprocess. Values are stored encrypted in Key Vault.</CardDescription>
           </div>
           {editing && (
             <Button type="button" variant="outline" size="sm" onClick={addEnvPair} className="gap-1">
@@ -472,8 +475,9 @@ export function McpServerDetail() {
                       className="font-mono text-sm"
                     />
                     <Input
-                      placeholder="value"
-                      value={pair.value}
+                      type="password"
+                      placeholder="leave blank to keep existing value"
+                      value={pair.value === "<secret>" ? "" : pair.value}
                       onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
                       className="font-mono text-sm"
                     />
@@ -490,7 +494,11 @@ export function McpServerDetail() {
                 {Object.entries(server.env).map(([k, v]) => (
                   <div key={k} className="flex items-center gap-2 text-sm">
                     <Badge variant="secondary" className="font-mono text-xs">{k}</Badge>
-                    <span className="text-muted-foreground font-mono text-xs">{v}</span>
+                    {v === "<secret>" ? (
+                      <Badge variant="outline" className="text-xs text-muted-foreground">secret</Badge>
+                    ) : (
+                      <span className="text-muted-foreground font-mono text-xs">{v}</span>
+                    )}
                   </div>
                 ))}
               </div>
