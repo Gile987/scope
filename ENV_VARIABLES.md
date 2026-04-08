@@ -164,9 +164,12 @@ In Kubernetes, no static token secrets (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`) are
 - **Local dev:** Leave unset to use env var fallback (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, etc.)
 
 ### AZURE_KEYVAULT_URI
-**Type:** URL string (token-manager only) — **Required**
+**Type:** URL string — **Required by `token-manager` and `api`**
 
-Azure KeyVault URI for storing token secret values. The Token Manager uses `KeyVaultTokenStore` with `DefaultAzureCredential`.
+Azure Key Vault URI used for secret storage.
+
+- **`token-manager`**: stores OAuth/PAT token values via `KeyVaultTokenStore` with `DefaultAzureCredential`.
+- **`api`**: stores MCP server `env` var values and HTTP header values via `McpSecretManager`. When set, secret values are written to Key Vault at create/update time and only `@kv:<name>` references are persisted in MongoDB. When unset, secrets are stored as plaintext in MongoDB (backward-compatible).
 
 - **Docker Compose:** Provided automatically via Lowkey Vault (Azure KV emulator): `https://lowkey-vault:8443`
 - **Kubernetes:** Azure Key Vault URI (e.g., `https://my-vault.vault.azure.net`)
