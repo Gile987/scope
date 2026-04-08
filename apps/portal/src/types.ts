@@ -91,6 +91,11 @@ export interface Run {
   skills?: string[];
   skillRevisions?: string[];
   extensions?: string[];
+  os?: {
+    platform: string;
+    release: string;
+    arch: string;
+  };
   harUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
