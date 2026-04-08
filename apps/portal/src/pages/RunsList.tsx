@@ -980,9 +980,9 @@ function RunRow({
           <span className="text-xs text-muted-foreground">–</span>
         )}
       </TableCell>
-      <TableCell>
+      <TableCell className="text-center">
         {run.os ? (
-          <PlatformIcon platform={run.os.platform} className="h-4 w-4" />
+          <PlatformIcon platform={run.os.platform} className="h-4 w-4 inline-block" />
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
@@ -1198,9 +1198,9 @@ function GroupRows({
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
         {/* Platform */}
-        <TableCell>
+        <TableCell className="text-center">
           {uniform.platform ? (
-            <PlatformIcon platform={uniform.platform} className="h-4 w-4" />
+            <PlatformIcon platform={uniform.platform} className="h-4 w-4 inline-block" />
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
         {/* MCP */}
