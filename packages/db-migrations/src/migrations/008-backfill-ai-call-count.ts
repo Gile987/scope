@@ -17,6 +17,7 @@ import { BlobServiceClient } from "@azure/storage-blob";
 import { DefaultAzureCredential } from "@azure/identity";
 import type { Db } from "mongodb";
 import type { MigrationInterface } from "mongo-migrate-ts";
+import { sleep, getRetryAfterMs, INTER_BATCH_DELAY_MS } from "../batch-update.js";
 
 // Matches the same patterns as extractAiCallCount in har-parser.ts
 const AI_COMPLETION_URL_PATTERNS: ReadonlyArray<RegExp> = [
@@ -102,8 +103,14 @@ export class BackfillAiCallCount implements MigrationInterface {
     let updatedRuns = 0;
     let skippedRuns = 0;
     let updatedTurns = 0;
+    let processedRuns = 0;
 
     for await (const doc of cursor) {
+      processedRuns++;
+      // Pace reads to avoid saturating CosmosDB RUs between documents
+      if (processedRuns > 1) {
+        await sleep(INTER_BATCH_DELAY_MS);
+      }
       const turns: any[] = doc.turns ?? [];
       const updates: Record<string, any> = {};
       let hasUpdate = false;
@@ -135,7 +142,26 @@ export class BackfillAiCallCount implements MigrationInterface {
           0,
         );
         updates["aiCallCount"] = totalAiCallCount;
-        await col.updateOne({ _id: doc._id }, { $set: updates });
+
+        // Pace writes to avoid saturating CosmosDB RUs; retry on 429
+        await sleep(INTER_BATCH_DELAY_MS);
+        let retries = 0;
+        const maxRetries = 10;
+        while (retries < maxRetries) {
+          try {
+            await col.updateOne({ _id: doc._id }, { $set: updates });
+            break;
+          } catch (err: any) {
+            if (err?.code === 16500 && retries < maxRetries - 1) {
+              const delay = Math.max(getRetryAfterMs(err), 500);
+              console.log(`  429 on run ${doc._id}, retry ${retries + 1}/${maxRetries - 1}, waiting ${delay}ms...`);
+              await sleep(delay);
+              retries++;
+            } else {
+              throw err;
+            }
+          }
+        }
         updatedRuns++;
       } else {
         skippedRuns++;
