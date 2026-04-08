@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { PlatformIcon } from "@/components/PlatformIcon";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -981,7 +982,7 @@ function RunRow({
       </TableCell>
       <TableCell>
         {run.os ? (
-          <span className="font-mono text-xs">{run.os.platform}</span>
+          <PlatformIcon platform={run.os.platform} className="h-4 w-4" />
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
@@ -1199,7 +1200,7 @@ function GroupRows({
         {/* Platform */}
         <TableCell>
           {uniform.platform ? (
-            <span className="font-mono text-xs">{uniform.platform}</span>
+            <PlatformIcon platform={uniform.platform} className="h-4 w-4" />
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
         {/* MCP */}
