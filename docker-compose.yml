@@ -179,6 +179,7 @@ services:
       GIT_COMMIT: ${GIT_COMMIT:-development}
       BUILD_TIME: ${BUILD_TIME:-}
       SCOPE_ENVIRONMENT: ${SCOPE_ENVIRONMENT:-}
+      AZURE_KEYVAULT_URI: https://lowkey-vault:8443
     depends_on:
       mongodb:
         condition: service_healthy
@@ -188,6 +189,8 @@ services:
         condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
+      lowkey-vault:
+        condition: service_healthy
 
   # Register agent definitions and versions (local dev — no real version env vars)
   register-agents:
