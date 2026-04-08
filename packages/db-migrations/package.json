@@ -21,6 +21,8 @@
     "migrate:new": "npx tsx src/migrate.ts new"
   },
   "dependencies": {
+    "@azure/identity": "^4.5.0",
+    "@azure/storage-blob": "^12.26.0",
     "mongo-migrate-ts": "^2.0.0",
     "mongodb": "^6.16.0",
     "uuid": "^10.0.0"
