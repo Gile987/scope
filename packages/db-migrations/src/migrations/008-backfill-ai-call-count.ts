@@ -80,20 +80,43 @@ async function downloadHarAsJson(
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+async function downloadHarWithRetry(
+  containerClient: ReturnType<BlobServiceClient["getContainerClient"]>,
+  blobName: string,
+  maxRetries = 3,
+): Promise<HarJson> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await downloadHarAsJson(containerClient, blobName);
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      const delay = 1000 * 2 ** attempt;
+      console.log(`  Blob download retry ${attempt + 1}/${maxRetries}, waiting ${delay}ms...`);
+      await sleep(delay);
+    }
+  }
+  throw new Error("unreachable");
+}
+
 export class BackfillAiCallCount implements MigrationInterface {
   async up(db: Db): Promise<void> {
     const col = db.collection("requests");
 
-    // Target runs that have at least one turn with a harUrl but no aiCallCount
-    const cursor = col.find({
-      "turns.0": { $exists: true },
-      "turns": {
-        $elemMatch: {
-          harUrl: { $exists: true },
-          aiCallCount: { $exists: false },
+    // Target runs that have at least one turn with a harUrl but no aiCallCount.
+    // Project to _id + turns only to reduce RU cost — avoids fetching large
+    // fields like logs, snapshots, etc.
+    const cursor = col.find(
+      {
+        "turns.0": { $exists: true },
+        "turns": {
+          $elemMatch: {
+            harUrl: { $exists: true },
+            aiCallCount: { $exists: false },
+          },
         },
       },
-    });
+      { projection: { _id: 1, turns: 1 } },
+    );
 
     let blobClient: ReturnType<BlobServiceClient["getContainerClient"]> | null = null;
     try {
@@ -128,7 +151,7 @@ export class BackfillAiCallCount implements MigrationInterface {
 
         try {
           const { blobName } = parseBlobNameFromUrl(turn.harUrl);
-          const har = await downloadHarAsJson(blobClient, blobName);
+          const har = await downloadHarWithRetry(blobClient, blobName);
           const count = extractAiCallCountFromHar(har);
           updates[`turns.${i}.aiCallCount`] = count;
           turns[i] = { ...turn, aiCallCount: count }; // keep local copy in sync for sum
