@@ -328,3 +328,56 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     expect(mockLog).toHaveBeenCalledWith("warn", expect.stringContaining("Failed to extract tool calls"), expect.anything());
   });
 });
+
+describe("runMultiTurnLoop — hadError", () => {
+  const mockLog = vi.fn().mockResolvedValue(undefined);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSanitizeHarFile.mockReset().mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
+    mockExtractToolCalls.mockReset().mockReturnValue([]);
+  });
+
+  function makeConfig(overrides: Record<string, unknown> = {}) {
+    return {
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi.fn(),
+      },
+      task: "Do something",
+      criteria: ["check"],
+      maxIterations: 2,
+      workspacePath: "/workspace",
+      judgeClient: { evaluate: vi.fn().mockResolvedValue({ passed: false, feedback: "Not done" }) } as any,
+      blobStorage: {
+        uploadFile: vi.fn().mockResolvedValue("https://blob/file"),
+        uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
+      } as any,
+      requestId: "req1",
+      log: mockLog,
+      ...overrides,
+    };
+  }
+
+  it("hadError is true when the coding agent throws", async () => {
+    const config = makeConfig();
+    (config.processor as any).processMessage.mockRejectedValue(new Error("Agent crashed"));
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(false);
+    expect(result.hadError).toBe(true);
+    expect(result.finalResult).toContain("Coding agent failed");
+  });
+
+  it("hadError is false when max iterations are exhausted without any agent error", async () => {
+    const config = makeConfig();
+    (config.processor as any).processMessage.mockResolvedValue({ response: "partial work" } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(false);
+    expect(result.hadError).toBe(false);
+    expect(result.finalResult).toContain("Max iterations");
+  });
+});
