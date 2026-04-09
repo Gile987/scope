@@ -1054,6 +1054,34 @@ describe("extractAiCallCount", () => {
     expect(extractAiCallCount(har)).toBe(1);
   });
 
+  it("counts completion URLs with query parameters (e.g. Azure OpenAI api-version)", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://my-resource.openai.azure.com/chat/completions?api-version=2024-02-01" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages?beta=true" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(2);
+  });
+
+  it("ignores non-POST requests (e.g. OPTIONS preflights)", () => {
+    const baseEntry = makeEntry({ url: "https://api.githubcopilot.com/chat/completions" });
+    const har = makeHar([
+      baseEntry,
+      { ...baseEntry, request: { ...baseEntry.request, method: "OPTIONS" } },
+      { ...baseEntry, request: { ...baseEntry.request, method: "GET" } },
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("ignores non-2xx responses (e.g. 429 rate limits, 5xx errors)", () => {
+    const baseEntry = makeEntry({ url: "https://api.githubcopilot.com/chat/completions" });
+    const har = makeHar([
+      baseEntry,
+      { ...baseEntry, response: { ...baseEntry.response, status: 429, statusText: "Too Many Requests" } },
+      { ...baseEntry, response: { ...baseEntry.response, status: 500, statusText: "Internal Server Error" } },
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
   it("returns 0 for empty HAR", () => {
     const har = makeHar([]);
     expect(extractAiCallCount(har)).toBe(0);

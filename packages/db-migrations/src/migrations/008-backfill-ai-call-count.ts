@@ -19,14 +19,19 @@ import type { Db } from "mongodb";
 import type { MigrationInterface } from "mongo-migrate-ts";
 import { sleep, getRetryAfterMs, INTER_BATCH_DELAY_MS } from "../batch-update.js";
 
-// Matches the same patterns as extractAiCallCount in har-parser.ts
+// Mirrors the same patterns and filters as extractAiCallCount in har-parser.ts
 const AI_COMPLETION_URL_PATTERNS: ReadonlyArray<RegExp> = [
-  /\/chat\/completions$/,
-  /\/v1\/messages$/,
+  /\/chat\/completions(\?|$)/,
+  /\/v1\/messages(\?|$)/,
 ];
 
-function extractAiCallCountFromHar(har: { log: { entries: Array<{ request: { url: string } }> } }): number {
+type HarJson = { log: { entries: Array<{ request: { method: string; url: string }; response: { status: number } }> } };
+
+function extractAiCallCountFromHar(har: HarJson): number {
   return har.log.entries.filter((entry) =>
+    entry.request.method === "POST" &&
+    entry.response.status >= 200 &&
+    entry.response.status < 300 &&
     AI_COMPLETION_URL_PATTERNS.some((p) => p.test(entry.request.url)),
   ).length;
 }
@@ -65,7 +70,7 @@ function createBlobServiceClient(): BlobServiceClient {
 async function downloadHarAsJson(
   containerClient: ReturnType<BlobServiceClient["getContainerClient"]>,
   blobName: string,
-): Promise<{ log: { entries: Array<{ request: { url: string } }> } }> {
+): Promise<HarJson> {
   const blobClient = containerClient.getBlobClient(blobName);
   const download = await blobClient.download();
   const chunks: Buffer[] = [];
