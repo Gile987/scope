@@ -10,6 +10,7 @@ import {
   LogEvent,
   MULTI_TURN_DEFAULTS,
   ConversationTurn,
+  OsInfo,
 } from "../types/types.js";
 import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
@@ -41,8 +42,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   /** Build workerVersion and OS fields for stamping on request documents.
    *  agentVersion is set at submission time by the API — the worker only adds workerVersion.
    *  OS info is always captured regardless of agentVersion availability. */
-  private getVersionFields(): Record<string, unknown> {
-    const fields: Record<string, unknown> = {
+  private getVersionFields(): { os: OsInfo; workerVersion?: string } {
+    const fields: { os: OsInfo; workerVersion?: string } = {
       os: {
         platform: os.platform(),
         release: os.release(),
