@@ -566,7 +566,7 @@ export function RunDetail() {
               </CardContent>
             </Card>
 
-            {/* Prompt Features card (if task prompt has features) */}
+            {/* Version Info card */}
             {(run.agentVersion || run.workerVersion || run.os) && (
               <Card>
                 <CardHeader>
