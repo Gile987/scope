@@ -3,7 +3,6 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { WorkerResult } from "../types/types.js";
-
 // Mock BlobStorage
 const mockUploadFile = vi.fn();
 vi.mock("../storage/blob-storage.js", () => ({
