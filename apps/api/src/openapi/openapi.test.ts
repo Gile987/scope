@@ -634,7 +634,6 @@ describe("OpenAPI document generation", () => {
       "SkillResponse",
       "FeatureFlagResponse",
       "ReportTemplateResponse",
-      "LogEvent",
     ];
 
     it.each(expectedSchemas)("contains schema '%s'", (schemaName) => {

@@ -18,6 +18,9 @@ import type { LogEvent } from "../types/types.js";
 
 const SNAPSHOTS_CONTAINER = "snapshots";
 const LOGS_CONTAINER = "logs";
+// Note: Azure Append Blobs cap at 50,000 blocks (1 block per appendBlock call).
+// At ~1 log event/second a run would need 14+ hours to approach this limit,
+// so the current per-event write is fine for typical benchmark run durations.
 
 // Directories/patterns to exclude from workspace snapshots
 const EXCLUDE_PATTERNS = [
@@ -40,6 +43,7 @@ export class BlobStorage {
   private containerClient: ContainerClient;
   private logsContainerClient: ContainerClient;
   private blobServiceClient: BlobServiceClient;
+  private logsContainerReady: Promise<void> | null = null;
 
   constructor(config: BlobStorageConfig) {
     let blobServiceClient: BlobServiceClient;
@@ -69,11 +73,22 @@ export class BlobStorage {
   }
 
   /**
+   * Ensures the logs container exists. Lazily initialized — the HTTP call is made
+   * at most once per BlobStorage instance, regardless of concurrent callers.
+   */
+  private ensureLogsContainer(): Promise<void> {
+    this.logsContainerReady ??= this.logsContainerClient
+      .createIfNotExists()
+      .then(() => undefined);
+    return this.logsContainerReady;
+  }
+
+  /**
    * Appends a single log event as a JSON line to the run's append blob.
    * Creates the blob and container on first use.
    */
   async appendLogEvent(requestId: string, logEvent: LogEvent): Promise<void> {
-    await this.logsContainerClient.createIfNotExists();
+    await this.ensureLogsContainer();
     const blobName = `${requestId}/run.jsonl`;
     const appendBlobClient = this.logsContainerClient.getAppendBlobClient(blobName);
     await appendBlobClient.createIfNotExists();
@@ -86,7 +101,7 @@ export class BlobStorage {
    * Returns an empty array if no log blob exists yet.
    */
   async getLogEvents(requestId: string): Promise<LogEvent[]> {
-    await this.logsContainerClient.createIfNotExists();
+    await this.ensureLogsContainer();
     const blobName = `${requestId}/run.jsonl`;
     const appendBlobClient = this.logsContainerClient.getAppendBlobClient(blobName);
 

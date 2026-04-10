@@ -78,6 +78,28 @@ describe("BlobStorage — log helpers", () => {
       expect(data.endsWith("\n")).toBe(true);
       expect(length).toBe(Buffer.byteLength(data));
     });
+
+    it("only calls container createIfNotExists once across multiple appends", async () => {
+      const storage = makeStorage();
+
+      await storage.appendLogEvent("run-123", makeLogEvent("first"));
+      await storage.appendLogEvent("run-123", makeLogEvent("second"));
+      await storage.appendLogEvent("run-123", makeLogEvent("third"));
+
+      expect(mockLogsContainerClient.createIfNotExists).toHaveBeenCalledOnce();
+    });
+
+    it("only calls container createIfNotExists once for concurrent appends", async () => {
+      const storage = makeStorage();
+
+      await Promise.all([
+        storage.appendLogEvent("run-123", makeLogEvent("a")),
+        storage.appendLogEvent("run-123", makeLogEvent("b")),
+        storage.appendLogEvent("run-123", makeLogEvent("c")),
+      ]);
+
+      expect(mockLogsContainerClient.createIfNotExists).toHaveBeenCalledOnce();
+    });
   });
 
   describe("getLogEvents", () => {
