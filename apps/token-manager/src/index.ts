@@ -5,10 +5,11 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, Collection, Db } from "mongodb";
-import { KeyDocument, AccountDocument } from "shared";
+import { KeyDocument, AccountDocument, McpEnvVarDocument } from "shared";
 import { createSecretStore, SecretStore } from "./keyvault-store.js";
 import { createKeyRouter } from "./routes.js";
 import { createAccountRouter } from "./account-routes.js";
+import { createMcpEnvVarRouter } from "./mcp-env-var-routes.js";
 import { startTokenScheduler } from "./token-scheduler.js";
 import { validateToken } from "./token-validators.js";
 
@@ -26,6 +27,7 @@ const validationIntervalMs = parseInt(
 let db: Db;
 let keysCollection: Collection<KeyDocument>;
 let accountsCollection: Collection<AccountDocument>;
+let mcpEnvVarsCollection: Collection<McpEnvVarDocument>;
 let secretStore: SecretStore;
 
 const app = express();
@@ -43,6 +45,7 @@ async function initializeClients(): Promise<void> {
   db = client.db(dbName);
   keysCollection = db.collection<KeyDocument>("tokens");
   accountsCollection = db.collection<AccountDocument>("accounts");
+  mcpEnvVarsCollection = db.collection<McpEnvVarDocument>("mcp-env-vars");
 
   // Create indexes
   try {
@@ -72,6 +75,10 @@ async function initializeClients(): Promise<void> {
   // Mount account routes
   const accountRouter = createAccountRouter(accountsCollection, secretStore);
   app.use(accountRouter);
+
+  // Mount MCP env var routes
+  const mcpEnvVarRouter = createMcpEnvVarRouter(mcpEnvVarsCollection, secretStore);
+  app.use(mcpEnvVarRouter);
 
   // Start validation scheduler
   const scheduler = startTokenScheduler({

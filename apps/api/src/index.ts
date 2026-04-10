@@ -90,6 +90,7 @@ import {
   CreateRequestInputSchema,
   ListRequestsQuerySchema,
   BulkResubmitInputSchema,
+  McpEnvVarClient,
 } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -160,6 +161,7 @@ let reportCollection: Collection<ReportDocument>;
 let agentCollection: Collection<CodingAgentDocument>;
 let modelCollection: Collection<ModelDocument>;
 let mcpServerCollection: Collection<McpServerDocument>;
+let mcpEnvVarClient: McpEnvVarClient | null = null;
 let insightsCollection: Collection<InsightDocument>;
 let taskPromptCollection: Collection<TaskPromptDocument>;
 let taskPromptStore: TaskPromptStore;
@@ -4069,6 +4071,14 @@ if (TOKEN_MANAGER_URL) {
   // NOTE: GET /api/v1/accounts/:id/secrets is intentionally NOT proxied.
   // Key-updaters call token-manager directly (ClusterIP) for secrets.
 
+  // MCP env var CRUD routes proxied to Token Manager (portal/CLI uses these)
+  app.get("/api/v1/mcp-env-vars/:mcpName", proxyToTokenManager);
+  app.post("/api/v1/mcp-env-vars/:mcpName", proxyToTokenManager);
+  app.delete("/api/v1/mcp-env-vars/:mcpName/:id", proxyToTokenManager);
+
+  // Initialize the server-side client for the API to call Token Manager directly
+  mcpEnvVarClient = new McpEnvVarClient(TOKEN_MANAGER_URL);
+
   console.log(`[api] Token Manager proxy enabled → ${TOKEN_MANAGER_URL}`);
 } else {
   console.log("[api] Token Manager proxy disabled (TOKEN_MANAGER_URL not set)");
@@ -4701,7 +4711,7 @@ const CreateMcpServerBodySchema = z.object({
   description: z.string().optional(),
 });
 
-// GET /api/v1/mcp/servers — list MCP servers
+// GET /api/v1/mcp/servers — list MCP servers (env never shown in list)
 apiRoute(app, registry, {
   method: "get",
   path: "/api/v1/mcp/servers",
@@ -4718,6 +4728,8 @@ apiRoute(app, registry, {
 });
 
 // GET /api/v1/mcp/servers/:id — get MCP server by slug
+// ?resolve=true  — return actual secret values (workers only, internal use)
+// default        — return masked values ("<secret>") for UI/CLI
 apiRoute(app, registry, {
   method: "get",
   path: "/api/v1/mcp/servers/:id",
@@ -4734,7 +4746,22 @@ apiRoute(app, registry, {
       res.status(404).json({ error: "MCP server not found" });
       return;
     }
-    res.json({ ...server, id: server._id });
+
+    if (mcpEnvVarClient) {
+      const shouldResolve = req.query.resolve === "true";
+      if (shouldResolve) {
+        const env = await mcpEnvVarClient.resolveEnv(server._id);
+        res.json({ ...server, id: server._id, ...(Object.keys(env).length > 0 ? { env } : {}) });
+      } else {
+        const items = await mcpEnvVarClient.listEnv(server._id);
+        const maskedEnv = items.length > 0
+          ? Object.fromEntries(items.map((item) => [item.key, "<secret>"]))
+          : undefined;
+        res.json({ ...server, id: server._id, ...(maskedEnv ? { env: maskedEnv } : {}) });
+      }
+    } else {
+      res.json({ ...server, id: server._id });
+    }
   },
 });
 
@@ -4749,6 +4776,13 @@ apiRoute(app, registry, {
   handler: async (req, res) => {
     const { _id, name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
     const now = new Date();
+
+    // If Token Manager is available, store env vars there — not in MongoDB
+    if (mcpEnvVarClient && env && Object.keys(env).length > 0) {
+      await mcpEnvVarClient.storeEnv(_id, env);
+    }
+    const mongoEnv = mcpEnvVarClient ? undefined : env;
+
     const existing = await mcpServerCollection.findOne({ _id });
 
     if (existing) {
@@ -4762,14 +4796,14 @@ apiRoute(app, registry, {
             ...(url !== undefined ? { url } : {}),
             ...(command !== undefined ? { command } : {}),
             ...(args !== undefined ? { args } : {}),
-            ...(env !== undefined ? { env } : {}),
+            ...(mongoEnv !== undefined ? { env: mongoEnv } : {}),
             ...(headers !== undefined ? { headers } : {}),
             ...(sessionMode !== undefined ? { sessionMode } : {}),
             ...(version !== undefined ? { version } : {}),
             ...(description !== undefined ? { description } : {}),
             updatedAt: now,
           },
-          $unset: { deletedAt: "" },
+          $unset: { deletedAt: "", ...(mcpEnvVarClient && env !== undefined ? { env: "" } : {}) },
         },
       );
       const updated = await mcpServerCollection.findOne({ _id });
@@ -4782,7 +4816,7 @@ apiRoute(app, registry, {
         ...(url ? { url } : {}),
         ...(command ? { command } : {}),
         ...(args ? { args } : {}),
-        ...(env ? { env } : {}),
+        ...(mongoEnv ? { env: mongoEnv } : {}),
         ...(headers ? { headers } : {}),
         ...(sessionMode ? { sessionMode } : {}),
         ...(version ? { version } : {}),
@@ -4817,19 +4851,34 @@ apiRoute(app, registry, {
       return;
     }
 
+    // If Token Manager is available and env is being updated, replace all env vars
+    if (mcpEnvVarClient && env !== undefined) {
+      await mcpEnvVarClient.deleteAllEnvVars(id);
+      if (Object.keys(env).length > 0) {
+        await mcpEnvVarClient.storeEnv(id, env);
+      }
+    }
+
     const updateFields: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) updateFields.name = name;
     if (type !== undefined) updateFields.type = type;
     if (url !== undefined) updateFields.url = url;
     if (command !== undefined) updateFields.command = command;
     if (args !== undefined) updateFields.args = args;
-    if (env !== undefined) updateFields.env = env;
+    // Only persist env in MongoDB when Token Manager is not available
+    if (env !== undefined && !mcpEnvVarClient) updateFields.env = env;
     if (headers !== undefined) updateFields.headers = headers;
     if (sessionMode !== undefined) updateFields.sessionMode = sessionMode;
     if (version !== undefined) updateFields.version = version;
     if (description !== undefined) updateFields.description = description;
 
-    await mcpServerCollection.updateOne({ _id: id }, { $set: updateFields });
+    const mongoUpdate: Record<string, unknown> = { $set: updateFields };
+    // Unset env from MongoDB if Token Manager takes over
+    if (mcpEnvVarClient && env !== undefined) {
+      (mongoUpdate as any).$unset = { env: "" };
+    }
+
+    await mcpServerCollection.updateOne({ _id: id }, mongoUpdate);
     const updated = await mcpServerCollection.findOne({ _id: id });
     res.json({ ...updated, id: updated!._id });
   },
@@ -4854,6 +4903,11 @@ apiRoute(app, registry, {
     if (!existing) {
       res.status(404).json({ error: "MCP server not found" });
       return;
+    }
+
+    // Best-effort cleanup of env vars in Token Manager before soft-delete
+    if (mcpEnvVarClient) {
+      await mcpEnvVarClient.deleteAllEnvVars(id);
     }
 
     await mcpServerCollection.updateOne(
@@ -6220,6 +6274,7 @@ export interface TestDependencies {
   agentCollection?: Collection<CodingAgentDocument>;
   modelCollection?: Collection<ModelDocument>;
   mcpServerCollection?: Collection<McpServerDocument>;
+  mcpEnvVarClient?: McpEnvVarClient | null;
   insightsCollection?: Collection<InsightDocument>;
   taskPromptCollection?: Collection<TaskPromptDocument>;
   taskPromptStore?: TaskPromptStore;
@@ -6244,6 +6299,7 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.agentCollection) agentCollection = deps.agentCollection;
   if (deps.modelCollection) modelCollection = deps.modelCollection;
   if (deps.mcpServerCollection) mcpServerCollection = deps.mcpServerCollection;
+  if ("mcpEnvVarClient" in deps) mcpEnvVarClient = deps.mcpEnvVarClient ?? null;
   if (deps.insightsCollection) insightsCollection = deps.insightsCollection;
   if (deps.taskPromptCollection) taskPromptCollection = deps.taskPromptCollection;
   if (deps.taskPromptStore) taskPromptStore = deps.taskPromptStore;

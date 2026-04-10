@@ -33,6 +33,15 @@ export interface McpServerDocument {
   deletedAt?: Date;               // Soft-delete timestamp
 }
 
+/** MCP env var document stored in MongoDB (via Token Manager) */
+export interface McpEnvVarDocument {
+  _id: string;        // MongoDB ObjectId as hex string
+  mcpName: string;    // Slug of the MCP server this belongs to
+  key: string;        // Env var name (e.g. "GITHUB_TOKEN")
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 /** Resolved MCP server configuration passed to workers at runtime */
 export interface McpServerConfig {
   type: McpTransportType;

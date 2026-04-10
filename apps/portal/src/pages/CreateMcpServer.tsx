@@ -327,7 +327,7 @@ export function CreateMcpServer() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Environment Variables</CardTitle>
-                <CardDescription>Optional env vars passed to the stdio subprocess</CardDescription>
+                <CardDescription>Sensitive values are stored encrypted via Token Manager</CardDescription>
               </div>
               <Button type="button" variant="outline" size="sm" onClick={addEnvPair} className="gap-1">
                 <Plus className="h-3.5 w-3.5" /> Add Variable
@@ -346,6 +346,7 @@ export function CreateMcpServer() {
                   />
                   <Input
                     placeholder="value"
+                    type="password"
                     value={pair.value}
                     onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
                     className="font-mono text-sm"
