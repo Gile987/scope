@@ -4,44 +4,63 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LogEvent } from "../types/types.js";
 
-// ─── Mock ioredis ──────────────────────────────────────────────────────────
-// log-publisher.ts uses createRequire to pull in ioredis; we mock the module.
+// ─── Mock withRetry ────────────────────────────────────────────────────────
+// Replace with a synchronous pass-through to avoid real backoff delays.
+// vi.mock works for ESM imports; withRetry is loaded as such.
 
-const mockRedis = {
-  publish: vi.fn().mockResolvedValue(1),
-  quit: vi.fn().mockResolvedValue(undefined),
-  on: vi.fn(),
-};
+const mockWithRetry = vi.fn();
 
-vi.mock("ioredis", () => {
-  const MockRedis = vi.fn(() => mockRedis);
-  return { default: MockRedis, __esModule: true };
-});
-
-// ─── Mock BlobStorage ──────────────────────────────────────────────────────
-
-const mockAppendLogEvent = vi.fn().mockResolvedValue(undefined);
-
-vi.mock("../storage/blob-storage.js", () => ({
-  BlobStorage: vi.fn().mockImplementation(() => ({
-    appendLogEvent: mockAppendLogEvent,
-  })),
+vi.mock("../utils/retry.js", () => ({
+  withRetry: mockWithRetry,
+  isCosmosDb429: vi.fn().mockReturnValue(false),
 }));
 
 // ─── Import after mocks ────────────────────────────────────────────────────
 
 const { LogPublisher } = await import("./log-publisher.js");
-const { BlobStorage } = await import("../storage/blob-storage.js");
+
+// ─── Mock objects ──────────────────────────────────────────────────────────
+
+// ioredis is loaded via createRequire() so vi.mock("ioredis") is bypassed.
+// We replace the redis instance on each publisher after construction.
+
+const mockRedis = {
+  publish: vi.fn().mockResolvedValue(1),
+  quit: vi.fn().mockResolvedValue(undefined),
+  on: vi.fn(),
+  disconnect: vi.fn(),
+};
+
+const mockAppendLogEvent = vi.fn().mockResolvedValue(undefined);
+
+const mockBlobStorage = {
+  appendLogEvent: mockAppendLogEvent,
+} as any;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
+/** Default withRetry behaviour: execute fn() once, pass result through. */
+function withRetryPassthrough() {
+  mockWithRetry.mockImplementation(async (fn: () => Promise<unknown>) => fn());
+}
+
 function makePublisher() {
-  const blobStorage = new (BlobStorage as any)();
-  return new LogPublisher(
-    { redisHost: "localhost", redisPort: 6379, redisPassword: "" },
-    blobStorage,
+  const publisher = new LogPublisher(
+    { redisHost: "127.0.0.1", redisPort: 1, redisPassword: "" },
+    mockBlobStorage,
     "test-worker",
   );
+  // vi.mock("ioredis") doesn't intercept createRequire-based CJS imports.
+  // Disconnect the real ioredis instance to stop background reconnection,
+  // then replace both redis and the circuit breaker with synchronous mocks.
+  (publisher as any).redis?.disconnect?.();
+  (publisher as any).redis = mockRedis;
+  (publisher as any).redisBreaker = {
+    execute: async (fn: () => Promise<unknown>) => fn(),
+    state: "closed",
+    onStateChange: vi.fn(),
+  };
+  return publisher;
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
@@ -49,6 +68,7 @@ function makePublisher() {
 describe("LogPublisher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    withRetryPassthrough();
     mockAppendLogEvent.mockResolvedValue(undefined);
     mockRedis.publish.mockResolvedValue(1);
   });
@@ -67,10 +87,11 @@ describe("LogPublisher", () => {
       expect(parsed.source).toBe("test-worker");
     });
 
-    it("persists the log event to blob storage", async () => {
+    it("persists the log event via withRetry wrapping appendLogEvent", async () => {
       const publisher = makePublisher();
       await publisher.publish("run-abc", "warn", "something happened");
 
+      expect(mockWithRetry).toHaveBeenCalledOnce();
       expect(mockAppendLogEvent).toHaveBeenCalledOnce();
       const [requestId, event] = mockAppendLogEvent.mock.calls[0];
       expect(requestId).toBe("run-abc");
@@ -91,40 +112,40 @@ describe("LogPublisher", () => {
       const publisher = makePublisher();
 
       await expect(publisher.publish("run-abc", "info", "msg")).resolves.toBeUndefined();
-      // Blob storage must still be called even when Redis fails
-      expect(mockAppendLogEvent).toHaveBeenCalledOnce();
+      expect(mockWithRetry).toHaveBeenCalledOnce();
     });
 
     it("does not throw when blob storage append fails after all retries", async () => {
       const err = Object.assign(new Error("BlobServiceError"), { statusCode: 500 });
-      mockAppendLogEvent.mockRejectedValue(err);
+      mockWithRetry.mockRejectedValue(err);
       const publisher = makePublisher();
 
       await expect(publisher.publish("run-abc", "info", "msg")).resolves.toBeUndefined();
     });
 
-    it("retries blob append on transient 503 before succeeding", async () => {
-      const transientErr = Object.assign(new Error("ServiceUnavailable"), { statusCode: 503 });
-      mockAppendLogEvent
-        .mockRejectedValueOnce(transientErr)
-        .mockResolvedValueOnce(undefined);
-
+    it("passes an isRetryable predicate that accepts 429, 500, and 503", async () => {
       const publisher = makePublisher();
       await publisher.publish("run-abc", "info", "msg");
 
-      expect(mockAppendLogEvent).toHaveBeenCalledTimes(2);
+      const [, opts] = mockWithRetry.mock.calls[0];
+      const isRetryable = opts?.isRetryable as (err: unknown) => boolean;
+      expect(isRetryable).toBeDefined();
+
+      expect(isRetryable({ statusCode: 429 })).toBe(true);
+      expect(isRetryable({ statusCode: 500 })).toBe(true);
+      expect(isRetryable({ statusCode: 503 })).toBe(true);
     });
 
-    it("does not retry blob append on non-transient 400 errors", async () => {
-      const badRequestErr = Object.assign(new Error("BadRequest"), { statusCode: 400 });
-      // A 400 is not in the retryable list, so it should fail after 1 attempt
-      mockAppendLogEvent.mockRejectedValue(badRequestErr);
-
+    it("passes an isRetryable predicate that rejects non-transient errors", async () => {
       const publisher = makePublisher();
-      await expect(publisher.publish("run-abc", "info", "msg")).resolves.toBeUndefined();
+      await publisher.publish("run-abc", "info", "msg");
 
-      // withRetry should not retry on 400 — only 1 call
-      expect(mockAppendLogEvent).toHaveBeenCalledTimes(1);
+      const [, opts] = mockWithRetry.mock.calls[0];
+      const isRetryable = opts?.isRetryable as (err: unknown) => boolean;
+
+      expect(isRetryable({ statusCode: 400 })).toBe(false);
+      expect(isRetryable({ statusCode: 404 })).toBe(false);
+      expect(isRetryable({})).toBe(false);
     });
   });
 

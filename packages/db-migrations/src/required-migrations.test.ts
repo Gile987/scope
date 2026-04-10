@@ -23,7 +23,7 @@ describe("REQUIRED_MIGRATIONS", () => {
   it("matches actual migration files on disk", () => {
     const migrationsDir = join(__dirname, "migrations");
     const filesOnDisk = readdirSync(migrationsDir).filter((f) =>
-      f.endsWith(".ts"),
+      f.endsWith(".ts") && !f.endsWith(".test.ts"),
     );
     for (const required of REQUIRED_MIGRATIONS) {
       expect(filesOnDisk).toContain(required);
@@ -33,7 +33,7 @@ describe("REQUIRED_MIGRATIONS", () => {
   it("includes all migration files on disk", () => {
     const migrationsDir = join(__dirname, "migrations");
     const filesOnDisk = readdirSync(migrationsDir).filter((f) =>
-      f.endsWith(".ts"),
+      f.endsWith(".ts") && !f.endsWith(".test.ts"),
     );
     for (const file of filesOnDisk) {
       expect(REQUIRED_MIGRATIONS).toContain(file);
