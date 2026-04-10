@@ -89,7 +89,7 @@ describe("BlobStorage — log helpers", () => {
       expect(mockLogsContainerClient.createIfNotExists).toHaveBeenCalledOnce();
     });
 
-    it("only calls container createIfNotExists once for concurrent appends", async () => {
+    it("only calls container createIfNotExists once for concurrent appends and all events land", async () => {
       const storage = makeStorage();
 
       await Promise.all([
@@ -99,6 +99,16 @@ describe("BlobStorage — log helpers", () => {
       ]);
 
       expect(mockLogsContainerClient.createIfNotExists).toHaveBeenCalledOnce();
+      // All three events must actually be appended
+      expect(mockAppendBlobClient.appendBlock).toHaveBeenCalledTimes(3);
+    });
+
+    it("propagates non-transient errors from appendBlock", async () => {
+      const err = Object.assign(new Error("AppendBlockFailed"), { statusCode: 400 });
+      mockAppendBlobClient.appendBlock.mockRejectedValue(err);
+
+      const storage = makeStorage();
+      await expect(storage.appendLogEvent("run-123", makeLogEvent("fail"))).rejects.toThrow("AppendBlockFailed");
     });
   });
 
