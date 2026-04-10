@@ -10,7 +10,7 @@
 
 import { writeFile, readFile, access, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { parseHarFile, extractToolCalls, extractTokenUsage } from "../har/har-parser.js";
+import { parseHarFile, extractToolCalls, extractTokenUsage, extractAiCallCount } from "../har/har-parser.js";
 import type { TokenUsage, WorkerLogFn } from "../types/types.js";
 
 const DEFAULT_API_URL = "http://localhost:18897";
@@ -27,6 +27,7 @@ export interface DevProxyInfo {
 export interface HarCollectionResult {
   harFilePath: string | null;
   tokenUsage?: TokenUsage;
+  aiCallCount?: number;
 }
 
 export class DevProxyClient {
@@ -245,7 +246,9 @@ export class DevProxyClient {
         if (tokenUsage) {
           await log("info", `Token usage: ${tokenUsage.promptTokens} prompt, ${tokenUsage.completionTokens} completion, ${tokenUsage.totalTokens} total`);
         }
-        return { harFilePath, tokenUsage };
+        const aiCallCount = extractAiCallCount(har);
+        await log("info", `AI call count: ${aiCallCount}`);
+        return { harFilePath, tokenUsage, aiCallCount };
       }
       await log("warn", "No HAR file found after DevProxy recording");
     } catch (error) {

@@ -233,6 +233,14 @@ export function RunDetail() {
                   </span>
                 </>
               )}
+              {run.aiCallCount !== undefined && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <span className="font-mono text-xs" title="LLM completion calls">
+                    {run.aiCallCount} LLM calls
+                  </span>
+                </>
+              )}
               {run.mcpServers && run.mcpServers.length > 0 && (
                 <>
                   <Separator orientation="vertical" className="h-4" />

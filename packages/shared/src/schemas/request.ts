@@ -55,6 +55,7 @@ export const ConversationTurnSchema = z
       response: z.string().optional(),
       timestamp: z.string().optional(),
     })).optional(),
+    aiCallCount: z.number().optional(),
     rawChatUrl: z.string().optional(),
     rawChatFormat: z.string().optional(),
   })
@@ -120,6 +121,7 @@ export const RequestResponseSchema = z
     videoUrls: z.array(z.string()).optional(),
     setupVideoUrls: z.array(z.string()).optional(),
     tokenUsage: TokenUsageSchema.optional(),
+    aiCallCount: z.number().optional(),
     submissionId: z.string().optional(),
     rawChatUrl: z.string().optional(),
     rawChatFormat: z.string().optional(),

@@ -142,6 +142,7 @@ export async function runMultiTurnLoop(
     let codingResponse: string;
     let turnHarUrl: string | undefined;
     let turnTokenUsage: TokenUsage | undefined;
+    let turnAiCallCount: number | undefined;
     let turnToolCalls: ToolCall[] | undefined;
     let turnRawChatUrl: string | undefined;
     let turnRawChatFormat: string | undefined;
@@ -150,6 +151,7 @@ export async function runMultiTurnLoop(
       const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs, extensionConfigs });
       codingResponse = workerResult.response;
       turnTokenUsage = workerResult.tokenUsage;
+      turnAiCallCount = workerResult.aiCallCount;
 
       // Upload HAR file to blob storage if available (sanitized to strip credentials)
       if (workerResult.harFilePath) {
@@ -237,6 +239,9 @@ export async function runMultiTurnLoop(
         }
       }
 
+      // Extract aiCallCount from the error if the worker attached it
+      const errorAiCallCount: number | undefined = (error as any)?.aiCallCount;
+
       // Extract video paths from the error if the worker attached them
       const errorVideoPaths: string[] = (error as any)?.videoFilePaths ?? [];
       let errorVideoUrls: string[] = [];
@@ -270,6 +275,7 @@ export async function runMultiTurnLoop(
         durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(errorHarUrl && { harUrl: errorHarUrl }),
         ...(errorVideoUrls.length > 0 && { videoUrls: errorVideoUrls }),
+        ...(errorAiCallCount !== undefined && { aiCallCount: errorAiCallCount }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -363,6 +369,9 @@ export async function runMultiTurnLoop(
         durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(turnHarUrl && { harUrl: turnHarUrl }),
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+        ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
+        ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
+        ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
         ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
         ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
       };
@@ -410,6 +419,7 @@ export async function runMultiTurnLoop(
       ...(turnHarUrl && { harUrl: turnHarUrl }),
       ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
       ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
+      ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
       ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
       ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
       ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),

@@ -473,6 +473,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       final: true,
     });
 
+    const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
+
     await withRetry(() => this.collection.updateOne(
       { _id: requestId },
       {
@@ -481,6 +483,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           outcome: finalOutcome,
           result: result.finalResult,
           updatedAt: new Date(),
+          ...(totalAiCallCount > 0 && { aiCallCount: totalAiCallCount }),
           ...(result.passed ? {} : { error: result.finalResult }),
         },
       }
