@@ -59,6 +59,8 @@ export interface MultiTurnResult {
   turns: ConversationTurn[];
   passed: boolean;
   finalResult: string;
+  /** True when the loop exited because of an unrecoverable error (agent crash, snapshot failure, judge failure), not because iterations were exhausted. */
+  hadError: boolean;
 }
 
 /**
@@ -123,6 +125,7 @@ export async function runMultiTurnLoop(
       return {
         turns,
         passed: false,
+        hadError: true,
         finalResult: `Timed out after ${iteration - 1} iterations (${Math.round(elapsed / 1000)}s)`,
       };
     }
@@ -282,6 +285,7 @@ export async function runMultiTurnLoop(
       return {
         turns,
         passed: false,
+        hadError: true,
         finalResult: `Coding agent failed on iteration ${iteration}: ${errorMsg}`,
       };
     }
@@ -326,6 +330,7 @@ export async function runMultiTurnLoop(
       return {
         turns,
         passed: false,
+        hadError: true,
         finalResult: `Snapshot upload failed on iteration ${iteration}: ${errorMsg}`,
       };
     }
@@ -378,6 +383,7 @@ export async function runMultiTurnLoop(
       return {
         turns,
         passed: false,
+        hadError: true,
         finalResult: `Judge evaluation failed on iteration ${iteration}: ${errorMsg}`,
       };
     }
@@ -433,6 +439,7 @@ export async function runMultiTurnLoop(
       return {
         turns,
         passed: true,
+        hadError: false,
         finalResult: codingResponse,
       } as MultiTurnResult;
     }
@@ -453,6 +460,7 @@ export async function runMultiTurnLoop(
   return {
     turns,
     passed: false,
+    hadError: false,
     finalResult: `Max iterations (${maxIterations}) reached. Last coding response: ${
       turns[turns.length - 1]?.codingAgentResponse?.substring(0, 200) || "none"
     }`,
