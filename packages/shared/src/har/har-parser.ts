@@ -572,3 +572,34 @@ export async function extractTokenUsageFromFile(filePath: string): Promise<Token
   const har = await parseHarFile(filePath);
   return extractTokenUsage(har);
 }
+
+/**
+ * URL patterns that identify AI completion endpoints.
+ * Matches the path suffix so it works across all known providers:
+ * - GitHub Copilot:  https://api.githubcopilot.com/chat/completions
+ * - GitHub Models:   https://models.inference.ai.azure.com/chat/completions
+ * - Anthropic:       https://api.anthropic.com/v1/messages
+ */
+const AI_COMPLETION_URL_PATTERNS: ReadonlyArray<RegExp> = [
+  /\/chat\/completions(\?|$)/,
+  /\/v1\/messages(\?|$)/,
+];
+
+/**
+ * Count the number of AI completion calls captured in a HAR file.
+ *
+ * Only POST requests with a 2xx response are counted:
+ * - POST-only: excludes OPTIONS preflights and other methods
+ * - 2xx-only: excludes 429 retries and transient 5xx errors so the
+ *   count reflects successful agent interactions, not noise
+ * - URL pattern uses (\?|$) to match paths with or without query params
+ *   (e.g. Azure OpenAI appends ?api-version=...)
+ */
+export function extractAiCallCount(har: HarFile): number {
+  return har.log.entries.filter((entry) =>
+    entry.request.method === "POST" &&
+    entry.response.status >= 200 &&
+    entry.response.status < 300 &&
+    AI_COMPLETION_URL_PATTERNS.some((p) => p.test(entry.request.url)),
+  ).length;
+}

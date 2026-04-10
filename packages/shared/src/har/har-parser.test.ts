@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent, extractTokenUsage } from "./har-parser.js";
+import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent, extractTokenUsage, extractAiCallCount } from "./har-parser.js";
 import type { HarFile, ToolCall } from "./types.js";
 
 // Mock fs/promises for parseHarFile tests
@@ -1009,5 +1009,81 @@ describe("extractTokenUsage", () => {
       makeEntry({}),
     ]);
     expect(extractTokenUsage(har)).toBeUndefined();
+  });
+});
+
+describe("extractAiCallCount", () => {
+  it("counts GitHub Copilot completion entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(2);
+  });
+
+  it("counts GitHub Models completion entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://models.inference.ai.azure.com/chat/completions" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("counts Anthropic messages entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(3);
+  });
+
+  it("counts mixed providers", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(2);
+  });
+
+  it("ignores non-completion entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+      makeEntry({ url: "https://api.githubcopilot.com/models" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/tokenize" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("counts completion URLs with query parameters (e.g. Azure OpenAI api-version)", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://my-resource.openai.azure.com/chat/completions?api-version=2024-02-01" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages?beta=true" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(2);
+  });
+
+  it("ignores non-POST requests (e.g. OPTIONS preflights)", () => {
+    const baseEntry = makeEntry({ url: "https://api.githubcopilot.com/chat/completions" });
+    const har = makeHar([
+      baseEntry,
+      { ...baseEntry, request: { ...baseEntry.request, method: "OPTIONS" } },
+      { ...baseEntry, request: { ...baseEntry.request, method: "GET" } },
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("ignores non-2xx responses (e.g. 429 rate limits, 5xx errors)", () => {
+    const baseEntry = makeEntry({ url: "https://api.githubcopilot.com/chat/completions" });
+    const har = makeHar([
+      baseEntry,
+      { ...baseEntry, response: { ...baseEntry.response, status: 429, statusText: "Too Many Requests" } },
+      { ...baseEntry, response: { ...baseEntry.response, status: 500, statusText: "Internal Server Error" } },
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("returns 0 for empty HAR", () => {
+    const har = makeHar([]);
+    expect(extractAiCallCount(har)).toBe(0);
   });
 });

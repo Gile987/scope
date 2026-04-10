@@ -81,6 +81,11 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                       {turn.tokenUsage.promptTokens.toLocaleString()}↑ · {turn.tokenUsage.completionTokens.toLocaleString()}↓
                     </span>
                   )}
+                  {turn.aiCallCount !== undefined && (
+                    <span className="font-mono" title="LLM completion calls">
+                      {turn.aiCallCount} LLM calls
+                    </span>
+                  )}
                   {turn.snapshotUrl && (
                     <Button
                       variant="ghost"

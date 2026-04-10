@@ -328,3 +328,93 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     expect(mockLog).toHaveBeenCalledWith("warn", expect.stringContaining("Failed to extract tool calls"), expect.anything());
   });
 });
+
+describe("runMultiTurnLoop — aiCallCount", () => {
+  const mockLog = vi.fn().mockResolvedValue(undefined);
+  const mockOnTurnComplete = vi.fn().mockResolvedValue(undefined);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSanitizeHarFile.mockReset().mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
+    mockExtractToolCalls.mockReset().mockReturnValue([]);
+  });
+
+  function makeConfig(overrides: Record<string, unknown> = {}) {
+    return {
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi.fn(),
+      },
+      task: "Do something",
+      criteria: ["check"],
+      maxIterations: 1,
+      workspacePath: "/workspace",
+      judgeClient: { evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "OK" }) } as any,
+      blobStorage: {
+        uploadFile: vi.fn().mockResolvedValue("https://blob/har"),
+        uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
+      } as any,
+      requestId: "req1",
+      log: mockLog,
+      onTurnComplete: mockOnTurnComplete,
+      ...overrides,
+    };
+  }
+
+  it("includes aiCallCount on the completed turn when worker returns it", async () => {
+    const config = makeConfig();
+    (config.processor as any).processMessage.mockResolvedValue({
+      response: "done",
+      aiCallCount: 4,
+    } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(true);
+    expect(result.turns[0].aiCallCount).toBe(4);
+  });
+
+  it("does not include aiCallCount on the completed turn when worker omits it", async () => {
+    const config = makeConfig();
+    (config.processor as any).processMessage.mockResolvedValue({
+      response: "done",
+    } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.turns[0].aiCallCount).toBeUndefined();
+  });
+
+  it("includes aiCallCount on the partial turn when judge evaluation fails", async () => {
+    const config = makeConfig({
+      judgeClient: {
+        evaluate: vi.fn().mockRejectedValue(new Error("judge down")),
+      },
+    });
+    (config.processor as any).processMessage.mockResolvedValue({
+      response: "done",
+      aiCallCount: 7,
+    } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(false);
+    expect(result.turns).toHaveLength(1);
+    expect(result.turns[0].aiCallCount).toBe(7);
+  });
+
+  it("does not include aiCallCount on the partial turn when worker omits it and judge fails", async () => {
+    const config = makeConfig({
+      judgeClient: {
+        evaluate: vi.fn().mockRejectedValue(new Error("judge down")),
+      },
+    });
+    (config.processor as any).processMessage.mockResolvedValue({
+      response: "done",
+    } satisfies WorkerResult);
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.turns[0].aiCallCount).toBeUndefined();
+  });
+});
