@@ -7,6 +7,7 @@ const Redis = require("ioredis");
 import { circuitBreaker, handleAll, ConsecutiveBreaker, CircuitState } from "cockatiel";
 import { LogEvent } from "../types/types.js";
 import { BlobStorage } from "../storage/blob-storage.js";
+import { withRetry } from "../utils/retry.js";
 
 export interface RedisConfig {
   redisHost: string;
@@ -93,8 +94,14 @@ export class LogPublisher {
     }
 
     // Append to blob storage for persistence (avoids CosmosDB RU pressure)
+    // Retries on transient blob storage errors (429, 500, 503) with exponential backoff.
     try {
-      await this.blobStorage.appendLogEvent(requestId, logEvent);
+      await withRetry(() => this.blobStorage.appendLogEvent(requestId, logEvent), {
+        isRetryable: (err) => {
+          const status = (err as any)?.statusCode;
+          return status === 429 || status === 500 || status === 503;
+        },
+      });
     } catch (error) {
       console.error(`Failed to persist log to blob storage: ${error}`);
     }
