@@ -36,6 +36,10 @@ import { SkillList } from "@/pages/SkillList";
 import { SkillDetail } from "@/pages/SkillDetail";
 import { ExtensionList } from "@/pages/ExtensionList";
 import { ExtensionDetail } from "@/pages/ExtensionDetail";
+import { ProfileList } from "@/pages/ProfileList";
+import { ProfileDetail } from "@/pages/ProfileDetail";
+import { CreateProfile } from "@/pages/CreateProfile";
+import { EditProfileWrapper } from "@/pages/EditProfileWrapper";
 import { InsightsList } from "@/pages/InsightsList";
 import { InsightDetail } from "@/pages/InsightDetail";
 import { CriteriaMdpView } from "@/pages/CriteriaMdpView";
@@ -100,6 +104,11 @@ export function App() {
         <Route path="/skills/*" element={<FeatureRoute featureKey="skills"><SkillDetail /></FeatureRoute>} />
         <Route path="/extensions" element={<FeatureRoute featureKey="extensions"><ExtensionList /></FeatureRoute>} />
         <Route path="/extensions/:id" element={<FeatureRoute featureKey="extensions"><ExtensionDetail /></FeatureRoute>} />
+        <Route path="/profiles" element={<FeatureRoute featureKey="profiles"><ProfileList /></FeatureRoute>} />
+        <Route path="/profiles/new" element={<FeatureRoute featureKey="profiles"><CreateProfile /></FeatureRoute>} />
+        <Route path="/profiles/:profileId" element={<FeatureRoute featureKey="profiles"><ProfileDetail /></FeatureRoute>} />
+        <Route path="/profiles/:profileId/v/:version" element={<FeatureRoute featureKey="profiles"><ProfileDetail /></FeatureRoute>} />
+        <Route path="/profiles/:profileId/edit" element={<FeatureRoute featureKey="profiles"><EditProfileWrapper /></FeatureRoute>} />
         <Route path="/admin" element={<Admin />} />
       </Route>
     </Routes>

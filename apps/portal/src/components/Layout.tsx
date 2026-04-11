@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch, Plug, Puzzle } from "lucide-react";
+import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch, Plug, Puzzle, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet, SheetContent, SheetTrigger, SheetTitle,
@@ -36,6 +36,7 @@ const navItems: NavItem[] = [
   { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
   { to: "/skills", label: "Skills", icon: BookOpen, featureKey: "skills" },
   { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions" },
+  { to: "/profiles", label: "Profiles", icon: User, featureKey: "profiles" },
 ];
 
 /** Width reserved for the "More" overflow button (icon + padding) */
