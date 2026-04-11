@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
-import { ArrowLeft, Loader2, Save } from "lucide-react";
+import { ArrowLeft, Loader2, Save, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 interface CreateProfilePageProps {
@@ -127,6 +127,52 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
     },
   });
 
+  const generateIdentity = () => {
+    const parts: string[] = [];
+    const descParts: string[] = [];
+
+    // Worker — use agent name if available, else raw ID
+    const agentName = selectedAgent?.name ?? worker;
+    if (agentName) {
+      parts.push(agentName);
+      descParts.push(agentName);
+    }
+
+    // Model
+    if (model) {
+      parts.push(model);
+      descParts.push(`model: ${model}`);
+    }
+
+    // Agent version
+    if (selectedAgentVersion) {
+      descParts.push(`agent version: ${selectedAgentVersion}`);
+    }
+
+    // MCP servers
+    if (selectedMcpServers.length > 0) {
+      parts.push(selectedMcpServers.join(", "));
+      descParts.push(`MCP: ${selectedMcpServers.join(", ")}`);
+    }
+
+    // Skills — use last segment of slug for name brevity
+    if (selectedSkills.length > 0) {
+      const shortSkills = selectedSkills.map((s) => s.split("/").pop() ?? s);
+      parts.push(shortSkills.join(", "));
+      descParts.push(`Skills: ${selectedSkills.join(", ")}`);
+    }
+
+    // Extensions — use last segment
+    if (selectedExtensions.length > 0) {
+      const shortExts = selectedExtensions.map((e) => e.split("/").pop()?.replace(/@.*$/, "") ?? e);
+      parts.push(shortExts.join(", "));
+      descParts.push(`Extensions: ${selectedExtensions.join(", ")}`);
+    }
+
+    setName(parts.join(" + "));
+    setDescription(descParts.join(". "));
+  };
+
   const canSubmit = name.trim() && worker && model;
 
   return (
@@ -150,8 +196,24 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
       {/* Identity */}
       <Card>
         <CardHeader>
-          <CardTitle>Identity</CardTitle>
-          <CardDescription>Name and description for this profile</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Identity</CardTitle>
+              <CardDescription>Name and description for this profile</CardDescription>
+            </div>
+            {!editProfileId && worker && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={generateIdentity}
+              >
+                <Zap className="h-3.5 w-3.5" />
+                Auto-fill
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
