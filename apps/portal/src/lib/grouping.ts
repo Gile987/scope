@@ -19,6 +19,7 @@ export interface GroupUniformValues {
   platform?: string;
   mcpServers?: string[];
   skillRevisions?: string[];
+  extensions?: string[];
   status?: RunStatus;
   submissionId?: string;
   task?: string;
@@ -136,6 +137,9 @@ function computeUniformValues(runs: Run[]): GroupUniformValues {
 
   const skillKey = uniform(runs, (r) => arrKey(r.skillRevisions));
   if (skillKey !== undefined && skillKey !== "") result.skillRevisions = runs[0].skillRevisions;
+
+  const extKey = uniform(runs, (r) => arrKey(r.extensions));
+  if (extKey !== undefined && extKey !== "") result.extensions = runs[0].extensions;
 
   return result;
 }

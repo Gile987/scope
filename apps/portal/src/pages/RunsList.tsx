@@ -869,6 +869,7 @@ export function RunsList() {
               <TableHead className="w-[80px]">OS</TableHead>
               <TableHead>MCP</TableHead>
               <TableHead>Skills</TableHead>
+              <TableHead>Extensions</TableHead>
               <TableHead className="w-[100px]">Status</TableHead>
               <TableHead className="w-[100px]">Outcome</TableHead>
               <TableHead className="w-[100px]">Report</TableHead>
@@ -1013,6 +1014,19 @@ function RunRow({
                 </Link>
               );
             })}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell>
+        {run.extensions && run.extensions.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {run.extensions.map((id) => (
+              <Link key={id} to={`/extensions/${id}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={id}>
+                {id.split(".").pop() ?? id}
+              </Link>
+            ))}
           </div>
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
@@ -1232,6 +1246,18 @@ function GroupRows({
                   </Link>
                 );
               })}
+            </div>
+          ) : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>
+        {/* Extensions */}
+        <TableCell>
+          {uniform.extensions && uniform.extensions.length > 0 ? (
+            <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+              {uniform.extensions.map((id) => (
+                <Link key={id} to={`/extensions/${id}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={id}>
+                  {id.split(".").pop() ?? id}
+                </Link>
+              ))}
             </div>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
