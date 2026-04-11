@@ -4,101 +4,93 @@
 
 ## Problem
 
-Runs grouping is currently implemented client-side in [`apps/portal/src/lib/grouping.ts`](apps/portal/src/lib/grouping.ts). The portal fetches **all** runs from `GET /api/v1/requests`, then groups and aggregates them in the browser. This blocks server-side pagination because:
+Runs grouping is currently implemented client-side in `apps/portal/src/lib/grouping.ts`. The portal fetches **all** runs from `GET /api/v1/requests`, then groups and aggregates them in the browser. This blocks server-side pagination because:
 
 1. Pagination returns a page of runs, but grouping needs visibility across ALL runs to compute correct groups and aggregates.
 2. A paginated response can split a group across pages, producing wrong counts, stats, and uniform-value detection.
 
 ## Solution
 
-Add a new **server-side grouping endpoint** that performs the `GROUP BY` and aggregation in CosmosDB/MongoDB, returning pre-computed group metadata. The portal then fetches groups first and drills into individual runs per group on demand.
+Add a `groupBy` query parameter to the existing `GET /api/v1/requests` endpoint. When absent, the endpoint behaves exactly as today (flat array of runs). When set to `task` or `submissionId`, it runs a MongoDB aggregation pipeline server-side and returns pre-computed group summaries — including all aggregation (turns, duration, tokens stats) and uniform-value detection — so the portal renders them directly with zero client-side computation.
 
 ## Steps
 
-### Step 1 — New `GET /api/v1/requests/groups` endpoint
+### Step 1 — Move shared types to `packages/shared`
 
-Add a new API route that accepts:
-- All existing filters: `worker`, `taskPromptId`, `criteria`, `submissionId`, `includeDeleted`
-- `groupBy`: `"task"` | `"submissionId"` (required)
+Move `GroupByKey`, `AggregateStats`, `GroupAggregates`, `GroupUniformValues`, and `RunGroup` interfaces from `apps/portal/src/lib/grouping.ts` to `packages/shared/src/types/` so both API and portal can import them.
 
-Returns an array of group summaries (no individual runs):
+### Step 2 — Add `groupBy` param to `GET /api/v1/requests`
 
+Add optional `groupBy` query param (`"task"` | `"submissionId"`) to the existing list endpoint.
+
+When `groupBy` is provided, run a MongoDB aggregation pipeline:
+1. `$match` — same filters as today (worker, taskPromptId, criteria, submissionId, deletedAt)
+2. `$addFields` — compute per-run derived values: turn count, total duration (sum of `turn.durationMs`), prompt/completion tokens
+3. `$group` — group by `taskPromptId` (or `submissionId`), accumulate min/max/avg/count for turns, duration, tokens; collect first values and distinct-count for uniform-value detection; grab first `scenario.task` for label
+4. `$project` — reshape into `RunGroup` response format with `AggregateStats` and `GroupUniformValues`
+
+Response shape when grouped:
 ```ts
-interface GroupResponse {
-  key: string;           // taskPromptId or submissionId
-  label: string;         // human-readable label (task name, submission ID)
-  count: number;         // number of runs in group
-  aggregates: {
-    turns: AggregateStats | null;
-    duration: AggregateStats | null;
-    promptTokens: AggregateStats | null;
-    completionTokens: AggregateStats | null;
-  };
-  uniform: GroupUniformValues;
-}
+{
+  key: string;
+  label: string;
+  count: number;
+  aggregates: GroupAggregates;   // turns, duration, promptTokens, completionTokens stats
+  uniform: GroupUniformValues;   // fields identical across all runs in group
+}[]
 ```
 
-**Implementation:** Use MongoDB aggregation pipeline:
-1. `$match` — apply the same filters as the existing list endpoint
-2. `$group` — group by `taskPromptId` or `submissionId`, accumulate arrays of per-run values (turn count, duration, tokens) and collect candidate uniform fields
-3. `$project` — compute min/max/mean/stdDev from accumulated arrays, detect uniform values
+When `groupBy` is absent, behavior is unchanged (flat `RequestDocument[]`).
 
-This keeps all computation in the database and returns only lightweight group summaries.
+### Step 3 — Server-side aggregation logic
 
-### Step 2 — Add pagination to `GET /api/v1/requests`
+Implement the aggregation computation (stats + uniform values) in a dedicated module `apps/api/src/grouping.ts` that builds the MongoDB pipeline stages. This keeps `index.ts` clean and the logic unit-testable.
 
-Extend the existing list endpoint with:
-- `groupKey`: value to filter by (e.g., a specific `taskPromptId` or `submissionId`)
-- `groupBy`: which field the key refers to (`"task"` | `"submissionId"`)
-- `limit` / `offset` (or `continuationToken` for CosmosDB-native pagination)
-
-When `groupKey` + `groupBy` are provided, the endpoint filters runs to that single group and paginates within it. This is used when the user expands a group row in the UI.
-
-### Step 3 — Move shared types to `packages/shared`
-
-Move the `GroupByKey`, `AggregateStats`, `GroupAggregates`, `GroupUniformValues`, and `RunGroup` interfaces from `apps/portal/src/lib/grouping.ts` to `packages/shared/src/types/` so both API and portal can import them.
+The aggregation computes **all** the same metrics the client currently does:
+- **Counts**: number of runs per group
+- **Stats** (min/max/mean/stdDev): turn count, total duration, prompt tokens, completion tokens
+- **Uniform values**: workerType, model, agentVersion, platform, mcpServers, skillRevisions, status, submissionId, task — included only when all runs in the group share the same value
 
 ### Step 4 — Portal API client
 
-Add `api.listRunGroups(opts)` method in `apps/portal/src/lib/api.ts` that calls the new groups endpoint.
-
-Update `api.listRuns(opts)` to accept `groupKey`, `groupBy`, `limit`, `offset` params.
+Update `api.listRuns()` in `apps/portal/src/lib/api.ts` to accept an optional `groupBy` param. Add a separate `api.listRunGroups(opts)` method (or overload) that returns `RunGroup[]` when grouping is requested.
 
 ### Step 5 — Update `RunsList.tsx`
 
 When `groupBy !== "none"`:
-1. Fetch groups from `api.listRunGroups(...)` instead of fetching all runs.
-2. Render group rows from the server response (no client-side `groupRuns()` call).
-3. On group expand, fetch that group's runs via `api.listRuns({ groupBy, groupKey, limit, offset })`.
-4. Support "load more" or pagination within an expanded group.
+1. Call `api.listRunGroups(...)` → get `RunGroup[]` from server with pre-computed aggregates.
+2. Render group rows directly from server response — no client-side `groupRuns()` call.
+3. On group expand, fetch that group's runs via `api.listRuns({ taskPromptId })` or `api.listRuns({ submissionId })`.
 
 When `groupBy === "none"`:
-1. Fetch runs via `api.listRuns({ limit, offset })` with pagination.
-2. Render flat rows, no client-side grouping.
+1. Fetch runs via `api.listRuns()` as today.
+2. Render flat rows, no grouping.
 
 ### Step 6 — Deprecate client-side grouping
 
-Keep `grouping.ts` and its tests intact for now (no breaking change), but the portal no longer calls `groupRuns()` in the main list view. It can be removed in a follow-up.
+Keep `grouping.ts` and its tests intact (no breaking change), but the portal no longer calls `groupRuns()` in the main list view. Can be removed in a follow-up.
 
 ### Step 7 — Tests
 
-- **API unit tests** (`endpoints.test.ts`): test the new `/requests/groups` endpoint with different `groupBy` values and filters.
-- **API unit tests**: test pagination params on the existing `/requests` endpoint.
-- **Portal tests**: update `RunsList` tests if any exist; test the new `api.listRunGroups` client method.
+- **API unit tests** (`apps/api/src/grouping.test.ts`): test the aggregation pipeline builder with different `groupBy` values and filters.
+- **API endpoint tests** (`endpoints.test.ts`): test `GET /api/v1/requests?groupBy=task` returns grouped response.
+- **Portal tests**: update any `RunsList` tests to use server-side groups.
 
 ## File Changes Summary
 
 | File | Change |
 |------|--------|
-| `packages/shared/src/types/types.ts` | Add `GroupByKey`, `AggregateStats`, `GroupAggregates`, `GroupUniformValues`, group response types |
-| `apps/api/src/index.ts` | Add `GET /api/v1/requests/groups` route; add `groupKey`/`groupBy`/`limit`/`offset` to list route |
-| `apps/api/src/endpoints.test.ts` | Tests for new groups endpoint and pagination |
-| `apps/portal/src/lib/api.ts` | Add `listRunGroups()`; extend `listRuns()` with pagination + group filter params |
-| `apps/portal/src/pages/RunsList.tsx` | Use server groups when `groupBy !== "none"`; paginate flat list when `groupBy === "none"` |
+| `packages/shared/src/types/types.ts` | Add `GroupByKey`, `AggregateStats`, `GroupAggregates`, `GroupUniformValues`, `RunGroup` types |
+| `apps/api/src/grouping.ts` | New — builds MongoDB aggregation pipeline for grouping + stats + uniform values |
+| `apps/api/src/grouping.test.ts` | New — tests for aggregation pipeline builder |
+| `apps/api/src/index.ts` | Add `groupBy` query param to list endpoint; call pipeline when set |
+| `apps/api/src/endpoints.test.ts` | Test grouped response from list endpoint |
+| `apps/portal/src/lib/api.ts` | Add `listRunGroups()` method |
+| `apps/portal/src/pages/RunsList.tsx` | Use server groups when grouped; stop calling client-side `groupRuns()` |
 | `apps/portal/src/lib/grouping.ts` | Keep as-is (deprecated, not deleted) |
 
 ## Risks & Notes
 
-- **CosmosDB aggregation pipeline support**: CosmosDB for MongoDB API supports `$group`, `$project`, `$match`, `$sort`, `$addFields`, `$unwind`, and the needed accumulator operators (`$min`, `$max`, `$avg`, `$push`, `$sum`). Standard deviation (`$stdDevPop`) is supported in MongoDB 3.2+ API — verify CosmosDB compatibility or compute it from the pushed array in `$project`.
-- **Index coverage**: The `$group` stage operates after `$match`, so existing indexes on `workerType`, `taskPromptId`, `submissionId`, `deletedAt`, `createdAt` should be sufficient.
-- **Breaking change**: None — the existing endpoint retains its current behavior when the new params are absent.
+- **CosmosDB aggregation support**: CosmosDB for MongoDB API supports `$group`, `$project`, `$match`, `$sort`, `$addFields`, `$unwind`, `$min`, `$max`, `$avg`, `$push`, `$sum`. `$stdDevPop` is supported in MongoDB 3.2+ — verify CosmosDB compatibility or compute stdDev from pushed arrays in `$project`.
+- **Index coverage**: `$group` runs after `$match`, so existing indexes on `workerType`, `taskPromptId`, `submissionId`, `deletedAt`, `createdAt` remain sufficient.
+- **Breaking change**: None — `groupBy` is optional; when absent the endpoint returns the same flat array as before.
