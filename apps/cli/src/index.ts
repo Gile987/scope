@@ -397,6 +397,7 @@ run
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
   .option("--submission-id <id>", "Filter by submission ID")
+  .option("--profile <id>", "Filter by profile ID")
   .option("--include-deleted", "Include soft-deleted runs")
 )
   .action(async (options) => {
@@ -409,6 +410,9 @@ run
       }
       if (options.submissionId) {
         params.set("submissionId", options.submissionId);
+      }
+      if (options.profile) {
+        params.set("profileId", options.profile);
       }
       if (options.includeDeleted) {
         params.set("includeDeleted", "true");
