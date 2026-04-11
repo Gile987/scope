@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import type { ProfileWithVersion } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
