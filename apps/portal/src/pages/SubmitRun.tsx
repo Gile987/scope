@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle, User, X } from "lucide-react";
+import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle, User, X, Save } from "lucide-react";
 import { WORKER_TYPES, type CodingAgent, type McpServerDocument, type ProfileWithVersion } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
@@ -24,6 +24,11 @@ import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
+import { toast } from "sonner";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
 
 const STEPS = ["Configure", "Review & Submit"];
 
@@ -90,6 +95,32 @@ export function SubmitRun() {
   const clearProfile = () => {
     setSelectedProfileId(null);
   };
+
+  // Save as Profile
+  const [saveProfileName, setSaveProfileName] = useState("");
+  const [saveProfileOpen, setSaveProfileOpen] = useState(false);
+
+  const saveProfileMutation = useMutation({
+    mutationFn: () =>
+      api.createProfile({
+        name: saveProfileName.trim(),
+        workerType: worker,
+        model,
+        ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
+        ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
+        ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
+        ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
+      }),
+    onSuccess: (data) => {
+      toast.success(`Profile "${saveProfileName}" saved`);
+      setSaveProfileOpen(false);
+      setSaveProfileName("");
+      setSelectedProfileId(data._id);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to save profile");
+    },
+  });
 
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
 
@@ -544,7 +575,54 @@ export function SubmitRun() {
           <Separator />
 
           {/* Continue */}
-          <div className="flex justify-end">
+          <div className="flex justify-between">
+            {!profileLocked && worker && model ? (
+              <Dialog open={saveProfileOpen} onOpenChange={setSaveProfileOpen}>
+                <DialogTrigger asChild>
+                  <Button type="button" variant="outline" className="gap-1.5">
+                    <Save className="h-4 w-4" /> Save as Profile
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Save as Profile</DialogTitle>
+                    <DialogDescription>
+                      Save the current agent configuration as a reusable profile.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-2 py-2">
+                    <Label htmlFor="profileName">Profile Name *</Label>
+                    <Input
+                      id="profileName"
+                      value={saveProfileName}
+                      onChange={(e) => setSaveProfileName(e.target.value)}
+                      placeholder="e.g. My Benchmark Profile"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && saveProfileName.trim()) {
+                          e.preventDefault();
+                          saveProfileMutation.mutate();
+                        }
+                      }}
+                    />
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      onClick={() => saveProfileMutation.mutate()}
+                      disabled={!saveProfileName.trim() || saveProfileMutation.isPending}
+                    >
+                      {saveProfileMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="mr-2 h-4 w-4" />
+                      )}
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            ) : (
+              <div />
+            )}
             <Button type="button" onClick={handleContinue} disabled={!task.trim() || (selectedAgent && selectedAgent.supportedModels.length > 0 && !model) || pickedCriteria.length === 0} className="gap-1.5">
               Continue <ArrowRight className="h-4 w-4" /> <KbdBadge />
             </Button>
