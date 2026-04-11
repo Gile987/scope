@@ -34,7 +34,7 @@ import {
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
 import { blobNameFromSnapshotsUrl, rewriteHarUrlsForArchive, detectBundledHarFiles, uploadBundledHarFiles, detectBundledChatFiles, uploadBundledChatFiles } from "./archive-har.js";
-import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, type ExtensionSearchResult, ExtensionClient, parseExtensionSpec, resolveAgentVersion } from "shared";
+import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, type ExtensionSearchResult, ExtensionClient, parseExtensionSpec, resolveAgentVersion, type ProfileDocument, type ProfileVersionDocument } from "shared";
 import { evaluateTrigger, REPORT_SYSTEM_PROMPT } from "shared";
 import {
   CreateCriteriaInputSchema,
@@ -90,6 +90,11 @@ import {
   CreateRequestInputSchema,
   ListRequestsQuerySchema,
   BulkResubmitInputSchema,
+  CreateProfileInputSchema,
+  UpdateProfileIdentitySchema,
+  ProfileResponseSchema,
+  ProfileVersionResponseSchema,
+  ProfileWithVersionResponseSchema,
 } from "shared";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -170,6 +175,8 @@ let extensionCollection: Collection<ExtensionDocument>;
 let skillRevisionCollection: Collection<SkillRevisionDocument>;
 let skillRevisionStore: SkillRevisionStore;
 let skillResolver: SkillResolver;
+let profileCollection: Collection<ProfileDocument>;
+let profileVersionCollection: Collection<ProfileVersionDocument>;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 const dynamicQueueClients: Map<string, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
@@ -310,6 +317,10 @@ async function initializeClients(): Promise<void> {
   extensionCollection = db.collection<ExtensionDocument>("extensions");
   skillRevisionCollection = db.collection<SkillRevisionDocument>("skill-revisions");
   skillRevisionStore = new SkillRevisionStore(skillRevisionCollection);
+  profileCollection = db.collection<ProfileDocument>("profiles");
+  profileVersionCollection = db.collection<ProfileVersionDocument>("profile-versions");
+  // Create profile indexes
+  await profileVersionCollection.createIndex({ profileId: 1, version: -1 });
   skillResolver = new SkillResolver({
     githubToken: process.env.GITHUB_TOKEN,
   });
@@ -524,8 +535,33 @@ apiRoute(app, registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId } = req.body;
     const worker = req.query.worker as string;
+
+    // --- Profile resolution: if profileId is provided, resolve the version and use its values ---
+    let profileId: string | undefined;
+    let profileVersionId: string | undefined;
+    let profileVersion: ProfileVersionDocument | null = null;
+    if (requestedProfileId) {
+      const profile = await profileCollection.findOne({
+        _id: requestedProfileId,
+        deletedAt: { $exists: false },
+      });
+      if (!profile) {
+        res.status(404).json({ error: `Profile not found: ${requestedProfileId}` });
+        return;
+      }
+      profileVersion = await profileVersionCollection.findOne({
+        profileId: profile._id,
+        version: profile.latestVersion,
+      });
+      if (!profileVersion) {
+        res.status(404).json({ error: `Profile version not found for profile: ${requestedProfileId}` });
+        return;
+      }
+      profileId = profile._id;
+      profileVersionId = profileVersion._id;
+    }
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
       res.status(400).json({ error: "scenario.task is required and must be a string" });
@@ -792,6 +828,8 @@ apiRoute(app, registry, {
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
           ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+          ...(profileId ? { profileId } : {}),
+          ...(profileVersionId ? { profileVersionId } : {}),
           submissionId,
         };
         newDocs.push(requestDoc);
@@ -848,6 +886,8 @@ apiRoute(app, registry, {
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
       ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+      ...(profileId ? { profileId } : {}),
+      ...(profileVersionId ? { profileVersionId } : {}),
       submissionId,
     };
 
@@ -1048,6 +1088,7 @@ apiRoute(app, registry, {
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
     const submissionIdFilter = req.query.submissionId as string;
+    const profileIdFilter = req.query.profileId as string;
     const includeDeleted = req.query.includeDeleted === "true";
     
     const filter: Record<string, unknown> = {};
@@ -1056,6 +1097,9 @@ apiRoute(app, registry, {
     }
     if (taskPromptIdFilter) {
       filter.taskPromptId = taskPromptIdFilter;
+    }
+    if (profileIdFilter) {
+      filter.profileId = profileIdFilter;
     }
     if (submissionIdFilter) {
       // Prefix-based matching: allow filtering by partial submission ID
@@ -5624,6 +5668,331 @@ apiRoute(app, registry, {
 });
 
 // =====================================================================
+// Profiles API
+// =====================================================================
+
+// POST /api/v1/profiles — create a new profile (+ version 1)
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/profiles",
+  tags: ["Profiles"],
+  summary: "Create a new profile",
+  body: CreateProfileInputSchema,
+  response: ProfileWithVersionResponseSchema,
+  handler: async (req, res, next) => {
+    try {
+      const { name, description, workerType, model, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
+      const now = new Date();
+      const profileId = uuidv4();
+      const versionId = uuidv4();
+
+      // Resolve extension versions (same pattern as run submission)
+      let resolvedExtensions: string[] | undefined;
+      if (extensions && extensions.length > 0) {
+        const extensionClient = new ExtensionClient("");
+        const resolvedSpecs: string[] = [];
+        for (const spec of extensions) {
+          const parsed = parseExtensionSpec(spec);
+          if (parsed.version) {
+            resolvedSpecs.push(`${parsed.id}@${parsed.version}`);
+          } else {
+            const versions = await extensionClient.getVersions(parsed.id, false);
+            if (versions.length === 0) {
+              res.status(422).json({ error: `No stable versions found for extension "${parsed.id}"` });
+              return;
+            }
+            resolvedSpecs.push(`${parsed.id}@${versions[0].version}`);
+          }
+        }
+        resolvedExtensions = resolvedSpecs;
+      }
+
+      const profileDoc: ProfileDocument = {
+        _id: profileId,
+        name,
+        ...(description ? { description } : {}),
+        latestVersion: 1,
+        createdAt: now,
+      };
+
+      const versionDoc: ProfileVersionDocument = {
+        _id: versionId,
+        profileId,
+        version: 1,
+        workerType,
+        model,
+        ...(agentVersion ? { agentVersion } : {}),
+        ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
+        ...(skillRevisions && skillRevisions.length > 0 ? { skillRevisions } : {}),
+        ...(resolvedExtensions && resolvedExtensions.length > 0 ? { extensions: resolvedExtensions } : {}),
+        createdAt: now,
+      };
+
+      await profileCollection.insertOne(profileDoc);
+      await profileVersionCollection.insertOne(versionDoc);
+
+      res.status(201).json({ ...profileDoc, version: versionDoc });
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// GET /api/v1/profiles — list profiles (latest version of each)
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/profiles",
+  tags: ["Profiles"],
+  summary: "List profiles",
+  query: z.object({ workerType: z.string().optional() }),
+  response: z.array(ProfileWithVersionResponseSchema),
+  handler: async (req, res, next) => {
+    try {
+      const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+      const profiles = await profileCollection.find(filter).sort({ name: 1 }).toArray();
+
+      const result = await Promise.all(
+        profiles.map(async (profile) => {
+          const latestVersion = await profileVersionCollection.findOne(
+            { profileId: profile._id, version: profile.latestVersion },
+          );
+          return { ...profile, version: latestVersion! };
+        }),
+      );
+
+      // Filter by workerType if specified (applied post-join)
+      const { workerType } = req.query;
+      const filtered = workerType
+        ? result.filter((p) => p.version.workerType === workerType)
+        : result;
+
+      res.json(filtered);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// GET /api/v1/profiles/:profileId — get profile with latest version
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/profiles/:profileId",
+  tags: ["Profiles"],
+  summary: "Get profile with latest version",
+  params: z.object({ profileId: z.string() }),
+  response: ProfileWithVersionResponseSchema,
+  handler: async (req, res, next) => {
+    try {
+      const profile = await profileCollection.findOne({
+        _id: req.params.profileId,
+        deletedAt: { $exists: false },
+      });
+      if (!profile) {
+        res.status(404).json({ error: "Profile not found" });
+        return;
+      }
+      const latestVersion = await profileVersionCollection.findOne(
+        { profileId: profile._id, version: profile.latestVersion },
+      );
+      res.json({ ...profile, version: latestVersion! });
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// GET /api/v1/profiles/:profileId/versions — list all versions
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/profiles/:profileId/versions",
+  tags: ["Profiles"],
+  summary: "List profile versions",
+  params: z.object({ profileId: z.string() }),
+  response: z.array(ProfileVersionResponseSchema),
+  handler: async (req, res, next) => {
+    try {
+      const profile = await profileCollection.findOne({
+        _id: req.params.profileId,
+        deletedAt: { $exists: false },
+      });
+      if (!profile) {
+        res.status(404).json({ error: "Profile not found" });
+        return;
+      }
+      const versions = await profileVersionCollection
+        .find({ profileId: profile._id })
+        .sort({ version: -1 })
+        .toArray();
+      res.json(versions);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// GET /api/v1/profiles/:profileId/versions/:version — get specific version
+apiRoute(app, registry, {
+  method: "get",
+  path: "/api/v1/profiles/:profileId/versions/:version",
+  tags: ["Profiles"],
+  summary: "Get profile version",
+  params: z.object({ profileId: z.string(), version: z.coerce.number() }),
+  response: ProfileVersionResponseSchema,
+  handler: async (req, res, next) => {
+    try {
+      const versionDoc = await profileVersionCollection.findOne({
+        profileId: req.params.profileId,
+        version: req.params.version,
+      });
+      if (!versionDoc) {
+        res.status(404).json({ error: "Profile version not found" });
+        return;
+      }
+      res.json(versionDoc);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// POST /api/v1/profiles/:profileId — create a new version
+apiRoute(app, registry, {
+  method: "post",
+  path: "/api/v1/profiles/:profileId",
+  tags: ["Profiles"],
+  summary: "Create new profile version",
+  params: z.object({ profileId: z.string() }),
+  body: CreateProfileInputSchema.omit({ name: true, description: true }),
+  response: ProfileVersionResponseSchema,
+  handler: async (req, res, next) => {
+    try {
+      const profile = await profileCollection.findOne({
+        _id: req.params.profileId,
+        deletedAt: { $exists: false },
+      });
+      if (!profile) {
+        res.status(404).json({ error: "Profile not found" });
+        return;
+      }
+
+      const { workerType, model, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
+      const now = new Date();
+      const newVersion = profile.latestVersion + 1;
+      const versionId = uuidv4();
+
+      // Resolve extension versions
+      let resolvedExtensions: string[] | undefined;
+      if (extensions && extensions.length > 0) {
+        const extensionClient = new ExtensionClient("");
+        const resolvedSpecs: string[] = [];
+        for (const spec of extensions) {
+          const parsed = parseExtensionSpec(spec);
+          if (parsed.version) {
+            resolvedSpecs.push(`${parsed.id}@${parsed.version}`);
+          } else {
+            const versions = await extensionClient.getVersions(parsed.id, false);
+            if (versions.length === 0) {
+              res.status(422).json({ error: `No stable versions found for extension "${parsed.id}"` });
+              return;
+            }
+            resolvedSpecs.push(`${parsed.id}@${versions[0].version}`);
+          }
+        }
+        resolvedExtensions = resolvedSpecs;
+      }
+
+      const versionDoc: ProfileVersionDocument = {
+        _id: versionId,
+        profileId: profile._id,
+        version: newVersion,
+        workerType,
+        model,
+        ...(agentVersion ? { agentVersion } : {}),
+        ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
+        ...(skillRevisions && skillRevisions.length > 0 ? { skillRevisions } : {}),
+        ...(resolvedExtensions && resolvedExtensions.length > 0 ? { extensions: resolvedExtensions } : {}),
+        createdAt: now,
+      };
+
+      await profileVersionCollection.insertOne(versionDoc);
+      await profileCollection.updateOne(
+        { _id: profile._id },
+        { $set: { latestVersion: newVersion, updatedAt: now } },
+      );
+
+      res.status(201).json(versionDoc);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// PUT /api/v1/profiles/:profileId — update profile identity (name/description)
+apiRoute(app, registry, {
+  method: "put",
+  path: "/api/v1/profiles/:profileId",
+  tags: ["Profiles"],
+  summary: "Update profile identity",
+  params: z.object({ profileId: z.string() }),
+  body: UpdateProfileIdentitySchema,
+  response: ProfileResponseSchema,
+  handler: async (req, res, next) => {
+    try {
+      const profile = await profileCollection.findOne({
+        _id: req.params.profileId,
+        deletedAt: { $exists: false },
+      });
+      if (!profile) {
+        res.status(404).json({ error: "Profile not found" });
+        return;
+      }
+
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+      if (req.body.name !== undefined) updateFields.name = req.body.name;
+      if (req.body.description !== undefined) updateFields.description = req.body.description;
+
+      await profileCollection.updateOne({ _id: profile._id }, { $set: updateFields });
+      const updated = await profileCollection.findOne({ _id: profile._id });
+      res.json(updated!);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// DELETE /api/v1/profiles/:profileId — soft-delete profile
+apiRoute(app, registry, {
+  method: "delete",
+  path: "/api/v1/profiles/:profileId",
+  tags: ["Profiles"],
+  summary: "Delete profile",
+  params: z.object({ profileId: z.string() }),
+  response: z.object({ message: z.string() }),
+  successStatus: 204,
+  handler: async (req, res, next) => {
+    try {
+      const profile = await profileCollection.findOne({
+        _id: req.params.profileId,
+        deletedAt: { $exists: false },
+      });
+      if (!profile) {
+        res.status(404).json({ error: "Profile not found" });
+        return;
+      }
+
+      await profileCollection.updateOne(
+        { _id: profile._id },
+        { $set: { deletedAt: new Date(), updatedAt: new Date() } },
+      );
+
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// =====================================================================
 // Insights API (apiRoute)
 // =====================================================================
 
@@ -6229,6 +6598,8 @@ export interface TestDependencies {
   skillRevisionCollection?: Collection<SkillRevisionDocument>;
   skillRevisionStore?: SkillRevisionStore;
   skillResolver?: SkillResolver;
+  profileCollection?: Collection<ProfileDocument>;
+  profileVersionCollection?: Collection<ProfileVersionDocument>;
   queueClients?: Map<WorkerType, QueueClient>;
   reportQueueClient?: QueueClient;
 }
@@ -6253,6 +6624,8 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.skillRevisionCollection) skillRevisionCollection = deps.skillRevisionCollection;
   if (deps.skillRevisionStore) skillRevisionStore = deps.skillRevisionStore;
   if (deps.skillResolver) skillResolver = deps.skillResolver;
+  if (deps.profileCollection) profileCollection = deps.profileCollection;
+  if (deps.profileVersionCollection) profileVersionCollection = deps.profileVersionCollection;
   if (deps.queueClients) queueClients.clear(), deps.queueClients.forEach((v, k) => queueClients.set(k, v));
   if (deps.reportQueueClient) reportQueueClient = deps.reportQueueClient;
 }
