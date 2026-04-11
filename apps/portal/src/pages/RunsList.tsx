@@ -1022,10 +1022,15 @@ function RunRow({
       <TableCell>
         {run.extensions && run.extensions.length > 0 ? (
           <div className="flex flex-wrap gap-1">
-            {run.extensions.map((id) => (
-              <Link key={id} to={`/extensions/${id}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={id}>
-                {id.split(".").pop() ?? id}
-              </Link>
+            {run.extensions.map((id) => {
+              const extName = id.split("@")[0].split(".").pop() ?? id;
+              const extSlug = id.split("@")[0];
+              return (
+                <Link key={id} to={`/extensions/${extSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={id}>
+                  {extName}
+                </Link>
+              );
+            })}
             ))}
           </div>
         ) : (
@@ -1253,11 +1258,15 @@ function GroupRows({
         <TableCell>
           {uniform.extensions && uniform.extensions.length > 0 ? (
             <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
-              {uniform.extensions.map((id) => (
-                <Link key={id} to={`/extensions/${id}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={id}>
-                  {id.split(".").pop() ?? id}
-                </Link>
-              ))}
+              {uniform.extensions.map((id) => {
+                const extName = id.split("@")[0].split(".").pop() ?? id;
+                const extSlug = id.split("@")[0];
+                return (
+                  <Link key={id} to={`/extensions/${extSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={id}>
+                    {extName}
+                  </Link>
+                );
+              })}
             </div>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
