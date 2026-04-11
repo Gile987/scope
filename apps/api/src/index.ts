@@ -7,7 +7,7 @@ import { MongoClient, Db, Collection } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { BlobServiceClient, RestError } from "@azure/storage-blob";
-import { v4 as uuidv4 } from "uuid";
+import { v7 as uuidv7 } from "uuid";
 import { createRequire } from "module";
 import dotenv from "dotenv";
 import multer from "multer";
@@ -764,7 +764,7 @@ apiRoute(app, registry, {
     const taskPromptId = taskPrompt._id;
 
     // Generate a submission ID to group all runs from this request
-    const submissionId = uuidv4();
+    const submissionId = uuidv7();
 
     // Handle multiple runs (count > 1)
     if (count > 1) {
@@ -773,7 +773,7 @@ apiRoute(app, registry, {
       const queueMessages: string[] = [];
 
       for (let i = 0; i < count; i++) {
-        const requestId = uuidv4();
+        const requestId = uuidv7();
         newIds.push(requestId);
 
         const requestDoc: RequestDocument = {
@@ -829,7 +829,7 @@ apiRoute(app, registry, {
     }
 
     // Single run (count === 1) - original behavior
-    const requestId = uuidv4();
+    const requestId = uuidv7();
 
     // Create request document
     const requestDoc: RequestDocument = {
@@ -1176,14 +1176,14 @@ apiRoute(app, registry, {
     const foundIds = new Set(originalRuns.map(r => r._id));
     const notFound = ids.filter(id => !foundIds.has(id));
 
-    const submissionId = uuidv4();
+    const submissionId = uuidv7();
     const newIds: string[] = [];
     const newDocs: RequestDocument[] = [];
     const queueMessages: Array<{ workerType: WorkerType; message: string }> = [];
 
     for (const original of originalRuns) {
       for (let i = 0; i < count; i++) {
-        const requestId = uuidv4();
+        const requestId = uuidv7();
         newIds.push(requestId);
 
         // Resolve effective values: override > original > omit
@@ -1988,7 +1988,7 @@ apiRoute(app, registry, {
       ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
       ...(runDoc.persona ? { persona: runDoc.persona } : {}),
       ...(runDoc.logs && Array.isArray(runDoc.logs) ? { logs: runDoc.logs } : {}),
-      ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv4() }),
+      ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv7() }),
       ...(runDoc.harUrl ? { harUrl: runDoc.harUrl } : {}),
       ...(runDoc.rawChatUrl ? { rawChatUrl: runDoc.rawChatUrl } : {}),
       ...(runDoc.rawChatFormat ? { rawChatFormat: runDoc.rawChatFormat } : {}),
@@ -3063,7 +3063,7 @@ apiRoute(app, registry, {
         }
       }
 
-      const reportId = uuidv4();
+      const reportId = uuidv7();
 
       const reportDoc: ReportDocument = {
         _id: reportId,
@@ -3159,7 +3159,7 @@ apiRoute(app, registry, {
       const created: { reportId: string; requestId: string }[] = [];
 
       for (const requestId of validIds) {
-        const reportId = uuidv4();
+        const reportId = uuidv7();
         const reportDoc: ReportDocument = {
           _id: reportId,
           requestId,
@@ -3537,7 +3537,7 @@ apiRoute(app, registry, {
         );
 
         if (triggerResult) {
-          const reportId = uuidv4();
+          const reportId = uuidv7();
           const reportDoc: ReportDocument = {
             _id: reportId,
             requestId,
@@ -3611,7 +3611,7 @@ apiRoute(app, registry, {
           );
 
           if (triggerResult) {
-            const reportId = uuidv4();
+            const reportId = uuidv7();
             const reportDoc: ReportDocument = {
               _id: reportId,
               requestId: run._id,
@@ -5775,7 +5775,7 @@ apiRoute(app, registry, {
 
       const now = new Date();
       const doc: InsightDocument = {
-        _id: uuidv4(),
+        _id: uuidv7(),
         title: title.trim(),
         description: description.trim(),
         category: category?.trim() || undefined,

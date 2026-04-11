@@ -3,7 +3,7 @@
 
 import { Router } from "express";
 import { Collection } from "mongodb";
-import { v4 as uuidv4 } from "uuid";
+import { v7 as uuidv7 } from "uuid";
 import {
   AccountDocument,
   AccountType,
@@ -49,7 +49,7 @@ export function createAccountRouter(
         return;
       }
 
-      const id = uuidv4();
+      const id = uuidv7();
       const secretName = deriveAccountSecretName(body.type, id);
 
       // Store secrets as a single JSON blob in KeyVault

@@ -3,7 +3,7 @@
 
 import { Router } from "express";
 import { Collection } from "mongodb";
-import { v4 as uuidv4 } from "uuid";
+import { v7 as uuidv7 } from "uuid";
 import {
   KeyDocument,
   KeyType,
@@ -86,7 +86,7 @@ export function createKeyRouter(
         return;
       }
 
-      const id = uuidv4();
+      const id = uuidv7();
       const secretName = deriveSecretName(body.type, id);
 
       // Store secret value
