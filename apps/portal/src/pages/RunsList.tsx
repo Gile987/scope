@@ -1142,6 +1142,18 @@ function GroupRows({
     refetchInterval: 10_000,
   });
 
+  // Group-level checkbox: select/deselect all runs in this group
+  const groupRunIds = useMemo(() => expandedRuns.map((r) => r._id), [expandedRuns]);
+  const allGroupSelected = groupRunIds.length > 0 && groupRunIds.every((id) => selectedIds.has(id));
+  const someGroupSelected = groupRunIds.some((id) => selectedIds.has(id));
+  const handleToggleGroupSelect = () => {
+    if (allGroupSelected) {
+      groupRunIds.forEach((id) => onToggleSelect(id));
+    } else {
+      groupRunIds.filter((id) => !selectedIds.has(id)).forEach((id) => onToggleSelect(id));
+    }
+  };
+
   return (
     <>
       <TableRow
@@ -1149,7 +1161,15 @@ function GroupRows({
         onClick={onToggleExpand}
       >
         {/* Checkbox */}
-        <TableCell />
+        <TableCell onClick={(e) => e.stopPropagation()}>
+          {groupRunIds.length > 0 ? (
+            <Checkbox
+              checked={allGroupSelected ? true : someGroupSelected ? "indeterminate" : false}
+              onCheckedChange={handleToggleGroupSelect}
+              aria-label={`Select all in group ${group.label}`}
+            />
+          ) : null}
+        </TableCell>
         {/* ID */}
         <TableCell className="font-medium">
           <div className="flex items-center gap-2">
