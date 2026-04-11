@@ -182,7 +182,6 @@ export const RunGroupSchema = z
     key: z.string(),
     label: z.string(),
     runIds: z.array(z.string()),
-    runIds: z.array(z.string()),
     aggregates: GroupAggregatesSchema,
     uniform: GroupUniformValuesSchema,
   })
