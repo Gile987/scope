@@ -1031,7 +1031,6 @@ function RunRow({
                 </Link>
               );
             })}
-            ))}
           </div>
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
