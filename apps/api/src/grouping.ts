@@ -164,8 +164,8 @@ export function buildGroupingPipeline(
         },
       },
     },
-    // 4. Sort by label for deterministic ordering
-    { $sort: { label: 1 } },
+    // 4. Sort by grouping key for deterministic ordering
+    { $sort: { key: 1 } },
   ];
 }
 

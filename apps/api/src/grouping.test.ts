@@ -19,9 +19,9 @@ describe("buildGroupingPipeline", () => {
     expect(pipeline).toHaveLength(4);
   });
 
-  it("$sort stage orders by label ascending", () => {
+  it("$sort stage orders by key ascending", () => {
     const pipeline = buildGroupingPipeline("task");
-    expect(pipeline[3]).toEqual({ $sort: { label: 1 } });
+    expect(pipeline[3]).toEqual({ $sort: { key: 1 } });
   });
 
   it("groups by taskPromptId for task grouping", () => {
