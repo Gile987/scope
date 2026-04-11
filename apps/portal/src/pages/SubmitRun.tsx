@@ -13,8 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle } from "lucide-react";
-import { WORKER_TYPES, type CodingAgent, type McpServerDocument } from "@/types";
+import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle, User, X } from "lucide-react";
+import { WORKER_TYPES, type CodingAgent, type McpServerDocument, type ProfileWithVersion } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { SkillPicker } from "@/components/SkillPicker";
@@ -48,6 +48,10 @@ export function SubmitRun() {
   // Extensions
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
 
+  // Profile
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const profileLocked = !!selectedProfileId;
+
   // Agent version
   const [selectedAgentVersion, setSelectedAgentVersion] = useState<string>("");
 
@@ -62,6 +66,30 @@ export function SubmitRun() {
     queryKey: ["mcp-servers"],
     queryFn: () => api.listMcpServers(),
   });
+
+  // Fetch profiles
+  const { data: profiles = [] } = useQuery({
+    queryKey: ["profiles"],
+    queryFn: () => api.listProfiles(),
+  });
+
+  // When profile is selected, apply its configuration
+  const applyProfile = (profileId: string | null) => {
+    setSelectedProfileId(profileId);
+    if (!profileId) return;
+    const p = (profiles as ProfileWithVersion[]).find((p) => p._id === profileId);
+    if (!p?.version) return;
+    setWorker(p.version.workerType);
+    setModel(p.version.model);
+    setSelectedAgentVersion(p.version.agentVersion ?? "");
+    setSelectedMcpServers(p.version.mcpServers ?? []);
+    setSelectedSkills(p.version.skillRevisions ?? []);
+    setSelectedExtensions(p.version.extensions ?? []);
+  };
+
+  const clearProfile = () => {
+    setSelectedProfileId(null);
+  };
 
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
 
@@ -179,6 +207,7 @@ export function SubmitRun() {
       ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
       ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
+      ...(selectedProfileId ? { profileId: selectedProfileId } : {}),
     });
   };
 
@@ -205,6 +234,45 @@ export function SubmitRun() {
       {/* ─── STEP 1: Configure ──────────────────────────────────────────── */}
       {step === 1 && (
         <div className="space-y-6">
+          {/* Profile Selector */}
+          {(profiles as ProfileWithVersion[]).length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <User className="h-5 w-5" />
+                  Profile <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+                </CardTitle>
+                <CardDescription>Select a profile to pre-fill agent configuration</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {selectedProfileId ? (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-sm">
+                      {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
+                    </Badge>
+                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={clearProfile}>
+                      <X className="h-3 w-3" />
+                    </Button>
+                    <span className="text-xs text-muted-foreground">Agent config locked by profile</span>
+                  </div>
+                ) : (
+                  <Select onValueChange={applyProfile}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="No profile — configure manually" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(profiles as ProfileWithVersion[]).map((p) => (
+                        <SelectItem key={p._id} value={p._id}>
+                          {p.name} <span className="text-muted-foreground ml-1">v{p.latestVersion}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Scenario */}
           <Card>
             <CardHeader>
@@ -325,7 +393,7 @@ export function SubmitRun() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="worker">Worker Type *</Label>
-                <Select value={worker} onValueChange={setWorker}>
+                <Select value={worker} onValueChange={setWorker} disabled={profileLocked}>
                   <SelectTrigger id="worker">
                     <SelectValue />
                   </SelectTrigger>
@@ -348,7 +416,7 @@ export function SubmitRun() {
               {selectedAgent && selectedAgent.supportedModels.length > 0 && (
                 <div className="space-y-2">
                   <Label htmlFor="model">Model *</Label>
-                  <Select value={model} onValueChange={setModel}>
+                  <Select value={model} onValueChange={setModel} disabled={profileLocked}>
                     <SelectTrigger id="model">
                       <SelectValue placeholder="Select model" />
                     </SelectTrigger>
@@ -365,7 +433,7 @@ export function SubmitRun() {
               {sortedVersions.length > 0 && (
                 <div className="space-y-2">
                   <Label htmlFor="agentVersion">Agent Version *</Label>
-                  <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion}>
+                  <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
                     <SelectTrigger id="agentVersion">
                       <SelectValue placeholder="Select version" />
                     </SelectTrigger>
@@ -494,6 +562,14 @@ export function SubmitRun() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="grid grid-cols-[8rem_1fr] gap-y-2">
+                {selectedProfileId && (
+                  <>
+                    <span className="text-muted-foreground">Profile</span>
+                    <Badge variant="secondary" className="font-mono text-xs w-fit">
+                      {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
+                    </Badge>
+                  </>
+                )}
                 <span className="text-muted-foreground">Task</span>
                 <span className="whitespace-pre-wrap">{task.trim()}</span>
                 <span className="text-muted-foreground">Worker</span>
