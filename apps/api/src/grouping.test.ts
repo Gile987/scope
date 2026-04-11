@@ -5,17 +5,23 @@ import { describe, it, expect } from "vitest";
 import { buildGroupingPipeline, computeStats } from "./grouping.js";
 
 describe("buildGroupingPipeline", () => {
-  it("returns 3 pipeline stages for task grouping", () => {
+  it("returns 4 pipeline stages for task grouping", () => {
     const pipeline = buildGroupingPipeline("task");
-    expect(pipeline).toHaveLength(3);
+    expect(pipeline).toHaveLength(4);
     expect(pipeline[0]).toHaveProperty("$addFields");
     expect(pipeline[1]).toHaveProperty("$group");
     expect(pipeline[2]).toHaveProperty("$project");
+    expect(pipeline[3]).toHaveProperty("$sort");
   });
 
-  it("returns 3 pipeline stages for submissionId grouping", () => {
+  it("returns 4 pipeline stages for submissionId grouping", () => {
     const pipeline = buildGroupingPipeline("submissionId");
-    expect(pipeline).toHaveLength(3);
+    expect(pipeline).toHaveLength(4);
+  });
+
+  it("$sort stage orders by label ascending", () => {
+    const pipeline = buildGroupingPipeline("task");
+    expect(pipeline[3]).toEqual({ $sort: { label: 1 } });
   });
 
   it("groups by taskPromptId for task grouping", () => {
@@ -80,7 +86,7 @@ describe("buildGroupingPipeline", () => {
 
   it("$project stage outputs key, label, runIds, aggregates, uniform", () => {
     const pipeline = buildGroupingPipeline("task");
-    const project = pipeline[2].$project as Record<string, unknown>;
+    const project = (pipeline[2] as { $project: Record<string, unknown> }).$project;
     expect(project._id).toBe(0);
     expect(project.key).toBeDefined();
     expect(project.runIds).toBe("$_runIds");

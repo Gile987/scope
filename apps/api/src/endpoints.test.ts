@@ -433,8 +433,8 @@ describe("API Endpoints", () => {
       expect(mocks.collection.aggregate).toHaveBeenCalled();
       const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
       expect(pipeline[0]).toHaveProperty("$match");
-      // buildGroupingPipeline adds 3 stages ($addFields, $group, $project)
-      expect(pipeline).toHaveLength(4); // $match + 3 from buildGroupingPipeline
+      // buildGroupingPipeline adds 4 stages ($addFields, $group, $project, $sort)
+      expect(pipeline).toHaveLength(5); // $match + 4 from buildGroupingPipeline
     });
 
     it("does not call aggregate when groupBy is absent", async () => {
