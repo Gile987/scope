@@ -267,45 +267,6 @@ export function SubmitRun() {
       {/* ─── STEP 1: Configure ──────────────────────────────────────────── */}
       {step === 1 && (
         <div className="space-y-6">
-          {/* Profile Selector */}
-          {(profiles as ProfileWithVersion[]).length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <User className="h-5 w-5" />
-                  Profile <span className="text-muted-foreground font-normal text-sm">(optional)</span>
-                </CardTitle>
-                <CardDescription>Select a profile to pre-fill agent configuration</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {selectedProfileId ? (
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-sm">
-                      {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
-                    </Badge>
-                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={clearProfile}>
-                      <X className="h-3 w-3" />
-                    </Button>
-                    <span className="text-xs text-muted-foreground">Agent config locked by profile</span>
-                  </div>
-                ) : (
-                  <Select onValueChange={applyProfile}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="No profile — configure manually" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(profiles as ProfileWithVersion[]).map((p) => (
-                        <SelectItem key={p._id} value={p._id}>
-                          {p.name} <span className="text-muted-foreground ml-1">v{p.latestVersion}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
           {/* Scenario */}
           <Card>
             <CardHeader>
@@ -432,6 +393,45 @@ export function SubmitRun() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Profile Selector */}
+          {(profiles as ProfileWithVersion[]).length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <User className="h-5 w-5" />
+                  Profile <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+                </CardTitle>
+                <CardDescription>Select a profile to pre-fill agent configuration</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {selectedProfileId ? (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-sm">
+                      {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
+                    </Badge>
+                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={clearProfile}>
+                      <X className="h-3 w-3" />
+                    </Button>
+                    <span className="text-xs text-muted-foreground">Agent config locked by profile</span>
+                  </div>
+                ) : (
+                  <Select onValueChange={applyProfile}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="No profile — configure manually" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(profiles as ProfileWithVersion[]).map((p) => (
+                        <SelectItem key={p._id} value={p._id}>
+                          {p.name} <span className="text-muted-foreground ml-1">v{p.latestVersion}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Worker */}
           <Card>
