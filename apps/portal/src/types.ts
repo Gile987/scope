@@ -798,3 +798,41 @@ export interface FeatureFlag {
   enabled: boolean;
   updatedAt: string;
 }
+
+// --- Runs grouping types (mirrored from shared) ---
+
+export type GroupByKey = "none" | "task" | "submissionId";
+
+export interface AggregateStats {
+  min: number;
+  max: number;
+  mean: number;
+  stdDev: number;
+}
+
+export interface GroupUniformValues {
+  workerType?: string;
+  model?: string;
+  agentVersion?: string;
+  platform?: string;
+  mcpServers?: string[];
+  skillRevisions?: string[];
+  status?: RunStatus;
+  submissionId?: string;
+  task?: string;
+}
+
+export interface GroupAggregates {
+  count: number;
+  turns: AggregateStats | null;
+  duration: AggregateStats | null;
+  promptTokens: AggregateStats | null;
+  completionTokens: AggregateStats | null;
+}
+
+export interface RunGroup {
+  key: string;
+  label: string;
+  aggregates: GroupAggregates;
+  uniform: GroupUniformValues;
+}
