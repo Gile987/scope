@@ -798,3 +798,37 @@ export interface FeatureFlag {
   enabled: boolean;
   updatedAt: string;
 }
+
+// =============================================================================
+// Profile types
+// =============================================================================
+
+/** Profile identity document (mutable) */
+export interface ProfileDocument {
+  _id: string;
+  name: string;
+  description?: string;
+  latestVersion: number;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** Profile version document (immutable snapshot) */
+export interface ProfileVersionDocument {
+  _id: string;
+  profileId: string;
+  version: number;
+  workerType: string;
+  model: string;
+  agentVersion?: string;
+  mcpServers?: string[];
+  skillRevisions?: string[];
+  extensions?: string[];
+  createdAt: string;
+}
+
+/** Profile with its latest (or specified) version embedded */
+export interface ProfileWithVersion extends ProfileDocument {
+  version: ProfileVersionDocument;
+}

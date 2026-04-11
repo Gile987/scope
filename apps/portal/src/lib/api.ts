@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -786,5 +786,77 @@ export const api = {
   /** Soft-delete an extension */
   deleteExtension: (id: string): Promise<{ id: string; deleted: boolean }> => {
     return request(`/extensions/${id}`, { method: "DELETE" });
+  },
+
+  // ─── Profiles ────────────────────────────────────────────────────────────
+
+  /** List all profiles (latest version of each) */
+  listProfiles: (opts?: { workerType?: string }): Promise<ProfileWithVersion[]> => {
+    const params = new URLSearchParams();
+    if (opts?.workerType) params.set("workerType", opts.workerType);
+    return request(`/profiles?${params}`);
+  },
+
+  /** Get a profile with its latest version */
+  getProfile: (profileId: string): Promise<ProfileWithVersion> => {
+    return request(`/profiles/${profileId}`);
+  },
+
+  /** List all versions of a profile */
+  listProfileVersions: (profileId: string): Promise<ProfileVersionDocument[]> => {
+    return request(`/profiles/${profileId}/versions`);
+  },
+
+  /** Get a specific version of a profile */
+  getProfileVersion: (profileId: string, version: number): Promise<ProfileVersionDocument> => {
+    return request(`/profiles/${profileId}/versions/${version}`);
+  },
+
+  /** Create a new profile (version 1) */
+  createProfile: (body: {
+    name: string;
+    description?: string;
+    workerType: string;
+    model: string;
+    agentVersion?: string;
+    mcpServers?: string[];
+    skillRevisions?: string[];
+    extensions?: string[];
+  }): Promise<ProfileWithVersion> => {
+    return request("/profiles", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Create a new version of an existing profile */
+  createProfileVersion: (profileId: string, body: {
+    workerType: string;
+    model: string;
+    agentVersion?: string;
+    mcpServers?: string[];
+    skillRevisions?: string[];
+    extensions?: string[];
+  }): Promise<ProfileVersionDocument> => {
+    return request(`/profiles/${profileId}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update profile identity (name/description) */
+  updateProfileIdentity: (profileId: string, body: {
+    name?: string;
+    description?: string;
+  }): Promise<ProfileDocument> => {
+    return request(`/profiles/${profileId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a profile */
+  deleteProfile: (profileId: string): Promise<void> => {
+    return request(`/profiles/${profileId}`, { method: "DELETE" });
   },
 };
