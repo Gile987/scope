@@ -156,13 +156,16 @@ Add an optional profile selector at the top of the configuration step:
 - Dropdown listing available profiles (fetched via `api.listProfiles()`)
 - When a profile is selected:
   - Pre-fill worker, model, agentVersion, mcpServers, skills, extensions from the profile
+  - **Lock all profile-controlled fields** — they become read-only/disabled. No overrides allowed. This keeps the link between the run and the profile unambiguous: if a run has a `profileId`, its configuration matches that profile exactly.
+  - To change a field, the user must either deselect the profile (switching back to manual mode) or edit the profile itself.
   - Store `profileId` for submission
-  - Individual fields remain editable (overrides are allowed — they just break the link to the profile)
-- "No profile" option keeps current behavior (manual selection)
+- "No profile" option keeps current behavior (manual selection with all fields editable)
 
 #### 3.2 Submission payload
 
-When submitting with a profile selected (and no overrides), include `profileId` in the request body. The API copies the profile's values into the `RequestDocument` fields **and** stores `profileId` for traceability.
+When submitting with a profile selected, include `profileId` in the request body. The API resolves the profile server-side: it reads the profile's values and copies them into the `RequestDocument` fields, then stores `profileId` for traceability. This means the portal only sends `profileId` (plus non-profile fields like scenario, persona, maxIterations, occurrences) — the API is the single source of truth for what a profile contains.
+
+When submitting without a profile, `profileId` is omitted and the request works exactly as today.
 
 #### 3.3 "Save as profile" action
 
