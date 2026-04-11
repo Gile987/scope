@@ -1154,6 +1154,19 @@ function GroupRows({
     }
   };
 
+  // Fetch report summaries for expanded runs
+  const { data: groupReportSummaries } = useQuery({
+    queryKey: ["report-summaries", groupRunIds],
+    queryFn: () => api.bulkReportSummary(groupRunIds),
+    enabled: groupRunIds.length > 0,
+    refetchInterval: 10_000,
+  });
+  // Merge parent-level and group-level summaries
+  const mergedReportSummaries = useMemo(() => {
+    if (!reportSummaries && !groupReportSummaries) return undefined;
+    return { ...reportSummaries, ...groupReportSummaries };
+  }, [reportSummaries, groupReportSummaries]);
+
   return (
     <>
       <TableRow
@@ -1319,7 +1332,21 @@ function GroupRows({
         </TableCell>
         {/* Report */}
         <TableCell>
-          <span className="text-xs text-muted-foreground">–</span>
+          {(() => {
+            if (expandedRuns.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
+            let total = 0, completed = 0, pending = 0, generating = 0, failed = 0;
+            for (const r of expandedRuns) {
+              const s = mergedReportSummaries?.[r._id];
+              if (!s) continue;
+              total += s.total;
+              completed += s.completed;
+              pending += s.pending;
+              generating += s.generating;
+              failed += s.failed;
+            }
+            if (total === 0) return <span className="text-xs text-muted-foreground">–</span>;
+            return <ReportProgressBar summary={{ total, completed, pending, generating, failed }} />;
+          })()}
         </TableCell>
         {/* Turns */}
         <TableCell className="text-center font-mono text-xs">
@@ -1357,7 +1384,7 @@ function GroupRows({
               run={run}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
-              reportSummaries={reportSummaries}
+              reportSummaries={mergedReportSummaries}
               deleteMutation={deleteMutation}
             />
           ))
