@@ -174,18 +174,88 @@ Add a "Save as profile" button on Step 2 (review) of SubmitRun. When clicked:
 - Saves current selections as a new profile via `api.createProfile()`
 - Sets the newly created profile as selected
 
-### Phase 4: Wiring & polish
+### Phase 4: CLI — Profile management & selection
 
-#### 4.1 Display profile on RunDetail
+The CLI mirrors all portal capabilities. Profile commands follow the existing CLI patterns (Commander.js, direct fetch to API, table/json/yaml output formats).
+
+#### 4.1 Profile CRUD commands
+
+**File:** `apps/cli/src/index.ts` (add `profile` command group)
+
+```
+profile
+├── list                 # List all profiles (table/json/yaml)
+├── get <id>             # Get profile details
+├── create               # Create profile (interactive or via flags)
+├── update <id>          # Update profile fields
+├── delete <id>          # Soft-delete profile
+└── import <path>        # Import profile(s) from YAML file
+```
+
+**Flags for `profile create` / `profile update`:**
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--name <name>` | String | Profile display name (required for create) |
+| `--description <desc>` | String | Optional description |
+| `-w, --worker <worker>` | String | Worker type (required for create) |
+| `--model <model>` | String | Model identifier |
+| `--agent-version <version>` | String | Agent version |
+| `--mcp-servers <slugs...>` | String[] | MCP server slugs |
+| `--skills <slugs...>` | String[] | Skill revision refs |
+| `--extensions <ids...>` | String[] | VS Code extension IDs |
+
+**YAML import format** (consistent with other entity imports):
+```yaml
+name: "Azure Skills + Learn MCP"
+description: "Full Azure developer profile"
+workerType: coder-acp-copilot
+model: gpt-4.1
+mcpServers:
+  - azure-learn-mcp
+  - azure-docs-mcp
+skillRevisions:
+  - vercel-labs/agent-skills/azure-dev
+extensions:
+  - ms-python.python
+```
+
+#### 4.2 Profile selection on `run submit`
+
+**File:** `apps/cli/src/index.ts` (modify submit command)
+
+Add `--profile <id>` flag to `run submit`:
+
+```bash
+# Submit with a profile — profile-controlled fields are resolved server-side
+pnpm cli run submit -s scenario.yaml -p persona.yaml --profile <profile-id>
+
+# Submit without a profile — manual selection as today
+pnpm cli run submit -s scenario.yaml -w coder-acp-copilot --model gpt-4.1
+```
+
+When `--profile` is provided:
+- The CLI sends `profileId` in the request body. The API resolves profile fields server-side (same as portal).
+- Profile-controlled flags (`-w`, `--model`, `--agent-version`, `--mcp-servers`, `--skills`, `--extensions`) are **rejected** if `--profile` is also set. The CLI validates this locally and prints a clear error: `"Cannot combine --profile with --worker, --model, etc. Use --profile alone or specify fields individually."`
+- Non-profile flags (`-s`, `-p`, `--max-iterations`, `-c`, etc.) remain usable alongside `--profile`.
+
+### Phase 5: Wiring & polish
+
+#### 5.1 Display profile on RunDetail
 
 **File:** `apps/portal/src/pages/RunDetail.tsx`
 
 If the run has a `profileId`, show a link to the profile in the run details header. Graceful fallback if the profile was since deleted.
 
-#### 4.2 Tests
+#### 5.2 Display profile on `run get` / `run list` CLI output
+
+Show the profile name (if set) in CLI output for run details and run listings.
+
+#### 5.3 Tests
 
 - **Unit tests** for Zod schemas (profile validation, partial updates)
 - **Unit tests** for API handlers (CRUD operations, soft-delete, filtering)
+- **Unit tests** for CLI flag validation (`--profile` mutual exclusivity with profile-controlled flags)
 - **Integration test** for the full flow: create profile → submit run with profile → verify run has profileId and copied values
 
 ## Implementation order
@@ -204,8 +274,11 @@ If the run has a `profileId`, show a link to the profile in the run details head
 | 10 | Routes + sidebar | `apps/portal/src/App.tsx`, sidebar component |
 | 11 | Profile selector in SubmitRun | `apps/portal/src/pages/SubmitRun.tsx` |
 | 12 | "Save as profile" on SubmitRun | `apps/portal/src/pages/SubmitRun.tsx` |
-| 13 | Profile link on RunDetail | `apps/portal/src/pages/RunDetail.tsx` |
-| 14 | Tests | `packages/shared/src/schemas/profile.test.ts`, `apps/api/src/**/*.test.ts` |
+| 13 | CLI profile CRUD commands | `apps/cli/src/index.ts` |
+| 14 | CLI `--profile` on run submit | `apps/cli/src/index.ts` |
+| 15 | Profile display on RunDetail | `apps/portal/src/pages/RunDetail.tsx` |
+| 16 | Profile display in CLI run output | `apps/cli/src/index.ts` |
+| 17 | Tests | `packages/shared/src/schemas/profile.test.ts`, `apps/api/src/**/*.test.ts`, `apps/cli/src/**/*.test.ts` |
 
 ## Out of scope (future)
 
