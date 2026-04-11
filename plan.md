@@ -73,23 +73,13 @@ export interface ProfileVersionDocument {
 - **`deletedAt` on ProfileDocument only** — soft-deleting the profile retires the entire lineage. Version documents remain for run traceability.
 - **`version` is auto-incremented** by the API: reads `latestVersion` from the profile, adds 1, and writes both the new version doc and the updated `latestVersion` in the same operation.
 - **Skills are pinned to specific revisions** — `skillRevisions` stores refs like `"vercel-labs/agent-skills/my-skill@a1b2c3d"` pointing to a specific immutable `SkillRevisionDocument`. When creating a profile, skills default to their latest resolved revision, but older revisions can be selected. This guarantees that two runs using the same profile version get identical skill content.
-- **Extensions are version-pinned** — `extensions` stores IDs with version like `"ms-python.python@2024.8.1"`. When creating a profile, the API resolves each extension to its current marketplace version and pins it. This requires adding version tracking to the extension import/sync flow (the current `ExtensionDocument` has no version field — see Phase 1 prerequisite below).
-
-#### 1.1b Extension version tracking prerequisite
-
-**File:** `packages/shared/src/types/types.ts`
-
-Add `version?: string` to `ExtensionDocument` — populated when importing from the marketplace. The extension import/sync flow stores the marketplace version at import time.
-
-**File:** `apps/api/src/index.ts`
-
-When creating a profile version, if an extension is specified without a version (e.g. `"ms-python.python"`), the API looks up the extension in `extensionCollection` and pins to its current `version`. If the extension has no version recorded, the unversioned ID is stored as-is (graceful degradation).
+- **Extensions are version-pinned** — `extensions` stores `"id@version"` specs like `"ms-python.python@2024.8.1"`. When creating a profile version, the API uses the same marketplace resolution pattern as run submission (`ExtensionClient.getVersions()`): bare IDs are resolved to `"id@latestStableVersion"`, explicit `"id@version"` specs are kept as-is. No changes to `ExtensionDocument` needed.
 
 #### 1.2 Define Zod schemas
 
 **File:** `packages/shared/src/schemas/profile.ts` (new)
 
-- `CreateProfileInputSchema` — name (required), description, workerType (required), model, agentVersion, mcpServers, skillRevisions, extensions. Used for both creating a new profile (version 1) and creating a new version of an existing profile. Skills and extensions can be specified with or without version pins — the API resolves unpinned references to their latest versions.
+- `CreateProfileInputSchema` — name (required), description, workerType (required), model, agentVersion, mcpServers, skillRevisions, extensions. Used for both creating a new profile (version 1) and creating a new version of an existing profile. Skills and extensions can be specified with or without version pins — the API resolves unpinned references to their latest versions via marketplace lookup (same as run submission).
 - `ProfileResponseSchema` — full document shape for API responses, including `profileId`, `version`, `_id`.
 
 No `UpdateProfileInputSchema` — there are no in-place updates. "Editing" goes through the create-new-version endpoint.
@@ -349,24 +339,23 @@ Show the profile name and version (if set) in CLI output for run details and run
 | Step | Scope | Files touched |
 |------|-------|---------------|
 | 1 | ProfileDocument + ProfileVersionDocument types | `packages/shared/src/types/types.ts` |
-| 2 | Extension version tracking prerequisite | `packages/shared/src/types/types.ts`, `apps/api/src/index.ts` |
-| 3 | Zod schemas | `packages/shared/src/schemas/profile.ts` (new) |
-| 4 | profileId + profileVersionId on RequestDocument | `packages/shared/src/types/types.ts`, `packages/shared/src/schemas/request.ts` |
-| 5 | MongoDB collections + indexes + API endpoints | `apps/api/src/index.ts` |
-| 6 | Portal API client | `apps/portal/src/lib/api.ts` |
-| 7 | Feature flag | `apps/api/src/index.ts` (seed) |
-| 8 | Profile list page (latest versions) | `apps/portal/src/pages/ProfileList.tsx` (new) |
-| 9 | Create profile page (with skill revision + extension version pickers) | `apps/portal/src/pages/CreateProfile.tsx` (new) |
-| 10 | Profile detail page (with version history + edit-as-new-version) | `apps/portal/src/pages/ProfileDetail.tsx` (new) |
-| 11 | Routes + sidebar | `apps/portal/src/App.tsx`, sidebar component |
-| 12 | Profile selector in SubmitRun (with version picker) | `apps/portal/src/pages/SubmitRun.tsx` |
-| 13 | "Save as profile" on SubmitRun | `apps/portal/src/pages/SubmitRun.tsx` |
-| 14 | Group-by-profile on RunsList + profileId filter on API | `apps/portal/src/pages/RunsList.tsx`, `apps/api/src/index.ts` |
-| 15 | CLI profile commands (create, edit, list, get, versions, delete, import) | `apps/cli/src/index.ts` |
-| 16 | CLI `--profile` + `--profile-version` on run submit | `apps/cli/src/index.ts` |
-| 17 | Profile + version display on RunDetail | `apps/portal/src/pages/RunDetail.tsx` |
-| 18 | Profile + version display in CLI run output | `apps/cli/src/index.ts` |
-| 19 | Tests | `packages/shared/src/schemas/profile.test.ts`, `apps/api/src/**/*.test.ts`, `apps/cli/src/**/*.test.ts` |
+| 2 | Zod schemas | `packages/shared/src/schemas/profile.ts` (new) |
+| 3 | profileId + profileVersionId on RequestDocument | `packages/shared/src/types/types.ts`, `packages/shared/src/schemas/request.ts` |
+| 4 | MongoDB collections + indexes + API endpoints | `apps/api/src/index.ts` |
+| 5 | Portal API client | `apps/portal/src/lib/api.ts` |
+| 6 | Feature flag | `apps/api/src/index.ts` (seed) |
+| 7 | Profile list page (latest versions) | `apps/portal/src/pages/ProfileList.tsx` (new) |
+| 8 | Create profile page (with skill revision + extension version pickers) | `apps/portal/src/pages/CreateProfile.tsx` (new) |
+| 9 | Profile detail page (with version history + edit-as-new-version) | `apps/portal/src/pages/ProfileDetail.tsx` (new) |
+| 10 | Routes + sidebar | `apps/portal/src/App.tsx`, sidebar component |
+| 11 | Profile selector in SubmitRun (with version picker) | `apps/portal/src/pages/SubmitRun.tsx` |
+| 12 | "Save as profile" on SubmitRun | `apps/portal/src/pages/SubmitRun.tsx` |
+| 13 | Group-by-profile on RunsList + profileId filter on API | `apps/portal/src/pages/RunsList.tsx`, `apps/api/src/index.ts` |
+| 14 | CLI profile commands (create, edit, list, get, versions, delete, import) | `apps/cli/src/index.ts` |
+| 15 | CLI `--profile` + `--profile-version` on run submit | `apps/cli/src/index.ts` |
+| 16 | Profile + version display on RunDetail | `apps/portal/src/pages/RunDetail.tsx` |
+| 17 | Profile + version display in CLI run output | `apps/cli/src/index.ts` |
+| 18 | Tests | `packages/shared/src/schemas/profile.test.ts`, `apps/api/src/**/*.test.ts`, `apps/cli/src/**/*.test.ts` |
 
 ## Out of scope (future)
 
