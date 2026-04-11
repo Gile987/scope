@@ -574,6 +574,29 @@ export function RunDetail() {
               </CardContent>
             </Card>
 
+            {/* Profile card */}
+            {run.profileId && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Profile</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-1 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Profile ID:</span>{" "}
+                    <Link to={`/profiles/${run.profileId}`} className="font-mono font-medium text-primary hover:underline">
+                      {run.profileId}
+                    </Link>
+                  </div>
+                  {run.profileVersionId && (
+                    <div>
+                      <span className="text-muted-foreground">Version ID:</span>{" "}
+                      <span className="font-mono font-medium">{run.profileVersionId}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Version Info card */}
             {(run.agentVersion || run.workerVersion || run.os) && (
               <Card>
