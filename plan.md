@@ -33,6 +33,7 @@ Use `page` + `limit` (skip/limit) instead of cursor-based pagination because:
 
 - Read `page` and `limit` from `req.query` (defaults: `page=1`, `limit=50`)
 - Compute `skip = (page - 1) * limit`
+- Change sort to `{ createdAt: -1, _id: -1 }` to guarantee deterministic ordering (tiebreaker on `_id` prevents duplicates/gaps across pages when multiple runs share the same `createdAt`)
 - Add `.skip(skip).limit(limit)` to the MongoDB query
 - Run a parallel `countDocuments(filter)` to get total count
 - Change response shape to a paginated envelope:
