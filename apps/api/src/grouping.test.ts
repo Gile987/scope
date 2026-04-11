@@ -47,6 +47,17 @@ describe("buildGroupingPipeline", () => {
     expect(group._completionTokensList).toBeDefined();
   });
 
+  it("$group stage accumulates status and outcome counts", () => {
+    const pipeline = buildGroupingPipeline("task");
+    const group = pipeline[1].$group as Record<string, unknown>;
+    expect(group._statusPending).toBeDefined();
+    expect(group._statusProcessing).toBeDefined();
+    expect(group._statusDone).toBeDefined();
+    expect(group._outcomeSucceeded).toBeDefined();
+    expect(group._outcomeFailed).toBeDefined();
+    expect(group._outcomeFinished).toBeDefined();
+  });
+
   it("$group stage collects distinct values for uniform detection", () => {
     const pipeline = buildGroupingPipeline("task");
     const group = pipeline[1].$group as Record<string, unknown>;
@@ -69,6 +80,14 @@ describe("buildGroupingPipeline", () => {
     expect(project.label).toBeDefined();
     expect(project.aggregates).toBeDefined();
     expect(project.uniform).toBeDefined();
+  });
+
+  it("$project aggregates include statusCounts and outcomeCounts", () => {
+    const pipeline = buildGroupingPipeline("task");
+    const project = pipeline[2].$project as Record<string, unknown>;
+    const aggregates = project.aggregates as Record<string, unknown>;
+    expect(aggregates.statusCounts).toEqual({ pending: "$_statusPending", processing: "$_statusProcessing", done: "$_statusDone" });
+    expect(aggregates.outcomeCounts).toEqual({ succeeded: "$_outcomeSucceeded", failed: "$_outcomeFailed", finished: "$_outcomeFinished" });
   });
 });
 

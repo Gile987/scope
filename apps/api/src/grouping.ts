@@ -115,6 +115,13 @@ export function buildGroupingPipeline(
         _tasks: { $addToSet: { $ifNull: ["$scenario.task", ""] } },
         _mcpKeys: { $addToSet: "$_mcpKey" },
         _skillKeys: { $addToSet: "$_skillKey" },
+        // Status/outcome distribution counts
+        _statusPending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
+        _statusProcessing: { $sum: { $cond: [{ $eq: ["$status", "processing"] }, 1, 0] } },
+        _statusDone: { $sum: { $cond: [{ $eq: ["$status", "done"] }, 1, 0] } },
+        _outcomeSucceeded: { $sum: { $cond: [{ $eq: ["$outcome", "succeeded"] }, 1, 0] } },
+        _outcomeFailed: { $sum: { $cond: [{ $eq: ["$outcome", "failed"] }, 1, 0] } },
+        _outcomeFinished: { $sum: { $cond: [{ $eq: ["$outcome", "finished"] }, 1, 0] } },
         // Keep first run's array values for uniform fields
         _firstMcpServers: { $first: "$mcpServers" },
         _firstSkillRevisions: { $first: "$skillRevisions" },
@@ -138,6 +145,8 @@ export function buildGroupingPipeline(
           duration: { $let: { vars: { vals: { $filter: { input: "$_durations", cond: { $and: [{ $ne: ["$$this", null] }, { $gt: ["$$this", 0] }] } } } }, in: { $cond: { if: { $eq: [{ $size: "$$vals" }, 0] }, then: null, else: { min: { $min: "$$vals" }, max: { $max: "$$vals" }, mean: { $avg: "$$vals" }, stdDev: { $cond: { if: { $lte: [{ $size: "$$vals" }, 1] }, then: 0, else: { $sqrt: { $avg: { $map: { input: "$$vals", in: { $pow: [{ $subtract: ["$$this", { $avg: "$$vals" }] }, 2] } } } } } } } } } } } },
           promptTokens: { $let: { vars: { vals: { $filter: { input: "$_promptTokensList", cond: { $ne: ["$$this", null] } } } }, in: { $cond: { if: { $eq: [{ $size: "$$vals" }, 0] }, then: null, else: { min: { $min: "$$vals" }, max: { $max: "$$vals" }, mean: { $avg: "$$vals" }, stdDev: { $cond: { if: { $lte: [{ $size: "$$vals" }, 1] }, then: 0, else: { $sqrt: { $avg: { $map: { input: "$$vals", in: { $pow: [{ $subtract: ["$$this", { $avg: "$$vals" }] }, 2] } } } } } } } } } } } },
           completionTokens: { $let: { vars: { vals: { $filter: { input: "$_completionTokensList", cond: { $ne: ["$$this", null] } } } }, in: { $cond: { if: { $eq: [{ $size: "$$vals" }, 0] }, then: null, else: { min: { $min: "$$vals" }, max: { $max: "$$vals" }, mean: { $avg: "$$vals" }, stdDev: { $cond: { if: { $lte: [{ $size: "$$vals" }, 1] }, then: 0, else: { $sqrt: { $avg: { $map: { input: "$$vals", in: { $pow: [{ $subtract: ["$$this", { $avg: "$$vals" }] }, 2] } } } } } } } } } } } },
+          statusCounts: { pending: "$_statusPending", processing: "$_statusProcessing", done: "$_statusDone" },
+          outcomeCounts: { succeeded: "$_outcomeSucceeded", failed: "$_outcomeFailed", finished: "$_outcomeFinished" },
         },
         uniform: {
           workerType: { $cond: { if: { $eq: [{ $size: "$_workerTypes" }, 1] }, then: { $arrayElemAt: ["$_workerTypes", 0] }, else: "$$REMOVE" } },

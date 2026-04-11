@@ -270,6 +270,8 @@ export interface GroupAggregates {
   duration: AggregateStats | null;
   promptTokens: AggregateStats | null;
   completionTokens: AggregateStats | null;
+  statusCounts: Record<string, number>;
+  outcomeCounts: Record<string, number>;
 }
 
 export interface RunGroup {

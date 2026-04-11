@@ -172,6 +172,8 @@ export const GroupAggregatesSchema = z
     duration: AggregateStatsSchema.nullable(),
     promptTokens: AggregateStatsSchema.nullable(),
     completionTokens: AggregateStatsSchema.nullable(),
+    statusCounts: z.record(z.string(), z.number()),
+    outcomeCounts: z.record(z.string(), z.number()),
   })
   .openapi("GroupAggregates");
 

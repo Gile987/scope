@@ -1242,13 +1242,60 @@ function GroupRows({
         </TableCell>
         {/* Status */}
         <TableCell>
-          {uniform.status ? (
-            <StatusBadge status={uniform.status} />
-          ) : <span className="text-xs text-muted-foreground">mixed</span>}
+          {(() => {
+            const statusColors: Record<string, string> = {
+              pending: "bg-gray-500",
+              processing: "bg-blue-500",
+              done: "bg-green-500",
+            };
+            const total = aggregates.count;
+            const done = aggregates.statusCounts?.done ?? 0;
+            const segments = Object.entries(aggregates.statusCounts ?? {}).filter(([, c]) => c > 0);
+            return (
+              <div className="flex flex-col gap-1 min-w-[80px]">
+                <span className="text-xs font-medium">{done}/{total} done</span>
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
+                  {segments.map(([status, count]) => (
+                    <div
+                      key={status}
+                      className={`h-full ${statusColors[status] ?? "bg-gray-400"} transition-all`}
+                      style={{ width: `${(count / total) * 100}%` }}
+                      title={`${status}: ${count}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </TableCell>
         {/* Outcome */}
         <TableCell>
-          <span className="text-xs text-muted-foreground">–</span>
+          {(() => {
+            const outcomeColors: Record<string, string> = {
+              succeeded: "bg-green-500",
+              failed: "bg-red-500",
+              finished: "bg-yellow-500",
+            };
+            const doneCount = aggregates.statusCounts?.done ?? 0;
+            const segments = Object.entries(aggregates.outcomeCounts ?? {}).filter(([, c]) => c > 0);
+            if (doneCount === 0 || segments.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
+            const succeeded = aggregates.outcomeCounts?.succeeded ?? 0;
+            return (
+              <div className="flex flex-col gap-1 min-w-[80px]">
+                <span className="text-xs font-medium">{succeeded}/{doneCount} pass</span>
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
+                  {segments.map(([outcome, count]) => (
+                    <div
+                      key={outcome}
+                      className={`h-full ${outcomeColors[outcome] ?? "bg-gray-400"} transition-all`}
+                      style={{ width: `${(count / doneCount) * 100}%` }}
+                      title={`${outcome}: ${count}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </TableCell>
         {/* Report */}
         <TableCell>
