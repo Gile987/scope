@@ -393,6 +393,60 @@ describe("API Endpoints", () => {
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body[0]).toHaveProperty("id", "r1");
     });
+
+    it("returns grouped results when groupBy=task", async () => {
+      const groupedDocs = [
+        { key: "tp-1", label: "Build a calculator", aggregates: { count: 3, turns: { min: 1, max: 3, mean: 2, stdDev: 0.8 }, duration: null, promptTokens: null, completionTokens: null }, uniform: { workerType: "coder-acp-copilot" } },
+      ];
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue(groupedDocs),
+      });
+
+      const res = await request(app).get("/api/v1/requests?groupBy=task");
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body[0]).toHaveProperty("key", "tp-1");
+      expect(res.body[0]).toHaveProperty("aggregates");
+      expect(res.body[0].aggregates).toHaveProperty("count", 3);
+      expect(res.body[0]).toHaveProperty("uniform");
+    });
+
+    it("returns grouped results when groupBy=submissionId", async () => {
+      const groupedDocs = [
+        { key: "sub-1", label: "sub-1", aggregates: { count: 2, turns: null, duration: null, promptTokens: null, completionTokens: null }, uniform: {} },
+      ];
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue(groupedDocs),
+      });
+
+      const res = await request(app).get("/api/v1/requests?groupBy=submissionId");
+      expect(res.status).toBe(200);
+      expect(res.body[0]).toHaveProperty("key", "sub-1");
+    });
+
+    it("calls aggregate pipeline when groupBy is provided", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get("/api/v1/requests?groupBy=task");
+      expect(mocks.collection.aggregate).toHaveBeenCalled();
+      const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
+      expect(pipeline[0]).toHaveProperty("$match");
+      // buildGroupingPipeline adds 3 stages ($addFields, $group, $project)
+      expect(pipeline).toHaveLength(4); // $match + 3 from buildGroupingPipeline
+    });
+
+    it("does not call aggregate when groupBy is absent", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests");
+      expect(mocks.collection.aggregate).not.toHaveBeenCalled();
+    });
   });
 
   describe("GET /api/v1/requests/:id", () => {
