@@ -35,12 +35,14 @@ interface SkillPickerProps {
   onChange: (slugs: string[]) => void;
   /** If true, hide the selection badges / multi-select — only show search+import (for SkillList page) */
   importOnly?: boolean;
+  /** If true, show selected items as read-only (no remove, no search) */
+  disabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-export function SkillPicker({ selected, onChange, importOnly = false }: SkillPickerProps) {
+export function SkillPicker({ selected, onChange, importOnly = false, disabled = false }: SkillPickerProps) {
   const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -231,16 +233,19 @@ export function SkillPicker({ selected, onChange, importOnly = false }: SkillPic
             <Badge key={id} variant="secondary" className="gap-1 font-mono text-xs">
               <BookOpen className="h-3 w-3" />
               {id}
-              <X
-                className="h-3 w-3 cursor-pointer hover:text-destructive"
-                onClick={() => removeItem(id)}
-              />
+              {!disabled && (
+                <X
+                  className="h-3 w-3 cursor-pointer hover:text-destructive"
+                  onClick={() => removeItem(id)}
+                />
+              )}
             </Badge>
           ))}
         </div>
       )}
 
       {/* Search input */}
+      {!disabled && (
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
@@ -259,6 +264,7 @@ export function SkillPicker({ selected, onChange, importOnly = false }: SkillPic
           <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
         )}
       </div>
+      )}
 
       {/* Dropdown */}
       {showDropdown && (
@@ -377,6 +383,7 @@ export function SkillPicker({ selected, onChange, importOnly = false }: SkillPic
       )}
 
       {/* Manual add section */}
+      {!disabled && (
       <div className="mt-1.5">
         <button
           type="button"
@@ -438,6 +445,7 @@ export function SkillPicker({ selected, onChange, importOnly = false }: SkillPic
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

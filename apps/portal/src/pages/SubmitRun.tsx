@@ -130,6 +130,7 @@ export function SubmitRun() {
 
   // When agent changes, reset model to the agent's default and clear extensions for non-vscode workers
   useEffect(() => {
+    if (selectedProfileId) return; // profile controls these values
     if (selectedAgent) {
       setModel(selectedAgent.defaultModel ?? "");
     } else {
@@ -154,6 +155,7 @@ export function SubmitRun() {
 
   // When agent changes or versions load, auto-select latest version
   useEffect(() => {
+    if (selectedProfileId) return; // profile controls agent version
     if (sortedVersions.length > 0) {
       setSelectedAgentVersion(sortedVersions[0].agentVersion);
     } else {
@@ -511,10 +513,11 @@ export function SubmitRun() {
                   {activeMcpServers.map((s: McpServerDocument) => (
                     <label
                       key={s._id}
-                      className="flex items-center gap-3 rounded-md border p-3 cursor-pointer hover:bg-accent/50 transition-colors"
+                      className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${profileLocked ? "opacity-60" : "cursor-pointer hover:bg-accent/50"}`}
                     >
                       <Checkbox
                         checked={selectedMcpServers.includes(s._id)}
+                        disabled={profileLocked}
                         onCheckedChange={(checked) => {
                           setSelectedMcpServers(prev =>
                             checked
@@ -552,7 +555,7 @@ export function SubmitRun() {
               <CardDescription>Search and select agent skills to inject into the coding agent prompt</CardDescription>
             </CardHeader>
             <CardContent>
-              <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} />
+              <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
             </CardContent>
           </Card>
 
@@ -567,7 +570,7 @@ export function SubmitRun() {
                 <CardDescription>Search and select VS Code extensions to install for this run</CardDescription>
               </CardHeader>
               <CardContent>
-                <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} />
+                <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} disabled={profileLocked} />
               </CardContent>
             </Card>
           )}
