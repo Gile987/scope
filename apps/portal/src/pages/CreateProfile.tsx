@@ -134,8 +134,9 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
     // Worker — use agent name if available, else raw ID
     const agentName = selectedAgent?.name ?? worker;
     if (agentName) {
-      parts.push(agentName);
-      descParts.push(agentName);
+      const workerLabel = selectedAgentVersion ? `${agentName}@${selectedAgentVersion}` : agentName;
+      parts.push(workerLabel);
+      descParts.push(workerLabel);
     }
 
     // Model
@@ -144,27 +145,22 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
       descParts.push(`model: ${model}`);
     }
 
-    // Agent version
-    if (selectedAgentVersion) {
-      descParts.push(`agent version: ${selectedAgentVersion}`);
-    }
-
     // MCP servers
     if (selectedMcpServers.length > 0) {
       parts.push(selectedMcpServers.join(", "));
       descParts.push(`MCP: ${selectedMcpServers.join(", ")}`);
     }
 
-    // Skills — use last segment of slug for name brevity
+    // Skills — keep full slug (may contain version info)
     if (selectedSkills.length > 0) {
       const shortSkills = selectedSkills.map((s) => s.split("/").pop() ?? s);
       parts.push(shortSkills.join(", "));
       descParts.push(`Skills: ${selectedSkills.join(", ")}`);
     }
 
-    // Extensions — use last segment
+    // Extensions — keep version suffix when present
     if (selectedExtensions.length > 0) {
-      const shortExts = selectedExtensions.map((e) => e.split("/").pop()?.replace(/@.*$/, "") ?? e);
+      const shortExts = selectedExtensions.map((e) => e.split("/").pop() ?? e);
       parts.push(shortExts.join(", "));
       descParts.push(`Extensions: ${selectedExtensions.join(", ")}`);
     }
