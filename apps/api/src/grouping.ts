@@ -168,19 +168,3 @@ export function buildGroupingPipeline(
     { $sort: { key: 1 } },
   ];
 }
-
-/**
- * Compute aggregate stats from an array of numbers.
- * Used for application-level grouping as a fallback when the MongoDB
- * aggregation pipeline cannot be used.
- */
-export function computeStats(values: number[]): AggregateStats | null {
-  if (values.length === 0) return null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const mean = values.reduce((s, v) => s + v, 0) / values.length;
-  const variance =
-    values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
-  const stdDev = Math.sqrt(variance);
-  return { min, max, mean, stdDev };
-}

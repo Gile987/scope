@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect } from "vitest";
-import { buildGroupingPipeline, computeStats } from "./grouping.js";
+import { buildGroupingPipeline } from "./grouping.js";
 
 describe("buildGroupingPipeline", () => {
   it("returns 4 pipeline stages for task grouping", () => {
@@ -101,30 +101,5 @@ describe("buildGroupingPipeline", () => {
     const aggregates = project.aggregates as Record<string, unknown>;
     expect(aggregates.statusCounts).toEqual({ pending: "$_statusPending", processing: "$_statusProcessing", done: "$_statusDone" });
     expect(aggregates.outcomeCounts).toEqual({ succeeded: "$_outcomeSucceeded", failed: "$_outcomeFailed", finished: "$_outcomeFinished" });
-  });
-});
-
-describe("computeStats", () => {
-  it("returns null for empty array", () => {
-    expect(computeStats([])).toBeNull();
-  });
-
-  it("computes stats for a single value", () => {
-    const result = computeStats([5]);
-    expect(result).toEqual({ min: 5, max: 5, mean: 5, stdDev: 0 });
-  });
-
-  it("computes min/max/mean/stdDev for multiple values", () => {
-    const result = computeStats([2, 4, 4, 4, 5, 5, 7, 9]);
-    expect(result).not.toBeNull();
-    expect(result!.min).toBe(2);
-    expect(result!.max).toBe(9);
-    expect(result!.mean).toBe(5);
-    expect(result!.stdDev).toBeCloseTo(2, 0);
-  });
-
-  it("handles identical values", () => {
-    const result = computeStats([3, 3, 3]);
-    expect(result).toEqual({ min: 3, max: 3, mean: 3, stdDev: 0 });
   });
 });
