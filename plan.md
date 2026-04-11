@@ -34,47 +34,73 @@ This directly supports the v2 "flagship profile" concept from the partner-facing
 
 **File:** `packages/shared/src/types/types.ts`
 
-Profiles are immutable and versioned. Each document in the `profiles` collection represents one version. All versions of the same profile share a `profileId`. The latest version is the one with the highest `version` number.
+Following the skill/revision pattern, profiles use **two collections**: a mutable `ProfileDocument` for identity and a separate immutable `ProfileVersionDocument` for each versioned snapshot.
+
+**Collection 1: `profiles`** — mutable identity
+
+```typescript
+export interface ProfileDocument {
+  _id: string;                // UUID — the profileId
+  name: string;               // Display name (e.g. "Azure Skills + Learn MCP")
+  description?: string;       // Optional description
+  latestVersion: number;      // Denormalized: current highest version number
+  createdAt: Date;
+  updatedAt?: Date;           // Updated when a new version is created or name/description changes
+  deletedAt?: Date;           // Soft-delete the entire profile
+}
+```
+
+**Collection 2: `profile-versions`** — immutable versioned snapshots
 
 ```typescript
 export interface ProfileVersionDocument {
   _id: string;                // UUID — unique per version
-  profileId: string;          // Shared across all versions of this profile (UUID)
+  profileId: string;          // FK → ProfileDocument._id
   version: number;            // Auto-incrementing per profileId (1, 2, 3, …)
-  name: string;               // Display name (e.g. "Azure Skills + Learn MCP")
-  description?: string;       // Optional description
   workerType: string;         // FK → CodingAgentDocument._id
   model?: string;             // Model identifier
   agentVersion?: string;      // Agent version string
   mcpServers?: string[];      // MCP server slugs
-  skillRevisions?: string[];  // Skill revision refs
-  extensions?: string[];      // Extension IDs (supports "id@version")
+  skillRevisions?: string[];  // Pinned skill revision refs (e.g. "source/skillName@commitHash")
+  extensions?: string[];      // Pinned extension IDs with version (e.g. "ms-python.python@2024.8.1")
   createdAt: Date;            // Immutable — no updatedAt
-  deletedAt?: Date;           // Soft-delete (applies to the entire profile lineage)
 }
 ```
 
 **Key design decisions:**
-- **No `updatedAt`** — versions are immutable once created. "Updating" a profile means creating a new version.
-- **`deletedAt` is lineage-wide** — soft-deleting a profile marks the latest version with `deletedAt`, which logically retires the entire profile. Historical versions remain for run traceability.
-- **`version` is auto-incremented** by the API when creating a new version. The API finds `max(version)` for the `profileId` and adds 1.
+- **Two collections** — follows the existing skill/revision pattern. `ProfileDocument` holds mutable identity (name, description, deletedAt); `ProfileVersionDocument` holds immutable configuration snapshots.
+- **`latestVersion` on ProfileDocument** — denormalized for efficient access. Updated atomically when a new version is created.
+- **`deletedAt` on ProfileDocument only** — soft-deleting the profile retires the entire lineage. Version documents remain for run traceability.
+- **`version` is auto-incremented** by the API: reads `latestVersion` from the profile, adds 1, and writes both the new version doc and the updated `latestVersion` in the same operation.
+- **Skills are pinned to specific revisions** — `skillRevisions` stores refs like `"vercel-labs/agent-skills/my-skill@a1b2c3d"` pointing to a specific immutable `SkillRevisionDocument`. When creating a profile, skills default to their latest resolved revision, but older revisions can be selected. This guarantees that two runs using the same profile version get identical skill content.
+- **Extensions are version-pinned** — `extensions` stores IDs with version like `"ms-python.python@2024.8.1"`. When creating a profile, the API resolves each extension to its current marketplace version and pins it. This requires adding version tracking to the extension import/sync flow (the current `ExtensionDocument` has no version field — see Phase 1 prerequisite below).
+
+#### 1.1b Extension version tracking prerequisite
+
+**File:** `packages/shared/src/types/types.ts`
+
+Add `version?: string` to `ExtensionDocument` — populated when importing from the marketplace. The extension import/sync flow stores the marketplace version at import time.
+
+**File:** `apps/api/src/index.ts`
+
+When creating a profile version, if an extension is specified without a version (e.g. `"ms-python.python"`), the API looks up the extension in `extensionCollection` and pins to its current `version`. If the extension has no version recorded, the unversioned ID is stored as-is (graceful degradation).
 
 #### 1.2 Define Zod schemas
 
 **File:** `packages/shared/src/schemas/profile.ts` (new)
 
-- `CreateProfileInputSchema` — name (required), description, workerType (required), model, agentVersion, mcpServers, skillRevisions, extensions. Used for both creating a new profile (version 1) and creating a new version of an existing profile.
+- `CreateProfileInputSchema` — name (required), description, workerType (required), model, agentVersion, mcpServers, skillRevisions, extensions. Used for both creating a new profile (version 1) and creating a new version of an existing profile. Skills and extensions can be specified with or without version pins — the API resolves unpinned references to their latest versions.
 - `ProfileResponseSchema` — full document shape for API responses, including `profileId`, `version`, `_id`.
 
 No `UpdateProfileInputSchema` — there are no in-place updates. "Editing" goes through the create-new-version endpoint.
 
-#### 1.3 Initialize MongoDB collection
+#### 1.3 Initialize MongoDB collections
 
 **File:** `apps/api/src/index.ts`
 
-- Add `profileCollection = db.collection<ProfileVersionDocument>("profiles")` alongside existing collections
-- Create compound index on `{ profileId: 1, version: -1 }` for efficient latest-version lookups
-- Create index on `{ profileId: 1, deletedAt: 1 }` for listing active profiles
+- Add `profileCollection = db.collection<ProfileDocument>("profiles")`
+- Add `profileVersionCollection = db.collection<ProfileVersionDocument>("profile-versions")`
+- Create compound index on `profile-versions`: `{ profileId: 1, version: -1 }` for efficient latest-version lookups
 
 #### 1.4 Implement REST endpoints
 
@@ -82,17 +108,16 @@ No `UpdateProfileInputSchema` — there are no in-place updates. "Editing" goes 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/profiles` | Create a new profile (version 1) |
-| `GET` | `/api/v1/profiles` | List profiles — **latest version only** per profileId (filter by workerType optional) |
-| `GET` | `/api/v1/profiles/:profileId` | Get latest version of a profile |
+| `POST` | `/api/v1/profiles` | Create a new profile (ProfileDocument + version 1) |
+| `GET` | `/api/v1/profiles` | List profiles — returns ProfileDocument list with latest version info (filter by workerType optional) |
+| `GET` | `/api/v1/profiles/:profileId` | Get profile with its latest version |
 | `GET` | `/api/v1/profiles/:profileId/versions` | List all versions of a profile (newest first) |
 | `GET` | `/api/v1/profiles/:profileId/versions/:version` | Get a specific version |
-| `POST` | `/api/v1/profiles/:profileId` | Create a new version of an existing profile. Body contains the full new state — the API auto-increments the version number. |
-| `DELETE` | `/api/v1/profiles/:profileId` | Soft-delete profile (marks latest version with `deletedAt`) |
+| `POST` | `/api/v1/profiles/:profileId` | Create a new version. Body contains the full new state — the API auto-increments the version, pins any unpinned skill/extension references, and updates `latestVersion` on the ProfileDocument. |
+| `PUT` | `/api/v1/profiles/:profileId` | Update profile identity (name, description) — does **not** create a new version |
+| `DELETE` | `/api/v1/profiles/:profileId` | Soft-delete profile (sets `deletedAt` on ProfileDocument) |
 
-**No `PUT` or `PATCH`** — profiles are immutable. The `POST .../profiles/:profileId` endpoint replaces the edit operation.
-
-**List endpoint behavior:** `GET /api/v1/profiles` returns only the latest version of each active profile (no `deletedAt`). This is the default view for profile selectors in both portal and CLI.
+**List endpoint behavior:** `GET /api/v1/profiles` returns only active profiles (no `deletedAt`). Each result includes the profile identity plus its latest version's configuration.
 
 #### 1.5 Link profiles to requests (optional reference)
 
@@ -323,24 +348,25 @@ Show the profile name and version (if set) in CLI output for run details and run
 
 | Step | Scope | Files touched |
 |------|-------|---------------|
-| 1 | ProfileVersionDocument type | `packages/shared/src/types/types.ts` |
-| 2 | Zod schemas | `packages/shared/src/schemas/profile.ts` (new) |
-| 3 | profileId + profileVersionId on RequestDocument | `packages/shared/src/types/types.ts`, `packages/shared/src/schemas/request.ts` |
-| 4 | MongoDB collection + indexes + API endpoints | `apps/api/src/index.ts` |
-| 5 | Portal API client | `apps/portal/src/lib/api.ts` |
-| 6 | Feature flag | `apps/api/src/index.ts` (seed) |
-| 7 | Profile list page (latest versions) | `apps/portal/src/pages/ProfileList.tsx` (new) |
-| 8 | Create profile page | `apps/portal/src/pages/CreateProfile.tsx` (new) |
-| 9 | Profile detail page (with version history + edit-as-new-version) | `apps/portal/src/pages/ProfileDetail.tsx` (new) |
-| 10 | Routes + sidebar | `apps/portal/src/App.tsx`, sidebar component |
-| 11 | Profile selector in SubmitRun (with version picker) | `apps/portal/src/pages/SubmitRun.tsx` |
-| 12 | "Save as profile" on SubmitRun | `apps/portal/src/pages/SubmitRun.tsx` |
-| 13 | Group-by-profile on RunsList + profileId filter on API | `apps/portal/src/pages/RunsList.tsx`, `apps/api/src/index.ts` |
-| 14 | CLI profile commands (create, edit, list, get, versions, delete, import) | `apps/cli/src/index.ts` |
-| 15 | CLI `--profile` + `--profile-version` on run submit | `apps/cli/src/index.ts` |
-| 16 | Profile + version display on RunDetail | `apps/portal/src/pages/RunDetail.tsx` |
-| 17 | Profile + version display in CLI run output | `apps/cli/src/index.ts` |
-| 18 | Tests | `packages/shared/src/schemas/profile.test.ts`, `apps/api/src/**/*.test.ts`, `apps/cli/src/**/*.test.ts` |
+| 1 | ProfileDocument + ProfileVersionDocument types | `packages/shared/src/types/types.ts` |
+| 2 | Extension version tracking prerequisite | `packages/shared/src/types/types.ts`, `apps/api/src/index.ts` |
+| 3 | Zod schemas | `packages/shared/src/schemas/profile.ts` (new) |
+| 4 | profileId + profileVersionId on RequestDocument | `packages/shared/src/types/types.ts`, `packages/shared/src/schemas/request.ts` |
+| 5 | MongoDB collections + indexes + API endpoints | `apps/api/src/index.ts` |
+| 6 | Portal API client | `apps/portal/src/lib/api.ts` |
+| 7 | Feature flag | `apps/api/src/index.ts` (seed) |
+| 8 | Profile list page (latest versions) | `apps/portal/src/pages/ProfileList.tsx` (new) |
+| 9 | Create profile page (with skill revision + extension version pickers) | `apps/portal/src/pages/CreateProfile.tsx` (new) |
+| 10 | Profile detail page (with version history + edit-as-new-version) | `apps/portal/src/pages/ProfileDetail.tsx` (new) |
+| 11 | Routes + sidebar | `apps/portal/src/App.tsx`, sidebar component |
+| 12 | Profile selector in SubmitRun (with version picker) | `apps/portal/src/pages/SubmitRun.tsx` |
+| 13 | "Save as profile" on SubmitRun | `apps/portal/src/pages/SubmitRun.tsx` |
+| 14 | Group-by-profile on RunsList + profileId filter on API | `apps/portal/src/pages/RunsList.tsx`, `apps/api/src/index.ts` |
+| 15 | CLI profile commands (create, edit, list, get, versions, delete, import) | `apps/cli/src/index.ts` |
+| 16 | CLI `--profile` + `--profile-version` on run submit | `apps/cli/src/index.ts` |
+| 17 | Profile + version display on RunDetail | `apps/portal/src/pages/RunDetail.tsx` |
+| 18 | Profile + version display in CLI run output | `apps/cli/src/index.ts` |
+| 19 | Tests | `packages/shared/src/schemas/profile.test.ts`, `apps/api/src/**/*.test.ts`, `apps/cli/src/**/*.test.ts` |
 
 ## Out of scope (future)
 
