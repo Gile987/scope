@@ -919,6 +919,8 @@ export function RunsList() {
                     deleteMutation={deleteMutation}
                     groupBy={groupBy}
                     workerFilter={workerFilter === "all" ? undefined : workerFilter}
+                    statusFilter={effectiveStatus}
+                    outcomeFilter={effectiveOutcome}
                     criteriaState={criteriaState}
                   />
                 );
@@ -1125,6 +1127,8 @@ function GroupRows({
   deleteMutation,
   groupBy,
   workerFilter,
+  statusFilter,
+  outcomeFilter,
   criteriaState,
 }: {
   group: RunGroup;
@@ -1136,6 +1140,8 @@ function GroupRows({
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   groupBy: GroupByKey;
   workerFilter?: string;
+  statusFilter?: string;
+  outcomeFilter?: string;
   criteriaState?: string;
 }) {
   const { aggregates, uniform } = group;
@@ -1144,7 +1150,7 @@ function GroupRows({
 
   // Fetch runs for this group on expand
   const expandFilter = useMemo(() => {
-    const opts: Record<string, string | undefined> = { worker: workerFilter, criteria: criteriaState };
+    const opts: Record<string, string | undefined> = { worker: workerFilter, status: statusFilter, outcome: outcomeFilter, criteria: criteriaState };
     if (groupBy === "task") {
       // group.key is taskPromptId (or scenario.task fallback)
       opts.taskPromptId = group.key;
@@ -1152,10 +1158,10 @@ function GroupRows({
       opts.submissionId = group.key === "no-submission" ? undefined : group.key;
     }
     return opts;
-  }, [group.key, groupBy, workerFilter, criteriaState]);
+  }, [group.key, groupBy, workerFilter, statusFilter, outcomeFilter, criteriaState]);
 
   const { data: expandedRuns = [], isLoading: isExpandLoading } = useQuery({
-    queryKey: ["group-runs", group.key, groupBy, workerFilter, criteriaState],
+    queryKey: ["group-runs", group.key, groupBy, workerFilter, statusFilter, outcomeFilter, criteriaState],
     queryFn: () => api.listRuns(expandFilter),
     enabled: isExpanded,
     refetchInterval: 10_000,
