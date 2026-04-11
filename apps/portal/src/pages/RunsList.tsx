@@ -51,6 +51,7 @@ export function RunsList() {
       criteria: criteriaState,
       submissionId,
     }),
+    enabled: groupBy === "none",
     refetchInterval: 10_000,
   });
 
