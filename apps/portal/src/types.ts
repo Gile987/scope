@@ -836,7 +836,6 @@ export interface RunGroup {
   key: string;
   label: string;
   runIds: string[];
-  runIds: string[];
   aggregates: GroupAggregates;
   uniform: GroupUniformValues;
 }
