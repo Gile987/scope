@@ -414,6 +414,22 @@ export function SubmitRun() {
                 </Label>
                 <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="occurrences">Number of occurrences</Label>
+                <Input
+                  id="occurrences"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={occurrences}
+                  onChange={(e) => setOccurrences(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                  className="w-24"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Submit {occurrences} identical run{occurrences !== 1 ? "s" : ""}
+                </p>
+              </div>
             </CardContent>
           </Card>
 
@@ -480,21 +496,6 @@ export function SubmitRun() {
                   </Select>
                 </div>
               )}
-              <div className="space-y-2">
-                <Label htmlFor="occurrences">Number of occurrences</Label>
-                <Input
-                  id="occurrences"
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={occurrences}
-                  onChange={(e) => setOccurrences(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
-                  className="w-24"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Submit {occurrences} identical run{occurrences !== 1 ? "s" : ""}
-                </p>
-              </div>
             </CardContent>
           </Card>
 
