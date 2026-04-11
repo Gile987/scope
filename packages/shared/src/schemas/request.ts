@@ -90,6 +90,7 @@ export const CreateRequestInputSchema = z
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
+    profileId: z.string().optional(),
   })
   .openapi("CreateRequestInput");
 
@@ -117,6 +118,8 @@ export const RequestResponseSchema = z
     extensions: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
     workerVersion: z.string().optional(),
+    profileId: z.string().optional(),
+    profileVersionId: z.string().optional(),
     harUrl: z.string().optional(),
     videoUrls: z.array(z.string()).optional(),
     setupVideoUrls: z.array(z.string()).optional(),
@@ -134,6 +137,7 @@ export const ListRequestsQuerySchema = z
     taskPromptId: z.string().optional(),
     criteria: z.string().optional(),
     submissionId: z.string().optional(),
+    profileId: z.string().optional(),
     status: RequestStatusSchema.optional(),
     outcome: RequestOutcomeSchema.optional(),
     page: z.coerce.number().int().min(1).optional(),
