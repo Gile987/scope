@@ -184,19 +184,20 @@ Seed a `profiles` feature flag (`{ key: "profiles", label: "Profiles" }`) in the
 **File:** `apps/portal/src/pages/SubmitRun.tsx`
 
 Add an optional profile selector at the top of the configuration step:
-- Dropdown listing available profiles (fetched via `api.listProfiles()`)
-- When a profile is selected:
-  - Pre-fill worker, model, agentVersion, mcpServers, skills, extensions from the profile
-  - **Lock all profile-controlled fields** — they become read-only/disabled. No overrides allowed. This keeps the link between the run and the profile unambiguous: if a run has a `profileId`, its configuration matches that profile exactly.
-  - To change a field, the user must either deselect the profile (switching back to manual mode) or edit the profile itself.
-  - Store `profileId` for submission
+- **Profile dropdown** listing available profiles (fetched via `api.listProfiles()` — latest version of each). The dropdown shows the profile name and current version (e.g. "Azure Skills + Learn MCP (v3)").
+- **Version selector** — once a profile is selected, a secondary control appears showing the version (defaulting to latest). The user can expand this to pick an older version from the profile's version history (`api.listProfileVersions(profileId)`). This supports Job 3 (regression check): re-running with a previous profile version to compare before/after.
+- When a profile + version is selected:
+  - Pre-fill worker, model, agentVersion, mcpServers, skills, extensions from that specific version
+  - **Lock all profile-controlled fields** — they become read-only/disabled. No overrides allowed. This keeps the link between the run and the profile version unambiguous.
+  - To change a field, the user must deselect the profile (switching back to manual mode) or edit the profile (which creates a new version).
+  - Store `profileVersionId` for submission
 - "No profile" option keeps current behavior (manual selection with all fields editable)
 
 #### 3.2 Submission payload
 
-When submitting with a profile selected, include `profileId` in the request body. The API resolves the profile server-side: it reads the profile's values and copies them into the `RequestDocument` fields, then stores `profileId` for traceability. This means the portal only sends `profileId` (plus non-profile fields like scenario, persona, maxIterations, occurrences) — the API is the single source of truth for what a profile contains.
+When submitting with a profile selected, include `profileVersionId` in the request body. The API resolves the specific version server-side: it reads that version's values and copies them into the `RequestDocument` fields, then stores both `profileId` (lineage) and `profileVersionId` (exact version) for traceability. This means the portal only sends `profileVersionId` (plus non-profile fields like scenario, persona, maxIterations, occurrences) — the API is the single source of truth for what a profile version contains.
 
-When submitting without a profile, `profileId` is omitted and the request works exactly as today.
+When submitting without a profile, both fields are omitted and the request works exactly as today.
 
 #### 3.3 "Save as profile" action
 
@@ -204,6 +205,22 @@ Add a "Save as profile" button on Step 2 (review) of SubmitRun. When clicked:
 - Opens a dialog to name the profile
 - Saves current selections as a new profile via `api.createProfile()`
 - Sets the newly created profile as selected
+
+#### 3.4 Group-by-profile on RunsList
+
+**File:** `apps/portal/src/pages/RunsList.tsx`
+
+Add "Profile" as a grouping option in the runs list. When grouping by profile:
+- Runs are grouped by `profileId`. Each group header shows the profile name.
+- Runs without a profile appear in an "Ungrouped" / "No profile" section.
+- Within each group, runs are sorted by creation date (newest first) as usual.
+- The profile version is shown per-run (since different runs under the same profile may use different versions).
+
+This also requires the API list endpoint (`GET /api/v1/requests`) to support a `profileId` filter parameter so the portal can fetch runs for a specific profile efficiently.
+
+**File:** `apps/api/src/index.ts`
+
+Add `profileId` as an optional query filter on `GET /api/v1/requests`.
 
 ### Phase 4: CLI — Profile management & selection
 
@@ -262,19 +279,25 @@ extensions:
 
 **File:** `apps/cli/src/index.ts` (modify submit command)
 
-Add `--profile <profileId>` flag to `run submit`:
+Add `--profile <profileId>` and `--profile-version <version>` flags to `run submit`:
 
 ```bash
-# Submit with a profile — resolves to latest version, fields resolved server-side
+# Submit with a profile — defaults to latest version, fields resolved server-side
 pnpm cli run submit -s scenario.yaml -p persona.yaml --profile <profileId>
+
+# Submit with a specific older version of a profile
+pnpm cli run submit -s scenario.yaml -p persona.yaml --profile <profileId> --profile-version 2
 
 # Submit without a profile — manual selection as today
 pnpm cli run submit -s scenario.yaml -w coder-acp-copilot --model gpt-4.1
 ```
 
 When `--profile` is provided:
-- The CLI sends `profileId` in the request body. The API resolves profile fields server-side (same as portal).
+- If `--profile-version` is omitted, the API resolves the **latest version** of the profile.
+- If `--profile-version` is provided, the API uses that specific version.
+- The CLI sends `profileVersionId` (resolved locally from profileId + version) or `profileId` (for latest) in the request body. The API resolves profile fields server-side (same as portal).
 - Profile-controlled flags (`-w`, `--model`, `--agent-version`, `--mcp-servers`, `--skills`, `--extensions`) are **rejected** if `--profile` is also set. The CLI validates this locally and prints a clear error: `"Cannot combine --profile with --worker, --model, etc. Use --profile alone or specify fields individually."`
+- `--profile-version` without `--profile` is **rejected**: `"--profile-version requires --profile."`
 - Non-profile flags (`-s`, `-p`, `--max-iterations`, `-c`, etc.) remain usable alongside `--profile`.
 
 ### Phase 5: Wiring & polish
@@ -310,13 +333,14 @@ Show the profile name and version (if set) in CLI output for run details and run
 | 8 | Create profile page | `apps/portal/src/pages/CreateProfile.tsx` (new) |
 | 9 | Profile detail page (with version history + edit-as-new-version) | `apps/portal/src/pages/ProfileDetail.tsx` (new) |
 | 10 | Routes + sidebar | `apps/portal/src/App.tsx`, sidebar component |
-| 11 | Profile selector in SubmitRun (latest version only) | `apps/portal/src/pages/SubmitRun.tsx` |
+| 11 | Profile selector in SubmitRun (with version picker) | `apps/portal/src/pages/SubmitRun.tsx` |
 | 12 | "Save as profile" on SubmitRun | `apps/portal/src/pages/SubmitRun.tsx` |
-| 13 | CLI profile commands (create, edit, list, get, versions, delete, import) | `apps/cli/src/index.ts` |
-| 14 | CLI `--profile` on run submit | `apps/cli/src/index.ts` |
-| 15 | Profile + version display on RunDetail | `apps/portal/src/pages/RunDetail.tsx` |
-| 16 | Profile + version display in CLI run output | `apps/cli/src/index.ts` |
-| 17 | Tests | `packages/shared/src/schemas/profile.test.ts`, `apps/api/src/**/*.test.ts`, `apps/cli/src/**/*.test.ts` |
+| 13 | Group-by-profile on RunsList + profileId filter on API | `apps/portal/src/pages/RunsList.tsx`, `apps/api/src/index.ts` |
+| 14 | CLI profile commands (create, edit, list, get, versions, delete, import) | `apps/cli/src/index.ts` |
+| 15 | CLI `--profile` + `--profile-version` on run submit | `apps/cli/src/index.ts` |
+| 16 | Profile + version display on RunDetail | `apps/portal/src/pages/RunDetail.tsx` |
+| 17 | Profile + version display in CLI run output | `apps/cli/src/index.ts` |
+| 18 | Tests | `packages/shared/src/schemas/profile.test.ts`, `apps/api/src/**/*.test.ts`, `apps/cli/src/**/*.test.ts` |
 
 ## Out of scope (future)
 
