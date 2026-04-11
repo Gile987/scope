@@ -101,6 +101,8 @@ export interface Run {
   videoUrls?: string[];
   setupVideoUrls?: string[];
   submissionId?: string;
+  profileId?: string;
+  profileVersionId?: string;
   tokenUsage?: TokenUsage;
   aiCallCount?: number;
 }

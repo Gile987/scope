@@ -3,7 +3,7 @@
 
 import type { Run, RunStatus } from "../types";
 
-export type GroupByKey = "none" | "task" | "submissionId";
+export type GroupByKey = "none" | "task" | "submissionId" | "profile";
 
 export interface AggregateStats {
   min: number;
@@ -149,6 +149,8 @@ export function groupRuns(runs: Run[], groupBy: GroupByKey): RunGroup[] {
     let key: string;
     if (groupBy === "task") {
       key = run.taskPromptId ?? run.scenario?.task ?? "unknown";
+    } else if (groupBy === "profile") {
+      key = run.profileId ?? "no-profile";
     } else {
       key = run.submissionId ?? "no-submission";
     }
@@ -165,6 +167,8 @@ export function groupRuns(runs: Run[], groupBy: GroupByKey): RunGroup[] {
     let label: string;
     if (groupBy === "task") {
       label = groupRuns[0]?.scenario?.task ?? key;
+    } else if (groupBy === "profile") {
+      label = key === "no-profile" ? "No profile" : key;
     } else {
       label = key === "no-submission" ? "No submission ID" : key;
     }

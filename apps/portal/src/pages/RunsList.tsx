@@ -314,6 +314,7 @@ export function RunsList() {
               <SelectItem value="none">None</SelectItem>
               <SelectItem value="task">Task</SelectItem>
               <SelectItem value="submissionId">Submission ID</SelectItem>
+              <SelectItem value="profile">Profile</SelectItem>
             </SelectContent>
           </Select>
         </div>
