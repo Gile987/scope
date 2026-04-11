@@ -297,3 +297,37 @@ describe("uniform values", () => {
     expect(u.agentVersion).toBe("v1");
   });
 });
+
+describe("groupRuns by profile", () => {
+  it("groups runs by profileId", () => {
+    const runs = [
+      makeRun({ profileId: "profile-a" }),
+      makeRun({ profileId: "profile-a" }),
+      makeRun({ profileId: "profile-b" }),
+      makeRun({}),
+    ];
+    const groups = groupRuns(runs, "profile");
+    expect(groups).toHaveLength(3);
+    const keys = groups.map((g) => g.key);
+    expect(keys).toContain("profile-a");
+    expect(keys).toContain("profile-b");
+    expect(keys).toContain("no-profile");
+  });
+
+  it("labels runs without profileId as 'No profile'", () => {
+    const runs = [makeRun({})];
+    const groups = groupRuns(runs, "profile");
+    expect(groups).toHaveLength(1);
+    expect(groups[0].label).toBe("No profile");
+  });
+
+  it("groups two runs with same profileId together", () => {
+    const runs = [
+      makeRun({ profileId: "p-1" }),
+      makeRun({ profileId: "p-1" }),
+    ];
+    const groups = groupRuns(runs, "profile");
+    expect(groups).toHaveLength(1);
+    expect(groups[0].runs).toHaveLength(2);
+  });
+});
