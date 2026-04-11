@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { PlatformIcon } from "@/components/PlatformIcon";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -865,6 +866,7 @@ export function RunsList() {
               <TableHead>Task</TableHead>
               <TableHead className="w-[180px]">Worker</TableHead>
               <TableHead>Version</TableHead>
+              <TableHead className="w-[80px]">OS</TableHead>
               <TableHead>MCP</TableHead>
               <TableHead>Skills</TableHead>
               <TableHead className="w-[100px]">Status</TableHead>
@@ -975,6 +977,13 @@ function RunRow({
       <TableCell>
         {run.agentVersion ? (
           <span className="font-mono text-xs">{run.agentVersion}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell className="text-center">
+        {run.os ? (
+          <PlatformIcon platform={run.os.platform} className="h-4 w-4 inline-block" />
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
@@ -1190,6 +1199,12 @@ function GroupRows({
         <TableCell>
           {uniform.agentVersion ? (
             <span className="font-mono text-xs">{uniform.agentVersion}</span>
+          ) : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>
+        {/* Platform */}
+        <TableCell className="text-center">
+          {uniform.platform ? (
+            <PlatformIcon platform={uniform.platform} className="h-4 w-4 inline-block" />
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
         {/* MCP */}

@@ -16,6 +16,7 @@ export interface GroupUniformValues {
   workerType?: string;
   model?: string;
   agentVersion?: string;
+  platform?: string;
   mcpServers?: string[];
   skillRevisions?: string[];
   status?: RunStatus;
@@ -116,6 +117,9 @@ function computeUniformValues(runs: Run[]): GroupUniformValues {
 
   const ver = uniform(runs, (r) => r.agentVersion ?? "");
   if (ver !== undefined && ver !== "") result.agentVersion = ver;
+
+  const plat = uniform(runs, (r) => r.os?.platform ?? "");
+  if (plat !== undefined && plat !== "") result.platform = plat;
 
   const status = uniform(runs, (r) => r.status);
   if (status !== undefined) result.status = status;

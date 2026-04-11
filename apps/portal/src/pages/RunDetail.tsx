@@ -574,8 +574,8 @@ export function RunDetail() {
               </CardContent>
             </Card>
 
-            {/* Prompt Features card (if task prompt has features) */}
-            {(run.agentVersion || run.workerVersion) && (
+            {/* Version Info card */}
+            {(run.agentVersion || run.workerVersion || run.os) && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Version Info</CardTitle>
@@ -591,6 +591,19 @@ export function RunDetail() {
                     <div>
                       <span className="text-muted-foreground">Worker Version:</span>{" "}
                       <span className="font-mono font-medium">{run.workerVersion}</span>
+                    </div>
+                  )}
+                  {run.os && (
+                    <div>
+                      <span className="text-muted-foreground">OS:</span>{" "}
+                      <span className="font-mono font-medium">
+                        {run.os.platform}
+                        <span className="text-muted-foreground ml-1">(release </span>
+                        {run.os.release}
+                        <span className="text-muted-foreground"> arch </span>
+                        {run.os.arch}
+                        <span className="text-muted-foreground">)</span>
+                      </span>
                     </div>
                   )}
                   <div>
