@@ -43,11 +43,18 @@ export function RunsList() {
   const [resubmitOverrides, setResubmitOverrides] = useState<BulkResubmitOverrides>({});
   const queryClient = useQueryClient();
 
+  // Merge URL taskPromptId with dropdown taskFilter (dropdown takes precedence)
+  const effectiveTaskPromptId = taskFilter !== "all" ? taskFilter : taskPromptId;
+  const effectiveStatus = statusFilter !== "all" ? statusFilter : undefined;
+  const effectiveOutcome = outcomeFilter !== "all" ? outcomeFilter : undefined;
+
   const { data: runs = [], isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, taskPromptId, criteriaState, submissionId],
+    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
-      taskPromptId,
+      taskPromptId: effectiveTaskPromptId,
+      status: effectiveStatus,
+      outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
     }),
@@ -57,11 +64,13 @@ export function RunsList() {
 
   // Fetch server-side groups when groupBy is active
   const { data: serverGroups = [], isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
-    queryKey: ["run-groups", groupBy, workerFilter, taskPromptId, criteriaState, submissionId],
+    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId],
     queryFn: () => api.listRunGroups({
       groupBy: groupBy as "task" | "submissionId",
       worker: workerFilter === "all" ? undefined : workerFilter,
-      taskPromptId,
+      taskPromptId: effectiveTaskPromptId,
+      status: effectiveStatus,
+      outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
     }),
@@ -91,10 +100,24 @@ export function RunsList() {
     refetchInterval: 10_000,
   });
 
-  const uniqueTasks = useMemo(
-    () => [...new Set(runs.map((r) => r.scenario?.task).filter(Boolean) as string[])].sort(),
-    [runs],
-  );
+  // Derive unique task options (name + taskPromptId) from runs or server groups
+  const taskOptions = useMemo(() => {
+    const seen = new Map<string, string>(); // taskPromptId → task name
+    if (groupBy === "none") {
+      for (const r of runs) {
+        if (r.taskPromptId && r.scenario?.task && !seen.has(r.taskPromptId)) {
+          seen.set(r.taskPromptId, r.scenario.task);
+        }
+      }
+    } else if (groupBy === "task") {
+      for (const g of serverGroups) {
+        if (g.key && g.label && !seen.has(g.key)) {
+          seen.set(g.key, g.label);
+        }
+      }
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [runs, serverGroups, groupBy]);
 
   // Compute summary of selected runs' values for the resubmit dialog
   const selectedRunsSummary = useMemo(() => {
@@ -189,12 +212,8 @@ export function RunsList() {
     },
   });
 
-  const filteredRuns = runs.filter((r) => {
-    if (statusFilter !== "all" && r.status !== statusFilter) return false;
-    if (outcomeFilter !== "all" && r.outcome !== outcomeFilter) return false;
-    if (taskFilter !== "all" && r.scenario?.task !== taskFilter) return false;
-    return true;
-  });
+  // Filtering is now server-side via status, outcome, and taskPromptId query params
+  const filteredRuns = runs;
 
   const runGroups = serverGroups;
 
@@ -297,9 +316,9 @@ export function RunsList() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All tasks</SelectItem>
-              {uniqueTasks.map((t) => (
-                <SelectItem key={t} value={t}>
-                  <span title={t}>{truncate(t, 50)}</span>
+              {taskOptions.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  <span title={t.name}>{truncate(t.name, 50)}</span>
                 </SelectItem>
               ))}
             </SelectContent>

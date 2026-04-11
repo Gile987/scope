@@ -447,6 +447,63 @@ describe("API Endpoints", () => {
       await request(app).get("/api/v1/requests");
       expect(mocks.collection.aggregate).not.toHaveBeenCalled();
     });
+
+    it("passes status filter to find query", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?status=done");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "done" }),
+      );
+    });
+
+    it("passes outcome filter to find query", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?outcome=succeeded");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "succeeded" }),
+      );
+    });
+
+    it("passes status and outcome filters to aggregate pipeline $match", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get("/api/v1/requests?groupBy=task&status=done&outcome=failed");
+      const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
+      expect(pipeline[0]).toEqual(
+        expect.objectContaining({
+          $match: expect.objectContaining({ status: "done", outcome: "failed" }),
+        }),
+      );
+    });
+
+    it("combines status, outcome, and worker filters", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?status=processing&outcome=succeeded&worker=coder-acp-copilot");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "processing",
+          outcome: "succeeded",
+          workerType: "coder-acp-copilot",
+        }),
+      );
+    });
   });
 
   describe("GET /api/v1/requests/:id", () => {

@@ -1051,6 +1051,8 @@ apiRoute(app, registry, {
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
     const submissionIdFilter = req.query.submissionId as string;
+    const statusFilter = req.query.status as string;
+    const outcomeFilter = req.query.outcome as string;
     const includeDeleted = req.query.includeDeleted === "true";
     const groupByParam = req.query.groupBy as "task" | "submissionId" | undefined;
     
@@ -1060,6 +1062,12 @@ apiRoute(app, registry, {
     }
     if (taskPromptIdFilter) {
       filter.taskPromptId = taskPromptIdFilter;
+    }
+    if (statusFilter) {
+      filter.status = statusFilter;
+    }
+    if (outcomeFilter) {
+      filter.outcome = outcomeFilter;
     }
     if (submissionIdFilter) {
       // Prefix-based matching: allow filtering by partial submission ID

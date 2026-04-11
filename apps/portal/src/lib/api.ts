@@ -19,11 +19,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  /** List all runs, optionally filtered by worker, task prompt, and/or MDP criteria state */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string; criteria?: string; submissionId?: string }): Promise<Run[]> => {
+  /** List all runs, optionally filtered by worker, task prompt, status, outcome, and/or MDP criteria state */
+  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string }): Promise<Run[]> => {
     const params = new URLSearchParams();
     if (opts?.worker) params.set("worker", opts.worker);
     if (opts?.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.outcome) params.set("outcome", opts.outcome);
     if (opts?.criteria) params.set("criteria", opts.criteria);
     if (opts?.submissionId) params.set("submissionId", opts.submissionId);
     const qs = params.toString();
@@ -31,11 +33,13 @@ export const api = {
   },
 
   /** List runs grouped by task or submissionId, with server-computed aggregates */
-  listRunGroups: (opts: { groupBy: "task" | "submissionId"; worker?: string; taskPromptId?: string; criteria?: string; submissionId?: string }): Promise<RunGroup[]> => {
+  listRunGroups: (opts: { groupBy: "task" | "submissionId"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string }): Promise<RunGroup[]> => {
     const params = new URLSearchParams();
     params.set("groupBy", opts.groupBy);
     if (opts.worker) params.set("worker", opts.worker);
     if (opts.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
+    if (opts.status) params.set("status", opts.status);
+    if (opts.outcome) params.set("outcome", opts.outcome);
     if (opts.criteria) params.set("criteria", opts.criteria);
     if (opts.submissionId) params.set("submissionId", opts.submissionId);
     return request(`/requests?${params.toString()}`);
