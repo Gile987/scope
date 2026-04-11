@@ -900,8 +900,6 @@ export function RunsList() {
                     groupBy={groupBy}
                     workerFilter={workerFilter === "all" ? undefined : workerFilter}
                     criteriaState={criteriaState}
-                    submissionId={submissionId}
-                    taskPromptId={taskPromptId}
                   />
                 );
               })
@@ -1108,8 +1106,6 @@ function GroupRows({
   groupBy,
   workerFilter,
   criteriaState,
-  submissionId,
-  taskPromptId,
 }: {
   group: RunGroup;
   isExpanded: boolean;
@@ -1121,8 +1117,6 @@ function GroupRows({
   groupBy: GroupByKey;
   workerFilter?: string;
   criteriaState?: string;
-  submissionId?: string;
-  taskPromptId?: string;
 }) {
   const { aggregates, uniform } = group;
   const fmtDur = (v: number) => formatDuration(Math.round(v));
