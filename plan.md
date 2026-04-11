@@ -58,7 +58,7 @@ export interface ProfileVersionDocument {
   profileId: string;          // FK → ProfileDocument._id
   version: number;            // Auto-incrementing per profileId (1, 2, 3, …)
   workerType: string;         // FK → CodingAgentDocument._id
-  model?: string;             // Model identifier
+  model: string;              // Model identifier (required)
   agentVersion?: string;      // Agent version string
   mcpServers?: string[];      // MCP server slugs
   skillRevisions?: string[];  // Pinned skill revision refs (e.g. "source/skillName@commitHash")
@@ -79,7 +79,7 @@ export interface ProfileVersionDocument {
 
 **File:** `packages/shared/src/schemas/profile.ts` (new)
 
-- `CreateProfileInputSchema` — name (required), description, workerType (required), model, agentVersion, mcpServers, skillRevisions, extensions. Used for both creating a new profile (version 1) and creating a new version of an existing profile. Skills and extensions can be specified with or without version pins — the API resolves unpinned references to their latest versions via marketplace lookup (same as run submission).
+- `CreateProfileInputSchema` — name (required), description, workerType (required), model (required), agentVersion, mcpServers, skillRevisions, extensions. Used for both creating a new profile (version 1) and creating a new version of an existing profile. Skills and extensions can be specified with or without version pins — the API resolves unpinned references to their latest versions via marketplace lookup (same as run submission).
 - `ProfileResponseSchema` — full document shape for API responses, including `profileId`, `version`, `_id`.
 
 No `UpdateProfileInputSchema` — there are no in-place updates. "Editing" goes through the create-new-version endpoint.
