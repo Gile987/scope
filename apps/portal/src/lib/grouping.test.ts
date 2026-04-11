@@ -296,4 +296,51 @@ describe("uniform values", () => {
     expect(u.mcpServers).toEqual(["fs"]);
     expect(u.agentVersion).toBe("v1");
   });
+
+  it("sets uniform extensions when all runs share the same extensions", () => {
+    const ext = ["ms-azuretools.vscode-cosmosdb@0.32.0"];
+    const runs = [
+      makeRun({ submissionId: "s1", extensions: ext }),
+      makeRun({ submissionId: "s1", extensions: ext }),
+    ];
+    const groups = groupRuns(runs, "submissionId");
+    expect(groups[0].uniform.extensions).toEqual(ext);
+  });
+
+  it("does not set uniform extensions when runs have different extensions", () => {
+    const runs = [
+      makeRun({ submissionId: "s1", extensions: ["ms-azuretools.vscode-cosmosdb@0.32.0"] }),
+      makeRun({ submissionId: "s1", extensions: ["ms-python.python@2024.1.0"] }),
+    ];
+    const groups = groupRuns(runs, "submissionId");
+    expect(groups[0].uniform.extensions).toBeUndefined();
+  });
+
+  it("does not set uniform extensions when no runs have extensions", () => {
+    const runs = [
+      makeRun({ submissionId: "s1" }),
+      makeRun({ submissionId: "s1" }),
+    ];
+    const groups = groupRuns(runs, "submissionId");
+    expect(groups[0].uniform.extensions).toBeUndefined();
+  });
+
+  it("treats same extensions in different order as uniform", () => {
+    const runs = [
+      makeRun({ submissionId: "s1", extensions: ["ext-b@1.0", "ext-a@2.0"] }),
+      makeRun({ submissionId: "s1", extensions: ["ext-a@2.0", "ext-b@1.0"] }),
+    ];
+    const groups = groupRuns(runs, "submissionId");
+    expect(groups[0].uniform.extensions).toBeDefined();
+    expect(groups[0].uniform.extensions).toHaveLength(2);
+  });
+
+  it("does not set uniform extensions when only some runs have them", () => {
+    const runs = [
+      makeRun({ submissionId: "s1", extensions: ["ms-azuretools.vscode-cosmosdb@0.32.0"] }),
+      makeRun({ submissionId: "s1" }),
+    ];
+    const groups = groupRuns(runs, "submissionId");
+    expect(groups[0].uniform.extensions).toBeUndefined();
+  });
 });
