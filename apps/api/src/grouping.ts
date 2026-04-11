@@ -98,6 +98,8 @@ export function buildGroupingPipeline(
       $group: {
         _id: "$_groupKey",
         count: { $sum: 1 },
+        // Collect run IDs for report summaries and bulk actions
+        _runIds: { $push: "$_id" },
         // Label: take first task name for display
         _firstTask: { $first: "$scenario.task" },
         // Push arrays for stats computation
@@ -132,6 +134,7 @@ export function buildGroupingPipeline(
       $project: {
         _id: 0,
         key: "$_id",
+        runIds: "$_runIds",
         label: {
           $cond: {
             if: { $eq: ["$_id", "no-submission"] },

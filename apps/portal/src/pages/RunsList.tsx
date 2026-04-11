@@ -1142,8 +1142,8 @@ function GroupRows({
     refetchInterval: 10_000,
   });
 
-  // Group-level checkbox: select/deselect all runs in this group
-  const groupRunIds = useMemo(() => expandedRuns.map((r) => r._id), [expandedRuns]);
+  // Group-level checkbox: select/deselect all runs in this group (runIds from server)
+  const groupRunIds = group.runIds;
   const allGroupSelected = groupRunIds.length > 0 && groupRunIds.every((id) => selectedIds.has(id));
   const someGroupSelected = groupRunIds.some((id) => selectedIds.has(id));
   const handleToggleGroupSelect = () => {
@@ -1154,7 +1154,7 @@ function GroupRows({
     }
   };
 
-  // Fetch report summaries for expanded runs
+  // Fetch report summaries for all runs in this group (always available via runIds)
   const { data: groupReportSummaries } = useQuery({
     queryKey: ["report-summaries", groupRunIds],
     queryFn: () => api.bulkReportSummary(groupRunIds),
@@ -1175,13 +1175,11 @@ function GroupRows({
       >
         {/* Checkbox */}
         <TableCell onClick={(e) => e.stopPropagation()}>
-          {groupRunIds.length > 0 ? (
-            <Checkbox
-              checked={allGroupSelected ? true : someGroupSelected ? "indeterminate" : false}
-              onCheckedChange={handleToggleGroupSelect}
-              aria-label={`Select all in group ${group.label}`}
-            />
-          ) : null}
+          <Checkbox
+            checked={allGroupSelected ? true : someGroupSelected ? "indeterminate" : false}
+            onCheckedChange={handleToggleGroupSelect}
+            aria-label={`Select all in group ${group.label}`}
+          />
         </TableCell>
         {/* ID */}
         <TableCell className="font-medium">
@@ -1333,10 +1331,10 @@ function GroupRows({
         {/* Report */}
         <TableCell>
           {(() => {
-            if (expandedRuns.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
+            if (!mergedReportSummaries || groupRunIds.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
             let total = 0, completed = 0, pending = 0, generating = 0, failed = 0;
-            for (const r of expandedRuns) {
-              const s = mergedReportSummaries?.[r._id];
+            for (const id of groupRunIds) {
+              const s = mergedReportSummaries[id];
               if (!s) continue;
               total += s.total;
               completed += s.completed;

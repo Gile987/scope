@@ -72,11 +72,18 @@ describe("buildGroupingPipeline", () => {
     expect(group._skillKeys).toBeDefined();
   });
 
-  it("$project stage outputs key, label, aggregates, uniform", () => {
+  it("$group stage collects run IDs", () => {
+    const pipeline = buildGroupingPipeline("task");
+    const group = pipeline[1].$group as Record<string, unknown>;
+    expect(group._runIds).toEqual({ $push: "$_id" });
+  });
+
+  it("$project stage outputs key, label, runIds, aggregates, uniform", () => {
     const pipeline = buildGroupingPipeline("task");
     const project = pipeline[2].$project as Record<string, unknown>;
     expect(project._id).toBe(0);
     expect(project.key).toBeDefined();
+    expect(project.runIds).toBe("$_runIds");
     expect(project.label).toBeDefined();
     expect(project.aggregates).toBeDefined();
     expect(project.uniform).toBeDefined();
