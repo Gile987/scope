@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle, User, X, Save } from "lucide-react";
-import { WORKER_TYPES, type CodingAgent, type McpServerDocument, type ProfileWithVersion } from "@/types";
+import { WORKER_TYPES, type CodingAgent, type McpServerDocument, type ProfileWithVersion, type ProfileVersionDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { SkillPicker } from "@/components/SkillPicker";
@@ -55,6 +55,7 @@ export function SubmitRun() {
 
   // Profile
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [selectedProfileVersion, setSelectedProfileVersion] = useState<number | null>(null);
   const profileLocked = !!selectedProfileId;
 
   // Agent version
@@ -78,22 +79,42 @@ export function SubmitRun() {
     queryFn: () => api.listProfiles(),
   });
 
-  // When profile is selected, apply its configuration
+  // Fetch versions for the selected profile
+  const { data: profileVersions = [] } = useQuery({
+    queryKey: ["profile-versions", selectedProfileId],
+    queryFn: () => api.listProfileVersions(selectedProfileId!),
+    enabled: !!selectedProfileId,
+  });
+
+  const applyVersionConfig = (v: ProfileVersionDocument) => {
+    setWorker(v.workerType);
+    setModel(v.model);
+    setSelectedAgentVersion(v.agentVersion ?? "");
+    setSelectedMcpServers(v.mcpServers ?? []);
+    setSelectedSkills(v.skillRevisions ?? []);
+    setSelectedExtensions(v.extensions ?? []);
+  };
+
+  // When profile is selected, apply its latest version configuration
   const applyProfile = (profileId: string | null) => {
     setSelectedProfileId(profileId);
     if (!profileId) return;
     const p = (profiles as ProfileWithVersion[]).find((p) => p._id === profileId);
     if (!p?.version) return;
-    setWorker(p.version.workerType);
-    setModel(p.version.model);
-    setSelectedAgentVersion(p.version.agentVersion ?? "");
-    setSelectedMcpServers(p.version.mcpServers ?? []);
-    setSelectedSkills(p.version.skillRevisions ?? []);
-    setSelectedExtensions(p.version.extensions ?? []);
+    setSelectedProfileVersion(p.version.version);
+    applyVersionConfig(p.version);
+  };
+
+  // When profile version changes, fetch and apply that version
+  const changeProfileVersion = (version: number) => {
+    setSelectedProfileVersion(version);
+    const v = profileVersions.find((pv: ProfileVersionDocument) => pv.version === version);
+    if (v) applyVersionConfig(v);
   };
 
   const clearProfile = () => {
     setSelectedProfileId(null);
+    setSelectedProfileVersion(null);
   };
 
   // Save as Profile
@@ -241,6 +262,10 @@ export function SubmitRun() {
       ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
       ...(selectedProfileId ? { profileId: selectedProfileId } : {}),
+      ...(selectedProfileId && selectedProfileVersion ? {
+        profileVersionId: profileVersions.find((pv: ProfileVersionDocument) => pv.version === selectedProfileVersion)?._id
+          ?? (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.version?._id,
+      } : {}),
     });
   };
 
@@ -406,14 +431,42 @@ export function SubmitRun() {
               </CardHeader>
               <CardContent>
                 {selectedProfileId ? (
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-sm">
-                      {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
-                    </Badge>
-                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={clearProfile}>
-                      <X className="h-3 w-3" />
-                    </Button>
-                    <span className="text-xs text-muted-foreground">Agent config locked by profile</span>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary" className="text-sm">
+                        {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
+                      </Badge>
+                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={clearProfile}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                      <span className="text-xs text-muted-foreground">Agent config locked by profile</span>
+                    </div>
+                    {profileVersions.length > 1 && selectedProfileVersion && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Version</Label>
+                        <Select
+                          value={String(selectedProfileVersion)}
+                          onValueChange={(v) => changeProfileVersion(Number(v))}
+                        >
+                          <SelectTrigger className="w-48">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {profileVersions
+                              .slice()
+                              .sort((a: ProfileVersionDocument, b: ProfileVersionDocument) => b.version - a.version)
+                              .map((v: ProfileVersionDocument) => (
+                                <SelectItem key={v.version} value={String(v.version)}>
+                                  v{v.version}
+                                  {v.version === (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.latestVersion
+                                    ? " (latest)"
+                                    : ""}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <Select onValueChange={applyProfile}>
@@ -649,6 +702,7 @@ export function SubmitRun() {
                     <span className="text-muted-foreground">Profile</span>
                     <Badge variant="secondary" className="font-mono text-xs w-fit">
                       {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
+                      {selectedProfileVersion ? ` v${selectedProfileVersion}` : ""}
                     </Badge>
                   </>
                 )}
