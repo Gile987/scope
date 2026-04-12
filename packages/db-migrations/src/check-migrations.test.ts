@@ -45,6 +45,7 @@ describe("checkMigrations", () => {
     const result = await checkMigrations(db);
     expect(result.ready).toBe(true);
     expect(result.pending).toEqual([]);
+    expect(result.totalApplied).toBe(10);
     expect(result.applied).toEqual([
       "001-backfill-task-prompts.ts",
       "002-create-indexes.ts",
@@ -65,6 +66,7 @@ describe("checkMigrations", () => {
     expect(result.ready).toBe(false);
     expect(result.pending).toEqual(["002-create-indexes.ts", "003-create-skill-indexes.ts", "004-add-submission-id-index.ts", "005-backfill-iteration-durations.ts", "006-split-status-outcome.ts", "007-rename-exhausted-to-finished.ts", "008-backfill-ai-call-count.ts", "009-add-requests-filter-indexes.ts", "010-add-requests-pagination-index.ts"]);
     expect(result.applied).toEqual(["001-backfill-task-prompts.ts"]);
+    expect(result.totalApplied).toBe(1);
   });
 
   it("returns not ready when no migrations are applied", async () => {
@@ -84,6 +86,7 @@ describe("checkMigrations", () => {
       "010-add-requests-pagination-index.ts",
     ]);
     expect(result.applied).toEqual([]);
+    expect(result.totalApplied).toBe(0);
   });
 
   it("ignores extra applied migrations not in the required list", async () => {
@@ -103,6 +106,7 @@ describe("checkMigrations", () => {
     const result = await checkMigrations(db);
     expect(result.ready).toBe(true);
     expect(result.pending).toEqual([]);
+    expect(result.totalApplied).toBe(11);
   });
 
   it("caches results within TTL", async () => {
