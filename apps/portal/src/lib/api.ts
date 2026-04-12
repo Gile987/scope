@@ -3,21 +3,9 @@
 
 import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, RunGroup, CursorPaginatedResponse } from "@/types";
 
+import { qs } from "./url";
+
 const BASE = "/api/v1";
-
-/** Encode a query-string value, escaping only chars that break URL parsing. */
-function encodeQsValue(v: string): string {
-  return v.replace(/[%&=+#\s]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
-}
-
-/** Build a query string from non-undefined params. */
-function qs(params: Record<string, string | undefined>): string {
-  const parts: string[] = [];
-  for (const [k, v] of Object.entries(params)) {
-    if (v != null) parts.push(`${k}=${encodeQsValue(v)}`);
-  }
-  return parts.length ? `?${parts.join("&")}` : "";
-}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
