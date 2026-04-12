@@ -107,4 +107,4 @@ When you run a command:
 
 The `db-migrations` package is compiled as part of the CI `build` job (`pnpm -r build` → `tsc`). This catches TypeScript errors in migrations before deployment.
 
-In Kubernetes, migrations are run automatically by a Job before the API pods start. The API readiness probe checks the `_migrations` collection against the `REQUIRED_MIGRATIONS` list — pods report "not ready" until all required migrations have been applied.
+In Kubernetes, migrations are run automatically by a Job before the API pods start. Locally, Docker Compose runs migrations automatically as well. The API readiness probe checks the `_migrations` collection against the `REQUIRED_MIGRATIONS` list — pods report "not ready" until all required migrations have been applied.
