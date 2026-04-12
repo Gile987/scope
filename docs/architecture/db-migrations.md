@@ -94,7 +94,7 @@ When you run a command:
 | Migration | Description |
 |-----------|-------------|
 | `001-backfill-task-prompts` | Creates `task-prompts` collection from existing `requests.scenario.task` values, links runs via `taskPromptId`, migrates prompt feature extraction data |
-| `002-create-indexes` | Creates single-field indexes on all collections (see [database.md](database.md)) |
+| `002-create-indexes` | Creates single-field indexes on all collections (see [db.md](db.md)) |
 | `003-create-skill-indexes` | Adds indexes for `skills` and `skill-revisions` collections |
 | `004-add-submission-id-index` | Sparse index on `requests.submissionId` for efficient filtering |
 | `005-backfill-iteration-durations` | Estimates `startedAt`/`durationMs` on existing turns from timestamps |
