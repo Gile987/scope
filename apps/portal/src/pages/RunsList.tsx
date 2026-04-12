@@ -74,6 +74,7 @@ export function RunsList() {
   });
   const runs = runsResponse?.data ?? [];
   const runsCursors = runsResponse?.cursors ?? { next: null, prev: null };
+  const estimatedTotal = (groupBy !== "none" ? groupsResponse : runsResponse)?.estimatedTotal;
 
   // Fetch server-side groups when groupBy is active
   const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
@@ -361,6 +362,7 @@ export function RunsList() {
           {groupBy !== "none"
             ? `${runGroups.length} group${runGroups.length !== 1 ? "s" : ""}`
             : `${filteredRuns.length} run${filteredRuns.length !== 1 ? "s" : ""}`}
+          {estimatedTotal != null && ` (~${estimatedTotal.toLocaleString()} total)`}
         </span>
       </div>
 

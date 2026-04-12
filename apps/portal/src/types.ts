@@ -108,6 +108,7 @@ export interface Run {
 export interface CursorPaginatedResponse<T> {
   data: T[];
   limit: number;
+  estimatedTotal: number;
   cursors: {
     next: string | null;
     prev: string | null;

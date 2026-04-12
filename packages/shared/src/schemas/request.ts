@@ -200,6 +200,7 @@ export const PaginatedRunsResponseSchema = z
   .object({
     data: z.array(RequestResponseSchema),
     limit: z.number(),
+    estimatedTotal: z.number(),
     cursors: CursorsSchema,
   })
   .openapi("PaginatedRunsResponse");
@@ -208,6 +209,7 @@ export const PaginatedRunGroupsResponseSchema = z
   .object({
     data: z.array(RunGroupSchema),
     limit: z.number(),
+    estimatedTotal: z.number(),
     cursors: CursorsSchema,
   })
   .openapi("PaginatedRunGroupsResponse");

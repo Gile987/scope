@@ -1110,6 +1110,9 @@ apiRoute(app, registry, {
       }
     }
 
+    // O(1) estimated total from collection metadata (unfiltered)
+    const estimatedTotal = await collection.estimatedDocumentCount();
+
     // Grouped mode: paginated RunGroup[] via two-phase aggregation
     if (groupByParam) {
       const groupByField = groupByParam === "task" ? "taskPromptId" : "submissionId";
@@ -1162,7 +1165,7 @@ apiRoute(app, registry, {
       const pageKeys: string[] = keyResults.map((k) => k._id as string);
 
       if (pageKeys.length === 0) {
-        res.json({ data: [], limit, cursors: { next: null, prev: null } });
+        res.json({ data: [], limit, estimatedTotal, cursors: { next: null, prev: null } });
         return;
       }
 
@@ -1197,6 +1200,7 @@ apiRoute(app, registry, {
       res.json({
         data: groups,
         limit,
+        estimatedTotal,
         cursors: {
           next: hasMoreAfter.length > 0 ? encodeCursor({ [groupByField]: lastKey }) : null,
           prev: hasMoreBefore.length > 0 ? encodeCursor({ [groupByField]: firstKey }) : null,
@@ -1249,7 +1253,7 @@ apiRoute(app, registry, {
     const data = resources.map((r) => ({ ...r, id: r._id }));
 
     if (data.length === 0) {
-      res.json({ data: [], limit, cursors: { next: null, prev: null } });
+      res.json({ data: [], limit, estimatedTotal, cursors: { next: null, prev: null } });
       return;
     }
 
@@ -1282,6 +1286,7 @@ apiRoute(app, registry, {
     res.json({
       data,
       limit,
+      estimatedTotal,
       cursors: {
         next: hasMoreAfter.length > 0 ? encodeCursor({ createdAt: lastCreatedAt, id: lastId }) : null,
         prev: hasMoreBefore.length > 0 ? encodeCursor({ createdAt: firstCreatedAt, id: firstId }) : null,

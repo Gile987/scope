@@ -395,6 +395,7 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("data");
       expect(res.body).toHaveProperty("limit");
+      expect(res.body).toHaveProperty("estimatedTotal");
       expect(res.body).toHaveProperty("cursors");
       expect(Array.isArray(res.body.data)).toBe(true);
       expect(res.body.data[0]).toHaveProperty("id", "r1");
