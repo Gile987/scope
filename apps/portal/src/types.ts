@@ -105,6 +105,16 @@ export interface Run {
   aiCallCount?: number;
 }
 
+export interface CursorPaginatedResponse<T> {
+  data: T[];
+  limit: number;
+  estimatedTotal: number;
+  cursors: {
+    next: string | null;
+    prev: string | null;
+  };
+}
+
 export const WORKER_TYPES = [
   "coder-acp-claude-code",
   "coder-acp-copilot"

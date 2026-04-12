@@ -67,6 +67,7 @@ export function createMockCollection<T extends Document = Document>(docs: T[] = 
       acknowledged: true,
     }),
     countDocuments: vi.fn().mockResolvedValue(data.length),
+    estimatedDocumentCount: vi.fn().mockResolvedValue(data.length),
     aggregate: vi
       .fn()
       .mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
