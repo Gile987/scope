@@ -1,7 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/** Encode a query-string value, escaping only chars that break URL parsing. */
+/**
+ * Encode a query-string value, escaping only chars that break URL parsing.
+ *
+ * We avoid URLSearchParams and encodeURIComponent here because both
+ * over-encode characters that are safe in query values — notably `~` and `|`
+ * which we use as cursor delimiters (e.g. "createdAt~2025-01-15T10:00:00.000Z|id~abc").
+ * This keeps URLs human-readable in browser devtools and logs.
+ */
 export function encodeQsValue(v: string): string {
   return v.replace(/[%&=+#\s]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
 }
