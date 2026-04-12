@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -20,7 +20,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown, ChevronLeft } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey } from "@/types";
@@ -41,15 +41,22 @@ export function RunsList() {
   const [resubmitCount, setResubmitCount] = useState(1);
   const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
   const [resubmitOverrides, setResubmitOverrides] = useState<BulkResubmitOverrides>({});
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [cursorDirection, setCursorDirection] = useState<"after" | "before" | undefined>(undefined);
   const queryClient = useQueryClient();
+
+  const resetCursor = useCallback(() => {
+    setCursor(undefined);
+    setCursorDirection(undefined);
+  }, []);
 
   // Merge URL taskPromptId with dropdown taskFilter (dropdown takes precedence)
   const effectiveTaskPromptId = taskFilter !== "all" ? taskFilter : taskPromptId;
   const effectiveStatus = statusFilter !== "all" ? statusFilter : undefined;
   const effectiveOutcome = outcomeFilter !== "all" ? outcomeFilter : undefined;
 
-  const { data: runs = [], isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId],
+  const { data: runsResponse, isLoading, isRefetching } = useQuery({
+    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId: effectiveTaskPromptId,
@@ -57,14 +64,19 @@ export function RunsList() {
       outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      after: cursorDirection === "after" ? cursor : undefined,
+      before: cursorDirection === "before" ? cursor : undefined,
     }),
     enabled: groupBy === "none",
     refetchInterval: 10_000,
   });
+  const runs = runsResponse?.data ?? [];
+  const runsTotal = runsResponse?.total ?? 0;
+  const runsCursors = runsResponse?.cursors ?? { next: null, prev: null };
 
   // Fetch server-side groups when groupBy is active
-  const { data: serverGroups = [], isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
-    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId],
+  const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
+    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection],
     queryFn: () => api.listRunGroups({
       groupBy: groupBy as "task" | "submissionId",
       worker: workerFilter === "all" ? undefined : workerFilter,
@@ -73,10 +85,15 @@ export function RunsList() {
       outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      after: cursorDirection === "after" ? cursor : undefined,
+      before: cursorDirection === "before" ? cursor : undefined,
     }),
     enabled: groupBy !== "none",
     refetchInterval: 10_000,
   });
+  const serverGroups = groupsResponse?.data ?? [];
+  const groupsTotal = groupsResponse?.total ?? 0;
+  const groupsCursors = groupsResponse?.cursors ?? { next: null, prev: null };
 
   // Fetch MCP servers for the resubmit dialog
   const { data: mcpServers = [] } = useQuery<McpServerDocument[]>({
@@ -268,7 +285,7 @@ export function RunsList() {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Worker:</span>
-          <Select value={workerFilter} onValueChange={(v) => { setWorkerFilter(v); setTaskFilter("all"); }}>
+          <Select value={workerFilter} onValueChange={(v) => { setWorkerFilter(v); setTaskFilter("all"); resetCursor(); }}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="All workers" />
             </SelectTrigger>
@@ -282,7 +299,7 @@ export function RunsList() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Status:</span>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); resetCursor(); }}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="All statuses" />
             </SelectTrigger>
@@ -296,7 +313,7 @@ export function RunsList() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Outcome:</span>
-          <Select value={outcomeFilter} onValueChange={setOutcomeFilter}>
+          <Select value={outcomeFilter} onValueChange={(v) => { setOutcomeFilter(v); resetCursor(); }}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="All outcomes" />
             </SelectTrigger>
@@ -310,7 +327,7 @@ export function RunsList() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Task:</span>
-          <Select value={taskFilter} onValueChange={setTaskFilter}>
+          <Select value={taskFilter} onValueChange={(v) => { setTaskFilter(v); resetCursor(); }}>
             <SelectTrigger className="w-[260px]">
               <SelectValue placeholder="All tasks" />
             </SelectTrigger>
@@ -326,7 +343,7 @@ export function RunsList() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Group by:</span>
-          <Select value={groupBy} onValueChange={(v) => { setGroupBy(v as GroupByKey); setExpandedGroups(new Set()); }}>
+          <Select value={groupBy} onValueChange={(v) => { setGroupBy(v as GroupByKey); setExpandedGroups(new Set()); resetCursor(); }}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="None" />
             </SelectTrigger>
@@ -341,8 +358,8 @@ export function RunsList() {
         {(isRefetching || isGroupsRefetching) && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
         <span className="text-sm text-muted-foreground">
           {groupBy !== "none"
-            ? `${runGroups.length} group${runGroups.length !== 1 ? "s" : ""}`
-            : `${filteredRuns.length} run${filteredRuns.length !== 1 ? "s" : ""}`}
+            ? `${runGroups.length} of ${groupsTotal} group${groupsTotal !== 1 ? "s" : ""}`
+            : `${filteredRuns.length} of ${runsTotal} run${runsTotal !== 1 ? "s" : ""}`}
         </span>
       </div>
 
@@ -941,6 +958,32 @@ export function RunsList() {
           </TableBody>
         </Table>
       )}
+
+      {/* Pagination controls */}
+      {(() => {
+        const activeCursors = groupBy !== "none" ? groupsCursors : runsCursors;
+        if (!activeCursors.prev && !activeCursors.next) return null;
+        return (
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!activeCursors.prev}
+              onClick={() => { setCursor(activeCursors.prev!); setCursorDirection("before"); }}
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!activeCursors.next}
+              onClick={() => { setCursor(activeCursors.next!); setCursorDirection("after"); }}
+            >
+              Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1178,12 +1221,13 @@ function GroupRows({
     return opts;
   }, [group.key, groupBy, workerFilter, statusFilter, outcomeFilter, criteriaState]);
 
-  const { data: expandedRuns = [], isLoading: isExpandLoading } = useQuery({
+  const { data: expandedRunsResponse, isLoading: isExpandLoading } = useQuery({
     queryKey: ["group-runs", group.key, groupBy, workerFilter, statusFilter, outcomeFilter, criteriaState],
     queryFn: () => api.listRuns(expandFilter),
     enabled: isExpanded,
     refetchInterval: 10_000,
   });
+  const expandedRuns = expandedRunsResponse?.data ?? [];
 
   // Group-level checkbox: select/deselect all runs in this group (runIds from server)
   const groupRunIds = group.runIds;

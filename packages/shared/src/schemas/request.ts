@@ -137,8 +137,9 @@ export const ListRequestsQuerySchema = z
     status: RequestStatusSchema.optional(),
     outcome: RequestOutcomeSchema.optional(),
     groupBy: z.enum(["task", "submissionId"]).optional(),
-    page: z.coerce.number().int().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
+    after: z.string().optional(),
+    before: z.string().optional(),
   })
   .openapi("ListRequestsQuery");
 
@@ -187,6 +188,31 @@ export const RunGroupSchema = z
     uniform: GroupUniformValuesSchema,
   })
   .openapi("RunGroup");
+
+export const CursorsSchema = z
+  .object({
+    next: z.string().nullable(),
+    prev: z.string().nullable(),
+  })
+  .openapi("Cursors");
+
+export const PaginatedRunsResponseSchema = z
+  .object({
+    data: z.array(RequestResponseSchema),
+    total: z.number(),
+    limit: z.number(),
+    cursors: CursorsSchema,
+  })
+  .openapi("PaginatedRunsResponse");
+
+export const PaginatedRunGroupsResponseSchema = z
+  .object({
+    data: z.array(RunGroupSchema),
+    total: z.number(),
+    limit: z.number(),
+    cursors: CursorsSchema,
+  })
+  .openapi("PaginatedRunGroupsResponse");
 
 export const BulkResubmitInputSchema = z
   .object({
