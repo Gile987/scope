@@ -140,10 +140,83 @@ export const ListRequestsQuerySchema = z
     profileId: z.string().optional(),
     status: RequestStatusSchema.optional(),
     outcome: RequestOutcomeSchema.optional(),
-    page: z.coerce.number().int().min(1).optional(),
+    groupBy: z.enum(["task", "submissionId"]).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
+    after: z.string().optional(),
+    before: z.string().optional(),
   })
   .openapi("ListRequestsQuery");
+
+export const AggregateStatsSchema = z
+  .object({
+    min: z.number(),
+    max: z.number(),
+    mean: z.number(),
+    stdDev: z.number(),
+  })
+  .openapi("AggregateStats");
+
+export const GroupUniformValuesSchema = z
+  .object({
+    workerType: z.string().optional(),
+    model: z.string().optional(),
+    agentVersion: z.string().optional(),
+    platform: z.string().optional(),
+    mcpServers: z.array(z.string()).optional(),
+    skillRevisions: z.array(z.string()).optional(),
+    extensions: z.array(z.string()).optional(),
+    status: RequestStatusSchema.optional(),
+    submissionId: z.string().optional(),
+    task: z.string().optional(),
+  })
+  .openapi("GroupUniformValues");
+
+export const GroupAggregatesSchema = z
+  .object({
+    count: z.number(),
+    turns: AggregateStatsSchema.nullable(),
+    duration: AggregateStatsSchema.nullable(),
+    promptTokens: AggregateStatsSchema.nullable(),
+    completionTokens: AggregateStatsSchema.nullable(),
+    statusCounts: z.record(z.string(), z.number()),
+    outcomeCounts: z.record(z.string(), z.number()),
+  })
+  .openapi("GroupAggregates");
+
+export const RunGroupSchema = z
+  .object({
+    key: z.string(),
+    label: z.string(),
+    runIds: z.array(z.string()),
+    aggregates: GroupAggregatesSchema,
+    uniform: GroupUniformValuesSchema,
+  })
+  .openapi("RunGroup");
+
+export const CursorsSchema = z
+  .object({
+    next: z.string().nullable(),
+    prev: z.string().nullable(),
+  })
+  .openapi("Cursors");
+
+export const PaginatedRunsResponseSchema = z
+  .object({
+    data: z.array(RequestResponseSchema),
+    limit: z.number(),
+    estimatedTotal: z.number(),
+    cursors: CursorsSchema,
+  })
+  .openapi("PaginatedRunsResponse");
+
+export const PaginatedRunGroupsResponseSchema = z
+  .object({
+    data: z.array(RunGroupSchema),
+    limit: z.number(),
+    estimatedTotal: z.number(),
+    cursors: CursorsSchema,
+  })
+  .openapi("PaginatedRunGroupsResponse");
 
 export const BulkResubmitInputSchema = z
   .object({

@@ -380,18 +380,148 @@ describe("API Endpoints", () => {
   // ===================================================================
 
   describe("GET /api/v1/requests", () => {
-    it("returns 200 with array of requests", async () => {
+    it("returns 200 with paginated response", async () => {
       const docs = [{ _id: "r1", scenario: { task: "t", criteria: [] }, workerType: "coder-acp-copilot", status: "completed", createdAt: new Date() }];
       (mocks.collection.find as any).mockReturnValue({
         sort: vi.fn().mockReturnValue({
-          toArray: vi.fn().mockResolvedValue(docs),
+          limit: vi.fn().mockReturnValue({
+            toArray: vi.fn().mockResolvedValue(docs),
+          }),
         }),
       });
 
       const res = await request(app).get("/api/v1/requests");
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body[0]).toHaveProperty("id", "r1");
+      expect(res.body).toHaveProperty("data");
+      expect(res.body).toHaveProperty("limit");
+      expect(res.body).toHaveProperty("estimatedTotal");
+      expect(res.body).toHaveProperty("cursors");
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.data[0]).toHaveProperty("id", "r1");
+    });
+
+    it("returns grouped results when groupBy=task", async () => {
+      const groupedDocs = [
+        { key: "tp-1", label: "Build a calculator", aggregates: { count: 3, turns: { min: 1, max: 3, mean: 2, stdDev: 0.8 }, duration: null, promptTokens: null, completionTokens: null }, uniform: { workerType: "coder-acp-copilot" } },
+      ];
+      // aggregate is called multiple times: key pipeline, phase2, hasMoreAfter, hasMoreBefore
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "tp-1" }]) }) // keys
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue(groupedDocs) }) // phase2
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }) // hasMoreAfter
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // hasMoreBefore
+
+      const res = await request(app).get("/api/v1/requests?groupBy=task");
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("data");
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.data[0]).toHaveProperty("key", "tp-1");
+      expect(res.body.data[0]).toHaveProperty("aggregates");
+      expect(res.body.data[0].aggregates).toHaveProperty("count", 3);
+      expect(res.body.data[0]).toHaveProperty("uniform");
+    });
+
+    it("returns grouped results when groupBy=submissionId", async () => {
+      const groupedDocs = [
+        { key: "sub-1", label: "sub-1", aggregates: { count: 2, turns: null, duration: null, promptTokens: null, completionTokens: null }, uniform: {} },
+      ];
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "sub-1" }]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue(groupedDocs) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) });
+
+      const res = await request(app).get("/api/v1/requests?groupBy=submissionId");
+      expect(res.status).toBe(200);
+      expect(res.body.data[0]).toHaveProperty("key", "sub-1");
+    });
+
+    it("calls aggregate pipeline when groupBy is provided", async () => {
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // keys (empty)
+
+      await request(app).get("/api/v1/requests?groupBy=task");
+      expect(mocks.collection.aggregate).toHaveBeenCalled();
+      // Phase 1 key pipeline: $match, $group, $sort, $limit
+      const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
+      expect(pipeline[0]).toHaveProperty("$match");
+      expect(pipeline[1]).toHaveProperty("$group");
+    });
+
+    it("does not call aggregate when groupBy is absent", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            toArray: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests");
+      expect(mocks.collection.aggregate).not.toHaveBeenCalled();
+    });
+
+    it("passes status filter to find query", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            toArray: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?status=done");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "done" }),
+      );
+    });
+
+    it("passes outcome filter to find query", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            toArray: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?outcome=succeeded");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "succeeded" }),
+      );
+    });
+
+    it("passes status and outcome filters to aggregate pipeline $match", async () => {
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ count: 0 }]) });
+
+      await request(app).get("/api/v1/requests?groupBy=task&status=done&outcome=failed");
+      const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
+      expect(pipeline[0]).toEqual(
+        expect.objectContaining({
+          $match: expect.objectContaining({ status: "done", outcome: "failed" }),
+        }),
+      );
+    });
+
+    it("combines status, outcome, and worker filters", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            toArray: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?status=processing&outcome=succeeded&worker=coder-acp-copilot");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "processing",
+          outcome: "succeeded",
+          workerType: "coder-acp-copilot",
+        }),
+      );
     });
   });
 

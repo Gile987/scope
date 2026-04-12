@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -20,17 +20,18 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown, ChevronLeft } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
-import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary } from "@/types";
-import { groupRuns, formatStatRange, type GroupByKey, type RunGroup } from "@/lib/grouping";
+import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey } from "@/types";
+import { formatStatRange } from "@/lib/grouping";
 
 export function RunsList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const taskPromptId = searchParams.get("taskPromptId") ?? undefined;
   const criteriaState = searchParams.get("criteria") ?? undefined;
   const submissionId = searchParams.get("submissionId") ?? undefined;
+  const limit = searchParams.get("limit") ? Number(searchParams.get("limit")) : undefined;
   const [workerFilter, setWorkerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
@@ -41,18 +42,60 @@ export function RunsList() {
   const [resubmitCount, setResubmitCount] = useState(1);
   const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
   const [resubmitOverrides, setResubmitOverrides] = useState<BulkResubmitOverrides>({});
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [cursorDirection, setCursorDirection] = useState<"after" | "before" | undefined>(undefined);
   const queryClient = useQueryClient();
 
-  const { data: runs = [], isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, taskPromptId, criteriaState, submissionId],
+  const resetCursor = useCallback(() => {
+    setCursor(undefined);
+    setCursorDirection(undefined);
+  }, []);
+
+  // Merge URL taskPromptId with dropdown taskFilter (dropdown takes precedence)
+  const effectiveTaskPromptId = taskFilter !== "all" ? taskFilter : taskPromptId;
+  const effectiveStatus = statusFilter !== "all" ? statusFilter : undefined;
+  const effectiveOutcome = outcomeFilter !== "all" ? outcomeFilter : undefined;
+
+  const { data: runsResponse, isLoading, isRefetching } = useQuery({
+    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
-      taskPromptId,
+      taskPromptId: effectiveTaskPromptId,
+      status: effectiveStatus,
+      outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      limit: limit,
+      after: cursorDirection === "after" ? cursor : undefined,
+      before: cursorDirection === "before" ? cursor : undefined,
     }),
+    enabled: groupBy === "none",
     refetchInterval: 10_000,
   });
+  const runs = runsResponse?.data ?? [];
+  const runsCursors = runsResponse?.cursors ?? { next: null, prev: null };
+
+  // Fetch server-side groups when groupBy is active
+  const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
+    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
+    queryFn: () => api.listRunGroups({
+      groupBy: groupBy as "task" | "submissionId",
+      worker: workerFilter === "all" ? undefined : workerFilter,
+      taskPromptId: effectiveTaskPromptId,
+      status: effectiveStatus,
+      outcome: effectiveOutcome,
+      criteria: criteriaState,
+      submissionId,
+      limit: limit,
+      after: cursorDirection === "after" ? cursor : undefined,
+      before: cursorDirection === "before" ? cursor : undefined,
+    }),
+    enabled: groupBy !== "none",
+    refetchInterval: 10_000,
+  });
+  const serverGroups = groupsResponse?.data ?? [];
+  const groupsCursors = groupsResponse?.cursors ?? { next: null, prev: null };
+  const estimatedTotal = (groupBy !== "none" ? groupsResponse : runsResponse)?.estimatedTotal;
 
   // Fetch MCP servers for the resubmit dialog
   const { data: mcpServers = [] } = useQuery<McpServerDocument[]>({
@@ -76,10 +119,24 @@ export function RunsList() {
     refetchInterval: 10_000,
   });
 
-  const uniqueTasks = useMemo(
-    () => [...new Set(runs.map((r) => r.scenario?.task).filter(Boolean) as string[])].sort(),
-    [runs],
-  );
+  // Derive unique task options (name + taskPromptId) from runs or server groups
+  const taskOptions = useMemo(() => {
+    const seen = new Map<string, string>(); // taskPromptId → task name
+    if (groupBy === "none") {
+      for (const r of runs) {
+        if (r.taskPromptId && r.scenario?.task && !seen.has(r.taskPromptId)) {
+          seen.set(r.taskPromptId, r.scenario.task);
+        }
+      }
+    } else if (groupBy === "task") {
+      for (const g of serverGroups) {
+        if (g.key && g.label && !seen.has(g.key)) {
+          seen.set(g.key, g.label);
+        }
+      }
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [runs, serverGroups, groupBy]);
 
   // Compute summary of selected runs' values for the resubmit dialog
   const selectedRunsSummary = useMemo(() => {
@@ -174,34 +231,16 @@ export function RunsList() {
     },
   });
 
-  const filteredRuns = runs.filter((r) => {
-    if (statusFilter !== "all" && r.status !== statusFilter) return false;
-    if (outcomeFilter !== "all" && r.outcome !== outcomeFilter) return false;
-    if (taskFilter !== "all" && r.scenario?.task !== taskFilter) return false;
-    return true;
-  });
+  // Filtering is now server-side via status, outcome, and taskPromptId query params
+  const filteredRuns = runs;
 
-  const runGroups = useMemo(() => groupRuns(filteredRuns, groupBy), [filteredRuns, groupBy]);
+  const runGroups = serverGroups;
 
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      return next;
-    });
-  };
-
-  const toggleGroupSelect = (group: RunGroup) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      const groupIds = group.runs.map((r) => r._id);
-      const allInGroupSelected = groupIds.every((id) => prev.has(id));
-      if (allInGroupSelected) {
-        groupIds.forEach((id) => next.delete(id));
-      } else {
-        groupIds.forEach((id) => next.add(id));
-      }
       return next;
     });
   };
@@ -248,7 +287,7 @@ export function RunsList() {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Worker:</span>
-          <Select value={workerFilter} onValueChange={(v) => { setWorkerFilter(v); setTaskFilter("all"); }}>
+          <Select value={workerFilter} onValueChange={(v) => { setWorkerFilter(v); setTaskFilter("all"); resetCursor(); }}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="All workers" />
             </SelectTrigger>
@@ -262,7 +301,7 @@ export function RunsList() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Status:</span>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); resetCursor(); }}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="All statuses" />
             </SelectTrigger>
@@ -276,7 +315,7 @@ export function RunsList() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Outcome:</span>
-          <Select value={outcomeFilter} onValueChange={setOutcomeFilter}>
+          <Select value={outcomeFilter} onValueChange={(v) => { setOutcomeFilter(v); resetCursor(); }}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="All outcomes" />
             </SelectTrigger>
@@ -290,15 +329,15 @@ export function RunsList() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Task:</span>
-          <Select value={taskFilter} onValueChange={setTaskFilter}>
+          <Select value={taskFilter} onValueChange={(v) => { setTaskFilter(v); resetCursor(); }}>
             <SelectTrigger className="w-[260px]">
               <SelectValue placeholder="All tasks" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All tasks</SelectItem>
-              {uniqueTasks.map((t) => (
-                <SelectItem key={t} value={t}>
-                  <span title={t}>{truncate(t, 50)}</span>
+              {taskOptions.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  <span title={t.name}>{truncate(t.name, 50)}</span>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -306,7 +345,7 @@ export function RunsList() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Group by:</span>
-          <Select value={groupBy} onValueChange={(v) => { setGroupBy(v as GroupByKey); setExpandedGroups(new Set()); }}>
+          <Select value={groupBy} onValueChange={(v) => { setGroupBy(v as GroupByKey); setExpandedGroups(new Set()); resetCursor(); }}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="None" />
             </SelectTrigger>
@@ -319,10 +358,12 @@ export function RunsList() {
           </Select>
         </div>
         <div className="flex-1" />
-        {isRefetching && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
+        {(isRefetching || isGroupsRefetching) && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
         <span className="text-sm text-muted-foreground">
-          {filteredRuns.length} run{filteredRuns.length !== 1 ? "s" : ""}
-          {groupBy !== "none" && ` in ${runGroups.length} group${runGroups.length !== 1 ? "s" : ""}`}
+          {groupBy !== "none"
+            ? `${runGroups.length} group${runGroups.length !== 1 ? "s" : ""}`
+            : `${filteredRuns.length} run${filteredRuns.length !== 1 ? "s" : ""}`}
+          {estimatedTotal != null && ` (~${estimatedTotal.toLocaleString()} total runs)`}
         </span>
       </div>
 
@@ -841,13 +882,13 @@ export function RunsList() {
       )}
 
       {/* Table */}
-      {isLoading ? (
+      {(groupBy === "none" ? isLoading : isGroupsLoading) ? (
         <div className="space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
-      ) : filteredRuns.length === 0 ? (
+      ) : (groupBy === "none" && filteredRuns.length === 0) || (groupBy !== "none" && runGroups.length === 0) ? (
         <div className="text-center py-12 text-muted-foreground">
           No runs found. <Link to="/runs/new" className="text-primary underline">Submit one?</Link>
         </div>
@@ -856,11 +897,13 @@ export function RunsList() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-[40px]">
-                <Checkbox
-                  checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                  onCheckedChange={toggleSelectAll}
-                  aria-label="Select all"
-                />
+                {groupBy === "none" && (
+                  <Checkbox
+                    checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                    onCheckedChange={toggleSelectAll}
+                    aria-label="Select all"
+                  />
+                )}
               </TableHead>
               <TableHead className="w-[100px]">ID</TableHead>
               <TableHead className="w-[100px]">Submission</TableHead>
@@ -870,6 +913,7 @@ export function RunsList() {
               <TableHead className="w-[80px]">OS</TableHead>
               <TableHead>MCP</TableHead>
               <TableHead>Skills</TableHead>
+              <TableHead>Extensions</TableHead>
               <TableHead className="w-[100px]">Status</TableHead>
               <TableHead className="w-[100px]">Outcome</TableHead>
               <TableHead className="w-[100px]">Report</TableHead>
@@ -885,25 +929,21 @@ export function RunsList() {
             {groupBy !== "none" ? (
               runGroups.map((group) => {
                 const isExpanded = expandedGroups.has(group.key);
-                const groupIds = group.runs.map((r) => r._id);
-                const allGroupSelected = groupIds.length > 0 && groupIds.every((id) => selectedIds.has(id));
-                const someGroupSelected = groupIds.some((id) => selectedIds.has(id));
                 return (
                   <GroupRows
                     key={group.key}
                     group={group}
                     isExpanded={isExpanded}
                     onToggleExpand={() => toggleGroup(group.key)}
-                    allGroupSelected={allGroupSelected}
-                    someGroupSelected={someGroupSelected}
-                    onToggleGroupSelect={() => toggleGroupSelect(group)}
                     selectedIds={selectedIds}
                     onToggleSelect={toggleSelect}
                     reportSummaries={reportSummaries}
                     deleteMutation={deleteMutation}
-                    bulkDeleteMutation={bulkDeleteMutation}
-                    bulkReportMutation={bulkReportMutation}
                     groupBy={groupBy}
+                    workerFilter={workerFilter === "all" ? undefined : workerFilter}
+                    statusFilter={effectiveStatus}
+                    outcomeFilter={effectiveOutcome}
+                    criteriaState={criteriaState}
                   />
                 );
               })
@@ -922,6 +962,32 @@ export function RunsList() {
           </TableBody>
         </Table>
       )}
+
+      {/* Pagination controls */}
+      {(() => {
+        const activeCursors = groupBy !== "none" ? groupsCursors : runsCursors;
+        if (!activeCursors.prev && !activeCursors.next) return null;
+        return (
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!activeCursors.prev}
+              onClick={() => { setCursor(activeCursors.prev!); setCursorDirection("before"); }}
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!activeCursors.next}
+              onClick={() => { setCursor(activeCursors.next!); setCursorDirection("after"); }}
+            >
+              Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1020,6 +1086,23 @@ function RunRow({
         )}
       </TableCell>
       <TableCell>
+        {run.extensions && run.extensions.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {run.extensions.map((id) => {
+              const [qualifiedName, version] = id.split("@");
+              const shortName = qualifiedName.split(".").pop() ?? id;
+              return (
+                <Link key={id} to={`/extensions/${qualifiedName}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={id}>
+                  {shortName}{version ? `@${version}` : ""}
+                </Link>
+              );
+            })}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell>
         <StatusBadge status={run.status} />
       </TableCell>
       <TableCell>
@@ -1103,34 +1186,77 @@ function GroupRows({
   group,
   isExpanded,
   onToggleExpand,
-  allGroupSelected,
-  someGroupSelected,
-  onToggleGroupSelect,
   selectedIds,
   onToggleSelect,
   reportSummaries,
   deleteMutation,
-  bulkDeleteMutation,
-  bulkReportMutation,
   groupBy,
+  workerFilter,
+  statusFilter,
+  outcomeFilter,
+  criteriaState,
 }: {
   group: RunGroup;
   isExpanded: boolean;
   onToggleExpand: () => void;
-  allGroupSelected: boolean;
-  someGroupSelected: boolean;
-  onToggleGroupSelect: () => void;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
-  bulkDeleteMutation: { mutate: (ids: string[]) => void; isPending: boolean };
-  bulkReportMutation: { mutate: (ids: string[]) => void; isPending: boolean };
   groupBy: GroupByKey;
+  workerFilter?: string;
+  statusFilter?: string;
+  outcomeFilter?: string;
+  criteriaState?: string;
 }) {
   const { aggregates, uniform } = group;
   const fmtDur = (v: number) => formatDuration(Math.round(v));
   const fmtNum = (v: number) => Math.round(v).toLocaleString();
+
+  // Fetch runs for this group on expand
+  const expandFilter = useMemo(() => {
+    const opts: Record<string, string | undefined> = { worker: workerFilter, status: statusFilter, outcome: outcomeFilter, criteria: criteriaState };
+    if (groupBy === "task") {
+      // group.key is taskPromptId (or scenario.task fallback)
+      opts.taskPromptId = group.key;
+    } else {
+      opts.submissionId = group.key === "no-submission" ? undefined : group.key;
+    }
+    return opts;
+  }, [group.key, groupBy, workerFilter, statusFilter, outcomeFilter, criteriaState]);
+
+  const { data: expandedRunsResponse, isLoading: isExpandLoading } = useQuery({
+    queryKey: ["group-runs", group.key, groupBy, workerFilter, statusFilter, outcomeFilter, criteriaState],
+    queryFn: () => api.listRuns(expandFilter),
+    enabled: isExpanded,
+    refetchInterval: 10_000,
+  });
+  const expandedRuns = expandedRunsResponse?.data ?? [];
+
+  // Group-level checkbox: select/deselect all runs in this group (runIds from server)
+  const groupRunIds = group.runIds;
+  const allGroupSelected = groupRunIds.length > 0 && groupRunIds.every((id) => selectedIds.has(id));
+  const someGroupSelected = groupRunIds.some((id) => selectedIds.has(id));
+  const handleToggleGroupSelect = () => {
+    if (allGroupSelected) {
+      groupRunIds.forEach((id) => onToggleSelect(id));
+    } else {
+      groupRunIds.filter((id) => !selectedIds.has(id)).forEach((id) => onToggleSelect(id));
+    }
+  };
+
+  // Fetch report summaries for all runs in this group (always available via runIds)
+  const { data: groupReportSummaries } = useQuery({
+    queryKey: ["report-summaries", groupRunIds],
+    queryFn: () => api.bulkReportSummary(groupRunIds),
+    enabled: groupRunIds.length > 0,
+    refetchInterval: 10_000,
+  });
+  // Merge parent-level and group-level summaries
+  const mergedReportSummaries = useMemo(() => {
+    if (!reportSummaries && !groupReportSummaries) return undefined;
+    return { ...reportSummaries, ...groupReportSummaries };
+  }, [reportSummaries, groupReportSummaries]);
 
   return (
     <>
@@ -1142,7 +1268,7 @@ function GroupRows({
         <TableCell onClick={(e) => e.stopPropagation()}>
           <Checkbox
             checked={allGroupSelected ? true : someGroupSelected ? "indeterminate" : false}
-            onCheckedChange={onToggleGroupSelect}
+            onCheckedChange={handleToggleGroupSelect}
             aria-label={`Select all in group ${group.label}`}
           />
         </TableCell>
@@ -1236,6 +1362,22 @@ function GroupRows({
             </div>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
+        {/* Extensions */}
+        <TableCell>
+          {uniform.extensions && uniform.extensions.length > 0 ? (
+            <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+              {uniform.extensions.map((id) => {
+                const [qualifiedName, version] = id.split("@");
+                const shortName = qualifiedName.split(".").pop() ?? id;
+                return (
+                  <Link key={id} to={`/extensions/${qualifiedName}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={id}>
+                    {shortName}{version ? `@${version}` : ""}
+                  </Link>
+                );
+              })}
+            </div>
+          ) : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>
         {/* Status */}
         <TableCell>
           {(() => {
@@ -1244,17 +1386,12 @@ function GroupRows({
               processing: "bg-blue-500",
               done: "bg-green-500",
             };
-            const completed = group.runs.filter((r) => r.status === "done").length;
-            const total = group.runs.length;
-            const segments = Object.entries(
-              group.runs.reduce<Record<string, number>>((acc, r) => {
-                acc[r.status] = (acc[r.status] ?? 0) + 1;
-                return acc;
-              }, {}),
-            );
+            const total = aggregates.count;
+            const done = aggregates.statusCounts?.done ?? 0;
+            const segments = Object.entries(aggregates.statusCounts ?? {}).filter(([, c]) => c > 0);
             return (
               <div className="flex flex-col gap-1 min-w-[80px]">
-                <span className="text-xs font-medium">{completed}/{total} done</span>
+                <span className="text-xs font-medium">{done}/{total} done</span>
                 <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
                   {segments.map(([status, count]) => (
                     <div
@@ -1275,26 +1412,21 @@ function GroupRows({
             const outcomeColors: Record<string, string> = {
               succeeded: "bg-green-500",
               failed: "bg-red-500",
-              exhausted: "bg-yellow-500",
+              finished: "bg-yellow-500",
             };
-            const doneRuns = group.runs.filter((r) => r.status === "done" && r.outcome);
-            if (doneRuns.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
-            const segments = Object.entries(
-              doneRuns.reduce<Record<string, number>>((acc, r) => {
-                acc[r.outcome!] = (acc[r.outcome!] ?? 0) + 1;
-                return acc;
-              }, {}),
-            );
-            const succeeded = doneRuns.filter((r) => r.outcome === "succeeded").length;
+            const doneCount = aggregates.statusCounts?.done ?? 0;
+            const segments = Object.entries(aggregates.outcomeCounts ?? {}).filter(([, c]) => c > 0);
+            if (doneCount === 0 || segments.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
+            const succeeded = aggregates.outcomeCounts?.succeeded ?? 0;
             return (
               <div className="flex flex-col gap-1 min-w-[80px]">
-                <span className="text-xs font-medium">{succeeded}/{doneRuns.length} pass</span>
+                <span className="text-xs font-medium">{succeeded}/{doneCount} pass</span>
                 <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden flex">
                   {segments.map(([outcome, count]) => (
                     <div
                       key={outcome}
                       className={`h-full ${outcomeColors[outcome] ?? "bg-gray-400"} transition-all`}
-                      style={{ width: `${(count / doneRuns.length) * 100}%` }}
+                      style={{ width: `${(count / doneCount) * 100}%` }}
                       title={`${outcome}: ${count}`}
                     />
                   ))}
@@ -1306,11 +1438,10 @@ function GroupRows({
         {/* Report */}
         <TableCell>
           {(() => {
-            const runsWithReports = group.runs.filter((r) => reportSummaries?.[r._id]);
-            if (runsWithReports.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
+            if (!mergedReportSummaries || groupRunIds.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
             let total = 0, completed = 0, pending = 0, generating = 0, failed = 0;
-            for (const r of group.runs) {
-              const s = reportSummaries?.[r._id];
+            for (const id of groupRunIds) {
+              const s = mergedReportSummaries[id];
               if (!s) continue;
               total += s.total;
               completed += s.completed;
@@ -1318,6 +1449,7 @@ function GroupRows({
               generating += s.generating;
               failed += s.failed;
             }
+            if (total === 0) return <span className="text-xs text-muted-foreground">–</span>;
             return <ReportProgressBar summary={{ total, completed, pending, generating, failed }} />;
           })()}
         </TableCell>
@@ -1325,6 +1457,8 @@ function GroupRows({
         <TableCell className="text-center font-mono text-xs">
           {formatStatRange(aggregates.turns, fmtNum)}
         </TableCell>
+        {/* LLM Calls */}
+        <TableCell />
         {/* Duration */}
         <TableCell className="font-mono text-xs">
           {formatStatRange(aggregates.duration, fmtDur)}
@@ -1338,70 +1472,29 @@ function GroupRows({
         {/* Created */}
         <TableCell />
         {/* Actions */}
-        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-end gap-1">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8" title="Generate reports for group">
-                  <FileText className="h-4 w-4" />
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Generate reports for {group.aggregates.count} run{group.aggregates.count !== 1 ? "s" : ""}?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will queue report generation for all runs in this group.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={() => bulkReportMutation.mutate(group.runs.map((r) => r._id))}
-                    disabled={bulkReportMutation.isPending}
-                  >
-                    {bulkReportMutation.isPending ? "Generating…" : "Generate"}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="Delete all runs in group">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete {group.aggregates.count} run{group.aggregates.count !== 1 ? "s" : ""} in this group?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will soft-delete all runs in this group. They can be recovered later if needed.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={() => bulkDeleteMutation.mutate(group.runs.map((r) => r._id))}
-                    disabled={bulkDeleteMutation.isPending}
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  >
-                    {bulkDeleteMutation.isPending ? "Deleting…" : "Delete"}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
-        </TableCell>
+        <TableCell />
       </TableRow>
-      {isExpanded && group.runs.map((run) => (
-        <RunRow
-          key={run._id}
-          run={run}
-          selectedIds={selectedIds}
-          onToggleSelect={onToggleSelect}
-          reportSummaries={reportSummaries}
-          deleteMutation={deleteMutation}
-        />
-      ))}
+      {isExpanded && (
+        isExpandLoading ? (
+          <TableRow>
+            <TableCell colSpan={18} className="text-center py-4">
+              <RefreshCw className="h-4 w-4 animate-spin inline-block mr-2" />
+              Loading runs…
+            </TableCell>
+          </TableRow>
+        ) : (
+          expandedRuns.map((run) => (
+            <RunRow
+              key={run._id}
+              run={run}
+              selectedIds={selectedIds}
+              onToggleSelect={onToggleSelect}
+              reportSummaries={mergedReportSummaries}
+              deleteMutation={deleteMutation}
+            />
+          ))
+        )
+      )}
     </>
   );
 }

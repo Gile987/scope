@@ -107,6 +107,16 @@ export interface Run {
   aiCallCount?: number;
 }
 
+export interface CursorPaginatedResponse<T> {
+  data: T[];
+  limit: number;
+  estimatedTotal: number;
+  cursors: {
+    next: string | null;
+    prev: string | null;
+  };
+}
+
 export const WORKER_TYPES = [
   "coder-acp-claude-code",
   "coder-acp-copilot"
@@ -833,4 +843,46 @@ export interface ProfileVersionDocument {
 /** Profile with its latest (or specified) version embedded */
 export interface ProfileWithVersion extends ProfileDocument {
   version: ProfileVersionDocument;
+}
+
+// --- Runs grouping types (mirrored from shared) ---
+
+export type GroupByKey = "none" | "task" | "submissionId";
+
+export interface AggregateStats {
+  min: number;
+  max: number;
+  mean: number;
+  stdDev: number;
+}
+
+export interface GroupUniformValues {
+  workerType?: string;
+  model?: string;
+  agentVersion?: string;
+  platform?: string;
+  mcpServers?: string[];
+  skillRevisions?: string[];
+  extensions?: string[];
+  status?: RunStatus;
+  submissionId?: string;
+  task?: string;
+}
+
+export interface GroupAggregates {
+  count: number;
+  turns: AggregateStats | null;
+  duration: AggregateStats | null;
+  promptTokens: AggregateStats | null;
+  completionTokens: AggregateStats | null;
+  statusCounts: Record<string, number>;
+  outcomeCounts: Record<string, number>;
+}
+
+export interface RunGroup {
+  key: string;
+  label: string;
+  runIds: string[];
+  aggregates: GroupAggregates;
+  uniform: GroupUniformValues;
 }

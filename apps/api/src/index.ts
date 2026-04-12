@@ -95,7 +95,12 @@ import {
   ProfileResponseSchema,
   ProfileVersionResponseSchema,
   ProfileWithVersionResponseSchema,
+  RunGroupSchema,
+  PaginatedRunsResponseSchema,
+  PaginatedRunGroupsResponseSchema,
 } from "shared";
+import { encodeCursor, decodeCursor } from "shared";
+import { buildGroupingPipeline } from "./grouping.js";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
@@ -1077,20 +1082,33 @@ apiRoute(app, registry, {
 });
 
 // List all requests (excludes soft-deleted by default)
+// When groupBy is provided, returns paginated RunGroup[]; otherwise paginated runs.
+// Uses cursor-based pagination with `after`/`before` params.
 apiRoute(app, registry, {
   method: "get",
   path: "/api/v1/requests",
   tags: ["Requests"],
   summary: "List requests",
   query: ListRequestsQuerySchema,
-  response: z.array(RequestResponseSchema),
+  response: z.union([PaginatedRunsResponseSchema, PaginatedRunGroupsResponseSchema]),
   handler: async (req, res) => {
     const workerFilter = req.query.worker as string;
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
     const submissionIdFilter = req.query.submissionId as string;
     const profileIdFilter = req.query.profileId as string;
+    const statusFilter = req.query.status as string;
+    const outcomeFilter = req.query.outcome as string;
     const includeDeleted = req.query.includeDeleted === "true";
+    const groupByParam = req.query.groupBy as "task" | "submissionId" | undefined;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
+    const afterParam = req.query.after as string | undefined;
+    const beforeParam = req.query.before as string | undefined;
+
+    if (afterParam && beforeParam) {
+      res.status(400).json({ error: "Cannot specify both 'after' and 'before'" });
+      return;
+    }
     
     const filter: Record<string, unknown> = {};
     if (workerFilter && VALID_WORKERS.includes(workerFilter as WorkerType)) {
@@ -1101,6 +1119,12 @@ apiRoute(app, registry, {
     }
     if (profileIdFilter) {
       filter.profileId = profileIdFilter;
+    }
+    if (statusFilter) {
+      filter.status = statusFilter;
+    }
+    if (outcomeFilter) {
+      filter.outcome = outcomeFilter;
     }
     if (submissionIdFilter) {
       // Prefix-based matching: allow filtering by partial submission ID
@@ -1131,12 +1155,188 @@ apiRoute(app, registry, {
       }
     }
 
-    const resources = await collection
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .toArray();
+    // O(1) estimated total from collection metadata (unfiltered)
+    const estimatedTotal = await collection.estimatedDocumentCount();
 
-    res.json(resources.map(r => ({ ...r, id: r._id })));
+    // Grouped mode: paginated RunGroup[] via two-phase aggregation
+    if (groupByParam) {
+      const groupByField = groupByParam === "task" ? "taskPromptId" : "submissionId";
+      const groupByAggField = `$${groupByField}`;
+
+      // Decode group cursor
+      let afterKey: string | undefined;
+      let beforeKey: string | undefined;
+      if (afterParam) {
+        try {
+          const parsed = decodeCursor(afterParam);
+          if (!(groupByField in parsed)) { res.status(400).json({ error: `Invalid cursor: expected '${groupByField}' field` }); return; }
+          afterKey = parsed[groupByField];
+        } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
+      }
+      if (beforeParam) {
+        try {
+          const parsed = decodeCursor(beforeParam);
+          if (!(groupByField in parsed)) { res.status(400).json({ error: `Invalid cursor: expected '${groupByField}' field` }); return; }
+          beforeKey = parsed[groupByField];
+        } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
+      }
+
+      // Phase 1: Get paginated distinct group keys + total count (lightweight)
+      const keyPipeline: Record<string, unknown>[] = [
+        { $match: filter },
+        { $group: { _id: groupByAggField } },
+        { $sort: { _id: 1 } },
+      ];
+      if (afterKey !== undefined) {
+        keyPipeline.push({ $match: { _id: { $gt: afterKey } } });
+      }
+      if (beforeKey !== undefined) {
+        keyPipeline.push({ $match: { _id: { $lt: beforeKey } } });
+      }
+
+      // For backward: sort descending, take limit, then reverse
+      if (beforeKey !== undefined) {
+        keyPipeline.push({ $sort: { _id: -1 } });
+      }
+      keyPipeline.push({ $limit: limit });
+
+      const keyResults = await collection.aggregate(keyPipeline).toArray();
+
+      // Reverse results for backward pagination
+      if (beforeKey !== undefined) {
+        keyResults.reverse();
+      }
+
+      const pageKeys: string[] = keyResults.map((k) => k._id as string);
+
+      if (pageKeys.length === 0) {
+        res.json({ data: [], limit, estimatedTotal, cursors: { next: null, prev: null } });
+        return;
+      }
+
+      // Phase 2: Full aggregation scoped to current page's groups only
+      const phase2Pipeline = [
+        { $match: { ...filter, [groupByField]: { $in: pageKeys } } },
+        ...buildGroupingPipeline(groupByParam),
+      ];
+      const groups = await collection.aggregate(phase2Pipeline).toArray();
+
+      // Build cursors
+      const firstKey = pageKeys[0];
+      const lastKey = pageKeys[pageKeys.length - 1];
+
+      // Check if there are more results in each direction
+      const hasMoreAfter = await collection.aggregate([
+        { $match: filter },
+        { $group: { _id: groupByAggField } },
+        { $sort: { _id: 1 } },
+        { $match: { _id: { $gt: lastKey } } },
+        { $limit: 1 },
+      ]).toArray();
+
+      const hasMoreBefore = await collection.aggregate([
+        { $match: filter },
+        { $group: { _id: groupByAggField } },
+        { $sort: { _id: 1 } },
+        { $match: { _id: { $lt: firstKey } } },
+        { $limit: 1 },
+      ]).toArray();
+
+      res.json({
+        data: groups,
+        limit,
+        estimatedTotal,
+        cursors: {
+          next: hasMoreAfter.length > 0 ? encodeCursor({ [groupByField]: lastKey }) : null,
+          prev: hasMoreBefore.length > 0 ? encodeCursor({ [groupByField]: firstKey }) : null,
+        },
+      });
+      return;
+    }
+
+    // Flat mode: paginated runs with cursor on { createdAt, _id }
+    let afterCursor: Record<string, string> | undefined;
+    let beforeCursor: Record<string, string> | undefined;
+    if (afterParam) {
+      try {
+        afterCursor = decodeCursor(afterParam);
+      } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
+    }
+    if (beforeParam) {
+      try {
+        beforeCursor = decodeCursor(beforeParam);
+      } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
+    }
+
+    // Build cursor filter for seek-based pagination
+    const cursorFilter = { ...filter };
+    let sort: Record<string, 1 | -1> = { createdAt: -1, _id: -1 };
+    let needsReverse = false;
+
+    if (afterCursor) {
+      // Forward: items after this cursor (older, since sort is descending)
+      cursorFilter.$or = [
+        { createdAt: { $lt: new Date(afterCursor.createdAt) } },
+        { createdAt: new Date(afterCursor.createdAt), _id: { $lt: afterCursor.id } },
+      ];
+    } else if (beforeCursor) {
+      // Backward: flip sort, get items before cursor, then reverse
+      sort = { createdAt: 1, _id: 1 };
+      needsReverse = true;
+      cursorFilter.$or = [
+        { createdAt: { $gt: new Date(beforeCursor.createdAt) } },
+        { createdAt: new Date(beforeCursor.createdAt), _id: { $gt: beforeCursor.id } },
+      ];
+    }
+
+    const resources = await collection.find(cursorFilter).sort(sort).limit(limit).toArray();
+
+    if (needsReverse) {
+      resources.reverse();
+    }
+
+    const data = resources.map((r) => ({ ...r, id: r._id }));
+
+    if (data.length === 0) {
+      res.json({ data: [], limit, estimatedTotal, cursors: { next: null, prev: null } });
+      return;
+    }
+
+    // Build cursors from first and last items
+    const first = data[0];
+    const last = data[data.length - 1];
+    const firstCreatedAt = new Date(first.createdAt).toISOString();
+    const firstId = String(first._id);
+    const lastCreatedAt = new Date(last.createdAt).toISOString();
+    const lastId = String(last._id);
+
+    // Check if there are more results in each direction
+    const [hasMoreAfter, hasMoreBefore] = await Promise.all([
+      collection.find({
+        ...filter,
+        $or: [
+          { createdAt: { $lt: new Date(lastCreatedAt) } },
+          { createdAt: new Date(lastCreatedAt), _id: { $lt: lastId } },
+        ],
+      }).sort({ createdAt: -1, _id: -1 }).limit(1).toArray(),
+      collection.find({
+        ...filter,
+        $or: [
+          { createdAt: { $gt: new Date(firstCreatedAt) } },
+          { createdAt: new Date(firstCreatedAt), _id: { $gt: firstId } },
+        ],
+      }).sort({ createdAt: 1, _id: 1 }).limit(1).toArray(),
+    ]);
+
+    res.json({
+      data,
+      limit,
+      estimatedTotal,
+      cursors: {
+        next: hasMoreAfter.length > 0 ? encodeCursor({ createdAt: lastCreatedAt, id: lastId }) : null,
+        prev: hasMoreBefore.length > 0 ? encodeCursor({ createdAt: firstCreatedAt, id: firstId }) : null,
+      },
+    });
   },
 });
 

@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse } from "@/types";
+
+import { qs } from "./url";
 
 const BASE = "/api/v1";
 
@@ -19,15 +21,35 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  /** List all runs, optionally filtered by worker, task prompt, and/or MDP criteria state */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string; criteria?: string; submissionId?: string }): Promise<Run[]> => {
-    const params = new URLSearchParams();
-    if (opts?.worker) params.set("worker", opts.worker);
-    if (opts?.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
-    if (opts?.criteria) params.set("criteria", opts.criteria);
-    if (opts?.submissionId) params.set("submissionId", opts.submissionId);
-    const qs = params.toString();
-    return request(`/requests${qs ? `?${qs}` : ""}`);
+  /** List runs with cursor-based pagination */
+  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; limit?: number; after?: string; before?: string }): Promise<CursorPaginatedResponse<Run>> => {
+    return request(`/requests${qs({
+      worker: opts?.worker,
+      taskPromptId: opts?.taskPromptId,
+      status: opts?.status,
+      outcome: opts?.outcome,
+      criteria: opts?.criteria,
+      submissionId: opts?.submissionId,
+      limit: opts?.limit ? String(opts.limit) : undefined,
+      after: opts?.after,
+      before: opts?.before,
+    })}`);
+  },
+
+  /** List runs grouped by task or submissionId, with cursor-based pagination */
+  listRunGroups: (opts: { groupBy: "task" | "submissionId"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; limit?: number; after?: string; before?: string }): Promise<CursorPaginatedResponse<RunGroup>> => {
+    return request(`/requests${qs({
+      groupBy: opts.groupBy,
+      worker: opts.worker,
+      taskPromptId: opts.taskPromptId,
+      status: opts.status,
+      outcome: opts.outcome,
+      criteria: opts.criteria,
+      submissionId: opts.submissionId,
+      limit: opts.limit ? String(opts.limit) : undefined,
+      after: opts.after,
+      before: opts.before,
+    })}`);
   },
 
   /** Get a single run by ID */
