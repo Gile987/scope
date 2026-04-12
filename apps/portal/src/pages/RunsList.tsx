@@ -362,7 +362,7 @@ export function RunsList() {
           {groupBy !== "none"
             ? `${runGroups.length} group${runGroups.length !== 1 ? "s" : ""}`
             : `${filteredRuns.length} run${filteredRuns.length !== 1 ? "s" : ""}`}
-          {estimatedTotal != null && ` (~${estimatedTotal.toLocaleString()} total)`}
+          {estimatedTotal != null && ` (~${estimatedTotal.toLocaleString()} total runs)`}
         </span>
       </div>
 
