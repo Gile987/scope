@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { AggregateStats } from "shared";
+import type { AggregateStats } from "../types";
 
 export function formatStatRange(
   stat: AggregateStats | null,

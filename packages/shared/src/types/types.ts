@@ -259,6 +259,7 @@ export interface GroupUniformValues {
   platform?: string;
   mcpServers?: string[];
   skillRevisions?: string[];
+  extensions?: string[];
   status?: "pending" | "processing" | "done";
   submissionId?: string;
   task?: string;

@@ -159,6 +159,7 @@ export const GroupUniformValuesSchema = z
     platform: z.string().optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
+    extensions: z.array(z.string()).optional(),
     status: RequestStatusSchema.optional(),
     submissionId: z.string().optional(),
     task: z.string().optional(),

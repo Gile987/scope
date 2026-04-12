@@ -817,6 +817,7 @@ export interface GroupUniformValues {
   platform?: string;
   mcpServers?: string[];
   skillRevisions?: string[];
+  extensions?: string[];
   status?: RunStatus;
   submissionId?: string;
   task?: string;

@@ -91,6 +91,13 @@ export function buildGroupingPipeline(
             in: { $concat: ["$$value", { $cond: { if: { $eq: ["$$value", ""] }, then: "", else: "," } }, "$$this"] },
           },
         },
+        _extensionKey: {
+          $reduce: {
+            input: { $sortArray: { input: { $ifNull: ["$extensions", []] }, sortBy: 1 } },
+            initialValue: "",
+            in: { $concat: ["$$value", { $cond: { if: { $eq: ["$$value", ""] }, then: "", else: "," } }, "$$this"] },
+          },
+        },
       },
     },
     // 2. Group and accumulate per-run values
@@ -117,6 +124,7 @@ export function buildGroupingPipeline(
         _tasks: { $addToSet: { $ifNull: ["$scenario.task", ""] } },
         _mcpKeys: { $addToSet: "$_mcpKey" },
         _skillKeys: { $addToSet: "$_skillKey" },
+        _extensionKeys: { $addToSet: "$_extensionKey" },
         // Status/outcome distribution counts
         _statusPending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
         _statusProcessing: { $sum: { $cond: [{ $eq: ["$status", "processing"] }, 1, 0] } },
@@ -127,6 +135,7 @@ export function buildGroupingPipeline(
         // Keep first run's array values for uniform fields
         _firstMcpServers: { $first: "$mcpServers" },
         _firstSkillRevisions: { $first: "$skillRevisions" },
+        _firstExtensions: { $first: "$extensions" },
       },
     },
     // 3. Project into final shape
@@ -161,6 +170,7 @@ export function buildGroupingPipeline(
           task: { $cond: { if: { $and: [{ $eq: [{ $size: "$_tasks" }, 1] }, { $ne: [{ $arrayElemAt: ["$_tasks", 0] }, ""] }] }, then: { $arrayElemAt: ["$_tasks", 0] }, else: "$$REMOVE" } },
           mcpServers: { $cond: { if: { $and: [{ $eq: [{ $size: "$_mcpKeys" }, 1] }, { $ne: [{ $arrayElemAt: ["$_mcpKeys", 0] }, ""] }] }, then: "$_firstMcpServers", else: "$$REMOVE" } },
           skillRevisions: { $cond: { if: { $and: [{ $eq: [{ $size: "$_skillKeys" }, 1] }, { $ne: [{ $arrayElemAt: ["$_skillKeys", 0] }, ""] }] }, then: "$_firstSkillRevisions", else: "$$REMOVE" } },
+          extensions: { $cond: { if: { $and: [{ $eq: [{ $size: "$_extensionKeys" }, 1] }, { $ne: [{ $arrayElemAt: ["$_extensionKeys", 0] }, ""] }] }, then: "$_firstExtensions", else: "$$REMOVE" } },
         },
       },
     },
