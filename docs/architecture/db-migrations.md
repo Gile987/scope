@@ -94,6 +94,14 @@ When you run a command:
 | Migration | Description |
 |-----------|-------------|
 | `001-backfill-task-prompts` | Creates `task-prompts` collection from existing `requests.scenario.task` values, links runs via `taskPromptId`, migrates prompt feature extraction data |
+| `002-create-indexes` | Creates single-field indexes on all collections (see [database.md](database.md)) |
+| `003-create-skill-indexes` | Adds indexes for `skills` and `skill-revisions` collections |
+| `004-add-submission-id-index` | Sparse index on `requests.submissionId` for efficient filtering |
+| `005-backfill-iteration-durations` | Estimates `startedAt`/`durationMs` on existing turns from timestamps |
+| `006-split-status-outcome` | Splits run status into `status` (pending/processing/done) + `outcome` (succeeded/failed/exhausted) |
+| `007-rename-exhausted-to-finished` | Renames outcome `exhausted` → `finished` |
+| `008-backfill-ai-call-count` | Downloads HARs from blob storage to count AI completion calls per turn |
+| `009-add-requests-filter-indexes` | Adds indexes on `taskPromptId`, `status`, `outcome`, `workerType`, `deletedAt` for server-side filtering/grouping |
 
 ## CI/CD
 
