@@ -94,7 +94,7 @@ import {
   PaginatedRunsResponseSchema,
   PaginatedRunGroupsResponseSchema,
 } from "shared";
-import { encodeCursor, decodeCursor, isFlatCursor, isGroupCursor, type FlatCursor, type GroupCursor } from "shared";
+import { encodeFlatCursor, decodeFlatCursor, encodeGroupCursor, decodeGroupCursor, type FlatCursor } from "shared";
 import { buildGroupingPipeline } from "./grouping.js";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -1059,7 +1059,7 @@ apiRoute(app, registry, {
     const outcomeFilter = req.query.outcome as string;
     const includeDeleted = req.query.includeDeleted === "true";
     const groupByParam = req.query.groupBy as "task" | "submissionId" | undefined;
-    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
     const afterParam = req.query.after as string | undefined;
     const beforeParam = req.query.before as string | undefined;
 
@@ -1120,16 +1120,16 @@ apiRoute(app, registry, {
       let beforeKey: string | undefined;
       if (afterParam) {
         try {
-          const cursor = decodeCursor(afterParam);
-          if (!isGroupCursor(cursor)) { res.status(400).json({ error: "Invalid cursor type for grouped mode" }); return; }
-          afterKey = cursor.k;
+          const parsed = decodeGroupCursor(afterParam);
+          if (parsed.field !== groupByField) { res.status(400).json({ error: `Invalid cursor: expected '${groupByField}' field` }); return; }
+          afterKey = parsed.value;
         } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
       }
       if (beforeParam) {
         try {
-          const cursor = decodeCursor(beforeParam);
-          if (!isGroupCursor(cursor)) { res.status(400).json({ error: "Invalid cursor type for grouped mode" }); return; }
-          beforeKey = cursor.k;
+          const parsed = decodeGroupCursor(beforeParam);
+          if (parsed.field !== groupByField) { res.status(400).json({ error: `Invalid cursor: expected '${groupByField}' field` }); return; }
+          beforeKey = parsed.value;
         } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
       }
 
@@ -1209,8 +1209,8 @@ apiRoute(app, registry, {
         total,
         limit,
         cursors: {
-          next: hasMoreAfter.length > 0 ? encodeCursor({ k: lastKey }) : null,
-          prev: hasMoreBefore.length > 0 ? encodeCursor({ k: firstKey }) : null,
+          next: hasMoreAfter.length > 0 ? encodeGroupCursor(groupByField, lastKey) : null,
+          prev: hasMoreBefore.length > 0 ? encodeGroupCursor(groupByField, firstKey) : null,
         },
       });
       return;
@@ -1221,16 +1221,12 @@ apiRoute(app, registry, {
     let beforeCursor: FlatCursor | undefined;
     if (afterParam) {
       try {
-        const cursor = decodeCursor(afterParam);
-        if (!isFlatCursor(cursor)) { res.status(400).json({ error: "Invalid cursor type for flat mode" }); return; }
-        afterCursor = cursor;
+        afterCursor = decodeFlatCursor(afterParam);
       } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
     }
     if (beforeParam) {
       try {
-        const cursor = decodeCursor(beforeParam);
-        if (!isFlatCursor(cursor)) { res.status(400).json({ error: "Invalid cursor type for flat mode" }); return; }
-        beforeCursor = cursor;
+        beforeCursor = decodeFlatCursor(beforeParam);
       } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
     }
 
@@ -1242,16 +1238,16 @@ apiRoute(app, registry, {
     if (afterCursor) {
       // Forward: items after this cursor (older, since sort is descending)
       cursorFilter.$or = [
-        { createdAt: { $lt: new Date(afterCursor.c) } },
-        { createdAt: new Date(afterCursor.c), _id: { $lt: afterCursor.i } },
+        { createdAt: { $lt: new Date(afterCursor.createdAt) } },
+        { createdAt: new Date(afterCursor.createdAt), _id: { $lt: afterCursor.id } },
       ];
     } else if (beforeCursor) {
       // Backward: flip sort, get items before cursor, then reverse
       sort = { createdAt: 1, _id: 1 };
       needsReverse = true;
       cursorFilter.$or = [
-        { createdAt: { $gt: new Date(beforeCursor.c) } },
-        { createdAt: new Date(beforeCursor.c), _id: { $gt: beforeCursor.i } },
+        { createdAt: { $gt: new Date(beforeCursor.createdAt) } },
+        { createdAt: new Date(beforeCursor.createdAt), _id: { $gt: beforeCursor.id } },
       ];
     }
 
@@ -1274,23 +1270,25 @@ apiRoute(app, registry, {
     // Build cursors from first and last items
     const first = data[0];
     const last = data[data.length - 1];
-    const firstCursorVal: FlatCursor = { c: new Date(first.createdAt).toISOString(), i: String(first._id) };
-    const lastCursorVal: FlatCursor = { c: new Date(last.createdAt).toISOString(), i: String(last._id) };
+    const firstCreatedAt = new Date(first.createdAt).toISOString();
+    const firstId = String(first._id);
+    const lastCreatedAt = new Date(last.createdAt).toISOString();
+    const lastId = String(last._id);
 
     // Check if there are more results in each direction
     const [hasMoreAfter, hasMoreBefore] = await Promise.all([
       collection.find({
         ...filter,
         $or: [
-          { createdAt: { $lt: new Date(lastCursorVal.c) } },
-          { createdAt: new Date(lastCursorVal.c), _id: { $lt: lastCursorVal.i } },
+          { createdAt: { $lt: new Date(lastCreatedAt) } },
+          { createdAt: new Date(lastCreatedAt), _id: { $lt: lastId } },
         ],
       }).sort({ createdAt: -1, _id: -1 }).limit(1).toArray(),
       collection.find({
         ...filter,
         $or: [
-          { createdAt: { $gt: new Date(firstCursorVal.c) } },
-          { createdAt: new Date(firstCursorVal.c), _id: { $gt: firstCursorVal.i } },
+          { createdAt: { $gt: new Date(firstCreatedAt) } },
+          { createdAt: new Date(firstCreatedAt), _id: { $gt: firstId } },
         ],
       }).sort({ createdAt: 1, _id: 1 }).limit(1).toArray(),
     ]);
@@ -1300,8 +1298,8 @@ apiRoute(app, registry, {
       total,
       limit,
       cursors: {
-        next: hasMoreAfter.length > 0 ? encodeCursor(lastCursorVal) : null,
-        prev: hasMoreBefore.length > 0 ? encodeCursor(firstCursorVal) : null,
+        next: hasMoreAfter.length > 0 ? encodeFlatCursor(lastCreatedAt, lastId) : null,
+        prev: hasMoreBefore.length > 0 ? encodeFlatCursor(firstCreatedAt, firstId) : null,
       },
     });
   },

@@ -5,6 +5,20 @@ import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, 
 
 const BASE = "/api/v1";
 
+/** Encode a query-string value, escaping only chars that break URL parsing. */
+function encodeQsValue(v: string): string {
+  return v.replace(/[%&=+#\s]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
+}
+
+/** Build a query string from non-undefined params. */
+function qs(params: Record<string, string | undefined>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v != null) parts.push(`${k}=${encodeQsValue(v)}`);
+  }
+  return parts.length ? `?${parts.join("&")}` : "";
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -21,34 +35,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   /** List runs with cursor-based pagination */
   listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; limit?: number; after?: string; before?: string }): Promise<CursorPaginatedResponse<Run>> => {
-    const params = new URLSearchParams();
-    if (opts?.worker) params.set("worker", opts.worker);
-    if (opts?.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
-    if (opts?.status) params.set("status", opts.status);
-    if (opts?.outcome) params.set("outcome", opts.outcome);
-    if (opts?.criteria) params.set("criteria", opts.criteria);
-    if (opts?.submissionId) params.set("submissionId", opts.submissionId);
-    if (opts?.limit) params.set("limit", String(opts.limit));
-    if (opts?.after) params.set("after", opts.after);
-    if (opts?.before) params.set("before", opts.before);
-    const qs = params.toString();
-    return request(`/requests${qs ? `?${qs}` : ""}`);
+    return request(`/requests${qs({
+      worker: opts?.worker,
+      taskPromptId: opts?.taskPromptId,
+      status: opts?.status,
+      outcome: opts?.outcome,
+      criteria: opts?.criteria,
+      submissionId: opts?.submissionId,
+      limit: opts?.limit ? String(opts.limit) : undefined,
+      after: opts?.after,
+      before: opts?.before,
+    })}`);
   },
 
   /** List runs grouped by task or submissionId, with cursor-based pagination */
   listRunGroups: (opts: { groupBy: "task" | "submissionId"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; limit?: number; after?: string; before?: string }): Promise<CursorPaginatedResponse<RunGroup>> => {
-    const params = new URLSearchParams();
-    params.set("groupBy", opts.groupBy);
-    if (opts.worker) params.set("worker", opts.worker);
-    if (opts.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
-    if (opts.status) params.set("status", opts.status);
-    if (opts.outcome) params.set("outcome", opts.outcome);
-    if (opts.criteria) params.set("criteria", opts.criteria);
-    if (opts.submissionId) params.set("submissionId", opts.submissionId);
-    if (opts.limit) params.set("limit", String(opts.limit));
-    if (opts.after) params.set("after", opts.after);
-    if (opts.before) params.set("before", opts.before);
-    return request(`/requests?${params.toString()}`);
+    return request(`/requests${qs({
+      groupBy: opts.groupBy,
+      worker: opts.worker,
+      taskPromptId: opts.taskPromptId,
+      status: opts.status,
+      outcome: opts.outcome,
+      criteria: opts.criteria,
+      submissionId: opts.submissionId,
+      limit: opts.limit ? String(opts.limit) : undefined,
+      after: opts.after,
+      before: opts.before,
+    })}`);
   },
 
   /** Get a single run by ID */

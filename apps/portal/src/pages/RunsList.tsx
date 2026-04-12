@@ -31,6 +31,7 @@ export function RunsList() {
   const taskPromptId = searchParams.get("taskPromptId") ?? undefined;
   const criteriaState = searchParams.get("criteria") ?? undefined;
   const submissionId = searchParams.get("submissionId") ?? undefined;
+  const limit = searchParams.get("limit") ? Number(searchParams.get("limit")) : undefined;
   const [workerFilter, setWorkerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
@@ -56,7 +57,7 @@ export function RunsList() {
   const effectiveOutcome = outcomeFilter !== "all" ? outcomeFilter : undefined;
 
   const { data: runsResponse, isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection],
+    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId: effectiveTaskPromptId,
@@ -64,6 +65,7 @@ export function RunsList() {
       outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      limit: limit,
       after: cursorDirection === "after" ? cursor : undefined,
       before: cursorDirection === "before" ? cursor : undefined,
     }),
@@ -76,7 +78,7 @@ export function RunsList() {
 
   // Fetch server-side groups when groupBy is active
   const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
-    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection],
+    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
     queryFn: () => api.listRunGroups({
       groupBy: groupBy as "task" | "submissionId",
       worker: workerFilter === "all" ? undefined : workerFilter,
@@ -85,6 +87,7 @@ export function RunsList() {
       outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      limit: limit,
       after: cursorDirection === "after" ? cursor : undefined,
       before: cursorDirection === "before" ? cursor : undefined,
     }),
