@@ -73,7 +73,6 @@ export function RunsList() {
     refetchInterval: 10_000,
   });
   const runs = runsResponse?.data ?? [];
-  const runsTotal = runsResponse?.total ?? 0;
   const runsCursors = runsResponse?.cursors ?? { next: null, prev: null };
 
   // Fetch server-side groups when groupBy is active
@@ -95,7 +94,6 @@ export function RunsList() {
     refetchInterval: 10_000,
   });
   const serverGroups = groupsResponse?.data ?? [];
-  const groupsTotal = groupsResponse?.total ?? 0;
   const groupsCursors = groupsResponse?.cursors ?? { next: null, prev: null };
 
   // Fetch MCP servers for the resubmit dialog
@@ -361,8 +359,8 @@ export function RunsList() {
         {(isRefetching || isGroupsRefetching) && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
         <span className="text-sm text-muted-foreground">
           {groupBy !== "none"
-            ? `${runGroups.length} of ${groupsTotal} group${groupsTotal !== 1 ? "s" : ""}`
-            : `${filteredRuns.length} of ${runsTotal} run${runsTotal !== 1 ? "s" : ""}`}
+            ? `${runGroups.length} group${runGroups.length !== 1 ? "s" : ""}`
+            : `${filteredRuns.length} run${filteredRuns.length !== 1 ? "s" : ""}`}
         </span>
       </div>
 

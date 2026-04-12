@@ -1146,33 +1146,23 @@ apiRoute(app, registry, {
         keyPipeline.push({ $match: { _id: { $lt: beforeKey } } });
       }
 
-      const countPipeline: Record<string, unknown>[] = [
-        { $match: filter },
-        { $group: { _id: groupByAggField } },
-        { $count: "count" },
-      ];
-
       // For backward: sort descending, take limit, then reverse
       if (beforeKey !== undefined) {
         keyPipeline.push({ $sort: { _id: -1 } });
       }
       keyPipeline.push({ $limit: limit });
 
-      const [keyResults, countResults] = await Promise.all([
-        collection.aggregate(keyPipeline).toArray(),
-        collection.aggregate(countPipeline).toArray(),
-      ]);
+      const keyResults = await collection.aggregate(keyPipeline).toArray();
 
       // Reverse results for backward pagination
       if (beforeKey !== undefined) {
         keyResults.reverse();
       }
 
-      const total = countResults[0]?.count ?? 0;
       const pageKeys: string[] = keyResults.map((k) => k._id as string);
 
       if (pageKeys.length === 0) {
-        res.json({ data: [], total, limit, cursors: { next: null, prev: null } });
+        res.json({ data: [], limit, cursors: { next: null, prev: null } });
         return;
       }
 
@@ -1206,7 +1196,6 @@ apiRoute(app, registry, {
 
       res.json({
         data: groups,
-        total,
         limit,
         cursors: {
           next: hasMoreAfter.length > 0 ? encodeCursor({ [groupByField]: lastKey }) : null,
@@ -1251,10 +1240,7 @@ apiRoute(app, registry, {
       ];
     }
 
-    const [resources, total] = await Promise.all([
-      collection.find(cursorFilter).sort(sort).limit(limit).toArray(),
-      collection.countDocuments(filter),
-    ]);
+    const resources = await collection.find(cursorFilter).sort(sort).limit(limit).toArray();
 
     if (needsReverse) {
       resources.reverse();
@@ -1263,7 +1249,7 @@ apiRoute(app, registry, {
     const data = resources.map((r) => ({ ...r, id: r._id }));
 
     if (data.length === 0) {
-      res.json({ data: [], total, limit, cursors: { next: null, prev: null } });
+      res.json({ data: [], limit, cursors: { next: null, prev: null } });
       return;
     }
 
@@ -1295,7 +1281,6 @@ apiRoute(app, registry, {
 
     res.json({
       data,
-      total,
       limit,
       cursors: {
         next: hasMoreAfter.length > 0 ? encodeCursor({ createdAt: lastCreatedAt, id: lastId }) : null,

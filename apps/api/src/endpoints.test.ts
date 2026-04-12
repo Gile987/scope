@@ -394,7 +394,6 @@ describe("API Endpoints", () => {
       const res = await request(app).get("/api/v1/requests");
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("data");
-      expect(res.body).toHaveProperty("total");
       expect(res.body).toHaveProperty("limit");
       expect(res.body).toHaveProperty("cursors");
       expect(Array.isArray(res.body.data)).toBe(true);
@@ -405,10 +404,9 @@ describe("API Endpoints", () => {
       const groupedDocs = [
         { key: "tp-1", label: "Build a calculator", aggregates: { count: 3, turns: { min: 1, max: 3, mean: 2, stdDev: 0.8 }, duration: null, promptTokens: null, completionTokens: null }, uniform: { workerType: "coder-acp-copilot" } },
       ];
-      // aggregate is called multiple times: key pipeline, count pipeline, phase2, hasMoreAfter, hasMoreBefore
+      // aggregate is called multiple times: key pipeline, phase2, hasMoreAfter, hasMoreBefore
       (mocks.collection.aggregate as any)
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "tp-1" }]) }) // keys
-        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ count: 1 }]) }) // count
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue(groupedDocs) }) // phase2
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }) // hasMoreAfter
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // hasMoreBefore
@@ -429,7 +427,6 @@ describe("API Endpoints", () => {
       ];
       (mocks.collection.aggregate as any)
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "sub-1" }]) })
-        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ count: 1 }]) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue(groupedDocs) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) });
@@ -441,8 +438,7 @@ describe("API Endpoints", () => {
 
     it("calls aggregate pipeline when groupBy is provided", async () => {
       (mocks.collection.aggregate as any)
-        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }) // keys (empty)
-        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ count: 0 }]) }); // count
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // keys (empty)
 
       await request(app).get("/api/v1/requests?groupBy=task");
       expect(mocks.collection.aggregate).toHaveBeenCalled();

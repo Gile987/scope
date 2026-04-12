@@ -199,7 +199,6 @@ export const CursorsSchema = z
 export const PaginatedRunsResponseSchema = z
   .object({
     data: z.array(RequestResponseSchema),
-    total: z.number(),
     limit: z.number(),
     cursors: CursorsSchema,
   })
@@ -208,7 +207,6 @@ export const PaginatedRunsResponseSchema = z
 export const PaginatedRunGroupsResponseSchema = z
   .object({
     data: z.array(RunGroupSchema),
-    total: z.number(),
     limit: z.number(),
     cursors: CursorsSchema,
   })
