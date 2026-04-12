@@ -11,7 +11,7 @@ interface VersionInfo {
 
 interface ReadinessInfo {
   status: string;
-  migrations: { ready: boolean; applied: string[]; pending: string[] };
+  migrations: { ready: boolean; applied: string[]; pending: string[]; totalApplied: number };
 }
 
 export function VersionFooter() {
@@ -70,7 +70,7 @@ export function VersionFooter() {
         ) : null}
         {readiness && (
           <span>
-            DB: <code className="font-mono">v{readiness.migrations.applied.length}</code>
+            DB: <code className="font-mono">v{readiness.migrations.totalApplied}</code>
             {readiness.migrations.pending.length > 0 && (
               <span className="ml-1 text-yellow-600 dark:text-yellow-400">
                 · {readiness.migrations.pending.length} pending
