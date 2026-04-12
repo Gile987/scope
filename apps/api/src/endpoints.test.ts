@@ -389,7 +389,6 @@ describe("API Endpoints", () => {
           }),
         }),
       });
-      (mocks.collection.countDocuments as any).mockResolvedValue(1);
 
       const res = await request(app).get("/api/v1/requests");
       expect(res.status).toBe(200);
@@ -457,7 +456,6 @@ describe("API Endpoints", () => {
           }),
         }),
       });
-      (mocks.collection.countDocuments as any).mockResolvedValue(0);
 
       await request(app).get("/api/v1/requests");
       expect(mocks.collection.aggregate).not.toHaveBeenCalled();
@@ -471,7 +469,6 @@ describe("API Endpoints", () => {
           }),
         }),
       });
-      (mocks.collection.countDocuments as any).mockResolvedValue(0);
 
       await request(app).get("/api/v1/requests?status=done");
       expect(mocks.collection.find).toHaveBeenCalledWith(
@@ -487,7 +484,6 @@ describe("API Endpoints", () => {
           }),
         }),
       });
-      (mocks.collection.countDocuments as any).mockResolvedValue(0);
 
       await request(app).get("/api/v1/requests?outcome=succeeded");
       expect(mocks.collection.find).toHaveBeenCalledWith(
@@ -517,7 +513,6 @@ describe("API Endpoints", () => {
           }),
         }),
       });
-      (mocks.collection.countDocuments as any).mockResolvedValue(0);
 
       await request(app).get("/api/v1/requests?status=processing&outcome=succeeded&worker=coder-acp-copilot");
       expect(mocks.collection.find).toHaveBeenCalledWith(
