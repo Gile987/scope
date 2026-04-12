@@ -94,7 +94,7 @@ import {
   PaginatedRunsResponseSchema,
   PaginatedRunGroupsResponseSchema,
 } from "shared";
-import { encodeFlatCursor, decodeFlatCursor, encodeGroupCursor, decodeGroupCursor, type FlatCursor } from "shared";
+import { encodeCursor, decodeCursor } from "shared";
 import { buildGroupingPipeline } from "./grouping.js";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
@@ -1120,16 +1120,16 @@ apiRoute(app, registry, {
       let beforeKey: string | undefined;
       if (afterParam) {
         try {
-          const parsed = decodeGroupCursor(afterParam);
-          if (parsed.field !== groupByField) { res.status(400).json({ error: `Invalid cursor: expected '${groupByField}' field` }); return; }
-          afterKey = parsed.value;
+          const parsed = decodeCursor(afterParam);
+          if (!(groupByField in parsed)) { res.status(400).json({ error: `Invalid cursor: expected '${groupByField}' field` }); return; }
+          afterKey = parsed[groupByField];
         } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
       }
       if (beforeParam) {
         try {
-          const parsed = decodeGroupCursor(beforeParam);
-          if (parsed.field !== groupByField) { res.status(400).json({ error: `Invalid cursor: expected '${groupByField}' field` }); return; }
-          beforeKey = parsed.value;
+          const parsed = decodeCursor(beforeParam);
+          if (!(groupByField in parsed)) { res.status(400).json({ error: `Invalid cursor: expected '${groupByField}' field` }); return; }
+          beforeKey = parsed[groupByField];
         } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
       }
 
@@ -1209,24 +1209,24 @@ apiRoute(app, registry, {
         total,
         limit,
         cursors: {
-          next: hasMoreAfter.length > 0 ? encodeGroupCursor(groupByField, lastKey) : null,
-          prev: hasMoreBefore.length > 0 ? encodeGroupCursor(groupByField, firstKey) : null,
+          next: hasMoreAfter.length > 0 ? encodeCursor({ [groupByField]: lastKey }) : null,
+          prev: hasMoreBefore.length > 0 ? encodeCursor({ [groupByField]: firstKey }) : null,
         },
       });
       return;
     }
 
     // Flat mode: paginated runs with cursor on { createdAt, _id }
-    let afterCursor: FlatCursor | undefined;
-    let beforeCursor: FlatCursor | undefined;
+    let afterCursor: Record<string, string> | undefined;
+    let beforeCursor: Record<string, string> | undefined;
     if (afterParam) {
       try {
-        afterCursor = decodeFlatCursor(afterParam);
+        afterCursor = decodeCursor(afterParam);
       } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
     }
     if (beforeParam) {
       try {
-        beforeCursor = decodeFlatCursor(beforeParam);
+        beforeCursor = decodeCursor(beforeParam);
       } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
     }
 
@@ -1298,8 +1298,8 @@ apiRoute(app, registry, {
       total,
       limit,
       cursors: {
-        next: hasMoreAfter.length > 0 ? encodeFlatCursor(lastCreatedAt, lastId) : null,
-        prev: hasMoreBefore.length > 0 ? encodeFlatCursor(firstCreatedAt, firstId) : null,
+        next: hasMoreAfter.length > 0 ? encodeCursor({ createdAt: lastCreatedAt, id: lastId }) : null,
+        prev: hasMoreBefore.length > 0 ? encodeCursor({ createdAt: firstCreatedAt, id: firstId }) : null,
       },
     });
   },

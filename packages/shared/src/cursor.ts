@@ -2,53 +2,33 @@
 // Licensed under the MIT License.
 
 /**
- * Cursor encoding/decoding for cursor-based pagination.
+ * Generic cursor encoding/decoding for cursor-based pagination.
  *
- * Human-readable composite format (uses `~` as key-value separator
- * because `:` appears in ISO timestamps):
- *   Flat mode:  "createdAt~<ISO>|id~<_id>"
- *   Grouped:    "<fieldName>~<value>"  e.g. "taskPromptId~tp-1" or "submissionId~sub-1"
+ * Format: "key~value" pairs joined by "|"
+ *   Single field:  "taskPromptId~tp-1"
+ *   Multi-field:   "createdAt~2025-01-15T10:00:00.000Z|id~abc123"
+ *
+ * Uses `~` as key-value separator (`:` appears in ISO timestamps)
+ * and `|` as pair separator.
  */
 
-const PIPE = "|";
-const SEP = "~";
+const PAIR_SEP = "|";
+const KV_SEP = "~";
 
-/** Flat cursor — position in the createdAt + _id sort space */
-export interface FlatCursor {
-  createdAt: string; // ISO string
-  id: string;        // _id
+/** Encode a cursor from a key-value record. */
+export function encodeCursor(fields: Record<string, string>): string {
+  return Object.entries(fields)
+    .map(([k, v]) => `${k}${KV_SEP}${v}`)
+    .join(PAIR_SEP);
 }
 
-/** Encode a flat cursor: "createdAt~<ISO>|id~<_id>" */
-export function encodeFlatCursor(createdAt: string, id: string): string {
-  return `createdAt${SEP}${createdAt}${PIPE}id${SEP}${id}`;
-}
-
-/** Decode a flat cursor string into its components */
-export function decodeFlatCursor(encoded: string): FlatCursor {
-  const parts = encoded.split(PIPE);
-  if (parts.length !== 2) throw new Error("Invalid flat cursor: expected 2 parts");
-  const createdAt = extractValue(parts[0], "createdAt");
-  const id = extractValue(parts[1], "id");
-  return { createdAt, id };
-}
-
-/** Encode a group cursor: "<fieldName>~<value>" */
-export function encodeGroupCursor(fieldName: string, value: string): string {
-  return `${fieldName}${SEP}${value}`;
-}
-
-/** Decode a group cursor string into field name and value */
-export function decodeGroupCursor(encoded: string): { field: string; value: string } {
-  const idx = encoded.indexOf(SEP);
-  if (idx < 1) throw new Error("Invalid group cursor: missing '~'");
-  return { field: encoded.slice(0, idx), value: encoded.slice(idx + 1) };
-}
-
-function extractValue(part: string, expectedKey: string): string {
-  const idx = part.indexOf(SEP);
-  if (idx < 1) throw new Error(`Invalid cursor part: missing '~'`);
-  const key = part.slice(0, idx);
-  if (key !== expectedKey) throw new Error(`Invalid cursor: expected '${expectedKey}', got '${key}'`);
-  return part.slice(idx + 1);
+/** Decode a cursor string into a key-value record. */
+export function decodeCursor(encoded: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const part of encoded.split(PAIR_SEP)) {
+    const idx = part.indexOf(KV_SEP);
+    if (idx < 1) throw new Error(`Invalid cursor: missing '~' in segment '${part}'`);
+    result[part.slice(0, idx)] = part.slice(idx + 1);
+  }
+  return result;
 }
