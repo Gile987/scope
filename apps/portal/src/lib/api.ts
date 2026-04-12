@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, RunGroup } from "@/types";
 
 const BASE = "/api/v1";
 
@@ -19,15 +19,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  /** List all runs, optionally filtered by worker, task prompt, and/or MDP criteria state */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string; criteria?: string; submissionId?: string }): Promise<Run[]> => {
+  /** List all runs, optionally filtered by worker, task prompt, status, outcome, and/or MDP criteria state */
+  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string }): Promise<Run[]> => {
     const params = new URLSearchParams();
     if (opts?.worker) params.set("worker", opts.worker);
     if (opts?.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.outcome) params.set("outcome", opts.outcome);
     if (opts?.criteria) params.set("criteria", opts.criteria);
     if (opts?.submissionId) params.set("submissionId", opts.submissionId);
     const qs = params.toString();
     return request(`/requests${qs ? `?${qs}` : ""}`);
+  },
+
+  /** List runs grouped by task or submissionId, with server-computed aggregates */
+  listRunGroups: (opts: { groupBy: "task" | "submissionId"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string }): Promise<RunGroup[]> => {
+    const params = new URLSearchParams();
+    params.set("groupBy", opts.groupBy);
+    if (opts.worker) params.set("worker", opts.worker);
+    if (opts.taskPromptId) params.set("taskPromptId", opts.taskPromptId);
+    if (opts.status) params.set("status", opts.status);
+    if (opts.outcome) params.set("outcome", opts.outcome);
+    if (opts.criteria) params.set("criteria", opts.criteria);
+    if (opts.submissionId) params.set("submissionId", opts.submissionId);
+    return request(`/requests?${params.toString()}`);
   },
 
   /** Get a single run by ID */

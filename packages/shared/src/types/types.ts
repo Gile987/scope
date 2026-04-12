@@ -241,6 +241,48 @@ export interface QueueProcessorConfig extends BaseQueueProcessorConfig {
 
 // --- Enhanced Criteria System types ---
 
+// --- Runs grouping types (shared between API and portal) ---
+
+export type GroupByKey = "none" | "task" | "submissionId";
+
+export interface AggregateStats {
+  min: number;
+  max: number;
+  mean: number;
+  stdDev: number;
+}
+
+export interface GroupUniformValues {
+  workerType?: string;
+  model?: string;
+  agentVersion?: string;
+  platform?: string;
+  mcpServers?: string[];
+  skillRevisions?: string[];
+  extensions?: string[];
+  status?: "pending" | "processing" | "done";
+  submissionId?: string;
+  task?: string;
+}
+
+export interface GroupAggregates {
+  count: number;
+  turns: AggregateStats | null;
+  duration: AggregateStats | null;
+  promptTokens: AggregateStats | null;
+  completionTokens: AggregateStats | null;
+  statusCounts: Record<string, number>;
+  outcomeCounts: Record<string, number>;
+}
+
+export interface RunGroup {
+  key: string;
+  label: string;
+  runIds: string[];
+  aggregates: GroupAggregates;
+  uniform: GroupUniformValues;
+}
+
 // Criteria definition (loaded from config/criteria/*.yaml for v2 scenarios)
 export interface CriteriaConfig {
   id: string;

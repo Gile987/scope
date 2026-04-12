@@ -393,6 +393,117 @@ describe("API Endpoints", () => {
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body[0]).toHaveProperty("id", "r1");
     });
+
+    it("returns grouped results when groupBy=task", async () => {
+      const groupedDocs = [
+        { key: "tp-1", label: "Build a calculator", aggregates: { count: 3, turns: { min: 1, max: 3, mean: 2, stdDev: 0.8 }, duration: null, promptTokens: null, completionTokens: null }, uniform: { workerType: "coder-acp-copilot" } },
+      ];
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue(groupedDocs),
+      });
+
+      const res = await request(app).get("/api/v1/requests?groupBy=task");
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body[0]).toHaveProperty("key", "tp-1");
+      expect(res.body[0]).toHaveProperty("aggregates");
+      expect(res.body[0].aggregates).toHaveProperty("count", 3);
+      expect(res.body[0]).toHaveProperty("uniform");
+    });
+
+    it("returns grouped results when groupBy=submissionId", async () => {
+      const groupedDocs = [
+        { key: "sub-1", label: "sub-1", aggregates: { count: 2, turns: null, duration: null, promptTokens: null, completionTokens: null }, uniform: {} },
+      ];
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue(groupedDocs),
+      });
+
+      const res = await request(app).get("/api/v1/requests?groupBy=submissionId");
+      expect(res.status).toBe(200);
+      expect(res.body[0]).toHaveProperty("key", "sub-1");
+    });
+
+    it("calls aggregate pipeline when groupBy is provided", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get("/api/v1/requests?groupBy=task");
+      expect(mocks.collection.aggregate).toHaveBeenCalled();
+      const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
+      expect(pipeline[0]).toHaveProperty("$match");
+      // buildGroupingPipeline adds 4 stages ($addFields, $group, $project, $sort)
+      expect(pipeline).toHaveLength(5); // $match + 4 from buildGroupingPipeline
+    });
+
+    it("does not call aggregate when groupBy is absent", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests");
+      expect(mocks.collection.aggregate).not.toHaveBeenCalled();
+    });
+
+    it("passes status filter to find query", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?status=done");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "done" }),
+      );
+    });
+
+    it("passes outcome filter to find query", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?outcome=succeeded");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "succeeded" }),
+      );
+    });
+
+    it("passes status and outcome filters to aggregate pipeline $match", async () => {
+      (mocks.collection.aggregate as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get("/api/v1/requests?groupBy=task&status=done&outcome=failed");
+      const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
+      expect(pipeline[0]).toEqual(
+        expect.objectContaining({
+          $match: expect.objectContaining({ status: "done", outcome: "failed" }),
+        }),
+      );
+    });
+
+    it("combines status, outcome, and worker filters", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?status=processing&outcome=succeeded&worker=coder-acp-copilot");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "processing",
+          outcome: "succeeded",
+          workerType: "coder-acp-copilot",
+        }),
+      );
+    });
   });
 
   describe("GET /api/v1/requests/:id", () => {

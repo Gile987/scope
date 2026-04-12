@@ -90,7 +90,9 @@ import {
   CreateRequestInputSchema,
   ListRequestsQuerySchema,
   BulkResubmitInputSchema,
+  RunGroupSchema,
 } from "shared";
+import { buildGroupingPipeline } from "./grouping.js";
 import { checkMigrations } from "db-migrations/check-migrations";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
@@ -1036,19 +1038,23 @@ apiRoute(app, registry, {
 });
 
 // List all requests (excludes soft-deleted by default)
+// When groupBy is provided, returns RunGroup[] instead of flat RequestDocument[]
 apiRoute(app, registry, {
   method: "get",
   path: "/api/v1/requests",
   tags: ["Requests"],
   summary: "List requests",
   query: ListRequestsQuerySchema,
-  response: z.array(RequestResponseSchema),
+  response: z.union([z.array(RequestResponseSchema), z.array(RunGroupSchema)]),
   handler: async (req, res) => {
     const workerFilter = req.query.worker as string;
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
     const submissionIdFilter = req.query.submissionId as string;
+    const statusFilter = req.query.status as string;
+    const outcomeFilter = req.query.outcome as string;
     const includeDeleted = req.query.includeDeleted === "true";
+    const groupByParam = req.query.groupBy as "task" | "submissionId" | undefined;
     
     const filter: Record<string, unknown> = {};
     if (workerFilter && VALID_WORKERS.includes(workerFilter as WorkerType)) {
@@ -1056,6 +1062,12 @@ apiRoute(app, registry, {
     }
     if (taskPromptIdFilter) {
       filter.taskPromptId = taskPromptIdFilter;
+    }
+    if (statusFilter) {
+      filter.status = statusFilter;
+    }
+    if (outcomeFilter) {
+      filter.outcome = outcomeFilter;
     }
     if (submissionIdFilter) {
       // Prefix-based matching: allow filtering by partial submission ID
@@ -1084,6 +1096,17 @@ apiRoute(app, registry, {
           },
         }));
       }
+    }
+
+    // Grouped mode: return RunGroup[] via aggregation pipeline
+    if (groupByParam) {
+      const pipeline = [
+        { $match: filter },
+        ...buildGroupingPipeline(groupByParam),
+      ];
+      const groups = await collection.aggregate(pipeline).toArray();
+      res.json(groups);
+      return;
     }
 
     const resources = await collection

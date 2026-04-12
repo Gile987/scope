@@ -136,10 +136,57 @@ export const ListRequestsQuerySchema = z
     submissionId: z.string().optional(),
     status: RequestStatusSchema.optional(),
     outcome: RequestOutcomeSchema.optional(),
+    groupBy: z.enum(["task", "submissionId"]).optional(),
     page: z.coerce.number().int().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
   })
   .openapi("ListRequestsQuery");
+
+export const AggregateStatsSchema = z
+  .object({
+    min: z.number(),
+    max: z.number(),
+    mean: z.number(),
+    stdDev: z.number(),
+  })
+  .openapi("AggregateStats");
+
+export const GroupUniformValuesSchema = z
+  .object({
+    workerType: z.string().optional(),
+    model: z.string().optional(),
+    agentVersion: z.string().optional(),
+    platform: z.string().optional(),
+    mcpServers: z.array(z.string()).optional(),
+    skillRevisions: z.array(z.string()).optional(),
+    extensions: z.array(z.string()).optional(),
+    status: RequestStatusSchema.optional(),
+    submissionId: z.string().optional(),
+    task: z.string().optional(),
+  })
+  .openapi("GroupUniformValues");
+
+export const GroupAggregatesSchema = z
+  .object({
+    count: z.number(),
+    turns: AggregateStatsSchema.nullable(),
+    duration: AggregateStatsSchema.nullable(),
+    promptTokens: AggregateStatsSchema.nullable(),
+    completionTokens: AggregateStatsSchema.nullable(),
+    statusCounts: z.record(z.string(), z.number()),
+    outcomeCounts: z.record(z.string(), z.number()),
+  })
+  .openapi("GroupAggregates");
+
+export const RunGroupSchema = z
+  .object({
+    key: z.string(),
+    label: z.string(),
+    runIds: z.array(z.string()),
+    aggregates: GroupAggregatesSchema,
+    uniform: GroupUniformValuesSchema,
+  })
+  .openapi("RunGroup");
 
 export const BulkResubmitInputSchema = z
   .object({
