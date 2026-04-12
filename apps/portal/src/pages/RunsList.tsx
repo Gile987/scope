@@ -74,7 +74,6 @@ export function RunsList() {
   });
   const runs = runsResponse?.data ?? [];
   const runsCursors = runsResponse?.cursors ?? { next: null, prev: null };
-  const estimatedTotal = (groupBy !== "none" ? groupsResponse : runsResponse)?.estimatedTotal;
 
   // Fetch server-side groups when groupBy is active
   const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
@@ -96,6 +95,7 @@ export function RunsList() {
   });
   const serverGroups = groupsResponse?.data ?? [];
   const groupsCursors = groupsResponse?.cursors ?? { next: null, prev: null };
+  const estimatedTotal = (groupBy !== "none" ? groupsResponse : runsResponse)?.estimatedTotal;
 
   // Fetch MCP servers for the resubmit dialog
   const { data: mcpServers = [] } = useQuery<McpServerDocument[]>({
