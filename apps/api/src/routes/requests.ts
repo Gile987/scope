@@ -80,7 +80,7 @@ apiRoute(ctx.app, ctx.registry, {
   successStatus: 201,
   handler: async (req, res) => {
     const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId } = req.body;
-    const worker = req.query.worker as string;
+    let worker = req.query.worker as string;
 
     // --- Profile resolution: if profileId is provided, resolve the version and use its values ---
     let profileId: string | undefined;
@@ -105,7 +105,51 @@ apiRoute(ctx.app, ctx.registry, {
       }
       profileId = profile._id;
       profileVersionId = profileVersion._id;
+
+      // Reject requests where client-supplied fields conflict with profile values.
+      // Clients should either omit these fields or send values that match the profile.
+      const conflicts: string[] = [];
+      if (worker && worker !== profileVersion.workerType) {
+        conflicts.push(`worker: sent "${worker}", profile requires "${profileVersion.workerType}"`);
+      }
+      if (requestedModel && requestedModel !== profileVersion.model) {
+        conflicts.push(`model: sent "${requestedModel}", profile requires "${profileVersion.model}"`);
+      }
+      if (mcpServerSlugs !== undefined) {
+        const profileMcp = profileVersion.mcpServers ?? [];
+        if (JSON.stringify([...mcpServerSlugs].sort()) !== JSON.stringify([...profileMcp].sort())) {
+          conflicts.push(`mcpServers: sent ${JSON.stringify(mcpServerSlugs)}, profile requires ${JSON.stringify(profileMcp)}`);
+        }
+      }
+      if (skillSlugs !== undefined) {
+        const profileSkills = profileVersion.skillRevisions ?? [];
+        if (JSON.stringify([...skillSlugs].sort()) !== JSON.stringify([...profileSkills].sort())) {
+          conflicts.push(`skills: sent ${JSON.stringify(skillSlugs)}, profile requires ${JSON.stringify(profileSkills)}`);
+        }
+      }
+      if (extensionIds !== undefined) {
+        const profileExts = profileVersion.extensions ?? [];
+        if (JSON.stringify([...extensionIds].sort()) !== JSON.stringify([...profileExts].sort())) {
+          conflicts.push(`extensions: sent ${JSON.stringify(extensionIds)}, profile requires ${JSON.stringify(profileExts)}`);
+        }
+      }
+      if (conflicts.length > 0) {
+        res.status(400).json({
+          error: `Profile "${profileId}" controls these fields. Either omit them or match the profile values.`,
+          conflicts,
+        });
+        return;
+      }
+
+      // Profile fields take precedence
+      worker = profileVersion.workerType;
     }
+
+    // Effective values: profile overrides client inputs for controlled fields
+    const effectiveModel = profileVersion ? profileVersion.model : requestedModel;
+    const effectiveMcpServers = profileVersion ? (profileVersion.mcpServers ?? undefined) : mcpServerSlugs;
+    const effectiveSkills = profileVersion ? (profileVersion.skillRevisions ?? undefined) : skillSlugs;
+    const effectiveExtensions = profileVersion ? (profileVersion.extensions ?? undefined) : extensionIds;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
       res.status(400).json({ error: "scenario.task is required and must be a string" });
@@ -160,7 +204,7 @@ apiRoute(ctx.app, ctx.registry, {
     const workerType = worker as WorkerType;
 
     // Resolve model: validate against agent's supportedModels if available
-    let model: string | undefined = requestedModel;
+    let model: string | undefined = effectiveModel;
     const agentDoc = await ctx.agentCollection.findOne({ _id: workerType, deletedAt: { $exists: false } });
     if (agentDoc && agentDoc.supportedModels.length > 0) {
       if (model && !agentDoc.supportedModels.includes(model)) {
@@ -200,34 +244,34 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Validate MCP server slugs if provided
     let validatedMcpServers: string[] | undefined;
-    if (mcpServerSlugs !== undefined) {
-      if (!Array.isArray(mcpServerSlugs) || !mcpServerSlugs.every((s: unknown) => typeof s === "string")) {
+    if (effectiveMcpServers !== undefined) {
+      if (!Array.isArray(effectiveMcpServers) || !effectiveMcpServers.every((s: unknown) => typeof s === "string")) {
         res.status(400).json({ error: "mcpServers must be an array of strings (MCP server slugs)" });
         return;
       }
-      if (mcpServerSlugs.length > 0) {
+      if (effectiveMcpServers.length > 0) {
         const existingServers = await ctx.mcpServerCollection
-          .find({ _id: { $in: mcpServerSlugs }, deletedAt: { $exists: false } })
+          .find({ _id: { $in: effectiveMcpServers }, deletedAt: { $exists: false } })
           .toArray();
         const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
-        const missingSlugs = mcpServerSlugs.filter((slug: string) => !existingSlugs.has(slug));
+        const missingSlugs = effectiveMcpServers.filter((slug: string) => !existingSlugs.has(slug));
         if (missingSlugs.length > 0) {
           res.status(400).json({ error: `MCP server(s) not found: ${missingSlugs.join(", ")}` });
           return;
         }
-        validatedMcpServers = mcpServerSlugs;
+        validatedMcpServers = effectiveMcpServers;
       }
     }
 
     // Validate and resolve skill slugs if provided
     let resolvedSkillRevisions: string[] | undefined;
-    if (skillSlugs !== undefined) {
-      if (!Array.isArray(skillSlugs) || !skillSlugs.every((s: unknown) => typeof s === "string")) {
+    if (effectiveSkills !== undefined) {
+      if (!Array.isArray(effectiveSkills) || !effectiveSkills.every((s: unknown) => typeof s === "string")) {
         res.status(400).json({ error: "skills must be an array of strings (skill slugs)" });
         return;
       }
-      if (skillSlugs.length > 0) {
-        const result = await resolveSkillSpecs(skillSlugs, ctx);
+      if (effectiveSkills.length > 0) {
+        const result = await resolveSkillSpecs(effectiveSkills, ctx);
         if (result.error) {
           const status = result.error.startsWith("Failed to resolve") ? 422 : 400;
           res.status(status).json({ error: result.error });
@@ -239,14 +283,14 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Validate extension specs if provided (supports "id" or "id@version" format)
     let validatedExtensions: string[] | undefined;
-    if (extensionIds !== undefined) {
-      if (!Array.isArray(extensionIds) || !extensionIds.every((s: unknown) => typeof s === "string")) {
+    if (effectiveExtensions !== undefined) {
+      if (!Array.isArray(effectiveExtensions) || !effectiveExtensions.every((s: unknown) => typeof s === "string")) {
         res.status(400).json({ error: "extensions must be an array of strings (extension IDs or id@version specs)" });
         return;
       }
-      if (extensionIds.length > 0) {
+      if (effectiveExtensions.length > 0) {
         // Parse specs to extract bare IDs for DB validation
-        const parsedSpecs = extensionIds.map((spec: string) => parseExtensionSpec(spec));
+        const parsedSpecs = effectiveExtensions.map((spec: string) => parseExtensionSpec(spec));
         const bareIds = parsedSpecs.map((s) => s.id);
         const existingExtensions = await ctx.extensionCollection
           .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
