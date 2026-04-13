@@ -969,6 +969,7 @@ export function RunsList() {
                   onToggleSelect={toggleSelect}
                   reportSummaries={reportSummaries}
                   deleteMutation={deleteMutation}
+                  profileNameMap={profileNameMap}
                 />
               ))
             )}
