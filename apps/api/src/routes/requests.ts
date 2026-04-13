@@ -904,6 +904,30 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    // Resolve profile override (once for the entire batch)
+    let overrideProfileId: string | null | undefined = overrides?.profileId;
+    let overrideProfileVersionId: string | undefined;
+    let overrideProfileVersion: ProfileVersionDocument | null = null;
+    if (typeof overrideProfileId === "string") {
+      const profile = await ctx.profileCollection.findOne({
+        _id: overrideProfileId,
+        deletedAt: { $exists: false },
+      });
+      if (!profile) {
+        res.status(404).json({ error: `Profile not found: ${overrideProfileId}` });
+        return;
+      }
+      overrideProfileVersion = await ctx.profileVersionCollection.findOne({
+        profileId: profile._id,
+        version: profile.latestVersion,
+      });
+      if (!overrideProfileVersion) {
+        res.status(404).json({ error: `Profile version not found for profile: ${overrideProfileId}` });
+        return;
+      }
+      overrideProfileVersionId = overrideProfileVersion._id;
+    }
+
     // Fetch original runs
     const originalRuns = await ctx.requestCollection.find(
       { _id: { $in: ids }, deletedAt: { $exists: false } }
@@ -922,13 +946,45 @@ apiRoute(ctx.app, ctx.registry, {
         const requestId = uuidv4();
         newIds.push(requestId);
 
-        // Resolve effective values: override > original > omit
-        const effectiveWorkerType = (overrides?.workerType ?? original.workerType) as WorkerType;
-        const effectiveModel = overrides?.model !== undefined ? overrides.model : original.model;
+        // Determine effective profile for this run
+        // overrideProfileId: undefined = keep original, null = detach, string = use new profile
+        let effectiveProfileId: string | undefined;
+        let effectiveProfileVersionId: string | undefined;
+        let activeProfileVersion: ProfileVersionDocument | null = null;
+        if (overrideProfileId === null) {
+          // Explicitly detached — no profile
+        } else if (typeof overrideProfileId === "string") {
+          effectiveProfileId = overrideProfileId;
+          effectiveProfileVersionId = overrideProfileVersionId;
+          activeProfileVersion = overrideProfileVersion;
+        } else {
+          // undefined — keep from original
+          effectiveProfileId = original.profileId;
+          effectiveProfileVersionId = original.profileVersionId;
+          // If the original had a profile, resolve its version for field overrides
+          if (original.profileId && original.profileVersionId) {
+            activeProfileVersion = await ctx.profileVersionCollection.findOne({ _id: original.profileVersionId });
+          }
+        }
+
+        // When a profile is active, its values take precedence over individual overrides
+        // for the fields it controls: workerType, model, mcpServers, skillRevisions, extensions
+        const effectiveWorkerType = (activeProfileVersion
+          ? activeProfileVersion.workerType
+          : (overrides?.workerType ?? original.workerType)) as WorkerType;
+        const effectiveModel = activeProfileVersion
+          ? activeProfileVersion.model
+          : (overrides?.model !== undefined ? overrides.model : original.model);
         const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
-        const effectiveMcpServers = overrides?.mcpServers !== undefined ? overrides.mcpServers : original.mcpServers;
-        const effectiveSkillRevisions = overrides?.skillRevisions !== undefined ? overrides.skillRevisions : original.skillRevisions;
-        const effectiveExtensions = overrides?.extensions !== undefined ? overrides.extensions : original.extensions;
+        const effectiveMcpServers = activeProfileVersion
+          ? (activeProfileVersion.mcpServers ?? null)
+          : (overrides?.mcpServers !== undefined ? overrides.mcpServers : original.mcpServers);
+        const effectiveSkillRevisions = activeProfileVersion
+          ? (activeProfileVersion.skillRevisions ?? null)
+          : (overrides?.skillRevisions !== undefined ? overrides.skillRevisions : original.skillRevisions);
+        const effectiveExtensions = activeProfileVersion
+          ? (activeProfileVersion.extensions ?? null)
+          : (overrides?.extensions !== undefined ? overrides.extensions : original.extensions);
         // Strip extensions for non-vscode workers (they don't support VS Code extensions)
         const isVscodeWorker = effectiveWorkerType.includes("vscode");
 
@@ -957,8 +1013,8 @@ apiRoute(ctx.app, ctx.registry, {
           ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
           ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
           ...(original.taskPromptId ? { taskPromptId: original.taskPromptId } : {}),
-          ...(original.profileId ? { profileId: original.profileId } : {}),
-          ...(original.profileVersionId ? { profileVersionId: original.profileVersionId } : {}),
+          ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
+          ...(effectiveProfileVersionId ? { profileVersionId: effectiveProfileVersionId } : {}),
           submissionId,
         };
 

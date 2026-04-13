@@ -20,7 +20,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown, ChevronLeft } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown, ChevronLeft, Lock } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
@@ -152,7 +152,7 @@ export function RunsList() {
   // Compute summary of selected runs' values for the resubmit dialog
   const selectedRunsSummary = useMemo(() => {
     const selected = runs.filter((r) => selectedIds.has(r._id));
-    if (selected.length === 0) return { worker: null, model: null, maxIterations: null, mcpServers: null };
+    if (selected.length === 0) return { worker: null, model: null, maxIterations: null, mcpServers: null, profileId: null };
 
     const workers = [...new Set(selected.map((r) => r.workerType))];
     const models = [...new Set(selected.map((r) => r.model ?? ""))];
@@ -163,6 +163,7 @@ export function RunsList() {
     const uniqueSkills = [...new Set(skillSets)];
     const extSets = selected.map((r) => (r.extensions ?? []).sort().join(","));
     const uniqueExts = [...new Set(extSets)];
+    const profileIds = [...new Set(selected.map((r) => r.profileId ?? ""))];
 
     return {
       worker: workers.length === 1 ? workers[0] : null,
@@ -171,17 +172,32 @@ export function RunsList() {
       mcpServers: uniqueMcp.length === 1 ? (selected[0].mcpServers ?? []) : null,
       skillRevisions: uniqueSkills.length === 1 ? (selected[0].skillRevisions ?? []) : null,
       extensions: uniqueExts.length === 1 ? (selected[0].extensions ?? []) : null,
+      profileId: profileIds.length === 1 ? (profileIds[0] || null) : null,
       isMultiWorker: workers.length > 1,
       isMultiModel: models.length > 1,
       isMultiIterations: iterations.length > 1,
       isMultiMcp: uniqueMcp.length > 1,
       isMultiSkills: uniqueSkills.length > 1,
       isMultiExtensions: uniqueExts.length > 1,
+      isMultiProfile: profileIds.length > 1,
     };
   }, [runs, selectedIds]);
 
+  // Determine the active profile for the resubmit dialog
+  // undefined = keep from source, null = detach, string = specific profile
+  const activeProfileId = resubmitOverrides.profileId !== undefined
+    ? resubmitOverrides.profileId
+    : selectedRunsSummary.profileId;
+  const activeProfile = useMemo(
+    () => activeProfileId ? profiles.find((p) => p._id === activeProfileId) ?? null : null,
+    [profiles, activeProfileId],
+  );
+
   // Determine supported models for the effective worker in the resubmit dialog
-  const effectiveWorker = resubmitOverrides.workerType ?? selectedRunsSummary.worker;
+  // When a profile is active, its values take precedence
+  const effectiveWorker = activeProfile
+    ? activeProfile.version.workerType
+    : (resubmitOverrides.workerType ?? selectedRunsSummary.worker);
   const effectiveAgent = useMemo(
     () => activeAgents.find((a) => a._id === effectiveWorker),
     [activeAgents, effectiveWorker],
@@ -535,9 +551,65 @@ export function RunsList() {
                 <div className="border-t pt-4">
                   <p className="text-sm font-medium mb-3">Overrides <span className="text-muted-foreground font-normal">(leave unchanged to copy from source)</span></p>
 
-                  {/* Worker type override */}
+                  {/* Profile override */}
                   <div className="flex items-center gap-4 mb-3">
-                    <Label className="text-sm w-32 shrink-0">Worker</Label>
+                    <Label className="text-sm w-32 shrink-0">Profile</Label>
+                    <Select
+                      value={resubmitOverrides.profileId === null ? "__none__" : resubmitOverrides.profileId ?? "__keep__"}
+                      onValueChange={(v) => setResubmitOverrides((prev) => {
+                        const next = { ...prev };
+                        if (v === "__keep__") {
+                          delete next.profileId;
+                        } else if (v === "__none__") {
+                          next.profileId = null;
+                        } else {
+                          next.profileId = v;
+                        }
+                        // Clear individual overrides for profile-controlled fields when
+                        // switching profiles — profile values take precedence
+                        delete next.workerType;
+                        delete next.model;
+                        delete next.mcpServers;
+                        delete next.skillRevisions;
+                        delete next.extensions;
+                        return next;
+                      })}
+                    >
+                      <SelectTrigger className="w-56">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__keep__">
+                          {selectedRunsSummary.profileId
+                            ? (profileNameMap.get(selectedRunsSummary.profileId) ?? formatId(selectedRunsSummary.profileId))
+                            : selectedRunsSummary.isMultiProfile ? "Mixed (keep each)" : "None"}
+                        </SelectItem>
+                        <SelectItem value="__none__">None (detach profile)</SelectItem>
+                        {profiles.map((p) => (
+                          <SelectItem key={p._id} value={p._id}>
+                            {p.name} <span className="text-muted-foreground">v{p.latestVersion}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {activeProfile && (
+                    <div className="flex items-center gap-2 mb-3 px-1 py-1.5 text-xs text-muted-foreground bg-muted/50 rounded">
+                      <Lock className="h-3 w-3 shrink-0" />
+                      Worker, model, MCP servers, skills, and extensions are controlled by the profile
+                    </div>
+                  )}
+
+                  {/* Worker type override */}
+                  <div className="flex items-center gap-4 mb-3" title={activeProfile ? "Controlled by profile" : undefined}>
+                    <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
+                      {activeProfile && <Lock className="h-3 w-3 text-muted-foreground" />}
+                      Worker
+                    </Label>
+                    {activeProfile ? (
+                      <span className="text-sm text-muted-foreground">{activeProfile.version.workerType}</span>
+                    ) : (
                     <Select
                       value={resubmitOverrides.workerType ?? "__keep__"}
                       onValueChange={(v) => setResubmitOverrides((prev) => {
@@ -569,11 +641,18 @@ export function RunsList() {
                         ))}
                       </SelectContent>
                     </Select>
+                    )}
                   </div>
 
                   {/* Model override */}
-                  <div className="flex items-center gap-4 mb-3">
-                    <Label className="text-sm w-32 shrink-0">Model</Label>
+                  <div className="flex items-center gap-4 mb-3" title={activeProfile ? "Controlled by profile" : undefined}>
+                    <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
+                      {activeProfile && <Lock className="h-3 w-3 text-muted-foreground" />}
+                      Model
+                    </Label>
+                    {activeProfile ? (
+                      <span className="text-sm text-muted-foreground">{activeProfile.version.model}</span>
+                    ) : (
                     <Select
                       value={resubmitOverrides.model === null ? "__clear__" : resubmitOverrides.model ?? "__keep__"}
                       onValueChange={(v) => setResubmitOverrides((prev) => {
@@ -606,6 +685,7 @@ export function RunsList() {
                         )}
                       </SelectContent>
                     </Select>
+                    )}
                   </div>
 
                   {/* Max iterations override */}
@@ -639,6 +719,16 @@ export function RunsList() {
                   </div>
 
                   {/* MCP servers override */}
+                  {activeProfile ? (
+                  <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                    <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                      <Lock className="h-3 w-3 text-muted-foreground" />MCP Servers
+                    </Label>
+                    <span className="text-sm text-muted-foreground">
+                      {activeProfile.version.mcpServers?.join(", ") || "None"}
+                    </span>
+                  </div>
+                  ) : (
                   <div className="flex items-start gap-4">
                     <Label className="text-sm w-32 shrink-0 pt-2">MCP Servers</Label>
                     <div className="flex-1 space-y-1.5">
@@ -702,8 +792,19 @@ export function RunsList() {
                       )}
                     </div>
                   </div>
+                  )}
 
                   {/* Skills override */}
+                  {activeProfile ? (
+                  <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                    <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                      <Lock className="h-3 w-3 text-muted-foreground" />Skills
+                    </Label>
+                    <span className="text-sm text-muted-foreground">
+                      {activeProfile.version.skillRevisions?.map((r) => r.split("@")[0].split("/").pop()).join(", ") || "None"}
+                    </span>
+                  </div>
+                  ) : (
                   <div className="flex items-start gap-4">
                     <Label className="text-sm w-32 shrink-0 pt-2">Skills</Label>
                     <div className="flex-1 space-y-1.5">
@@ -777,9 +878,22 @@ export function RunsList() {
                       })()}
                     </div>
                   </div>
+                  )}
 
                   {/* Extensions override — only for VS Code workers */}
-                  {effectiveWorker?.includes("vscode") && (
+                  {activeProfile ? (
+                    effectiveWorker?.includes("vscode") && (
+                    <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                      <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                        <Lock className="h-3 w-3 text-muted-foreground" />Extensions
+                      </Label>
+                      <span className="text-sm text-muted-foreground">
+                        {activeProfile.version.extensions?.join(", ") || "None"}
+                      </span>
+                    </div>
+                    )
+                  ) : (
+                  effectiveWorker?.includes("vscode") && (
                   <div className="flex items-start gap-4">
                     <Label className="text-sm w-32 shrink-0 pt-2">Extensions</Label>
                     <div className="flex-1 space-y-1.5">
@@ -850,7 +964,7 @@ export function RunsList() {
                       })()}
                     </div>
                   </div>
-                  )}
+                  ))}
                 </div>
               </div>
               <AlertDialogFooter>

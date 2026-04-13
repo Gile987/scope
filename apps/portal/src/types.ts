@@ -322,6 +322,7 @@ export interface MdpResponse {
 
 // Bulk re-submit overrides
 export interface BulkResubmitOverrides {
+  profileId?: string | null;
   workerType?: string;
   model?: string | null;
   maxIterations?: number | null;

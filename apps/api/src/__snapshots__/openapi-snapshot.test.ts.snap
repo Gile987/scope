@@ -252,6 +252,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   "null",
                 ],
               },
+              "profileId": {
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
               "skillRevisions": {
                 "items": {
                   "type": "string",

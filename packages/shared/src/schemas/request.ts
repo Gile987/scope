@@ -224,6 +224,7 @@ export const BulkResubmitInputSchema = z
     count: z.number().int().min(1).max(10).optional().default(1),
     overrides: z
       .object({
+        profileId: z.string().nullable().optional(),
         workerType: z.string().optional(),
         model: z.string().nullable().optional(),
         maxIterations: z.number().nullable().optional(),

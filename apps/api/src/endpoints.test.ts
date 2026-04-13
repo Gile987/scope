@@ -854,5 +854,141 @@ describe("API Endpoints", () => {
       expect(insertCall[0]).toHaveProperty("model", "gpt-4o");
       expect(insertCall[0]).toHaveProperty("maxIterations", 5);
     });
+
+    it("applies profile override: uses profile fields for worker, model, mcpServers, skillRevisions, extensions", async () => {
+      const originalRun = {
+        _id: "run-original",
+        scenario: { task: "Build a form", criteria: ["has_react"] },
+        workerType: "coder-acp-copilot",
+        status: "completed",
+        model: "gpt-4o",
+        createdAt: new Date(),
+        maxIterations: 5,
+      };
+
+      const mockCursor = {
+        toArray: vi.fn().mockResolvedValue([originalRun]),
+        sort: vi.fn().mockReturnThis(),
+        skip: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+      };
+      (mocks.collection.find as any).mockReturnValue(mockCursor);
+
+      // Profile + version mocks
+      (mocks.profileCollection.findOne as any).mockResolvedValue({
+        _id: "profile-1",
+        name: "My Profile",
+        latestVersion: 2,
+      });
+      (mocks.profileVersionCollection.findOne as any).mockResolvedValue({
+        _id: "pv-2",
+        profileId: "profile-1",
+        version: 2,
+        workerType: "coder-vscode-insiders",
+        model: "claude-sonnet-4",
+        mcpServers: ["mcp-a"],
+        skillRevisions: ["skill-a@v1"],
+        extensions: ["ext-a"],
+      });
+
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-vscode-insiders",
+        versions: [
+          { agentVersion: "insiders-0.1.0", queueName: "queue-vscode-insiders", status: "active", createdAt: new Date() },
+        ],
+        supportedModels: ["claude-sonnet-4"],
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-resubmit")
+        .send({
+          ids: ["run-original"],
+          count: 1,
+          overrides: {
+            profileId: "profile-1",
+            model: "should-be-ignored", // profile takes precedence
+            maxIterations: 10, // not controlled by profile
+          },
+        });
+
+      expect(res.status).toBe(201);
+
+      const insertCall = (mocks.collection.insertMany as any).mock.calls[0][0];
+      expect(insertCall).toHaveLength(1);
+      const doc = insertCall[0];
+      // Profile-controlled fields come from profile version
+      expect(doc).toHaveProperty("workerType", "coder-vscode-insiders");
+      expect(doc).toHaveProperty("model", "claude-sonnet-4");
+      expect(doc).toHaveProperty("mcpServers", ["mcp-a"]);
+      expect(doc).toHaveProperty("skillRevisions", ["skill-a@v1"]);
+      expect(doc).toHaveProperty("extensions", ["ext-a"]);
+      expect(doc).toHaveProperty("profileId", "profile-1");
+      expect(doc).toHaveProperty("profileVersionId", "pv-2");
+      // maxIterations is not profile-controlled
+      expect(doc).toHaveProperty("maxIterations", 10);
+    });
+
+    it("detaches profile when profileId override is null", async () => {
+      const originalRun = {
+        _id: "run-original",
+        scenario: { task: "Build a form", criteria: ["has_react"] },
+        workerType: "coder-acp-copilot",
+        status: "completed",
+        model: "gpt-4o",
+        profileId: "old-profile",
+        profileVersionId: "old-pv",
+        createdAt: new Date(),
+        maxIterations: 5,
+      };
+
+      const mockCursor = {
+        toArray: vi.fn().mockResolvedValue([originalRun]),
+        sort: vi.fn().mockReturnThis(),
+        skip: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+      };
+      (mocks.collection.find as any).mockReturnValue(mockCursor);
+
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [
+          { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
+        ],
+        supportedModels: ["gpt-4o"],
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-resubmit")
+        .send({
+          ids: ["run-original"],
+          count: 1,
+          overrides: { profileId: null, model: "claude-sonnet-4" },
+        });
+
+      expect(res.status).toBe(201);
+
+      const insertCall = (mocks.collection.insertMany as any).mock.calls[0][0];
+      const doc = insertCall[0];
+      // Profile detached — no profile fields
+      expect(doc.profileId).toBeUndefined();
+      expect(doc.profileVersionId).toBeUndefined();
+      // Individual overrides respected since no profile active
+      expect(doc).toHaveProperty("model", "claude-sonnet-4");
+    });
+
+    it("returns 404 when profile override references non-existent profile", async () => {
+      (mocks.profileCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-resubmit")
+        .send({
+          ids: ["run-1"],
+          count: 1,
+          overrides: { profileId: "nonexistent" },
+        });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toContain("Profile not found");
+    });
   });
 });
