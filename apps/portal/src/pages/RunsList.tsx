@@ -121,6 +121,28 @@ export function RunsList() {
     return map;
   }, [profiles]);
 
+  // Collect unique profileIds referenced by visible runs
+  const referencedProfileIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of runs) if (r.profileId) ids.add(r.profileId);
+    return [...ids];
+  }, [runs]);
+
+  // Fetch all versions for referenced profiles → build profileVersionId → version number map
+  const { data: allProfileVersions = [] } = useQuery({
+    queryKey: ["profile-versions-for-runs", referencedProfileIds],
+    queryFn: async () => {
+      const results = await Promise.all(referencedProfileIds.map((id) => api.listProfileVersions(id)));
+      return results.flat();
+    },
+    enabled: referencedProfileIds.length > 0,
+  });
+  const profileVersionIdMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const v of allProfileVersions) map.set(v._id, v.version);
+    return map;
+  }, [allProfileVersions]);
+
   // Fetch bulk report summary for all visible runs
   const runIds = useMemo(() => runs.map((r) => r._id), [runs]);
   const { data: reportSummaries } = useQuery({
@@ -164,6 +186,9 @@ export function RunsList() {
     const extSets = selected.map((r) => (r.extensions ?? []).sort().join(","));
     const uniqueExts = [...new Set(extSets)];
     const profileIds = [...new Set(selected.map((r) => r.profileId ?? ""))];
+    const profileVersions = [...new Set(selected.map((r) =>
+      (r.profileVersionId ? profileVersionIdMap.get(r.profileVersionId) : undefined) ?? 0
+    ))];
 
     return {
       worker: workers.length === 1 ? workers[0] : null,
@@ -173,6 +198,7 @@ export function RunsList() {
       skillRevisions: uniqueSkills.length === 1 ? (selected[0].skillRevisions ?? []) : null,
       extensions: uniqueExts.length === 1 ? (selected[0].extensions ?? []) : null,
       profileId: profileIds.length === 1 ? (profileIds[0] || null) : null,
+      profileVersion: profileVersions.length === 1 ? (profileVersions[0] || null) : null,
       isMultiWorker: workers.length > 1,
       isMultiModel: models.length > 1,
       isMultiIterations: iterations.length > 1,
@@ -181,7 +207,7 @@ export function RunsList() {
       isMultiExtensions: uniqueExts.length > 1,
       isMultiProfile: profileIds.length > 1,
     };
-  }, [runs, selectedIds]);
+  }, [runs, selectedIds, profileVersionIdMap]);
 
   // Determine the active profile for the resubmit dialog
   // undefined = keep from source, null = detach, string = specific profile
@@ -581,7 +607,10 @@ export function RunsList() {
                       <SelectContent>
                         <SelectItem value="__keep__">
                           {selectedRunsSummary.profileId
-                            ? (profileNameMap.get(selectedRunsSummary.profileId) ?? formatId(selectedRunsSummary.profileId))
+                            ? <>
+                                {profileNameMap.get(selectedRunsSummary.profileId) ?? formatId(selectedRunsSummary.profileId)}
+                                {selectedRunsSummary.profileVersion && <span className="text-muted-foreground"> v{selectedRunsSummary.profileVersion}</span>}
+                              </>
                             : selectedRunsSummary.isMultiProfile ? "Mixed (keep each)" : "None"}
                         </SelectItem>
                         <SelectItem value="__none__">None (detach profile)</SelectItem>
