@@ -29,7 +29,7 @@ import {
   parseExtensionSpec,
   resolveAgentVersion,
 } from "shared";
-import type { SkillDocument, SkillRevisionDocument, ProfileDocument, ProfileVersionDocument } from "shared";
+import type { ProfileDocument, ProfileVersionDocument } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import { VALID_WORKERS } from "../route-context.js";
 import type {
@@ -43,6 +43,7 @@ import { computeAnalysis } from "../analysis.js";
 import type { AnalysisResponse, AnalyzableRun } from "../analysis.js";
 import { parseStateKey } from "../criteria-mdp.js";
 import { buildGroupingPipeline } from "../grouping.js";
+import { resolveSkillSpecs } from "../utils/skill-helpers.js";
 import {
   blobNameFromSnapshotsUrl,
   detectBundledChatFiles,
@@ -226,60 +227,13 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       if (skillSlugs.length > 0) {
-        // Validate skill slugs exist in our DB
-        const existingSkills = await ctx.skillCollection
-          .find({ _id: { $in: skillSlugs }, deletedAt: { $exists: false } })
-          .toArray();
-        const existingSkillSlugs = new Set(existingSkills.map((s: SkillDocument) => s._id));
-        const missingSkillSlugs = skillSlugs.filter((slug: string) => !existingSkillSlugs.has(slug));
-        if (missingSkillSlugs.length > 0) {
-          res.status(400).json({ error: `Skill(s) not found: ${missingSkillSlugs.join(", ")}` });
+        const result = await resolveSkillSpecs(skillSlugs, ctx);
+        if (result.error) {
+          const status = result.error.startsWith("Failed to resolve") ? 422 : 400;
+          res.status(status).json({ error: result.error });
           return;
         }
-
-        // Resolve each skill to a SkillRevisionDocument
-        const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
-          if (!ctx.storageConnectionString && !ctx.storageAccountName) {
-            throw new Error("Blob storage not configured — cannot store skill archives");
-          }
-          let blobServiceClient: BlobServiceClient;
-          if (ctx.storageConnectionString) {
-            blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
-          } else {
-            const credential = new DefaultAzureCredential();
-            blobServiceClient = new BlobServiceClient(
-              `https://${ctx.storageAccountName}.blob.core.windows.net`,
-              credential
-            );
-          }
-          const containerClient = blobServiceClient.getContainerClient("skill-archives");
-          await containerClient.createIfNotExists();
-          const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
-          await blockBlobClient.upload(data, data.length, {
-            blobHTTPHeaders: { blobContentType: "application/gzip" },
-          });
-          return blockBlobClient.url;
-        };
-
-        const revisionRefs: string[] = [];
-        for (const skill of existingSkills) {
-          try {
-            const revision = await ctx.skillResolver.resolve(
-              skill.source,
-              skill.skillName,
-              ctx.skillRevisionStore,
-              uploadArchive
-            );
-            revisionRefs.push(revision.ref);
-          } catch (resolveError) {
-            console.error(`Failed to resolve skill "${skill._id}":`, resolveError);
-            res.status(422).json({
-              error: `Failed to resolve skill "${skill._id}": ${resolveError instanceof Error ? resolveError.message : String(resolveError)}`,
-            });
-            return;
-          }
-        }
-        resolvedSkillRevisions = revisionRefs;
+        resolvedSkillRevisions = result.refs;
       }
     }
 
