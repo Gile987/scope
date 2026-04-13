@@ -209,9 +209,17 @@ export function ProfileDetail() {
                     <div>
                       <Label>Extensions</Label>
                       <div className="flex flex-wrap gap-1 mt-1">
-                        {displayVersion.extensions.map((e) => (
-                          <Badge key={e} variant="outline" className="font-mono text-xs">{e}</Badge>
-                        ))}
+                        {displayVersion.extensions.map((e) => {
+                          const at = e.lastIndexOf("@");
+                          const id = at > 0 ? e.substring(0, at) : e;
+                          const version = at > 0 ? e.substring(at + 1) : undefined;
+                          return (
+                            <Badge key={e} variant="outline" className="font-mono text-xs gap-1">
+                              {id}
+                              {version && <span className="text-muted-foreground">@{version}</span>}
+                            </Badge>
+                          );
+                        })}
                       </div>
                     </div>
                   </>

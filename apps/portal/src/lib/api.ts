@@ -14,7 +14,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || `HTTP ${res.status}`);
+    const message = body.error || `HTTP ${res.status}`;
+    const details = body.details as Array<{ path: string; message: string }> | undefined;
+    if (details?.length) {
+      throw new Error(`${message}: ${details.map((d) => `${d.path || "body"}: ${d.message}`).join(", ")}`);
+    }
+    throw new Error(message);
   }
   if (res.status === 204) return undefined as T;
   return res.json();

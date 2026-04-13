@@ -165,11 +165,11 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
       descParts.push(`Extensions: ${selectedExtensions.join(", ")}`);
     }
 
-    setName(parts.join(" + "));
-    setDescription(descParts.join(". "));
+    setName(parts.join(" + ").slice(0, 128));
+    setDescription(descParts.join(". ").slice(0, 512));
   };
 
-  const canSubmit = name.trim() && worker && model;
+  const canSubmit = name.trim() && name.length <= 128 && description.length <= 512 && worker && model;
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -213,17 +213,25 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Name *</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="name">Name *</Label>
+              {name.length > 128 && <span className="text-xs text-destructive">{name.length}/128</span>}
+            </div>
             <Input
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Azure Skills + Learn MCP"
               disabled={!!editProfileId}
+              className={name.length > 128 ? "border-destructive" : undefined}
             />
+            {name.length > 128 && <p className="text-xs text-destructive">Name must be 128 characters or fewer</p>}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="description">Description</Label>
+              {description.length > 512 && <span className="text-xs text-destructive">{description.length}/512</span>}
+            </div>
             <Textarea
               id="description"
               value={description}
@@ -231,7 +239,9 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
               placeholder="Optional description"
               rows={2}
               disabled={!!editProfileId}
+              className={description.length > 512 ? "border-destructive" : undefined}
             />
+            {description.length > 512 && <p className="text-xs text-destructive">Description must be 512 characters or fewer</p>}
           </div>
         </CardContent>
       </Card>
