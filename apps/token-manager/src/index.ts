@@ -5,10 +5,11 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, Collection, Db } from "mongodb";
-import { KeyDocument, AccountDocument } from "shared";
+import { KeyDocument, AccountDocument, McpSecretDocument, McpServerDocument } from "shared";
 import { createSecretStore, SecretStore } from "./keyvault-store.js";
 import { createKeyRouter } from "./routes.js";
 import { createAccountRouter } from "./account-routes.js";
+import { createMcpSecretRouter } from "./mcp-secret-routes.js";
 import { startTokenScheduler } from "./token-scheduler.js";
 import { validateToken } from "./token-validators.js";
 
@@ -26,6 +27,8 @@ const validationIntervalMs = parseInt(
 let db: Db;
 let keysCollection: Collection<KeyDocument>;
 let accountsCollection: Collection<AccountDocument>;
+let mcpSecretsCollection: Collection<McpSecretDocument>;
+let mcpServerCollection: Collection<McpServerDocument>;
 let secretStore: SecretStore;
 
 const app = express();
@@ -43,6 +46,8 @@ async function initializeClients(): Promise<void> {
   db = client.db(dbName);
   keysCollection = db.collection<KeyDocument>("tokens");
   accountsCollection = db.collection<AccountDocument>("accounts");
+  mcpSecretsCollection = db.collection<McpSecretDocument>("mcp-secrets");
+  mcpServerCollection = db.collection<McpServerDocument>("mcp-servers");
 
   // Create indexes
   try {
@@ -72,6 +77,16 @@ async function initializeClients(): Promise<void> {
   // Mount account routes
   const accountRouter = createAccountRouter(accountsCollection, secretStore);
   app.use(accountRouter);
+
+  // Mount MCP secret routes
+  // Create unique index on { mcpId, name } to enforce no duplicate secret names per server
+  try {
+    await mcpSecretsCollection.createIndex({ mcpId: 1, name: 1 }, { unique: true });
+  } catch (err) {
+    console.log("[token-manager] Index mcp-secrets mcpId/name may already exist");
+  }
+  const mcpSecretRouter = createMcpSecretRouter(mcpSecretsCollection, mcpServerCollection, secretStore);
+  app.use(mcpSecretRouter);
 
   // Start validation scheduler
   const scheduler = startTokenScheduler({

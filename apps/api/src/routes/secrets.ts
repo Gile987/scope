@@ -56,5 +56,12 @@ export function registerSecretsRoutes(ctx: RouteContext): void {
   // NOTE: GET /api/v1/accounts/:id/secrets is intentionally NOT proxied.
   // Key-updaters call token-manager directly (ClusterIP) for secrets.
 
+  // MCP server secret CRUD routes proxied to Token Manager (portal/CLI uses these)
+  // NOTE: GET /api/v1/mcp/servers/:id/secrets/resolve is intentionally NOT proxied.
+  // The API calls Token Manager directly via McpSecretClient for resolve (internal only).
+  ctx.app.post("/api/v1/mcp/servers/:id/secrets", proxyToTokenManager);
+  ctx.app.get("/api/v1/mcp/servers/:id/secrets", proxyToTokenManager);
+  ctx.app.delete("/api/v1/mcp/servers/:id/secrets/:name", proxyToTokenManager);
+
   console.log(`[api] Token Manager proxy enabled → ${TOKEN_MANAGER_URL}`);
 }

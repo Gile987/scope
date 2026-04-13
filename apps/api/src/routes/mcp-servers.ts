@@ -13,6 +13,8 @@ import type { McpServerDocument, RouteContext } from "../route-context.js";
 
 export function registerMcpServersRoutes(ctx: RouteContext): void {
 
+const { mcpSecretClient } = ctx;
+
 const CreateMcpServerBodySchema = z.object({
   _id: z
     .string()
@@ -29,7 +31,7 @@ const CreateMcpServerBodySchema = z.object({
   description: z.string().optional(),
 });
 
-// GET /api/v1/mcp/servers — list MCP servers
+// GET /api/v1/mcp/servers — list MCP servers (env/headers never shown in list)
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/mcp/servers",
@@ -46,6 +48,7 @@ apiRoute(ctx.app, ctx.registry, {
 });
 
 // GET /api/v1/mcp/servers/:id — get MCP server by slug
+// When Token Manager is available, returns masked values for env/headers ("<secret>")
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/mcp/servers/:id",
@@ -62,11 +65,27 @@ apiRoute(ctx.app, ctx.registry, {
       res.status(404).json({ error: "MCP server not found" });
       return;
     }
+
+    if (mcpSecretClient) {
+      const items = await mcpSecretClient.listSecrets(server._id);
+      if (items.length > 0) {
+        const masked = Object.fromEntries(items.map((item) => [item.name, "<secret>"]));
+        // Return masked env or headers depending on transport type
+        if (server.type === "stdio") {
+          return res.json({ ...server, id: server._id, env: masked });
+        } else {
+          const maskedHeaders = items.map((item) => ({ name: item.name, value: "<secret>" }));
+          return res.json({ ...server, id: server._id, headers: maskedHeaders });
+        }
+      }
+    }
+
     res.json({ ...server, id: server._id });
   },
 });
 
 // POST /api/v1/mcp/servers — create MCP server (upserts if soft-deleted)
+// env/headers are rejected with 503 if Token Manager is not available
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
   path: "/api/v1/mcp/servers",
@@ -76,11 +95,18 @@ apiRoute(ctx.app, ctx.registry, {
   response: McpServerResponseSchema,
   handler: async (req, res) => {
     const { _id, name, type, url, command, args, env, headers, sessionMode, version, description } = req.body;
+
+    const hasSecrets = (env && Object.keys(env).length > 0) || (headers && headers.length > 0);
+    if (hasSecrets && !mcpSecretClient) {
+      res.status(503).json({ error: "Secret storage unavailable: TOKEN_MANAGER_URL is not configured" });
+      return;
+    }
+
     const now = new Date();
     const existing = await ctx.mcpServerCollection.findOne({ _id });
 
     if (existing) {
-      // Upsert: un-delete if soft-deleted, update fields
+      // Upsert: un-delete if soft-deleted, update non-secret fields
       await ctx.mcpServerCollection.updateOne(
         { _id },
         {
@@ -90,18 +116,17 @@ apiRoute(ctx.app, ctx.registry, {
             ...(url !== undefined ? { url } : {}),
             ...(command !== undefined ? { command } : {}),
             ...(args !== undefined ? { args } : {}),
-            ...(env !== undefined ? { env } : {}),
-            ...(headers !== undefined ? { headers } : {}),
             ...(sessionMode !== undefined ? { sessionMode } : {}),
             ...(version !== undefined ? { version } : {}),
             ...(description !== undefined ? { description } : {}),
             updatedAt: now,
           },
-          $unset: { deletedAt: "" },
+          $unset: {
+            deletedAt: "",
+            ...(mcpSecretClient ? { env: "", headers: "" } : {}),
+          },
         },
       );
-      const updated = await ctx.mcpServerCollection.findOne({ _id });
-      res.json({ ...updated, id: updated!._id });
     } else {
       const serverDoc: McpServerDocument = {
         _id,
@@ -110,16 +135,26 @@ apiRoute(ctx.app, ctx.registry, {
         ...(url ? { url } : {}),
         ...(command ? { command } : {}),
         ...(args ? { args } : {}),
-        ...(env ? { env } : {}),
-        ...(headers ? { headers } : {}),
         ...(sessionMode ? { sessionMode } : {}),
         ...(version ? { version } : {}),
         ...(description ? { description } : {}),
         createdAt: now,
       };
       await ctx.mcpServerCollection.insertOne(serverDoc);
-      res.status(201).json({ ...serverDoc, id: serverDoc._id });
     }
+
+    // Store secrets in Token Manager — replace all existing secrets for this server
+    if (mcpSecretClient && hasSecrets) {
+      await mcpSecretClient.deleteAllSecrets(_id);
+      if (env && Object.keys(env).length > 0) {
+        await mcpSecretClient.storeEnv(_id, env);
+      } else if (headers && headers.length > 0) {
+        await mcpSecretClient.storeHeaders(_id, headers);
+      }
+    }
+
+    const updated = await ctx.mcpServerCollection.findOne({ _id });
+    res.status(existing ? 200 : 201).json({ ...updated, id: updated!._id });
   },
 });
 
@@ -145,19 +180,39 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    const hasSecrets = (env && Object.keys(env).length > 0) || (headers && headers.length > 0);
+    if (hasSecrets && !mcpSecretClient) {
+      res.status(503).json({ error: "Secret storage unavailable: TOKEN_MANAGER_URL is not configured" });
+      return;
+    }
+
     const updateFields: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) updateFields.name = name;
     if (type !== undefined) updateFields.type = type;
     if (url !== undefined) updateFields.url = url;
     if (command !== undefined) updateFields.command = command;
     if (args !== undefined) updateFields.args = args;
-    if (env !== undefined) updateFields.env = env;
-    if (headers !== undefined) updateFields.headers = headers;
     if (sessionMode !== undefined) updateFields.sessionMode = sessionMode;
     if (version !== undefined) updateFields.version = version;
     if (description !== undefined) updateFields.description = description;
 
-    await ctx.mcpServerCollection.updateOne({ _id: id }, { $set: updateFields });
+    const mongoUpdate: Record<string, unknown> = { $set: updateFields };
+    if (mcpSecretClient && (env !== undefined || headers !== undefined)) {
+      (mongoUpdate as any).$unset = { env: "", headers: "" };
+    }
+
+    await ctx.mcpServerCollection.updateOne({ _id: id }, mongoUpdate);
+
+    // Replace all secrets in Token Manager if provided
+    if (mcpSecretClient && (env !== undefined || headers !== undefined)) {
+      await mcpSecretClient.deleteAllSecrets(id);
+      if (env && Object.keys(env).length > 0) {
+        await mcpSecretClient.storeEnv(id, env);
+      } else if (headers && headers.length > 0) {
+        await mcpSecretClient.storeHeaders(id, headers);
+      }
+    }
+
     const updated = await ctx.mcpServerCollection.findOne({ _id: id });
     res.json({ ...updated, id: updated!._id });
   },
@@ -182,6 +237,11 @@ apiRoute(ctx.app, ctx.registry, {
     if (!existing) {
       res.status(404).json({ error: "MCP server not found" });
       return;
+    }
+
+    // Best-effort cleanup of secrets before soft-delete
+    if (mcpSecretClient) {
+      await mcpSecretClient.deleteAllSecrets(id);
     }
 
     await ctx.mcpServerCollection.updateOne(
