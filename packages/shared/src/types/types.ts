@@ -245,7 +245,7 @@ export interface QueueProcessorConfig extends BaseQueueProcessorConfig {
 
 // --- Runs grouping types (shared between API and portal) ---
 
-export type GroupByKey = "none" | "task" | "submissionId";
+export type GroupByKey = "none" | "task" | "submissionId" | "profile";
 
 export interface AggregateStats {
   min: number;

@@ -79,7 +79,7 @@ export function RunsList() {
   const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
     queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
     queryFn: () => api.listRunGroups({
-      groupBy: groupBy as "task" | "submissionId",
+      groupBy: groupBy as "task" | "submissionId" | "profile",
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId: effectiveTaskPromptId,
       status: effectiveStatus,
@@ -1246,6 +1246,8 @@ function GroupRows({
     if (groupBy === "task") {
       // group.key is taskPromptId (or scenario.task fallback)
       opts.taskPromptId = group.key;
+    } else if (groupBy === "profile") {
+      opts.profileId = group.key === "no-profile" ? undefined : group.key;
     } else {
       opts.submissionId = group.key === "no-submission" ? undefined : group.key;
     }
@@ -1406,7 +1408,19 @@ function GroupRows({
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
         {/* Profile */}
-        <TableCell />
+        <TableCell>
+          {groupBy === "profile" ? (
+            group.key !== "no-profile" ? (
+              <Link
+                to={`/profiles/${group.key}`}
+                className="text-primary hover:underline font-medium"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {profileNameMap.get(group.key) ?? formatId(group.key)}
+              </Link>
+            ) : <span className="font-medium text-muted-foreground">{group.label}</span>
+          ) : null}
+        </TableCell>
         {/* Status */}
         <TableCell>
           {(() => {

@@ -1100,7 +1100,7 @@ apiRoute(app, registry, {
     const statusFilter = req.query.status as string;
     const outcomeFilter = req.query.outcome as string;
     const includeDeleted = req.query.includeDeleted === "true";
-    const groupByParam = req.query.groupBy as "task" | "submissionId" | undefined;
+    const groupByParam = req.query.groupBy as "task" | "submissionId" | "profile" | undefined;
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
     const afterParam = req.query.after as string | undefined;
     const beforeParam = req.query.before as string | undefined;
@@ -1160,7 +1160,7 @@ apiRoute(app, registry, {
 
     // Grouped mode: paginated RunGroup[] via two-phase aggregation
     if (groupByParam) {
-      const groupByField = groupByParam === "task" ? "taskPromptId" : "submissionId";
+      const groupByField = groupByParam === "task" ? "taskPromptId" : groupByParam === "profile" ? "profileId" : "submissionId";
       const groupByAggField = `$${groupByField}`;
 
       // Decode group cursor

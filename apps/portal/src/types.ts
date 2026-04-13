@@ -847,7 +847,7 @@ export interface ProfileWithVersion extends ProfileDocument {
 
 // --- Runs grouping types (mirrored from shared) ---
 
-export type GroupByKey = "none" | "task" | "submissionId";
+export type GroupByKey = "none" | "task" | "submissionId" | "profile";
 
 export interface AggregateStats {
   min: number;
