@@ -6,6 +6,7 @@ import cors from "cors";
 import { MongoClient, Db, Collection } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
+import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
 import { TaskPromptStore, SkillRevisionStore, SkillResolver } from "shared";
 import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument } from "shared";
@@ -84,7 +85,6 @@ let skillRevisionCollection: Collection<SkillRevisionDocument>;
 let skillRevisionStore: SkillRevisionStore;
 let skillResolver: SkillResolver;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
-const dynamicQueueClients: Map<string, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
 async function initializeClients(): Promise<void> {
@@ -203,22 +203,6 @@ async function initializeClients(): Promise<void> {
   console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}, report`);
 }
 
-// Get or create a QueueClient for a dynamically resolved queue name
-function getOrCreateQueueClient(queueName: string): QueueClient {
-  const existing = dynamicQueueClients.get(queueName);
-  if (existing) return existing;
-  let client: QueueClient;
-  if (storageConnectionString) {
-    client = new QueueClient(storageConnectionString, queueName);
-  } else {
-    const credential = new DefaultAzureCredential();
-    const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
-    client = new QueueClient(`${queueUrl}/${queueName}`, credential);
-  }
-  dynamicQueueClients.set(queueName, client);
-  return client;
-}
-
 // --- OpenAPI documentation (lazy — Swagger UI mounted in main() after all routes register) ---
 
 // Shared route context — module-level vars are populated by initializeClients()
@@ -247,7 +231,7 @@ const routeCtx: RouteContext = {
   get skillResolver() { return skillResolver; },
   get queueClients() { return queueClients; },
   get reportQueueClient() { return reportQueueClient; },
-  getOrCreateQueueClient,
+  getOrCreateQueueClient: createQueueClientFactory(storageConnectionString, storageAccountName),
   validWorkers: VALID_WORKERS,
   storageConnectionString,
   storageAccountName,
