@@ -1,0 +1,629 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`CLI command registration > full command tree matches snapshot 1`] = `
+{
+  "agent": {
+    "subcommands": {
+      "delete": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--output",
+          "--url",
+        ],
+      },
+      "model": {
+        "subcommands": {
+          "add": {
+            "options": [
+              "--id",
+              "--model",
+              "--url",
+            ],
+          },
+          "list": {
+            "options": [
+              "--id",
+              "--output",
+              "--url",
+            ],
+          },
+          "remove": {
+            "options": [
+              "--id",
+              "--model",
+              "--url",
+            ],
+          },
+          "set-default": {
+            "options": [
+              "--id",
+              "--model",
+              "--url",
+            ],
+          },
+        },
+      },
+      "update": {
+        "options": [
+          "--description",
+          "--id",
+          "--name",
+          "--url",
+        ],
+      },
+      "version": {
+        "subcommands": {
+          "list": {
+            "options": [
+              "--id",
+              "--output",
+              "--status",
+              "--url",
+            ],
+          },
+        },
+      },
+    },
+  },
+  "criteria": {
+    "subcommands": {
+      "create": {
+        "options": [
+          "--depends-on",
+          "--id",
+          "--prompt",
+          "--url",
+        ],
+      },
+      "delete": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "graph": {
+        "options": [
+          "--output",
+          "--url",
+        ],
+      },
+      "import": {
+        "options": [
+          "--dry-run",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--output",
+          "--query",
+          "--url",
+        ],
+      },
+      "update": {
+        "options": [
+          "--depends-on",
+          "--id",
+          "--prompt",
+          "--url",
+        ],
+      },
+    },
+  },
+  "extension": {
+    "subcommands": {
+      "delete": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "import": {
+        "options": [
+          "--description",
+          "--id",
+          "--name",
+          "--origin",
+          "--publisher",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--output",
+          "--url",
+        ],
+      },
+      "search": {
+        "options": [
+          "--limit",
+          "--output",
+          "--query",
+          "--url",
+        ],
+      },
+    },
+  },
+  "insight": {
+    "subcommands": {
+      "block": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "create": {
+        "options": [
+          "--category",
+          "--description",
+          "--tags",
+          "--title",
+          "--url",
+        ],
+      },
+      "delete": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "downvote": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--blocked",
+          "--output",
+          "--query",
+          "--url",
+        ],
+      },
+      "unblock": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "update": {
+        "options": [
+          "--category",
+          "--description",
+          "--id",
+          "--tags",
+          "--title",
+          "--url",
+        ],
+      },
+      "upvote": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+    },
+  },
+  "mcp": {
+    "subcommands": {
+      "server": {
+        "subcommands": {
+          "create": {
+            "options": [
+              "--api-url",
+              "--args",
+              "--command",
+              "--description",
+              "--env",
+              "--header",
+              "--id",
+              "--name",
+              "--type",
+              "--url",
+            ],
+          },
+          "delete": {
+            "options": [
+              "--id",
+              "--url",
+            ],
+          },
+          "get": {
+            "options": [
+              "--id",
+              "--output",
+              "--url",
+            ],
+          },
+          "list": {
+            "options": [
+              "--output",
+              "--url",
+            ],
+          },
+          "update": {
+            "options": [
+              "--api-url",
+              "--args",
+              "--command",
+              "--description",
+              "--env",
+              "--header",
+              "--id",
+              "--name",
+              "--type",
+              "--url",
+            ],
+          },
+        },
+      },
+    },
+  },
+  "prompt-feature": {
+    "subcommands": {
+      "create": {
+        "options": [
+          "--id",
+          "--prompt",
+          "--url",
+        ],
+      },
+      "delete": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "extract": {
+        "options": [
+          "--force",
+          "--model",
+          "--output",
+          "--scenario",
+          "--task",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "import": {
+        "options": [
+          "--dry-run",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--output",
+          "--query",
+          "--url",
+        ],
+      },
+      "update": {
+        "options": [
+          "--id",
+          "--prompt",
+          "--url",
+        ],
+      },
+    },
+  },
+  "report": {
+    "subcommands": {
+      "generate": {
+        "options": [
+          "--id",
+          "--no-stream",
+          "--stream",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--output",
+          "--run",
+          "--url",
+        ],
+      },
+      "logs": {
+        "options": [
+          "--from-start",
+          "--id",
+          "--url",
+        ],
+      },
+    },
+  },
+  "report-template": {
+    "subcommands": {
+      "create": {
+        "options": [
+          "--description",
+          "--id",
+          "--model",
+          "--name",
+          "--system-prompt-content",
+          "--system-prompt-mode",
+          "--timeout-ms",
+          "--trigger-ids",
+          "--trigger-match",
+          "--trigger-type",
+          "--url",
+          "--user-prompt",
+        ],
+      },
+      "delete": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "import": {
+        "options": [
+          "--dry-run",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--output",
+          "--url",
+        ],
+      },
+      "models": {
+        "options": [
+          "--url",
+        ],
+      },
+      "update": {
+        "options": [
+          "--description",
+          "--id",
+          "--model",
+          "--name",
+          "--system-prompt-content",
+          "--system-prompt-mode",
+          "--timeout-ms",
+          "--trigger-ids",
+          "--trigger-match",
+          "--trigger-type",
+          "--url",
+          "--user-prompt",
+        ],
+      },
+    },
+  },
+  "run": {
+    "subcommands": {
+      "delete": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "demo": {
+        "options": [
+          "--count",
+          "--message",
+          "--url",
+          "--workers",
+        ],
+      },
+      "download": {
+        "options": [
+          "--dir",
+          "--extract",
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--include-deleted",
+          "--output",
+          "--submission-id",
+          "--url",
+          "--worker",
+        ],
+      },
+      "logs": {
+        "options": [
+          "--from-start",
+          "--id",
+          "--url",
+        ],
+      },
+      "status": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "submit": {
+        "options": [
+          "--agent-version",
+          "--criteria",
+          "--extensions",
+          "--max-iterations",
+          "--mcp-servers",
+          "--message",
+          "--model",
+          "--no-stream",
+          "--persona",
+          "--scenario",
+          "--skills",
+          "--traits",
+          "--url",
+          "--worker",
+        ],
+      },
+      "upload": {
+        "options": [
+          "--dry-run",
+          "--url",
+        ],
+      },
+    },
+  },
+  "skill": {
+    "subcommands": {
+      "delete": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "import": {
+        "options": [
+          "--description",
+          "--name",
+          "--origin",
+          "--skill-name",
+          "--source",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--output",
+          "--url",
+        ],
+      },
+      "resolve": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "revisions": {
+        "options": [
+          "--id",
+          "--limit",
+          "--output",
+          "--url",
+        ],
+      },
+      "search": {
+        "options": [
+          "--limit",
+          "--output",
+          "--query",
+          "--url",
+        ],
+      },
+    },
+  },
+  "task-prompt": {
+    "subcommands": {
+      "create": {
+        "options": [
+          "--file",
+          "--text",
+          "--url",
+        ],
+      },
+      "delete": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
+      "extract-features": {
+        "options": [
+          "--force",
+          "--id",
+          "--model",
+          "--output",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--limit",
+          "--offset",
+          "--output",
+          "--search",
+          "--url",
+        ],
+      },
+    },
+  },
+}
+`;

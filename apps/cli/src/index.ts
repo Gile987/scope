@@ -37,7 +37,7 @@ function printFollowUpCommands(id: string): void {
   console.log(`  ${dimTimestamp('List all runs:')} pnpm cli run list`);
 }
 
-const program = new Command();
+export const program = new Command();
 
 const DEFAULT_WORKERS = [
   "coder-acp-claude-code",
@@ -4095,5 +4095,12 @@ taskPrompt
     }
   });
 
-program.parse();
+// Only parse when run directly (not when imported by tests)
+const isDirectRun = process.argv[1] && (
+  process.argv[1].endsWith('/cli/src/index.ts') ||
+  process.argv[1].endsWith('/cli/dist/index.js')
+);
+if (isDirectRun) {
+  program.parse();
+}
 
