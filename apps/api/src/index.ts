@@ -101,7 +101,9 @@ import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
 import { apiRoute } from "./openapi/api-route.js";
+import { registerFeatureFlagRoutes } from "./routes/feature-flags.js";
 import { VALID_WORKERS } from "./route-context.js";
+import type { RouteContext } from "./route-context.js";
 import type {
   CriteriaDocument,
   PromptFeatureDocument,
@@ -426,6 +428,35 @@ function getOrCreateQueueClient(queueName: string): QueueClient {
 }
 
 // --- OpenAPI documentation (lazy — Swagger UI mounted in main() after all routes register) ---
+
+// Shared route context — module-level vars are populated by initializeClients()
+// before any HTTP request arrives, so handlers see the initialized values.
+const routeCtx: RouteContext = {
+  get app() { return app; },
+  get registry() { return registry; },
+  get db() { return db; },
+  get requestCollection() { return collection; },
+  get criteriaCollection() { return criteriaCollection; },
+  get promptFeatureCollection() { return promptFeatureCollection; },
+  get promptFeatureExtractionCollection() { return promptFeatureExtractionCollection; },
+  get reportCollection() { return reportCollection; },
+  get reportTemplateCollection() { return reportTemplateCollection; },
+  get agentCollection() { return agentCollection; },
+  get modelCollection() { return modelCollection; },
+  get mcpServerCollection() { return mcpServerCollection; },
+  get insightsCollection() { return insightsCollection; },
+  get taskPromptCollection() { return taskPromptCollection; },
+  get featureFlagCollection() { return featureFlagCollection; },
+  get skillCollection() { return skillCollection; },
+  get skillRevisionCollection() { return skillRevisionCollection; },
+  get taskPromptStore() { return taskPromptStore; },
+  get skillRevisionStore() { return skillRevisionStore; },
+  get skillResolver() { return skillResolver; },
+  get queueClients() { return queueClients; },
+  get reportQueueClient() { return reportQueueClient; },
+  getOrCreateQueueClient,
+  validWorkers: VALID_WORKERS,
+};
 
 // Health check endpoint (liveness probe — always returns 200)
 apiRoute(app, registry, {
@@ -6344,45 +6375,8 @@ apiRoute(app, registry, {
   },
 });
 
-// ─── Feature Flags (apiRoute) ─────────────────────────────────────────────────
-
-// GET /api/v1/feature-flags — list all feature flags
-apiRoute(app, registry, {
-  method: "get",
-  path: "/api/v1/feature-flags",
-  tags: ["Feature Flags"],
-  summary: "List feature flags",
-  response: z.array(FeatureFlagResponseSchema),
-  handler: async (_req, res) => {
-    const flags = await featureFlagCollection.find({}).toArray();
-    res.json(flags);
-  },
-});
-
-// PUT /api/v1/feature-flags/:key — update a feature flag
-apiRoute(app, registry, {
-  method: "put",
-  path: "/api/v1/feature-flags/:key",
-  tags: ["Feature Flags"],
-  summary: "Update feature flag",
-  params: z.object({ key: z.string() }),
-  body: UpdateFeatureFlagInputSchema,
-  response: FeatureFlagResponseSchema,
-  handler: async (req, res) => {
-    const result = await featureFlagCollection.findOneAndUpdate(
-      { key: req.params.key },
-      { $set: { enabled: req.body.enabled, updatedAt: new Date() } },
-      { returnDocument: "after" },
-    );
-
-    if (!result) {
-      res.status(404).json({ error: `Feature flag '${req.params.key}' not found` });
-      return;
-    }
-
-    res.json(result);
-  },
-});
+// ─── Feature Flags ────────────────────────────────────────────────────────────
+registerFeatureFlagRoutes(routeCtx);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
