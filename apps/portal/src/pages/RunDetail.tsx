@@ -46,6 +46,12 @@ export function RunDetail() {
     },
   });
 
+  const { data: profile } = useQuery({
+    queryKey: ["profile", run?.profileId],
+    queryFn: () => api.getProfile(run!.profileId!),
+    enabled: !!run?.profileId,
+  });
+
   const isActive = run?.status === "pending" || run?.status === "processing";
   // Note: "done" is terminal — not active, no log streaming needed
 
@@ -582,15 +588,23 @@ export function RunDetail() {
                 </CardHeader>
                 <CardContent className="space-y-1 text-sm">
                   <div>
-                    <span className="text-muted-foreground">Profile ID:</span>{" "}
-                    <Link to={`/profiles/${run.profileId}`} className="font-mono font-medium text-primary hover:underline">
-                      {run.profileId}
+                    <span className="text-muted-foreground">Name:</span>{" "}
+                    <Link to={`/profiles/${run.profileId}`} className="font-medium text-primary hover:underline">
+                      {profile?.name ?? <Skeleton className="inline-block h-4 w-32 align-middle" />}
                     </Link>
                   </div>
                   {run.profileVersionId && (
                     <div>
-                      <span className="text-muted-foreground">Version ID:</span>{" "}
-                      <span className="font-mono font-medium">{run.profileVersionId}</span>
+                      <span className="text-muted-foreground">Version:</span>{" "}
+                      <span className="font-medium">
+                        {profile ? `v${profile.version.version}` : <Skeleton className="inline-block h-4 w-8 align-middle" />}
+                      </span>
+                    </div>
+                  )}
+                  {profile?.description && (
+                    <div>
+                      <span className="text-muted-foreground">Description:</span>{" "}
+                      <span>{profile.description}</span>
                     </div>
                   )}
                 </CardContent>
