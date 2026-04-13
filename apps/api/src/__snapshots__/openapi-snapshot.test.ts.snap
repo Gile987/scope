@@ -1,0 +1,7087 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
+{
+  "components": {
+    "parameters": {},
+    "schemas": {
+      "AccountInput": {
+        "additionalProperties": {},
+        "properties": {},
+        "type": "object",
+      },
+      "AccountResponse": {
+        "additionalProperties": {},
+        "properties": {},
+        "type": "object",
+      },
+      "AgentResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "defaultModel": {
+            "type": "string",
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "modelProvider": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "supportedModels": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/AgentVersion",
+            },
+            "type": "array",
+          },
+        },
+        "required": [
+          "_id",
+          "name",
+          "supportedModels",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "AgentVersion": {
+        "properties": {
+          "agentVersion": {
+            "type": "string",
+          },
+          "buildTime": {
+            "type": "string",
+          },
+          "components": {
+            "additionalProperties": {
+              "type": "string",
+            },
+            "type": "object",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "gitCommit": {
+            "type": "string",
+          },
+          "imageTag": {
+            "type": "string",
+          },
+          "queueName": {
+            "type": "string",
+          },
+          "status": {
+            "enum": [
+              "active",
+              "retired",
+            ],
+            "type": "string",
+          },
+          "workerVersion": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "agentVersion",
+          "workerVersion",
+          "components",
+          "gitCommit",
+          "buildTime",
+          "imageTag",
+          "queueName",
+          "status",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "AggregateStats": {
+        "properties": {
+          "max": {
+            "type": "number",
+          },
+          "mean": {
+            "type": "number",
+          },
+          "min": {
+            "type": "number",
+          },
+          "stdDev": {
+            "type": "number",
+          },
+        },
+        "required": [
+          "min",
+          "max",
+          "mean",
+          "stdDev",
+        ],
+        "type": [
+          "object",
+          "null",
+        ],
+      },
+      "BulkCreateReportsInput": {
+        "properties": {
+          "requestIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "templateId": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "requestIds",
+        ],
+        "type": "object",
+      },
+      "BulkReportStatusInput": {
+        "properties": {
+          "reportIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+        },
+        "required": [
+          "reportIds",
+        ],
+        "type": "object",
+      },
+      "BulkReportSummaryInput": {
+        "properties": {
+          "requestIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+        },
+        "required": [
+          "requestIds",
+        ],
+        "type": "object",
+      },
+      "BulkReportSummaryResponse": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/ReportSummary",
+        },
+        "type": "object",
+      },
+      "BulkResubmitInput": {
+        "properties": {
+          "count": {
+            "default": 1,
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer",
+          },
+          "ids": {
+            "items": {
+              "type": "string",
+            },
+            "minItems": 1,
+            "type": "array",
+          },
+          "overrides": {
+            "properties": {
+              "extensions": {
+                "items": {
+                  "type": "string",
+                },
+                "type": [
+                  "array",
+                  "null",
+                ],
+              },
+              "maxIterations": {
+                "type": [
+                  "number",
+                  "null",
+                ],
+              },
+              "mcpServers": {
+                "items": {
+                  "type": "string",
+                },
+                "type": [
+                  "array",
+                  "null",
+                ],
+              },
+              "model": {
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "skillRevisions": {
+                "items": {
+                  "type": "string",
+                },
+                "type": [
+                  "array",
+                  "null",
+                ],
+              },
+              "workerType": {
+                "type": "string",
+              },
+            },
+            "type": "object",
+          },
+        },
+        "required": [
+          "ids",
+        ],
+        "type": "object",
+      },
+      "BulkTriggerReportsInput": {
+        "properties": {
+          "requestIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+        },
+        "required": [
+          "requestIds",
+        ],
+        "type": "object",
+      },
+      "ConversationTurn": {
+        "properties": {
+          "aiCallCount": {
+            "type": "number",
+          },
+          "codingAgentResponse": {
+            "type": "string",
+          },
+          "criteriaResults": {
+            "items": {
+              "$ref": "#/components/schemas/CriterionResult",
+            },
+            "type": "array",
+          },
+          "durationMs": {
+            "type": "number",
+          },
+          "harUrl": {
+            "type": "string",
+          },
+          "iteration": {
+            "type": "number",
+          },
+          "judgeFeedback": {
+            "type": "string",
+          },
+          "passed": {
+            "type": "boolean",
+          },
+          "rawChatFormat": {
+            "type": "string",
+          },
+          "rawChatUrl": {
+            "type": "string",
+          },
+          "snapshotUrl": {
+            "type": "string",
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "tokenUsage": {
+            "$ref": "#/components/schemas/TokenUsage",
+          },
+          "toolCalls": {
+            "items": {
+              "properties": {
+                "arguments": {
+                  "additionalProperties": {},
+                  "type": "object",
+                },
+                "id": {
+                  "type": "string",
+                },
+                "name": {
+                  "type": "string",
+                },
+                "response": {
+                  "type": "string",
+                },
+                "timestamp": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "id",
+                "name",
+                "arguments",
+              ],
+              "type": "object",
+            },
+            "type": "array",
+          },
+          "videoUrls": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+        },
+        "required": [
+          "iteration",
+          "codingAgentResponse",
+          "judgeFeedback",
+          "snapshotUrl",
+          "passed",
+          "timestamp",
+        ],
+        "type": "object",
+      },
+      "CreateAgentInput": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "defaultModel": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "modelProvider": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "supportedModels": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+        },
+        "required": [
+          "_id",
+          "name",
+        ],
+        "type": "object",
+      },
+      "CreateCriteriaInput": {
+        "properties": {
+          "dependsOn": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string",
+          },
+          "prompt": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "id",
+          "prompt",
+        ],
+        "type": "object",
+      },
+      "CreateExtensionInput": {
+        "properties": {
+          "_id": {
+            "pattern": "^[a-zA-Z0-9-]+\\.[a-zA-Z0-9-]+$",
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "origin": {
+            "enum": [
+              "marketplace",
+              "manual",
+            ],
+            "type": "string",
+          },
+          "publisher": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "_id",
+          "publisher",
+          "name",
+          "origin",
+        ],
+        "type": "object",
+      },
+      "CreateInsightInput": {
+        "properties": {
+          "category": {
+            "type": "string",
+          },
+          "createdBy": {
+            "enum": [
+              "agent",
+              "user",
+            ],
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "sourceReportId": {
+            "type": "string",
+          },
+          "tags": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "title": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "title",
+          "description",
+        ],
+        "type": "object",
+      },
+      "CreatePromptFeatureInput": {
+        "properties": {
+          "id": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string",
+          },
+          "prompt": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "id",
+          "prompt",
+        ],
+        "type": "object",
+      },
+      "CreateReportInput": {
+        "properties": {
+          "requestId": {
+            "type": "string",
+          },
+          "templateId": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "requestId",
+        ],
+        "type": "object",
+      },
+      "CreateReportTemplateInput": {
+        "properties": {
+          "description": {
+            "type": "string",
+          },
+          "id": {
+            "type": "string",
+          },
+          "model": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "systemPrompt": {
+            "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
+          },
+          "timeoutMs": {
+            "exclusiveMinimum": 0,
+            "type": "integer",
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/ReportTrigger",
+          },
+          "userPrompt": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "id",
+          "name",
+          "userPrompt",
+        ],
+        "type": "object",
+      },
+      "CreateRequestInput": {
+        "properties": {
+          "extensions": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "maxIterations": {
+            "type": "number",
+          },
+          "mcpServers": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "model": {
+            "type": "string",
+          },
+          "persona": {
+            "$ref": "#/components/schemas/Persona",
+          },
+          "personaInstructions": {
+            "type": "string",
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/Scenario",
+          },
+          "skillRevisions": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+        },
+        "required": [
+          "scenario",
+        ],
+        "type": "object",
+      },
+      "CreateSkillInput": {
+        "properties": {
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "origin": {
+            "enum": [
+              "skills-sh",
+              "manual",
+            ],
+            "type": "string",
+          },
+          "skillName": {
+            "type": "string",
+          },
+          "source": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "source",
+          "skillName",
+          "name",
+          "origin",
+        ],
+        "type": "object",
+      },
+      "CreateTaskPromptInput": {
+        "properties": {
+          "text": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "text",
+        ],
+        "type": "object",
+      },
+      "CriteriaGraph": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/CriteriaGraphEdge",
+            },
+            "type": "array",
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/CriteriaGraphNode",
+            },
+            "type": "array",
+          },
+        },
+        "required": [
+          "nodes",
+          "edges",
+        ],
+        "type": "object",
+      },
+      "CriteriaGraphEdge": {
+        "properties": {
+          "from": {
+            "type": "string",
+          },
+          "to": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "from",
+          "to",
+        ],
+        "type": "object",
+      },
+      "CriteriaGraphNode": {
+        "properties": {
+          "dependsOn": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "id": {
+            "type": "string",
+          },
+          "prompt": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "id",
+          "prompt",
+        ],
+        "type": "object",
+      },
+      "CriteriaResponse": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "dependsOn": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "id": {
+            "type": "string",
+          },
+          "prompt": {
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "id",
+          "prompt",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "CriterionResult": {
+        "properties": {
+          "criterionId": {
+            "type": "string",
+          },
+          "evaluated": {
+            "type": "boolean",
+          },
+          "feedback": {
+            "type": "string",
+          },
+          "passed": {
+            "type": "boolean",
+          },
+        },
+        "required": [
+          "criterionId",
+          "passed",
+          "feedback",
+          "evaluated",
+        ],
+        "type": "object",
+      },
+      "Cursors": {
+        "properties": {
+          "next": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "prev": {
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "next",
+          "prev",
+        ],
+        "type": "object",
+      },
+      "ExtensionResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "origin": {
+            "enum": [
+              "marketplace",
+              "manual",
+            ],
+            "type": "string",
+          },
+          "publisher": {
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "_id",
+          "publisher",
+          "name",
+          "origin",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "ExtensionSearchResult": {
+        "properties": {
+          "description": {
+            "type": "string",
+          },
+          "id": {
+            "type": "string",
+          },
+          "internal": {
+            "type": "boolean",
+          },
+          "name": {
+            "type": "string",
+          },
+          "publisher": {
+            "type": "string",
+          },
+          "version": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "id",
+          "name",
+          "publisher",
+          "internal",
+        ],
+        "type": "object",
+      },
+      "ExtensionVersionInfo": {
+        "properties": {
+          "lastUpdated": {
+            "type": "string",
+          },
+          "preRelease": {
+            "type": "boolean",
+          },
+          "version": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "version",
+          "preRelease",
+          "lastUpdated",
+        ],
+        "type": "object",
+      },
+      "FeatureFlagResponse": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+          },
+          "key": {
+            "type": "string",
+          },
+          "label": {
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "key",
+          "label",
+          "enabled",
+          "updatedAt",
+        ],
+        "type": "object",
+      },
+      "GroupAggregates": {
+        "properties": {
+          "completionTokens": {
+            "$ref": "#/components/schemas/AggregateStats",
+          },
+          "count": {
+            "type": "number",
+          },
+          "duration": {
+            "$ref": "#/components/schemas/AggregateStats",
+          },
+          "outcomeCounts": {
+            "additionalProperties": {
+              "type": "number",
+            },
+            "type": "object",
+          },
+          "promptTokens": {
+            "$ref": "#/components/schemas/AggregateStats",
+          },
+          "statusCounts": {
+            "additionalProperties": {
+              "type": "number",
+            },
+            "type": "object",
+          },
+          "turns": {
+            "$ref": "#/components/schemas/AggregateStats",
+          },
+        },
+        "required": [
+          "count",
+          "turns",
+          "duration",
+          "promptTokens",
+          "completionTokens",
+          "statusCounts",
+          "outcomeCounts",
+        ],
+        "type": "object",
+      },
+      "GroupUniformValues": {
+        "properties": {
+          "agentVersion": {
+            "type": "string",
+          },
+          "extensions": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "mcpServers": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "model": {
+            "type": "string",
+          },
+          "platform": {
+            "type": "string",
+          },
+          "skillRevisions": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "processing",
+              "done",
+            ],
+            "type": "string",
+          },
+          "submissionId": {
+            "type": "string",
+          },
+          "task": {
+            "type": "string",
+          },
+          "workerType": {
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "InsightReference": {
+        "properties": {
+          "insightId": {
+            "type": "string",
+          },
+          "isNew": {
+            "type": "boolean",
+          },
+          "referencedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "insightId",
+          "referencedAt",
+          "isNew",
+        ],
+        "type": "object",
+      },
+      "InsightResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "blocked": {
+            "type": "boolean",
+          },
+          "category": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "createdBy": {
+            "enum": [
+              "agent",
+              "user",
+            ],
+            "type": "string",
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "downvotes": {
+            "type": "number",
+          },
+          "referenceCount": {
+            "type": "number",
+          },
+          "sourceReportId": {
+            "type": "string",
+          },
+          "tags": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "title": {
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "upvotes": {
+            "type": "number",
+          },
+        },
+        "required": [
+          "_id",
+          "title",
+          "description",
+          "upvotes",
+          "downvotes",
+          "blocked",
+          "referenceCount",
+          "createdBy",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "KeyInput": {
+        "additionalProperties": {},
+        "properties": {},
+        "type": "object",
+      },
+      "KeyResponse": {
+        "additionalProperties": {},
+        "properties": {},
+        "type": "object",
+      },
+      "LogEvent": {
+        "properties": {
+          "data": {
+            "additionalProperties": {},
+            "type": "object",
+          },
+          "level": {
+            "enum": [
+              "info",
+              "warn",
+              "error",
+              "debug",
+            ],
+            "type": "string",
+          },
+          "message": {
+            "type": "string",
+          },
+          "source": {
+            "type": "string",
+          },
+          "timestamp": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "timestamp",
+          "level",
+          "message",
+        ],
+        "type": "object",
+      },
+      "McpServerHeader": {
+        "properties": {
+          "name": {
+            "type": "string",
+          },
+          "value": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "name",
+          "value",
+        ],
+        "type": "object",
+      },
+      "McpServerResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "args": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "command": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string",
+            },
+            "type": "object",
+          },
+          "headers": {
+            "items": {
+              "$ref": "#/components/schemas/McpServerHeader",
+            },
+            "type": "array",
+          },
+          "name": {
+            "type": "string",
+          },
+          "sessionMode": {
+            "enum": [
+              "stateful",
+              "stateless",
+            ],
+            "type": "string",
+          },
+          "type": {
+            "enum": [
+              "sse",
+              "http",
+              "stdio",
+            ],
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "url": {
+            "type": "string",
+          },
+          "version": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "_id",
+          "name",
+          "type",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "ModelResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "agentId": {
+            "type": "string",
+          },
+          "disappearedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "firstSeenAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "lastSeenAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "metadata": {
+            "additionalProperties": {},
+            "type": "object",
+          },
+          "modelId": {
+            "type": "string",
+          },
+          "provider": {
+            "type": "string",
+          },
+          "providerAvailableFrom": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "providerEndOfLife": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "_id",
+          "modelId",
+          "provider",
+          "agentId",
+          "firstSeenAt",
+          "lastSeenAt",
+        ],
+        "type": "object",
+      },
+      "PaginatedRunGroupsResponse": {
+        "properties": {
+          "cursors": {
+            "$ref": "#/components/schemas/Cursors",
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/RunGroup",
+            },
+            "type": "array",
+          },
+          "estimatedTotal": {
+            "type": "number",
+          },
+          "limit": {
+            "type": "number",
+          },
+        },
+        "required": [
+          "data",
+          "limit",
+          "estimatedTotal",
+          "cursors",
+        ],
+        "type": "object",
+      },
+      "PaginatedRunsResponse": {
+        "properties": {
+          "cursors": {
+            "$ref": "#/components/schemas/Cursors",
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/RequestResponse",
+            },
+            "type": "array",
+          },
+          "estimatedTotal": {
+            "type": "number",
+          },
+          "limit": {
+            "type": "number",
+          },
+        },
+        "required": [
+          "data",
+          "limit",
+          "estimatedTotal",
+          "cursors",
+        ],
+        "type": "object",
+      },
+      "PatchAgentVersionInput": {
+        "properties": {
+          "status": {
+            "enum": [
+              "active",
+              "retired",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "status",
+        ],
+        "type": "object",
+      },
+      "PatchTaskPromptFeatureInput": {
+        "properties": {
+          "detected": {
+            "type": "boolean",
+          },
+        },
+        "required": [
+          "detected",
+        ],
+        "type": "object",
+      },
+      "Persona": {
+        "properties": {
+          "experience": {
+            "enum": [
+              "junior",
+              "senior",
+            ],
+            "type": "string",
+          },
+          "personality": {
+            "enum": [
+              "demanding",
+              "friendly",
+            ],
+            "type": "string",
+          },
+          "type": {
+            "enum": [
+              "traditional",
+              "ai_assisted",
+              "vibe",
+            ],
+            "type": "string",
+          },
+          "verbosity": {
+            "enum": [
+              "brief",
+              "moderate",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "personality",
+          "experience",
+          "verbosity",
+          "type",
+        ],
+        "type": "object",
+      },
+      "PromptFeatureResponse": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "id": {
+            "type": "string",
+          },
+          "prompt": {
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "id",
+          "prompt",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "PromptFeatureResult": {
+        "properties": {
+          "detected": {
+            "type": "boolean",
+          },
+          "evaluated": {
+            "type": "boolean",
+          },
+          "featureId": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "featureId",
+          "detected",
+          "evaluated",
+        ],
+        "type": "object",
+      },
+      "RegisterAgentVersionInput": {
+        "properties": {
+          "agentVersion": {
+            "type": "string",
+          },
+          "buildTime": {
+            "type": "string",
+          },
+          "components": {
+            "additionalProperties": {
+              "type": "string",
+            },
+            "type": "object",
+          },
+          "gitCommit": {
+            "type": "string",
+          },
+          "imageTag": {
+            "type": "string",
+          },
+          "queueName": {
+            "type": "string",
+          },
+          "workerVersion": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "agentVersion",
+          "workerVersion",
+          "components",
+          "gitCommit",
+          "buildTime",
+          "imageTag",
+          "queueName",
+        ],
+        "type": "object",
+      },
+      "ReportResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "content": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "error": {
+            "type": "string",
+          },
+          "insightReferences": {
+            "items": {
+              "$ref": "#/components/schemas/InsightReference",
+            },
+            "type": "array",
+          },
+          "logs": {
+            "items": {
+              "$ref": "#/components/schemas/LogEvent",
+            },
+            "type": "array",
+          },
+          "reporter": {
+            "$ref": "#/components/schemas/Reporter",
+          },
+          "requestId": {
+            "type": "string",
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "generating",
+              "completed",
+              "failed",
+            ],
+            "type": "string",
+          },
+          "templateId": {
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "_id",
+          "requestId",
+          "status",
+          "logs",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "ReportSummary": {
+        "properties": {
+          "completed": {
+            "type": "number",
+          },
+          "failed": {
+            "type": "number",
+          },
+          "generating": {
+            "type": "number",
+          },
+          "pending": {
+            "type": "number",
+          },
+          "total": {
+            "type": "number",
+          },
+        },
+        "required": [
+          "total",
+          "pending",
+          "generating",
+          "completed",
+          "failed",
+        ],
+        "type": "object",
+      },
+      "ReportTemplateResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "id": {
+            "type": "string",
+          },
+          "model": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "systemPrompt": {
+            "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
+          },
+          "timeoutMs": {
+            "exclusiveMinimum": 0,
+            "type": "integer",
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/ReportTrigger",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "userPrompt": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "_id",
+          "id",
+          "name",
+          "userPrompt",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "ReportTemplateSystemPrompt": {
+        "properties": {
+          "content": {
+            "type": "string",
+          },
+          "mode": {
+            "enum": [
+              "append",
+              "override",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "mode",
+          "content",
+        ],
+        "type": "object",
+      },
+      "ReportTrigger": {
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "always",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "type",
+            ],
+            "type": "object",
+          },
+          {
+            "properties": {
+              "criteriaIds": {
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "match": {
+                "enum": [
+                  "any",
+                  "all",
+                ],
+                "type": "string",
+              },
+              "type": {
+                "enum": [
+                  "criteria",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "type",
+              "criteriaIds",
+            ],
+            "type": "object",
+          },
+          {
+            "properties": {
+              "taskPromptIds": {
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "type": {
+                "enum": [
+                  "taskPrompt",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "type",
+              "taskPromptIds",
+            ],
+            "type": "object",
+          },
+          {
+            "properties": {
+              "featureIds": {
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "match": {
+                "enum": [
+                  "any",
+                  "all",
+                ],
+                "type": "string",
+              },
+              "type": {
+                "enum": [
+                  "promptFeature",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "type",
+              "featureIds",
+            ],
+            "type": "object",
+          },
+        ],
+      },
+      "Reporter": {
+        "properties": {
+          "agentId": {
+            "type": "string",
+          },
+          "agentVersion": {
+            "type": "string",
+          },
+          "gitHash": {
+            "type": "string",
+          },
+          "id": {
+            "type": "string",
+          },
+          "model": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "id",
+          "name",
+          "gitHash",
+          "model",
+          "agentId",
+          "agentVersion",
+        ],
+        "type": "object",
+      },
+      "RequestResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "agentVersion": {
+            "type": "string",
+          },
+          "aiCallCount": {
+            "type": "number",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "error": {
+            "type": "string",
+          },
+          "extensions": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "harUrl": {
+            "type": "string",
+          },
+          "logs": {
+            "items": {
+              "$ref": "#/components/schemas/LogEvent",
+            },
+            "type": "array",
+          },
+          "maxIterations": {
+            "type": "number",
+          },
+          "mcpServers": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "model": {
+            "type": "string",
+          },
+          "outcome": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "finished",
+            ],
+            "type": "string",
+          },
+          "persona": {
+            "$ref": "#/components/schemas/Persona",
+          },
+          "personaInstructions": {
+            "type": "string",
+          },
+          "rawChatFormat": {
+            "type": "string",
+          },
+          "rawChatUrl": {
+            "type": "string",
+          },
+          "result": {
+            "type": "string",
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/Scenario",
+          },
+          "setupVideoUrls": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "skillRevisions": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "processing",
+              "done",
+            ],
+            "type": "string",
+          },
+          "submissionId": {
+            "type": "string",
+          },
+          "taskPromptId": {
+            "type": "string",
+          },
+          "tokenUsage": {
+            "$ref": "#/components/schemas/TokenUsage",
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationTurn",
+            },
+            "type": "array",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "videoUrls": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "workerType": {
+            "type": "string",
+          },
+          "workerVersion": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "_id",
+          "scenario",
+          "workerType",
+          "status",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "RunGroup": {
+        "properties": {
+          "aggregates": {
+            "$ref": "#/components/schemas/GroupAggregates",
+          },
+          "key": {
+            "type": "string",
+          },
+          "label": {
+            "type": "string",
+          },
+          "runIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "uniform": {
+            "$ref": "#/components/schemas/GroupUniformValues",
+          },
+        },
+        "required": [
+          "key",
+          "label",
+          "runIds",
+          "aggregates",
+          "uniform",
+        ],
+        "type": "object",
+      },
+      "Scenario": {
+        "properties": {
+          "criteria": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "task": {
+            "type": "string",
+          },
+          "version": {
+            "enum": [
+              "v1",
+              "v2",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "task",
+          "criteria",
+        ],
+        "type": "object",
+      },
+      "SkillResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "origin": {
+            "enum": [
+              "skills-sh",
+              "manual",
+            ],
+            "type": "string",
+          },
+          "skillName": {
+            "type": "string",
+          },
+          "source": {
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "_id",
+          "source",
+          "skillName",
+          "name",
+          "origin",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "SkillRevisionResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "allowedTools": {
+            "type": "string",
+          },
+          "archiveUrl": {
+            "type": "string",
+          },
+          "commitHash": {
+            "type": "string",
+          },
+          "commitTimestamp": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "compatibility": {
+            "type": "string",
+          },
+          "content": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "license": {
+            "type": "string",
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string",
+            },
+            "type": "object",
+          },
+          "name": {
+            "type": "string",
+          },
+          "ref": {
+            "type": "string",
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "skillName": {
+            "type": "string",
+          },
+          "skillPath": {
+            "type": "string",
+          },
+          "source": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "_id",
+          "ref",
+          "source",
+          "skillName",
+          "skillPath",
+          "commitHash",
+          "commitTimestamp",
+          "name",
+          "description",
+          "content",
+          "archiveUrl",
+          "resolvedAt",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "SkillSearchResult": {
+        "properties": {
+          "description": {
+            "type": "string",
+          },
+          "id": {
+            "type": "string",
+          },
+          "installs": {
+            "type": "number",
+          },
+          "internal": {
+            "type": "boolean",
+          },
+          "name": {
+            "type": "string",
+          },
+          "source": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "id",
+          "name",
+          "source",
+          "internal",
+        ],
+        "type": "object",
+      },
+      "SuggestedPromptFeature": {
+        "properties": {
+          "behavior": {
+            "type": "string",
+          },
+          "prompt": {
+            "type": "string",
+          },
+          "suggestedId": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "suggestedId",
+          "behavior",
+          "prompt",
+        ],
+        "type": "object",
+      },
+      "TaskPromptResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/PromptFeatureResult",
+            },
+            "type": "array",
+          },
+          "featuresExtractedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "text": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "_id",
+          "text",
+          "createdAt",
+        ],
+        "type": "object",
+      },
+      "TokenUsage": {
+        "properties": {
+          "completionTokens": {
+            "type": "number",
+          },
+          "promptTokens": {
+            "type": "number",
+          },
+          "totalTokens": {
+            "type": "number",
+          },
+        },
+        "required": [
+          "promptTokens",
+          "completionTokens",
+          "totalTokens",
+        ],
+        "type": "object",
+      },
+      "TriggerReportsInput": {
+        "properties": {
+          "requestId": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "requestId",
+        ],
+        "type": "object",
+      },
+      "UpdateAgentInput": {
+        "properties": {
+          "defaultModel": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "modelProvider": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "supportedModels": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+        },
+        "type": "object",
+      },
+      "UpdateCriteriaInput": {
+        "properties": {
+          "dependsOn": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "prompt": {
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "UpdateExtensionInput": {
+        "properties": {
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "UpdateFeatureFlagInput": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+          },
+        },
+        "required": [
+          "enabled",
+        ],
+        "type": "object",
+      },
+      "UpdateInsightInput": {
+        "properties": {
+          "category": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "tags": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "title": {
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "UpdateMcpServerInput": {
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "command": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string",
+            },
+            "type": "object",
+          },
+          "headers": {
+            "items": {
+              "$ref": "#/components/schemas/McpServerHeader",
+            },
+            "type": "array",
+          },
+          "name": {
+            "type": "string",
+          },
+          "sessionMode": {
+            "enum": [
+              "stateful",
+              "stateless",
+            ],
+            "type": "string",
+          },
+          "type": {
+            "enum": [
+              "sse",
+              "http",
+              "stdio",
+            ],
+            "type": "string",
+          },
+          "url": {
+            "type": "string",
+          },
+          "version": {
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "UpdatePromptFeatureInput": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "UpdateReportTemplateInput": {
+        "properties": {
+          "description": {
+            "type": "string",
+          },
+          "model": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "systemPrompt": {
+            "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
+          },
+          "timeoutMs": {
+            "exclusiveMinimum": 0,
+            "type": "integer",
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/ReportTrigger",
+          },
+          "userPrompt": {
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "ValidateKeyInput": {
+        "properties": {
+          "token": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "token",
+        ],
+        "type": "object",
+      },
+    },
+  },
+  "info": {
+    "description": "REST API for the Scope platform — benchmarking AI coding agents",
+    "title": "Scope API",
+    "version": "1.0.0",
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/about": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "buildTime": {
+                      "type": "string",
+                    },
+                    "description": {
+                      "type": "string",
+                    },
+                    "environment": {
+                      "type": "string",
+                    },
+                    "name": {
+                      "type": "string",
+                    },
+                    "version": {
+                      "type": "string",
+                    },
+                    "workers": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                  },
+                  "required": [
+                    "name",
+                    "version",
+                    "buildTime",
+                    "environment",
+                    "description",
+                    "workers",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "API metadata",
+        "tags": [
+          "System",
+        ],
+      },
+    },
+    "/api/v1/accounts": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AccountResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List accounts",
+        "tags": [
+          "Accounts",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse",
+                },
+              },
+            },
+            "description": "Account created",
+          },
+        },
+        "summary": "Create account",
+        "tags": [
+          "Accounts",
+        ],
+      },
+    },
+    "/api/v1/accounts/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                    },
+                  },
+                  "required": [
+                    "success",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Account deleted",
+          },
+        },
+        "summary": "Delete account",
+        "tags": [
+          "Accounts",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Get account",
+        "tags": [
+          "Accounts",
+        ],
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse",
+                },
+              },
+            },
+            "description": "Account updated",
+          },
+        },
+        "summary": "Update account",
+        "tags": [
+          "Accounts",
+        ],
+      },
+    },
+    "/api/v1/agents": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "modelProvider",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgentResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List agents",
+        "tags": [
+          "Agents",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAgentInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Validation error",
+          },
+        },
+        "summary": "Create or update agent (upsert)",
+        "tags": [
+          "Agents",
+        ],
+      },
+    },
+    "/api/v1/agents/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "204": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "message",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Agent not found",
+          },
+        },
+        "summary": "Delete agent",
+        "tags": [
+          "Agents",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Agent not found",
+          },
+        },
+        "summary": "Get agent",
+        "tags": [
+          "Agents",
+        ],
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAgentInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Validation error",
+          },
+          "404": {
+            "description": "Agent not found",
+          },
+        },
+        "summary": "Update agent",
+        "tags": [
+          "Agents",
+        ],
+      },
+    },
+    "/api/v1/agents/{id}/versions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgentVersion",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Agent not found",
+          },
+        },
+        "summary": "List agent versions",
+        "tags": [
+          "Agents",
+        ],
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterAgentVersionInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentVersion",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Validation error",
+          },
+          "404": {
+            "description": "Agent not found",
+          },
+        },
+        "summary": "Register agent version (upsert)",
+        "tags": [
+          "Agents",
+        ],
+      },
+    },
+    "/api/v1/agents/{id}/versions/{agentVersion}": {
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "agentVersion",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchAgentVersionInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentVersion",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid status value",
+          },
+          "404": {
+            "description": "Agent or version not found",
+          },
+        },
+        "summary": "Patch agent version",
+        "tags": [
+          "Agents",
+        ],
+      },
+    },
+    "/api/v1/analysis": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "taskPromptId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "criteria",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "submissionId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "k",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "description": "Analysis metrics",
+                  "properties": {},
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Compute pass@k / success@T metrics",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/criteria": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CriteriaResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List criteria",
+        "tags": [
+          "Criteria",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCriteriaInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CriteriaResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "409": {
+            "description": "Criterion already exists",
+          },
+        },
+        "summary": "Create criterion",
+        "tags": [
+          "Criteria",
+        ],
+      },
+    },
+    "/api/v1/criteria/generate-prompt": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "behavior": {
+                    "type": "string",
+                  },
+                  "currentId": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "behavior",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "prompt": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "prompt",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Empty behavior string",
+          },
+          "503": {
+            "description": "LLM not configured",
+          },
+        },
+        "summary": "Generate criterion prompt from behavior",
+        "tags": [
+          "Criteria",
+        ],
+      },
+    },
+    "/api/v1/criteria/graph": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CriteriaGraph",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Get criteria DAG",
+        "tags": [
+          "Criteria",
+        ],
+      },
+    },
+    "/api/v1/criteria/mdp": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "criteria",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "features",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "worker",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "taskPromptId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "properties": {},
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Compute MDP transitions",
+        "tags": [
+          "Criteria",
+        ],
+      },
+    },
+    "/api/v1/criteria/seed": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "criteria": {
+                    "items": {
+                      "$ref": "#/components/schemas/CreateCriteriaInput",
+                    },
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "criteria",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "seeded": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "seeded",
+                    "errors",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Seed criteria in bulk",
+        "tags": [
+          "Criteria",
+        ],
+      },
+    },
+    "/api/v1/criteria/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                    },
+                    "id": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "deleted",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Criterion not found",
+          },
+          "409": {
+            "description": "Criterion has dependents",
+          },
+        },
+        "summary": "Soft-delete criterion",
+        "tags": [
+          "Criteria",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CriteriaResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Criterion not found",
+          },
+        },
+        "summary": "Get criterion",
+        "tags": [
+          "Criteria",
+        ],
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCriteriaInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CriteriaResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid dependency reference or self-reference",
+          },
+          "404": {
+            "description": "Criterion not found",
+          },
+        },
+        "summary": "Update criterion",
+        "tags": [
+          "Criteria",
+        ],
+      },
+    },
+    "/api/v1/extensions": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExtensionResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List all extensions",
+        "tags": [
+          "Extensions",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExtensionInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Create or import an extension",
+        "tags": [
+          "Extensions",
+        ],
+      },
+    },
+    "/api/v1/extensions/search": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExtensionSearchResult",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Missing query parameter",
+          },
+        },
+        "summary": "Search extensions (internal + marketplace)",
+        "tags": [
+          "Extensions",
+        ],
+      },
+    },
+    "/api/v1/extensions/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "204": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "message",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Delete extension",
+        "tags": [
+          "Extensions",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Get extension by ID",
+        "tags": [
+          "Extensions",
+        ],
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateExtensionInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Update extension",
+        "tags": [
+          "Extensions",
+        ],
+      },
+    },
+    "/api/v1/extensions/{id}/versions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "preRelease",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExtensionVersionInfo",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List available versions for an extension",
+        "tags": [
+          "Extensions",
+        ],
+      },
+    },
+    "/api/v1/feature-flags": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FeatureFlagResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List feature flags",
+        "tags": [
+          "Feature Flags",
+        ],
+      },
+    },
+    "/api/v1/feature-flags/{key}": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFeatureFlagInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureFlagResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Update feature flag",
+        "tags": [
+          "Feature Flags",
+        ],
+      },
+    },
+    "/api/v1/insights": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InsightResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List insights",
+        "tags": [
+          "Insights",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInsightInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Create insight",
+        "tags": [
+          "Insights",
+        ],
+      },
+    },
+    "/api/v1/insights/search": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InsightResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Search insights",
+        "tags": [
+          "Insights",
+        ],
+      },
+    },
+    "/api/v1/insights/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "204": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "message",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Insight not found",
+          },
+        },
+        "summary": "Delete insight",
+        "tags": [
+          "Insights",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Insight not found",
+          },
+        },
+        "summary": "Get insight",
+        "tags": [
+          "Insights",
+        ],
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateInsightInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Insight not found",
+          },
+        },
+        "summary": "Update insight",
+        "tags": [
+          "Insights",
+        ],
+      },
+    },
+    "/api/v1/insights/{id}/block": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Insight not found",
+          },
+        },
+        "summary": "Block insight",
+        "tags": [
+          "Insights",
+        ],
+      },
+    },
+    "/api/v1/insights/{id}/downvote": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Insight not found",
+          },
+        },
+        "summary": "Downvote insight",
+        "tags": [
+          "Insights",
+        ],
+      },
+    },
+    "/api/v1/insights/{id}/reports": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Insight not found",
+          },
+        },
+        "summary": "Get reports referencing insight",
+        "tags": [
+          "Insights",
+        ],
+      },
+    },
+    "/api/v1/insights/{id}/unblock": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Insight not found",
+          },
+        },
+        "summary": "Unblock insight",
+        "tags": [
+          "Insights",
+        ],
+      },
+    },
+    "/api/v1/insights/{id}/upvote": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Insight not found",
+          },
+        },
+        "summary": "Upvote insight",
+        "tags": [
+          "Insights",
+        ],
+      },
+    },
+    "/api/v1/keys": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KeyResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List keys",
+        "tags": [
+          "Keys",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResponse",
+                },
+              },
+            },
+            "description": "Key created",
+          },
+        },
+        "summary": "Create key",
+        "tags": [
+          "Keys",
+        ],
+      },
+    },
+    "/api/v1/keys/preview": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResponse",
+                },
+              },
+            },
+            "description": "Key preview",
+          },
+        },
+        "summary": "Preview key",
+        "tags": [
+          "Keys",
+        ],
+      },
+    },
+    "/api/v1/keys/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                    },
+                  },
+                  "required": [
+                    "success",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Key deleted",
+          },
+        },
+        "summary": "Delete key",
+        "tags": [
+          "Keys",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Get key",
+        "tags": [
+          "Keys",
+        ],
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResponse",
+                },
+              },
+            },
+            "description": "Key updated",
+          },
+        },
+        "summary": "Update key",
+        "tags": [
+          "Keys",
+        ],
+      },
+    },
+    "/api/v1/keys/{id}/validate": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateKeyInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "description": "Key validation result",
+                  "properties": {},
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Validation result",
+          },
+        },
+        "summary": "Validate key",
+        "tags": [
+          "Keys",
+        ],
+      },
+    },
+    "/api/v1/mcp/servers": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/McpServerResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List MCP servers",
+        "tags": [
+          "MCP Servers",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "_id": {
+                    "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                    "type": "string",
+                  },
+                  "args": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "command": {
+                    "type": "string",
+                  },
+                  "description": {
+                    "type": "string",
+                  },
+                  "env": {
+                    "additionalProperties": {
+                      "type": "string",
+                    },
+                    "type": "object",
+                  },
+                  "headers": {
+                    "items": {
+                      "$ref": "#/components/schemas/McpServerHeader",
+                    },
+                    "type": "array",
+                  },
+                  "name": {
+                    "type": "string",
+                  },
+                  "sessionMode": {
+                    "enum": [
+                      "stateful",
+                      "stateless",
+                    ],
+                    "type": "string",
+                  },
+                  "type": {
+                    "enum": [
+                      "sse",
+                      "http",
+                      "stdio",
+                    ],
+                    "type": "string",
+                  },
+                  "url": {
+                    "type": "string",
+                  },
+                  "version": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "_id",
+                  "name",
+                  "type",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Create MCP server",
+        "tags": [
+          "MCP Servers",
+        ],
+      },
+    },
+    "/api/v1/mcp/servers/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "204": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "message",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Delete MCP server",
+        "tags": [
+          "MCP Servers",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Get MCP server",
+        "tags": [
+          "MCP Servers",
+        ],
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMcpServerInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Update MCP server",
+        "tags": [
+          "MCP Servers",
+        ],
+      },
+    },
+    "/api/v1/models": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "agentId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModelResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List models",
+        "tags": [
+          "Models",
+        ],
+      },
+    },
+    "/api/v1/models/sync": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "agentId": {
+                    "type": "string",
+                  },
+                  "models": {
+                    "items": {
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                        },
+                        "metadata": {
+                          "additionalProperties": {},
+                          "type": "object",
+                        },
+                        "providerAvailableFrom": {
+                          "type": "string",
+                        },
+                        "providerEndOfLife": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "id",
+                      ],
+                      "type": "object",
+                    },
+                    "type": "array",
+                  },
+                  "provider": {
+                    "type": "string",
+                  },
+                  "scannedAt": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "agentId",
+                  "provider",
+                  "models",
+                  "scannedAt",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "added": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "removed": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "unchanged": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                  },
+                  "required": [
+                    "added",
+                    "removed",
+                    "unchanged",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Sync models from provider",
+        "tags": [
+          "Models",
+        ],
+      },
+    },
+    "/api/v1/models/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Get model",
+        "tags": [
+          "Models",
+        ],
+      },
+    },
+    "/api/v1/prompt-features": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PromptFeatureResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List features",
+        "tags": [
+          "Prompt Features",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePromptFeatureInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptFeatureResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+          "409": {
+            "description": "Feature already exists",
+          },
+        },
+        "summary": "Create feature",
+        "tags": [
+          "Prompt Features",
+        ],
+      },
+    },
+    "/api/v1/prompt-features/extract-from-text": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "model": {
+                    "type": "string",
+                  },
+                  "text": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "text",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cached": {
+                      "type": "boolean",
+                    },
+                    "features": {
+                      "items": {
+                        "$ref": "#/components/schemas/PromptFeatureResult",
+                      },
+                      "type": "array",
+                    },
+                    "suggestedFeatures": {
+                      "items": {
+                        "$ref": "#/components/schemas/SuggestedPromptFeature",
+                      },
+                      "type": "array",
+                    },
+                  },
+                  "required": [
+                    "features",
+                    "cached",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Empty text string",
+          },
+          "503": {
+            "description": "LLM not configured",
+          },
+        },
+        "summary": "Extract features from text",
+        "tags": [
+          "Prompt Features",
+        ],
+      },
+    },
+    "/api/v1/prompt-features/generate-prompt": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "behavior": {
+                    "type": "string",
+                  },
+                  "currentId": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "behavior",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "prompt": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "prompt",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Empty behavior string",
+          },
+          "503": {
+            "description": "LLM not configured",
+          },
+        },
+        "summary": "Generate prompt feature from behavior",
+        "tags": [
+          "Prompt Features",
+        ],
+      },
+    },
+    "/api/v1/prompt-features/seed": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "features": {
+                    "items": {
+                      "$ref": "#/components/schemas/CreatePromptFeatureInput",
+                    },
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "features",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "seeded": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "seeded",
+                    "errors",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Seed prompt features in bulk",
+        "tags": [
+          "Prompt Features",
+        ],
+      },
+    },
+    "/api/v1/prompt-features/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                    },
+                    "id": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "deleted",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Feature not found",
+          },
+        },
+        "summary": "Soft-delete feature",
+        "tags": [
+          "Prompt Features",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptFeatureResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Feature not found",
+          },
+        },
+        "summary": "Get feature",
+        "tags": [
+          "Prompt Features",
+        ],
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePromptFeatureInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptFeatureResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+          "404": {
+            "description": "Feature not found",
+          },
+        },
+        "summary": "Update feature",
+        "tags": [
+          "Prompt Features",
+        ],
+      },
+    },
+    "/api/v1/report-templates": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportTemplateResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List report templates",
+        "tags": [
+          "Report Templates",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReportTemplateInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportTemplateResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "409": {
+            "description": "Report template already exists",
+          },
+        },
+        "summary": "Create report template",
+        "tags": [
+          "Report Templates",
+        ],
+      },
+    },
+    "/api/v1/report-templates/available-models": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "modelId": {
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "modelId",
+                    ],
+                    "type": "object",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List models available for report generation",
+        "tags": [
+          "Report Templates",
+        ],
+      },
+    },
+    "/api/v1/report-templates/default-system-prompt": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "content": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "content",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Get default system prompt",
+        "tags": [
+          "Report Templates",
+        ],
+      },
+    },
+    "/api/v1/report-templates/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "204": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "message",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Report template not found",
+          },
+        },
+        "summary": "Delete report template",
+        "tags": [
+          "Report Templates",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportTemplateResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Report template not found",
+          },
+        },
+        "summary": "Get report template",
+        "tags": [
+          "Report Templates",
+        ],
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReportTemplateInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportTemplateResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Report template not found",
+          },
+        },
+        "summary": "Update report template",
+        "tags": [
+          "Report Templates",
+        ],
+      },
+    },
+    "/api/v1/reports": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "requestId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List reports",
+        "tags": [
+          "Reports",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReportInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+          "404": {
+            "description": "Run or template not found",
+          },
+        },
+        "summary": "Create report",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/reports/bulk-create": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkCreateReportsInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+        },
+        "summary": "Bulk create reports",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/reports/bulk-status": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkReportStatusInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+        },
+        "summary": "Bulk get report statuses",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/reports/bulk-summary": {
+      "post": {
+        "description": "Returns aggregated report status counts per run. Only the latest report per template is counted (re-triggers are deduplicated).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkReportSummaryInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkReportSummaryResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+        },
+        "summary": "Bulk get report summary per run",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/reports/bulk-trigger": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkTriggerReportsInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": {},
+                    "properties": {},
+                    "type": "object",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+        },
+        "summary": "Bulk trigger reports",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/reports/trigger": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerReportsInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "reports": {
+                      "items": {
+                        "$ref": "#/components/schemas/ReportResponse",
+                      },
+                      "type": "array",
+                    },
+                    "triggered": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "triggered",
+                    "reports",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+          "404": {
+            "description": "Run not found",
+          },
+        },
+        "summary": "Trigger reports",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/reports/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Report not found",
+          },
+        },
+        "summary": "Get report",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/reports/{id}/insights": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/InsightResponse",
+                      },
+                      {
+                        "default": undefined,
+                        "properties": {
+                          "isNew": {
+                            "type": "boolean",
+                          },
+                          "referencedAt": {
+                            "format": "date-time",
+                            "type": [
+                              "string",
+                              "null",
+                            ],
+                          },
+                        },
+                        "type": "object",
+                      },
+                    ],
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Report not found",
+          },
+        },
+        "summary": "Get insights for report",
+        "tags": [
+          "Reports",
+        ],
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                  },
+                  "isNew": {
+                    "type": "boolean",
+                  },
+                },
+                "required": [
+                  "insightId",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "insightId": {
+                      "type": "string",
+                    },
+                    "isNew": {
+                      "type": "boolean",
+                    },
+                    "referencedAt": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null",
+                      ],
+                    },
+                  },
+                  "required": [
+                    "insightId",
+                    "referencedAt",
+                    "isNew",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Report or insight not found",
+          },
+          "409": {
+            "description": "Insight already referenced by this report",
+          },
+        },
+        "summary": "Link insight to report",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/reports/{id}/logs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent event stream of log entries",
+          },
+          "404": {
+            "description": "Report not found",
+          },
+        },
+        "summary": "Stream report logs (SSE)",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/requests": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "worker",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "taskPromptId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "criteria",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "submissionId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "pending",
+                "processing",
+                "done",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "enum": [
+                "succeeded",
+                "failed",
+                "finished",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "groupBy",
+            "required": false,
+            "schema": {
+              "enum": [
+                "task",
+                "submissionId",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer",
+            },
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PaginatedRunsResponse",
+                    },
+                    {
+                      "$ref": "#/components/schemas/PaginatedRunGroupsResponse",
+                    },
+                  ],
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List requests",
+        "tags": [
+          "Requests",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateRequestInput",
+                  },
+                  {
+                    "default": undefined,
+                    "properties": {
+                      "agentVersion": {
+                        "type": "string",
+                      },
+                      "count": {
+                        "default": 1,
+                        "maximum": 10,
+                        "minimum": 1,
+                        "type": "number",
+                      },
+                      "promptFeatureExtractionId": {
+                        "type": "string",
+                      },
+                      "skills": {
+                        "items": {
+                          "type": "string",
+                        },
+                        "type": "array",
+                      },
+                    },
+                    "type": "object",
+                  },
+                ],
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RequestResponse",
+                    },
+                    {
+                      "items": {
+                        "$ref": "#/components/schemas/RequestResponse",
+                      },
+                      "type": "array",
+                    },
+                  ],
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Submit request(s)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/bulk": {
+      "delete": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "ids",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "deleted": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "deleted",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Bulk soft-delete requests",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/bulk-resubmit": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkResubmitInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RequestResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Bulk resubmit requests",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "message",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Soft-delete request",
+        "tags": [
+          "Requests",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Get request",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/archive": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Gzipped run archive",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download full run archive",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/har": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "HAR-format JSON file",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download HAR file",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/logs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent event stream of log entries",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Stream request logs (SSE)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/reports": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Run not found",
+          },
+        },
+        "summary": "Get reports for request",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/snapshots/{iteration}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "iteration",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Gzipped snapshot archive",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download iteration snapshot",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/video": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "WebM video recording (supports Range requests)",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download session recording",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/runs/upload": {
+      "post": {
+        "responses": {
+          "201": {
+            "description": "Success",
+          },
+        },
+        "summary": "Import run archive",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/skill-revisions/by-ref/{ref}(*)": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillRevisionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Skill revision not found",
+          },
+        },
+        "summary": "Get skill revision by ref",
+        "tags": [
+          "Skill Revisions",
+        ],
+      },
+    },
+    "/api/v1/skill-revisions/by-ref/{ref}(*)/archive": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Binary tar.gz archive",
+          },
+          "404": {
+            "description": "Skill revision or archive not found",
+          },
+          "500": {
+            "description": "Blob storage error",
+          },
+        },
+        "summary": "Download skill revision archive",
+        "tags": [
+          "Skill Revisions",
+        ],
+      },
+    },
+    "/api/v1/skill-revisions/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillRevisionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Skill revision not found",
+          },
+        },
+        "summary": "Get skill revision by ID",
+        "tags": [
+          "Skill Revisions",
+        ],
+      },
+    },
+    "/api/v1/skills": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List all skills",
+        "tags": [
+          "Skills",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSkillInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Create or import a skill",
+        "tags": [
+          "Skills",
+        ],
+      },
+    },
+    "/api/v1/skills/search": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillSearchResult",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Missing query parameter",
+          },
+        },
+        "summary": "Search skills (internal + external)",
+        "tags": [
+          "Skills",
+        ],
+      },
+    },
+    "/api/v1/skills/search/external": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillSearchResult",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Missing query parameter",
+          },
+        },
+        "summary": "Search external skills registry",
+        "tags": [
+          "Skills",
+        ],
+      },
+    },
+    "/api/v1/skills/{id}(*)": {
+      "delete": {
+        "responses": {
+          "204": {
+            "description": "Success",
+          },
+          "404": {
+            "description": "Skill not found",
+          },
+        },
+        "summary": "Soft-delete a skill",
+        "tags": [
+          "Skills",
+        ],
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Skill not found",
+          },
+        },
+        "summary": "Get skill by slug",
+        "tags": [
+          "Skills",
+        ],
+      },
+    },
+    "/api/v1/skills/{id}(*)/resolve": {
+      "post": {
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillRevisionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Skill not found",
+          },
+          "500": {
+            "description": "Blob storage error",
+          },
+        },
+        "summary": "Trigger skill resolution",
+        "tags": [
+          "Skills",
+        ],
+      },
+    },
+    "/api/v1/skills/{id}(*)/revisions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillRevisionResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Skill not found",
+          },
+        },
+        "summary": "List skill revisions",
+        "tags": [
+          "Skills",
+        ],
+      },
+    },
+    "/api/v1/task-prompts": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": [
+                "number",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": [
+                "number",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/TaskPromptResponse",
+                      },
+                      "type": "array",
+                    },
+                    "limit": {
+                      "type": "number",
+                    },
+                    "offset": {
+                      "type": "number",
+                    },
+                    "total": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "items",
+                    "total",
+                    "limit",
+                    "offset",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List task prompts",
+        "tags": [
+          "Task Prompts",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTaskPromptInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPromptResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Empty text string",
+          },
+        },
+        "summary": "Create or find task prompt",
+        "tags": [
+          "Task Prompts",
+        ],
+      },
+    },
+    "/api/v1/task-prompts/generate": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "description": {
+                    "type": "string",
+                  },
+                  "existingPrompt": {
+                    "type": "string",
+                  },
+                },
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "tasks": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                  },
+                  "required": [
+                    "tasks",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "503": {
+            "description": "LLM not configured",
+          },
+        },
+        "summary": "Generate task prompts",
+        "tags": [
+          "Task Prompts",
+        ],
+      },
+    },
+    "/api/v1/task-prompts/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                    },
+                  },
+                  "required": [
+                    "deleted",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Task prompt not found",
+          },
+        },
+        "summary": "Soft-delete task prompt",
+        "tags": [
+          "Task Prompts",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPromptResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Task prompt not found",
+          },
+        },
+        "summary": "Get task prompt",
+        "tags": [
+          "Task Prompts",
+        ],
+      },
+    },
+    "/api/v1/task-prompts/{id}/extract-features": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "model": {
+                    "type": "string",
+                  },
+                },
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cached": {
+                      "type": "boolean",
+                    },
+                    "features": {
+                      "items": {
+                        "$ref": "#/components/schemas/PromptFeatureResult",
+                      },
+                      "type": "array",
+                    },
+                    "featuresExtractedAt": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null",
+                      ],
+                    },
+                    "suggestedFeatures": {
+                      "items": {
+                        "$ref": "#/components/schemas/SuggestedPromptFeature",
+                      },
+                      "type": "array",
+                    },
+                    "taskPromptId": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "taskPromptId",
+                    "features",
+                    "cached",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Task prompt not found",
+          },
+          "503": {
+            "description": "LLM not configured",
+          },
+        },
+        "summary": "Extract features from task prompt",
+        "tags": [
+          "Task Prompts",
+        ],
+      },
+    },
+    "/api/v1/task-prompts/{id}/features/{featureId}": {
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "featureId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchTaskPromptFeatureInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPromptResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid detected value",
+          },
+          "404": {
+            "description": "Task prompt or feature not found",
+          },
+        },
+        "summary": "Toggle feature flag on task prompt",
+        "tags": [
+          "Task Prompts",
+        ],
+      },
+    },
+    "/api/v1/version": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "buildTime": {
+                      "type": "string",
+                    },
+                    "commit": {
+                      "type": "string",
+                    },
+                    "environment": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "commit",
+                    "buildTime",
+                    "environment",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Version info",
+        "tags": [
+          "System",
+        ],
+      },
+    },
+    "/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                    },
+                    "version": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "status",
+                    "version",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Liveness probe",
+        "tags": [
+          "Health",
+        ],
+      },
+    },
+    "/ready": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "migrations": {},
+                    "status": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "status",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "503": {
+            "description": "Service is not ready",
+          },
+        },
+        "summary": "Readiness probe",
+        "tags": [
+          "Health",
+        ],
+      },
+    },
+  },
+  "servers": [
+    {
+      "description": "Current server",
+      "url": "/",
+    },
+  ],
+  "webhooks": {},
+}
+`;
