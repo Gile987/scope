@@ -989,6 +989,15 @@ describe("API Endpoints", () => {
         supportedModels: ["claude-sonnet-4"],
       });
 
+      // Skill resolution mocks (resolveSkillSpecs validates slug + pinned ref)
+      (mocks.skillCollection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([{ _id: "skill-a" }]),
+      });
+      (mocks.skillRevisionStore.getByRef as any).mockResolvedValue({
+        _id: "rev-skill-a",
+        ref: "skill-a@v1",
+      });
+
       const res = await request(app)
         .post("/api/v1/requests/bulk-resubmit")
         .send({

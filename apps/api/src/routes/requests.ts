@@ -1026,6 +1026,16 @@ apiRoute(ctx.app, ctx.registry, {
         const effectiveSkillRevisions = activeProfileVersion
           ? (activeProfileVersion.skillRevisions ?? null)
           : (overrides?.skillRevisions !== undefined ? overrides.skillRevisions : original.skillRevisions);
+        // Resolve skill specs to pinned refs (handles both bare slugs and already-pinned refs)
+        let resolvedSkillRevisions: string[] | null = null;
+        if (effectiveSkillRevisions && effectiveSkillRevisions.length > 0) {
+          const result = await resolveSkillSpecs(effectiveSkillRevisions, ctx);
+          if (result.error) {
+            res.status(422).json({ error: `Skill resolution failed during resubmit: ${result.error}` });
+            return;
+          }
+          resolvedSkillRevisions = result.refs ?? null;
+        }
         const effectiveExtensions = activeProfileVersion
           ? (activeProfileVersion.extensions ?? null)
           : (overrides?.extensions !== undefined ? overrides.extensions : original.extensions);
@@ -1053,7 +1063,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(original.persona ? { persona: original.persona } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
-          ...(effectiveSkillRevisions && effectiveSkillRevisions.length > 0 ? { skillRevisions: effectiveSkillRevisions } : {}),
+          ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
           ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
           ...(original.taskPromptId ? { taskPromptId: original.taskPromptId } : {}),
