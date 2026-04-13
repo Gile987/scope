@@ -23,7 +23,7 @@ import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown, ChevronLeft } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
-import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey } from "@/types";
+import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
 import { formatStatRange } from "@/lib/grouping";
 
 export function RunsList() {
@@ -109,6 +109,17 @@ export function RunsList() {
     queryFn: api.listAgents,
   });
   const activeAgents = useMemo(() => agents.filter((a) => !a.deletedAt), [agents]);
+
+  // Fetch profiles for name lookup
+  const { data: profiles = [] } = useQuery<ProfileWithVersion[]>({
+    queryKey: ["profiles"],
+    queryFn: () => api.listProfiles(),
+  });
+  const profileNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of profiles) map.set(p._id, p.name);
+    return map;
+  }, [profiles]);
 
   // Fetch bulk report summary for all visible runs
   const runIds = useMemo(() => runs.map((r) => r._id), [runs]);
@@ -914,6 +925,7 @@ export function RunsList() {
               <TableHead>MCP</TableHead>
               <TableHead>Skills</TableHead>
               <TableHead>Extensions</TableHead>
+              <TableHead>Profile</TableHead>
               <TableHead className="w-[100px]">Status</TableHead>
               <TableHead className="w-[100px]">Outcome</TableHead>
               <TableHead className="w-[100px]">Report</TableHead>
@@ -940,6 +952,7 @@ export function RunsList() {
                     reportSummaries={reportSummaries}
                     deleteMutation={deleteMutation}
                     groupBy={groupBy}
+                    profileNameMap={profileNameMap}
                     workerFilter={workerFilter === "all" ? undefined : workerFilter}
                     statusFilter={effectiveStatus}
                     outcomeFilter={effectiveOutcome}
@@ -998,12 +1011,14 @@ function RunRow({
   onToggleSelect,
   reportSummaries,
   deleteMutation,
+  profileNameMap,
 }: {
   run: Run;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
+  profileNameMap: Map<string, string>;
 }) {
   return (
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
@@ -1103,6 +1118,15 @@ function RunRow({
         )}
       </TableCell>
       <TableCell>
+        {run.profileId ? (
+          <Link to={`/profiles/${run.profileId}`} className="text-primary hover:underline text-xs font-mono">
+            {profileNameMap.get(run.profileId) ?? formatId(run.profileId)}
+          </Link>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell>
         <StatusBadge status={run.status} />
       </TableCell>
       <TableCell>
@@ -1191,6 +1215,7 @@ function GroupRows({
   reportSummaries,
   deleteMutation,
   groupBy,
+  profileNameMap,
   workerFilter,
   statusFilter,
   outcomeFilter,
@@ -1204,6 +1229,7 @@ function GroupRows({
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   groupBy: GroupByKey;
+  profileNameMap: Map<string, string>;
   workerFilter?: string;
   statusFilter?: string;
   outcomeFilter?: string;
@@ -1378,6 +1404,8 @@ function GroupRows({
             </div>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
+        {/* Profile */}
+        <TableCell />
         {/* Status */}
         <TableCell>
           {(() => {
@@ -1477,7 +1505,7 @@ function GroupRows({
       {isExpanded && (
         isExpandLoading ? (
           <TableRow>
-            <TableCell colSpan={18} className="text-center py-4">
+            <TableCell colSpan={19} className="text-center py-4">
               <RefreshCw className="h-4 w-4 animate-spin inline-block mr-2" />
               Loading runs…
             </TableCell>
@@ -1491,6 +1519,7 @@ function GroupRows({
               onToggleSelect={onToggleSelect}
               reportSummaries={mergedReportSummaries}
               deleteMutation={deleteMutation}
+              profileNameMap={profileNameMap}
             />
           ))
         )
