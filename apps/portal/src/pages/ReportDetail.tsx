@@ -54,7 +54,7 @@ export function ReportDetail() {
   const effectiveLogs = logStream.logs;
   const effectiveIsConnected = isActive ? logStream.isConnected : false;
   const effectiveIsDone = isActive ? logStream.isDone : true;
-  const effectiveError = isActive ? logStream.error : null;
+  const effectiveError = logStream.error;
 
   const copyId = () => {
     navigator.clipboard.writeText(id ?? "");

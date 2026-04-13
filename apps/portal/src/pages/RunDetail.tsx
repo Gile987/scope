@@ -67,7 +67,7 @@ export function RunDetail() {
   const effectiveLogs = logStream.logs;
   const effectiveIsConnected = isActive ? logStream.isConnected : false;
   const effectiveIsDone = isActive ? logStream.isDone : true;
-  const effectiveError = isActive ? logStream.error : null;
+  const effectiveError = logStream.error;
 
   // Fetch linked task prompt (if present) — provides prompt features
   const taskPromptId = run?.taskPromptId;

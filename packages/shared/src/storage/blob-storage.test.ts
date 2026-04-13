@@ -103,6 +103,38 @@ describe("BlobStorage — log helpers", () => {
       expect(mockAppendBlobClient.appendBlock).toHaveBeenCalledTimes(3);
     });
 
+    it("only calls blob createIfNotExists once across multiple sequential appends for the same run", async () => {
+      const storage = makeStorage();
+
+      await storage.appendLogEvent("run-123", makeLogEvent("first"));
+      await storage.appendLogEvent("run-123", makeLogEvent("second"));
+      await storage.appendLogEvent("run-123", makeLogEvent("third"));
+
+      expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledOnce();
+    });
+
+    it("only calls blob createIfNotExists once for concurrent appends for the same run", async () => {
+      const storage = makeStorage();
+
+      await Promise.all([
+        storage.appendLogEvent("run-123", makeLogEvent("a")),
+        storage.appendLogEvent("run-123", makeLogEvent("b")),
+        storage.appendLogEvent("run-123", makeLogEvent("c")),
+      ]);
+
+      expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledOnce();
+    });
+
+    it("calls blob createIfNotExists separately for different run IDs", async () => {
+      const storage = makeStorage();
+
+      await storage.appendLogEvent("run-aaa", makeLogEvent("x"));
+      await storage.appendLogEvent("run-bbb", makeLogEvent("y"));
+
+      // Two different blobs — each initialized once
+      expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledTimes(2);
+    });
+
     it("propagates non-transient errors from appendBlock", async () => {
       const err = Object.assign(new Error("AppendBlockFailed"), { statusCode: 400 });
       mockAppendBlobClient.appendBlock.mockRejectedValue(err);

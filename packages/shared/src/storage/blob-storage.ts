@@ -44,6 +44,8 @@ export class BlobStorage {
   private logsContainerClient: ContainerClient;
   private blobServiceClient: BlobServiceClient;
   private logsContainerReady: Promise<void> | null = null;
+  /** Tracks per-blob createIfNotExists — keyed by blobName, value is the settled promise. */
+  private initializedBlobs = new Map<string, Promise<void>>();
 
   constructor(config: BlobStorageConfig) {
     let blobServiceClient: BlobServiceClient;
@@ -85,13 +87,20 @@ export class BlobStorage {
 
   /**
    * Appends a single log event as a JSON line to the run's append blob.
-   * Creates the blob and container on first use.
+   * Creates the blob and container on first use. Blob-level initialization is
+   * cached per blobName so concurrent appends only call createIfNotExists once.
    */
   async appendLogEvent(requestId: string, logEvent: LogEvent): Promise<void> {
     await this.ensureLogsContainer();
     const blobName = `${requestId}/run.jsonl`;
     const appendBlobClient = this.logsContainerClient.getAppendBlobClient(blobName);
-    await appendBlobClient.createIfNotExists();
+    if (!this.initializedBlobs.has(blobName)) {
+      this.initializedBlobs.set(
+        blobName,
+        appendBlobClient.createIfNotExists().then(() => undefined),
+      );
+    }
+    await this.initializedBlobs.get(blobName);
     const line = JSON.stringify(logEvent) + "\n";
     await appendBlobClient.appendBlock(line, Buffer.byteLength(line));
   }
