@@ -34,6 +34,8 @@ import {
 import { computeAnalysis, AnalysisResponse, AnalyzableRun } from "./analysis.js";
 import { computeMdp, parseStateKey, type MdpAnalyzableRun } from "./criteria-mdp.js";
 import { blobNameFromSnapshotsUrl, rewriteHarUrlsForArchive, detectBundledHarFiles, uploadBundledHarFiles, detectBundledChatFiles, uploadBundledChatFiles } from "./archive-har.js";
+import { registerProfilesRoutes } from "./routes/profiles.js";
+import { resolveSkillSpecs } from "./utils/skill-helpers.js";
 import { TaskPromptStore, computeTaskPromptId, type TaskPromptDocument, SkillRevisionStore, SkillResolver, type SkillDocument, type SkillRevisionDocument, type SkillSearchResult, type ExtensionSearchResult, ExtensionClient, parseExtensionSpec, resolveAgentVersion, type ProfileDocument, type ProfileVersionDocument } from "shared";
 import { evaluateTrigger, REPORT_SYSTEM_PROMPT } from "shared";
 import {
@@ -90,11 +92,6 @@ import {
   CreateRequestInputSchema,
   ListRequestsQuerySchema,
   BulkResubmitInputSchema,
-  CreateProfileInputSchema,
-  UpdateProfileIdentitySchema,
-  ProfileResponseSchema,
-  ProfileVersionResponseSchema,
-  ProfileWithVersionResponseSchema,
   RunGroupSchema,
   PaginatedRunsResponseSchema,
   PaginatedRunGroupsResponseSchema,
@@ -107,6 +104,7 @@ import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
 import { apiRoute } from "./openapi/api-route.js";
 import { VALID_WORKERS } from "./route-context.js";
+import type { RouteContext } from "./route-context.js";
 import type {
   CriteriaDocument,
   PromptFeatureDocument,
@@ -687,7 +685,7 @@ apiRoute(app, registry, {
         return;
       }
       if (skillSlugs.length > 0) {
-        const result = await resolveSkillSpecs(skillSlugs);
+        const result = await resolveSkillSpecs(skillSlugs, { skillCollection, skillRevisionStore, skillResolver, storageConnectionString, storageAccountName });
         if (result.error) {
           res.status(422).json({ error: result.error });
           return;
@@ -5818,437 +5816,39 @@ apiRoute(app, registry, {
   },
 });
 
-// =====================================================================
-// Shared helpers
-// =====================================================================
-
-/** Parse "slug@commitHash" → { slug, commitHash } or "slug" → { slug } */
-function parseSkillSpec(spec: string): { slug: string; commitHash?: string } {
-  const at = spec.lastIndexOf("@");
-  if (at > 0) return { slug: spec.substring(0, at), commitHash: spec.substring(at + 1) };
-  return { slug: spec };
-}
-
-/**
- * Resolve skill specs (slug or slug@commitHash) to revision refs.
- * - If spec has @commitHash → look up that specific revision
- * - If spec has no hash → resolve to latest revision via skillResolver
- */
-async function resolveSkillSpecs(specs: string[]): Promise<{ refs?: string[]; error?: string }> {
-  if (!specs.length) return { refs: [] };
-
-  // Extract unique slugs from specs
-  const parsedSpecs = specs.map(parseSkillSpec);
-  const slugs = [...new Set(parsedSpecs.map((p) => p.slug))];
-
-  // Validate all slugs exist in DB
-  const existingSkills = await skillCollection
-    .find({ _id: { $in: slugs }, deletedAt: { $exists: false } })
-    .toArray();
-  const existingMap = new Map(existingSkills.map((s: SkillDocument) => [s._id, s]));
-  const missing = slugs.filter((slug) => !existingMap.has(slug));
-  if (missing.length > 0) {
-    return { error: `Skill(s) not found: ${missing.join(", ")}` };
-  }
-
-  const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
-    if (!storageConnectionString && !storageAccountName) {
-      throw new Error("Blob storage not configured — cannot store skill archives");
-    }
-    let blobServiceClient: BlobServiceClient;
-    if (storageConnectionString) {
-      blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
-    } else {
-      const credential = new DefaultAzureCredential();
-      blobServiceClient = new BlobServiceClient(
-        `https://${storageAccountName}.blob.core.windows.net`,
-        credential
-      );
-    }
-    const containerClient = blobServiceClient.getContainerClient("skill-archives");
-    await containerClient.createIfNotExists();
-    const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
-    await blockBlobClient.upload(data, data.length, {
-      blobHTTPHeaders: { blobContentType: "application/gzip" },
-    });
-    return blockBlobClient.url;
-  };
-
-  const refs: string[] = [];
-  for (const { slug, commitHash } of parsedSpecs) {
-    const skill = existingMap.get(slug)!;
-    if (commitHash) {
-      // Pinned to specific revision — validate it exists
-      const ref = `${slug}@${commitHash}`;
-      const revision = await skillRevisionStore.getByRef(ref);
-      if (!revision) {
-        return { error: `Skill revision not found: ${ref}` };
-      }
-      refs.push(revision.ref);
-    } else {
-      // Resolve to latest revision
-      try {
-        const revision = await skillResolver.resolve(
-          skill.source,
-          skill.skillName,
-          skillRevisionStore,
-          uploadArchive,
-        );
-        refs.push(revision.ref);
-      } catch (resolveError) {
-        return { error: `Failed to resolve skill "${skill._id}": ${resolveError instanceof Error ? resolveError.message : String(resolveError)}` };
-      }
-    }
-  }
-  return { refs };
-}
-
-// =====================================================================
-// Profiles API
-// =====================================================================
-
-// POST /api/v1/profiles — create a new profile (+ version 1)
-apiRoute(app, registry, {
-  method: "post",
-  path: "/api/v1/profiles",
-  tags: ["Profiles"],
-  summary: "Create a new profile",
-  body: CreateProfileInputSchema,
-  response: ProfileWithVersionResponseSchema,
-  handler: async (req, res, next) => {
-    try {
-      const { name, description, workerType, model, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
-      const now = new Date();
-      const profileId = uuidv4();
-      const versionId = uuidv4();
-
-      // Resolve extension versions (same pattern as run submission)
-      let resolvedExtensions: string[] | undefined;
-      if (extensions && extensions.length > 0) {
-        const extensionClient = new ExtensionClient("");
-        const resolvedSpecs: string[] = [];
-        for (const spec of extensions) {
-          const parsed = parseExtensionSpec(spec);
-          if (parsed.version) {
-            resolvedSpecs.push(`${parsed.id}@${parsed.version}`);
-          } else {
-            const versions = await extensionClient.getVersions(parsed.id, false);
-            if (versions.length === 0) {
-              res.status(422).json({ error: `No stable versions found for extension "${parsed.id}"` });
-              return;
-            }
-            resolvedSpecs.push(`${parsed.id}@${versions[0].version}`);
-          }
-        }
-        resolvedExtensions = resolvedSpecs;
-      }
-
-      // Resolve skill specs to pinned revision refs
-      let resolvedSkillRevisions: string[] | undefined;
-      if (skillRevisions && skillRevisions.length > 0) {
-        const result = await resolveSkillSpecs(skillRevisions);
-        if (result.error) {
-          res.status(422).json({ error: result.error });
-          return;
-        }
-        resolvedSkillRevisions = result.refs;
-      }
-
-      const profileDoc: ProfileDocument = {
-        _id: profileId,
-        name,
-        ...(description ? { description } : {}),
-        latestVersion: 1,
-        createdAt: now,
-      };
-
-      const versionDoc: ProfileVersionDocument = {
-        _id: versionId,
-        profileId,
-        version: 1,
-        workerType,
-        model,
-        ...(agentVersion ? { agentVersion } : {}),
-        ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
-        ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
-        ...(resolvedExtensions && resolvedExtensions.length > 0 ? { extensions: resolvedExtensions } : {}),
-        createdAt: now,
-      };
-
-      await profileCollection.insertOne(profileDoc);
-      await profileVersionCollection.insertOne(versionDoc);
-
-      res.status(201).json({ ...profileDoc, version: versionDoc });
-    } catch (error) {
-      next(error);
-    }
-  },
-});
-
-// GET /api/v1/profiles — list profiles (latest version of each)
-apiRoute(app, registry, {
-  method: "get",
-  path: "/api/v1/profiles",
-  tags: ["Profiles"],
-  summary: "List profiles",
-  query: z.object({ workerType: z.string().optional() }),
-  response: z.array(ProfileWithVersionResponseSchema),
-  handler: async (req, res, next) => {
-    try {
-      const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
-      const profiles = await profileCollection.find(filter).sort({ name: 1 }).toArray();
-
-      const result = await Promise.all(
-        profiles.map(async (profile) => {
-          const latestVersion = await profileVersionCollection.findOne(
-            { profileId: profile._id, version: profile.latestVersion },
-          );
-          return { ...profile, version: latestVersion! };
-        }),
-      );
-
-      // Filter by workerType if specified (applied post-join)
-      const { workerType } = req.query;
-      const filtered = workerType
-        ? result.filter((p) => p.version.workerType === workerType)
-        : result;
-
-      res.json(filtered);
-    } catch (error) {
-      next(error);
-    }
-  },
-});
-
-// GET /api/v1/profiles/:profileId — get profile with latest version
-apiRoute(app, registry, {
-  method: "get",
-  path: "/api/v1/profiles/:profileId",
-  tags: ["Profiles"],
-  summary: "Get profile with latest version",
-  params: z.object({ profileId: z.string() }),
-  response: ProfileWithVersionResponseSchema,
-  handler: async (req, res, next) => {
-    try {
-      const profile = await profileCollection.findOne({
-        _id: req.params.profileId,
-        deletedAt: { $exists: false },
-      });
-      if (!profile) {
-        res.status(404).json({ error: "Profile not found" });
-        return;
-      }
-      const latestVersion = await profileVersionCollection.findOne(
-        { profileId: profile._id, version: profile.latestVersion },
-      );
-      res.json({ ...profile, version: latestVersion! });
-    } catch (error) {
-      next(error);
-    }
-  },
-});
-
-// GET /api/v1/profiles/:profileId/versions — list all versions
-apiRoute(app, registry, {
-  method: "get",
-  path: "/api/v1/profiles/:profileId/versions",
-  tags: ["Profiles"],
-  summary: "List profile versions",
-  params: z.object({ profileId: z.string() }),
-  response: z.array(ProfileVersionResponseSchema),
-  handler: async (req, res, next) => {
-    try {
-      const profile = await profileCollection.findOne({
-        _id: req.params.profileId,
-        deletedAt: { $exists: false },
-      });
-      if (!profile) {
-        res.status(404).json({ error: "Profile not found" });
-        return;
-      }
-      const versions = await profileVersionCollection
-        .find({ profileId: profile._id })
-        .sort({ version: -1 })
-        .toArray();
-      res.json(versions);
-    } catch (error) {
-      next(error);
-    }
-  },
-});
-
-// GET /api/v1/profiles/:profileId/versions/:version — get specific version
-apiRoute(app, registry, {
-  method: "get",
-  path: "/api/v1/profiles/:profileId/versions/:version",
-  tags: ["Profiles"],
-  summary: "Get profile version",
-  params: z.object({ profileId: z.string(), version: z.coerce.number() }),
-  response: ProfileVersionResponseSchema,
-  handler: async (req, res, next) => {
-    try {
-      const versionDoc = await profileVersionCollection.findOne({
-        profileId: req.params.profileId,
-        version: req.params.version,
-      });
-      if (!versionDoc) {
-        res.status(404).json({ error: "Profile version not found" });
-        return;
-      }
-      res.json(versionDoc);
-    } catch (error) {
-      next(error);
-    }
-  },
-});
-
-// POST /api/v1/profiles/:profileId — create a new version
-apiRoute(app, registry, {
-  method: "post",
-  path: "/api/v1/profiles/:profileId",
-  tags: ["Profiles"],
-  summary: "Create new profile version",
-  params: z.object({ profileId: z.string() }),
-  body: CreateProfileInputSchema.omit({ name: true, description: true }),
-  response: ProfileVersionResponseSchema,
-  handler: async (req, res, next) => {
-    try {
-      const profile = await profileCollection.findOne({
-        _id: req.params.profileId,
-        deletedAt: { $exists: false },
-      });
-      if (!profile) {
-        res.status(404).json({ error: "Profile not found" });
-        return;
-      }
-
-      const { workerType, model, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
-      const now = new Date();
-      const newVersion = profile.latestVersion + 1;
-      const versionId = uuidv4();
-
-      // Resolve extension versions
-      let resolvedExtensions: string[] | undefined;
-      if (extensions && extensions.length > 0) {
-        const extensionClient = new ExtensionClient("");
-        const resolvedSpecs: string[] = [];
-        for (const spec of extensions) {
-          const parsed = parseExtensionSpec(spec);
-          if (parsed.version) {
-            resolvedSpecs.push(`${parsed.id}@${parsed.version}`);
-          } else {
-            const versions = await extensionClient.getVersions(parsed.id, false);
-            if (versions.length === 0) {
-              res.status(422).json({ error: `No stable versions found for extension "${parsed.id}"` });
-              return;
-            }
-            resolvedSpecs.push(`${parsed.id}@${versions[0].version}`);
-          }
-        }
-        resolvedExtensions = resolvedSpecs;
-      }
-
-      // Resolve skill specs to pinned revision refs
-      let resolvedSkillRevisions: string[] | undefined;
-      if (skillRevisions && skillRevisions.length > 0) {
-        const result = await resolveSkillSpecs(skillRevisions);
-        if (result.error) {
-          res.status(422).json({ error: result.error });
-          return;
-        }
-        resolvedSkillRevisions = result.refs;
-      }
-
-      const versionDoc: ProfileVersionDocument = {
-        _id: versionId,
-        profileId: profile._id,
-        version: newVersion,
-        workerType,
-        model,
-        ...(agentVersion ? { agentVersion } : {}),
-        ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
-        ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
-        ...(resolvedExtensions && resolvedExtensions.length > 0 ? { extensions: resolvedExtensions } : {}),
-        createdAt: now,
-      };
-
-      await profileVersionCollection.insertOne(versionDoc);
-      await profileCollection.updateOne(
-        { _id: profile._id },
-        { $set: { latestVersion: newVersion, updatedAt: now } },
-      );
-
-      res.status(201).json(versionDoc);
-    } catch (error) {
-      next(error);
-    }
-  },
-});
-
-// PUT /api/v1/profiles/:profileId — update profile identity (name/description)
-apiRoute(app, registry, {
-  method: "put",
-  path: "/api/v1/profiles/:profileId",
-  tags: ["Profiles"],
-  summary: "Update profile identity",
-  params: z.object({ profileId: z.string() }),
-  body: UpdateProfileIdentitySchema,
-  response: ProfileResponseSchema,
-  handler: async (req, res, next) => {
-    try {
-      const profile = await profileCollection.findOne({
-        _id: req.params.profileId,
-        deletedAt: { $exists: false },
-      });
-      if (!profile) {
-        res.status(404).json({ error: "Profile not found" });
-        return;
-      }
-
-      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-      if (req.body.name !== undefined) updateFields.name = req.body.name;
-      if (req.body.description !== undefined) updateFields.description = req.body.description;
-
-      await profileCollection.updateOne({ _id: profile._id }, { $set: updateFields });
-      const updated = await profileCollection.findOne({ _id: profile._id });
-      res.json(updated!);
-    } catch (error) {
-      next(error);
-    }
-  },
-});
-
-// DELETE /api/v1/profiles/:profileId — soft-delete profile
-apiRoute(app, registry, {
-  method: "delete",
-  path: "/api/v1/profiles/:profileId",
-  tags: ["Profiles"],
-  summary: "Delete profile",
-  params: z.object({ profileId: z.string() }),
-  response: z.object({ message: z.string() }),
-  successStatus: 204,
-  handler: async (req, res, next) => {
-    try {
-      const profile = await profileCollection.findOne({
-        _id: req.params.profileId,
-        deletedAt: { $exists: false },
-      });
-      if (!profile) {
-        res.status(404).json({ error: "Profile not found" });
-        return;
-      }
-
-      await profileCollection.updateOne(
-        { _id: profile._id },
-        { $set: { deletedAt: new Date(), updatedAt: new Date() } },
-      );
-
-      res.status(204).send();
-    } catch (error) {
-      next(error);
-    }
-  },
-});
+// ─── Profile routes (extracted module) ────────────────────────────────────────
+const routeCtx: RouteContext = {
+  get app() { return app; },
+  get registry() { return registry; },
+  get db() { return db; },
+  get requestCollection() { return collection; },
+  get criteriaCollection() { return criteriaCollection; },
+  get promptFeatureCollection() { return promptFeatureCollection; },
+  get promptFeatureExtractionCollection() { return promptFeatureExtractionCollection; },
+  get reportCollection() { return reportCollection; },
+  get reportTemplateCollection() { return reportTemplateCollection; },
+  get agentCollection() { return agentCollection; },
+  get modelCollection() { return modelCollection; },
+  get mcpServerCollection() { return mcpServerCollection; },
+  get insightsCollection() { return insightsCollection; },
+  get taskPromptCollection() { return taskPromptCollection; },
+  get featureFlagCollection() { return featureFlagCollection; },
+  get skillCollection() { return skillCollection; },
+  get extensionCollection() { return extensionCollection; },
+  get skillRevisionCollection() { return skillRevisionCollection; },
+  get profileCollection() { return profileCollection; },
+  get profileVersionCollection() { return profileVersionCollection; },
+  get taskPromptStore() { return taskPromptStore; },
+  get skillRevisionStore() { return skillRevisionStore; },
+  get skillResolver() { return skillResolver; },
+  get queueClients() { return queueClients; },
+  get reportQueueClient() { return reportQueueClient; },
+  getOrCreateQueueClient,
+  validWorkers: VALID_WORKERS,
+  storageConnectionString,
+  storageAccountName,
+};
+registerProfilesRoutes(routeCtx);
 
 // =====================================================================
 // Insights API (apiRoute)

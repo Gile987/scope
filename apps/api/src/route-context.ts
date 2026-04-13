@@ -4,7 +4,6 @@
 import type { z } from "zod";
 import type { Collection, Db } from "mongodb";
 import type { QueueClient } from "@azure/storage-queue";
-import type { BlobServiceClient } from "@azure/storage-blob";
 import type { Express } from "express";
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import type {
@@ -14,6 +13,8 @@ import type {
   SkillResolver,
   SkillDocument,
   SkillRevisionDocument,
+  ProfileDocument,
+  ProfileVersionDocument,
   // Zod response schemas → inferred types replace hand-written interfaces
   CriteriaResponseSchema,
   ExtensionResponseSchema,
@@ -86,7 +87,10 @@ export interface RouteContext {
   taskPromptCollection: Collection<TaskPromptDocument>;
   featureFlagCollection: Collection<FeatureFlagDocument>;
   skillCollection: Collection<SkillDocument>;
+  extensionCollection: Collection<ExtensionDocument>;
   skillRevisionCollection: Collection<SkillRevisionDocument>;
+  profileCollection: Collection<ProfileDocument>;
+  profileVersionCollection: Collection<ProfileVersionDocument>;
 
   // Services
   taskPromptStore: TaskPromptStore;
@@ -100,5 +104,6 @@ export interface RouteContext {
 
   // Config
   validWorkers: readonly string[];
-  blobServiceClient?: BlobServiceClient;
+  storageConnectionString: string;
+  storageAccountName: string;
 }
