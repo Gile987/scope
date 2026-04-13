@@ -22,6 +22,7 @@ import { sanitizeHarFile } from "../har/har-parser.js";
 import { JudgeClient } from "../judge/judge-client.js";
 import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
 import { McpServerClient } from "../mcp/mcp-server-client.js";
+import { McpSecretClient } from "../mcp/mcp-secret-client.js";
 import { SkillClient } from "../skills/skill-client.js";
 import { ExtensionClient } from "../extensions/extension-client.js";
 import { extractSkillsToWorkspace } from "../skills/skill-extractor.js";
@@ -76,6 +77,27 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolving ${requestDoc.mcpServers.length} MCP server(s)`, { mcpServers: requestDoc.mcpServers });
       mcpServerConfigs = await mcpClient.resolveServers(requestDoc.mcpServers);
       await log("info", `Resolved MCP servers: ${mcpServerConfigs.map(s => s.name).join(", ")}`);
+
+      // Hydrate configs with real plaintext secrets from Token Manager
+      const tokenManagerUrl = (this.config as QueueProcessorConfig).tokenManagerUrl;
+      if (tokenManagerUrl) {
+        const secretClient = new McpSecretClient(tokenManagerUrl);
+        mcpServerConfigs = await Promise.all(
+          mcpServerConfigs.map(async (config) => {
+            const resolved = await secretClient.resolveSecrets(config.name);
+            if ('env' in resolved && resolved.env && Object.keys(resolved.env).length > 0) {
+              return { ...config, env: resolved.env };
+            }
+            if ('headers' in resolved && resolved.headers && resolved.headers.length > 0) {
+              return { ...config, headers: resolved.headers };
+            }
+            return config;
+          })
+        );
+        await log("info", `Hydrated secrets for MCP servers: ${mcpServerConfigs.map(s => s.name).join(", ")}`);
+      } else {
+        await log("warn", "TOKEN_MANAGER_URL not configured — MCP server secrets will not be resolved");
+      }
     }
 
     // Resolve skill revision refs to configs via API

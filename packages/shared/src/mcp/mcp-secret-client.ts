@@ -3,6 +3,17 @@
 
 import type { McpServerHeader } from '../types/mcp.js';
 
+/**
+ * Thrown when the Token Manager is configured but unreachable (network failure).
+ * Distinct from HTTP errors so callers can return 503 rather than 500.
+ */
+export class McpSecretUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super(`Secret storage unavailable: Token Manager is unreachable (${cause instanceof Error ? cause.message : String(cause)})`);
+    this.name = 'McpSecretUnavailableError';
+  }
+}
+
 /** Metadata returned from list endpoint — no value ever included */
 export interface McpSecretListItem {
   id: string;
@@ -41,13 +52,21 @@ export class McpSecretClient {
     this.tokenManagerUrl = tokenManagerUrl.replace(/\/+$/, '');
   }
 
+  private async fetchOrThrow(url: string, init?: RequestInit): Promise<Response> {
+    try {
+      return await fetch(url, init);
+    } catch (cause) {
+      throw new McpSecretUnavailableError(cause);
+    }
+  }
+
   /**
    * Upsert a secret (create or overwrite by name).
    * Returns metadata only — value is never returned.
    */
   async storeSecret(mcpId: string, name: string, value: string): Promise<McpSecretListItem> {
     const url = `${this.tokenManagerUrl}/api/v1/mcp/servers/${encodeURIComponent(mcpId)}/secrets`;
-    const res = await fetch(url, {
+    const res = await this.fetchOrThrow(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, value }),
@@ -85,7 +104,7 @@ export class McpSecretClient {
    */
   async listSecrets(mcpId: string): Promise<McpSecretListItem[]> {
     const url = `${this.tokenManagerUrl}/api/v1/mcp/servers/${encodeURIComponent(mcpId)}/secrets`;
-    const res = await fetch(url);
+    const res = await this.fetchOrThrow(url);
     if (!res.ok) {
       throw new Error(`[McpSecretClient] GET ${url} failed: ${res.status} ${res.statusText}`);
     }
@@ -99,7 +118,7 @@ export class McpSecretClient {
    */
   async resolveSecrets(mcpId: string): Promise<McpSecretResolved> {
     const url = `${this.tokenManagerUrl}/api/v1/mcp/servers/${encodeURIComponent(mcpId)}/secrets/resolve`;
-    const res = await fetch(url);
+    const res = await this.fetchOrThrow(url);
     if (!res.ok) {
       throw new Error(`[McpSecretClient] GET ${url} failed: ${res.status} ${res.statusText}`);
     }
@@ -111,7 +130,7 @@ export class McpSecretClient {
    */
   async deleteSecret(mcpId: string, name: string): Promise<void> {
     const url = `${this.tokenManagerUrl}/api/v1/mcp/servers/${encodeURIComponent(mcpId)}/secrets/${encodeURIComponent(name)}`;
-    const res = await fetch(url, { method: 'DELETE' });
+    const res = await this.fetchOrThrow(url, { method: 'DELETE' });
     if (!res.ok && res.status !== 404) {
       throw new Error(`[McpSecretClient] DELETE ${url} failed: ${res.status} ${res.statusText}`);
     }
