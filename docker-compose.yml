@@ -419,9 +419,9 @@ services:
   # MCPJungle sidecar for Claude Code worker (stdio + remote HTTP MCP aggregation)
   mcp-gateway-claude-code:
     image: ghcr.io/mcpjungle/mcpjungle:latest-stdio
-    # Suppress the ASCII art banner (stdout) while keeping logs (stderr)
+    # Suppress the ASCII art banner (written to stderr by Cobra's cmd.Print)
     entrypoint: ["/bin/sh", "-c"]
-    command: ["exec /mcpjungle start 1>/dev/null"]
+    command: ["/mcpjungle start 2>&1 | grep --line-buffered -v '[█═╗╚║╔╝]' >&2"]
     profiles: [claude-code]
     environment:
       SESSION_IDLE_TIMEOUT_SEC: "0"
@@ -507,9 +507,9 @@ services:
   # MCPJungle sidecar for Copilot worker (stdio + remote HTTP MCP aggregation)
   mcp-gateway-copilot:
     image: ghcr.io/mcpjungle/mcpjungle:latest-stdio
-    # Suppress the ASCII art banner (stdout) while keeping logs (stderr)
+    # Suppress the ASCII art banner (written to stderr by Cobra's cmd.Print)
     entrypoint: ["/bin/sh", "-c"]
-    command: ["exec /mcpjungle start 1>/dev/null"]
+    command: ["/mcpjungle start 2>&1 | grep --line-buffered -v '[█═╗╚║╔╝]' >&2"]
     profiles: [copilot]
     environment:
       SESSION_IDLE_TIMEOUT_SEC: "0"
