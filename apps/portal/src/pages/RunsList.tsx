@@ -1120,11 +1120,11 @@ function RunRow({
       </TableCell>
       <TableCell>
         {run.profileId ? (
-          <Link to={`/profiles/${run.profileId}`} className="text-primary hover:underline text-xs">
+          <Link to={`/profiles/${run.profileId}`} className="text-primary hover:underline">
             {profileNameMap.get(run.profileId) ?? formatId(run.profileId)}
           </Link>
         ) : (
-          <span className="text-xs text-muted-foreground">–</span>
+          <span className="text-muted-foreground">–</span>
         )}
       </TableCell>
       <TableCell>
