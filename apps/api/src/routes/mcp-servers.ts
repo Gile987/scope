@@ -72,11 +72,12 @@ apiRoute(ctx.app, ctx.registry, {
         const masked = Object.fromEntries(items.map((item) => [item.name, "<secret>"]));
         // Return masked env or headers depending on transport type
         if (server.type === "stdio") {
-          return res.json({ ...server, id: server._id, env: masked });
+          res.json({ ...server, id: server._id, env: masked });
         } else {
           const maskedHeaders = items.map((item) => ({ name: item.name, value: "<secret>" }));
-          return res.json({ ...server, id: server._id, headers: maskedHeaders });
+          res.json({ ...server, id: server._id, headers: maskedHeaders });
         }
+        return;
       }
     }
 

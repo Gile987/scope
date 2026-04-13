@@ -8,7 +8,7 @@ import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
-import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient } from "shared";
+import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError } from "shared";
 import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument } from "shared";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
@@ -263,6 +263,10 @@ registerFeatureFlagRoutes(routeCtx);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof McpSecretUnavailableError) {
+    res.status(503).json({ error: err.message });
+    return;
+  }
   console.error("Error:", err);
   res.status(500).json({ error: err.message || "Internal server error" });
 });
