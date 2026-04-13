@@ -21,48 +21,14 @@ import { colorLevel, dimTimestamp, errorText, successText, label, value, banner,
 import { formatData, isMachineReadable } from "./utils/formatters.js";
 import type { OutputFormat, DisplayField } from "./utils/types.js";
 import { runGetAction } from "./run-get-action.js";
+import { normalizeUrl, printFollowUpCommands, DEFAULT_WORKERS, OUTPUT_FORMATS, withOutputOption } from "./utils/shared.js";
+import { mapYamlCriterion } from "./utils/yaml-mappers.js";
+import { mapYamlReportTemplate } from "./utils/yaml-mappers.js";
+import { parseEnvPairs, parseHeaderPairs } from "./utils/parsers.js";
 
 dotenv.config();
 
-/** Strip trailing slashes from a URL to avoid double-slash issues when appending paths */
-const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
-
-function printFollowUpCommands(id: string): void {
-  console.log(`\n${label('Run ID:')} ${value(id)}`);
-  console.log(`\n${label('Next steps:')}`);
-  console.log(`  ${dimTimestamp('Get details:')}   pnpm cli run get -i ${id}`);
-  console.log(`  ${dimTimestamp('Check status:')}  pnpm cli run status -i ${id}`);
-  console.log(`  ${dimTimestamp('Stream logs:')}   pnpm cli run logs -i ${id}`);
-  console.log(`  ${dimTimestamp('Download:')}      pnpm cli run download -i ${id}`);
-  console.log(`  ${dimTimestamp('List all runs:')} pnpm cli run list`);
-}
-
 export const program = new Command();
-
-const DEFAULT_WORKERS = [
-  "coder-acp-claude-code",
-  "coder-acp-copilot",
-  "coder-vscode-web",
-];
-
-// Output format definitions with descriptions and categories
-const OUTPUT_FORMATS = {
-  table: { section: 'Human-readable formats', description: 'Formatted table with borders (default for lists)' },
-  tsv:   { section: 'Machine-readable formats', description: 'Tab-separated values for Unix tools (cut, awk, grep, xargs)' },
-  json:  { section: 'Machine-readable formats', description: 'JSON format for programmatic access and AI agents' },
-  yaml:  { section: 'Machine-readable formats', description: 'YAML format for human-friendly structured data' },
-} as const;
-
-/**
- * Add the standard `-o, --output <format>` option to a command.
- * @param cmd - The Commander command to add the option to.
- * @param extra - Additional format names beyond the defaults (table, tsv, json, yaml).
- * @returns The command (for chaining).
- */
-function withOutputOption(cmd: Command, extra?: string[]): Command {
-  const formats = ['table', 'tsv', 'json', 'yaml', ...(extra ?? [])];
-  return cmd.option("-o, --output <format>", `Output format: ${formats.join(', ')}`, "table");
-}
 
 program
   .name("scope-mt")
@@ -1117,30 +1083,6 @@ criteria
       process.exit(1);
     }
   });
-
-/**
- * Map a parsed YAML object to a criteria API payload.
- * Handles snake_case `depends_on` → camelCase `dependsOn` conversion.
- */
-function mapYamlCriterion(
-  doc: Record<string, unknown>,
-  filename: string,
-  _docIndex: number
-): { id: string; prompt: string; dependsOn?: string[] } | null {
-  const id = doc.id as string | undefined;
-  const prompt = doc.prompt as string | undefined;
-  if (!id || !prompt) return null;
-
-  // Support both snake_case (YAML convention) and camelCase
-  const depsRaw = (doc.depends_on ?? doc.dependsOn) as string[] | undefined;
-  const dependsOn = Array.isArray(depsRaw) ? depsRaw.map(d => String(d).trim()) : undefined;
-
-  return {
-    id: id.trim(),
-    prompt: prompt.trim(),
-    ...(dependsOn && dependsOn.length > 0 ? { dependsOn } : {}),
-  };
-}
 
 // ─── Prompt Feature management ───────────────────────────────────────────────
 
@@ -2311,69 +2253,6 @@ reportTemplate
     }
   });
 
-/**
- * Map a parsed YAML object to a report template API payload.
- * Handles snake_case → camelCase conversion for YAML convention.
- */
-function mapYamlReportTemplate(
-  doc: Record<string, unknown>,
-  _filename: string,
-  _docIndex: number
-): Record<string, unknown> | null {
-  const id = doc.id as string | undefined;
-  const name = doc.name as string | undefined;
-  const userPrompt = (doc.user_prompt ?? doc.userPrompt) as string | undefined;
-  if (!id || !name || !userPrompt) return null;
-
-  const result: Record<string, unknown> = {
-    id: id.trim(),
-    name: name.trim(),
-    userPrompt: userPrompt.trim(),
-  };
-
-  const description = doc.description as string | undefined;
-  if (description) result.description = description.trim();
-
-  const model = doc.model as string | undefined;
-  if (model) result.model = model.trim();
-
-  const timeoutMs = (doc.timeout_ms ?? doc.timeoutMs) as number | undefined;
-  if (timeoutMs) result.timeoutMs = Number(timeoutMs);
-
-  // System prompt: support snake_case YAML
-  const sysCfg = (doc.system_prompt ?? doc.systemPrompt) as Record<string, unknown> | undefined;
-  if (sysCfg && sysCfg.mode && sysCfg.content) {
-    result.systemPrompt = {
-      mode: String(sysCfg.mode).trim(),
-      content: String(sysCfg.content).trim(),
-    };
-  }
-
-  // Trigger
-  const triggerCfg = doc.trigger as Record<string, unknown> | undefined;
-  if (triggerCfg && triggerCfg.type) {
-    const trigger: Record<string, unknown> = { type: String(triggerCfg.type).trim() };
-    const triggerType = trigger.type as string;
-
-    if (triggerType === 'criteria') {
-      const ids = (triggerCfg.criteria_ids ?? triggerCfg.criteriaIds) as string[] | undefined;
-      if (Array.isArray(ids)) trigger.criteriaIds = ids.map(s => String(s).trim());
-      if (triggerCfg.match) trigger.match = String(triggerCfg.match).trim();
-    } else if (triggerType === 'taskPrompt') {
-      const ids = (triggerCfg.task_prompt_ids ?? triggerCfg.taskPromptIds) as string[] | undefined;
-      if (Array.isArray(ids)) trigger.taskPromptIds = ids.map(s => String(s).trim());
-    } else if (triggerType === 'promptFeature') {
-      const ids = (triggerCfg.feature_ids ?? triggerCfg.featureIds) as string[] | undefined;
-      if (Array.isArray(ids)) trigger.featureIds = ids.map(s => String(s).trim());
-      if (triggerCfg.match) trigger.match = String(triggerCfg.match).trim();
-    }
-
-    result.trigger = trigger;
-  }
-
-  return result;
-}
-
 // ─── Agent management ────────────────────────────────────────────────────────
 
 const agent = program
@@ -2759,31 +2638,6 @@ const mcp = program
   });
 
 configureHelp(mcp);
-
-/** Parse KEY=VALUE strings into a Record, exiting on bad format */
-function parseEnvPairs(pairs: string[]): Record<string, string> {
-  return pairs.reduce((acc: Record<string, string>, pair: string) => {
-    const idx = pair.indexOf('=');
-    if (idx === -1) {
-      console.error(errorText(`Invalid env format: "${pair}". Expected KEY=VALUE`));
-      process.exit(1);
-    }
-    acc[pair.substring(0, idx)] = pair.substring(idx + 1);
-    return acc;
-  }, {});
-}
-
-/** Parse name:value strings into header objects, exiting on bad format */
-function parseHeaderPairs(pairs: string[]): { name: string; value: string }[] {
-  return pairs.map((h: string) => {
-    const idx = h.indexOf(':');
-    if (idx === -1) {
-      console.error(errorText(`Invalid header format: "${h}". Expected name:value`));
-      process.exit(1);
-    }
-    return { name: h.substring(0, idx).trim(), value: h.substring(idx + 1).trim() };
-  });
-}
 
 const mcpServer = mcp
   .command("server")
