@@ -970,6 +970,40 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       overrideProfileVersionId = overrideProfileVersion._id;
+
+      // Reject individual overrides that conflict with the profile's controlled fields
+      const conflicts: string[] = [];
+      if (overrides?.workerType && overrides.workerType !== overrideProfileVersion.workerType) {
+        conflicts.push(`workerType: sent "${overrides.workerType}", profile requires "${overrideProfileVersion.workerType}"`);
+      }
+      if (overrides?.model !== undefined && overrides.model !== overrideProfileVersion.model) {
+        conflicts.push(`model: sent "${overrides.model}", profile requires "${overrideProfileVersion.model}"`);
+      }
+      if (overrides?.mcpServers !== undefined) {
+        const profileMcp = overrideProfileVersion.mcpServers ?? [];
+        if (JSON.stringify([...overrides.mcpServers!].sort()) !== JSON.stringify([...profileMcp].sort())) {
+          conflicts.push(`mcpServers: sent ${JSON.stringify(overrides.mcpServers)}, profile requires ${JSON.stringify(profileMcp)}`);
+        }
+      }
+      if (overrides?.skillRevisions !== undefined) {
+        const profileSkills = overrideProfileVersion.skillRevisions ?? [];
+        if (JSON.stringify([...overrides.skillRevisions!].sort()) !== JSON.stringify([...profileSkills].sort())) {
+          conflicts.push(`skillRevisions: sent ${JSON.stringify(overrides.skillRevisions)}, profile requires ${JSON.stringify(profileSkills)}`);
+        }
+      }
+      if (overrides?.extensions !== undefined) {
+        const profileExts = overrideProfileVersion.extensions ?? [];
+        if (JSON.stringify([...overrides.extensions!].sort()) !== JSON.stringify([...profileExts].sort())) {
+          conflicts.push(`extensions: sent ${JSON.stringify(overrides.extensions)}, profile requires ${JSON.stringify(profileExts)}`);
+        }
+      }
+      if (conflicts.length > 0) {
+        res.status(400).json({
+          error: `Profile "${overrideProfileId}" controls these fields. Either omit them or match the profile values.`,
+          conflicts,
+        });
+        return;
+      }
     }
 
     // Fetch original runs

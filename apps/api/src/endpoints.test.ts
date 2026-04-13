@@ -1005,8 +1005,7 @@ describe("API Endpoints", () => {
           count: 1,
           overrides: {
             profileId: "profile-1",
-            model: "should-be-ignored", // profile takes precedence
-            maxIterations: 10, // not controlled by profile
+            maxIterations: 10, // not controlled by profile — allowed
           },
         });
 
@@ -1088,6 +1087,41 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(404);
       expect(res.body.error).toContain("Profile not found");
+    });
+
+    it("returns 400 when individual overrides conflict with profile", async () => {
+      (mocks.profileCollection.findOne as any).mockResolvedValue({
+        _id: "profile-1",
+        name: "My Profile",
+        latestVersion: 1,
+      });
+      (mocks.profileVersionCollection.findOne as any).mockResolvedValue({
+        _id: "pv-1",
+        profileId: "profile-1",
+        version: 1,
+        workerType: "coder-acp-copilot",
+        model: "claude-sonnet-4",
+        mcpServers: [],
+        skillRevisions: [],
+        extensions: [],
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-resubmit")
+        .send({
+          ids: ["run-1"],
+          count: 1,
+          overrides: {
+            profileId: "profile-1",
+            model: "gpt-4o", // conflicts with profile
+          },
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("controls these fields");
+      expect(res.body.conflicts).toEqual(
+        expect.arrayContaining([expect.stringContaining("model")])
+      );
     });
   });
 });
