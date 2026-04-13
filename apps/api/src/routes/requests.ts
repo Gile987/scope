@@ -1727,7 +1727,7 @@ apiRoute(ctx.app, ctx.registry, {
       status: runDoc.status,
       createdAt: runDoc.createdAt ? new Date(runDoc.createdAt) : new Date(),
       updatedAt: runDoc.updatedAt ? new Date(runDoc.updatedAt) : undefined,
-      turns: turns.map((t: Record<string, unknown>) => ({
+      turns: turns.map((t: any) => ({
         ...t,
         timestamp: t.timestamp ? new Date(t.timestamp as string) : new Date(),
       })),
