@@ -324,8 +324,6 @@ async function initializeClients(): Promise<void> {
   skillRevisionStore = new SkillRevisionStore(skillRevisionCollection);
   profileCollection = db.collection<ProfileDocument>("profiles");
   profileVersionCollection = db.collection<ProfileVersionDocument>("profile-versions");
-  // Create profile indexes
-  await profileVersionCollection.createIndex({ profileId: 1, version: -1 });
   skillResolver = new SkillResolver({
     githubToken: process.env.GITHUB_TOKEN,
   });
