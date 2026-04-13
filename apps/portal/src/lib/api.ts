@@ -528,7 +528,7 @@ export const api = {
   },
 
   /** Get API readiness and migration status (hits root-level /ready, not /api/v1) */
-  getReadiness: async (): Promise<{ status: string; migrations: { ready: boolean; applied: string[]; pending: string[] } }> => {
+  getReadiness: async (): Promise<{ status: string; migrations: { ready: boolean; applied: string[]; pending: string[]; totalApplied: number } }> => {
     const res = await fetch("/ready");
     // /ready returns 503 when not ready — we still want the JSON body
     if (!res.ok && res.status !== 503) {
