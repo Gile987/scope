@@ -73,7 +73,14 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
   // Find selected agent for model/version lists
   const selectedAgent = agents.find((a: CodingAgent) => a._id === worker);
   const supportedModels = selectedAgent?.supportedModels ?? [];
-  const isVscodeWorker = worker.includes("vscode") || worker.includes("copilot");
+  const isVscodeWorker = worker.includes("vscode");
+
+  // Clear extensions when switching to a non-vscode worker
+  useEffect(() => {
+    if (!isVscodeWorker) {
+      setSelectedExtensions([]);
+    }
+  }, [isVscodeWorker]);
 
   // Fetch agent versions
   const { data: agentVersions = [] } = useQuery({

@@ -149,6 +149,43 @@ describe("Profile API Endpoints", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("rejects extensions on non-vscode worker", async () => {
+      const res = await request(app)
+        .post("/api/v1/profiles")
+        .send({
+          name: "Bad Combo",
+          workerType: "coder-acp-copilot",
+          model: "gpt-4o",
+          extensions: ["ms-azuretools.vscode-cosmosdb@0.32.1"],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("does not support VS Code extensions");
+    });
+  });
+
+  describe("POST /api/v1/profiles/:profileId (new version)", () => {
+    it("rejects extensions on non-vscode worker", async () => {
+      const profileCol = mocks.profileCollection as any;
+      profileCol.findOne = vi.fn().mockResolvedValue({
+        _id: "p-1",
+        name: "ACP Profile",
+        latestVersion: 1,
+        createdAt: new Date(),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/profiles/p-1")
+        .send({
+          workerType: "coder-acp-copilot",
+          model: "gpt-4o",
+          extensions: ["ms-azuretools.vscode-cosmosdb@0.32.1"],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("does not support VS Code extensions");
+    });
   });
 
   describe("GET /api/v1/profiles", () => {

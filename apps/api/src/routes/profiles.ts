@@ -34,6 +34,13 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const { name, description, workerType, model, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
+
+      // Extensions are only supported by VS Code workers
+      if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
+        res.status(400).json({ error: `Worker type "${workerType}" does not support VS Code extensions` });
+        return;
+      }
+
       const now = new Date();
       const profileId = uuidv4();
       const versionId = uuidv4();
@@ -239,6 +246,13 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       const { workerType, model, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
+
+      // Extensions are only supported by VS Code workers
+      if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
+        res.status(400).json({ error: `Worker type "${workerType}" does not support VS Code extensions` });
+        return;
+      }
+
       const now = new Date();
       const newVersion = profile.latestVersion + 1;
       const versionId = uuidv4();
