@@ -140,7 +140,7 @@ export const ListRequestsQuerySchema = z
     profileId: z.string().optional(),
     status: RequestStatusSchema.optional(),
     outcome: RequestOutcomeSchema.optional(),
-    groupBy: z.enum(["task", "submissionId"]).optional(),
+    groupBy: z.enum(["task", "submissionId", "profile"]).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
     after: z.string().optional(),
     before: z.string().optional(),
