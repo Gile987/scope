@@ -25,6 +25,7 @@ import { registerMcpServersRoutes } from "./routes/mcp-servers.js";
 import { registerSkillsRoutes } from "./routes/skills.js";
 import { registerExtensionsRoutes } from "./routes/extensions.js";
 import { registerInsightsRoutes } from "./routes/insights.js";
+import { registerSecretsRoutes } from "./routes/secrets.js";
 import { VALID_WORKERS } from "./route-context.js";
 import type { RouteContext } from "./route-context.js";
 import type {
@@ -252,58 +253,9 @@ const routeCtx: RouteContext = {
   storageAccountName,
 };
 
-// =============================================================================
-// Token Manager proxy (admin CRUD - excludes /acquire which is worker-only)
-// =============================================================================
-const TOKEN_MANAGER_URL = process.env.TOKEN_MANAGER_URL || "";
-
-if (TOKEN_MANAGER_URL) {
-  const proxyToTokenManager = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const targetUrl = `${TOKEN_MANAGER_URL}${req.originalUrl}`;
-      const headers: Record<string, string> = { "content-type": "application/json" };
-      const fetchOpts: RequestInit = {
-        method: req.method,
-        headers,
-      };
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        fetchOpts.body = JSON.stringify(req.body);
-      }
-      const upstream = await fetch(targetUrl, fetchOpts);
-      const contentType = upstream.headers.get("content-type") || "application/json";
-      const body = await upstream.text();
-      res.status(upstream.status).set("content-type", contentType).send(body);
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  // CRUD routes proxied to Token Manager (portal uses these)
-  app.post("/api/v1/keys/preview", proxyToTokenManager);   // must be before :id routes
-  app.post("/api/v1/keys", proxyToTokenManager);
-  app.get("/api/v1/keys", proxyToTokenManager);
-  app.get("/api/v1/keys/:id", proxyToTokenManager);
-  app.put("/api/v1/keys/:id", proxyToTokenManager);
-  app.delete("/api/v1/keys/:id", proxyToTokenManager);
-  app.post("/api/v1/keys/:id/validate", proxyToTokenManager);
-  // NOTE: POST /api/v1/keys/acquire is intentionally NOT proxied.
-  // Workers call token-manager directly (ClusterIP) for /acquire.
-
-  // Account CRUD routes proxied to Token Manager (portal uses these)
-  app.post("/api/v1/accounts", proxyToTokenManager);
-  app.get("/api/v1/accounts", proxyToTokenManager);
-  app.get("/api/v1/accounts/:id", proxyToTokenManager);
-  app.put("/api/v1/accounts/:id", proxyToTokenManager);
-  app.delete("/api/v1/accounts/:id", proxyToTokenManager);
-  // NOTE: GET /api/v1/accounts/:id/secrets is intentionally NOT proxied.
-  // Key-updaters call token-manager directly (ClusterIP) for secrets.
-
-  console.log(`[api] Token Manager proxy enabled → ${TOKEN_MANAGER_URL}`);
-} else {
-  console.log("[api] Token Manager proxy disabled (TOKEN_MANAGER_URL not set)");
-}
-
-// ─── Feature Flags ────────────────────────────────────────────────────────────
+// ─── Route registration ───────────────────────────────────────────────────────
+// Secrets/proxy routes must be registered first (before :id param routes)
+registerSecretsRoutes(routeCtx);
 registerSystemRoutes(routeCtx);
 registerRequestsRoutes(routeCtx);
 registerCriteriaRoutes(routeCtx);
