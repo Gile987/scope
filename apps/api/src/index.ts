@@ -679,68 +679,20 @@ apiRoute(app, registry, {
       }
     }
 
-    // Validate and resolve skill slugs if provided
+    // Validate and resolve skill specs if provided (supports "slug" or "slug@commitHash")
     let resolvedSkillRevisions: string[] | undefined;
     if (skillSlugs !== undefined) {
       if (!Array.isArray(skillSlugs) || !skillSlugs.every((s: unknown) => typeof s === "string")) {
-        res.status(400).json({ error: "skills must be an array of strings (skill slugs)" });
+        res.status(400).json({ error: "skills must be an array of strings (skill slugs or slug@commitHash specs)" });
         return;
       }
       if (skillSlugs.length > 0) {
-        // Validate skill slugs exist in our DB
-        const existingSkills = await skillCollection
-          .find({ _id: { $in: skillSlugs }, deletedAt: { $exists: false } })
-          .toArray();
-        const existingSkillSlugs = new Set(existingSkills.map((s: SkillDocument) => s._id));
-        const missingSkillSlugs = skillSlugs.filter((slug: string) => !existingSkillSlugs.has(slug));
-        if (missingSkillSlugs.length > 0) {
-          res.status(400).json({ error: `Skill(s) not found: ${missingSkillSlugs.join(", ")}` });
+        const result = await resolveSkillSpecs(skillSlugs);
+        if (result.error) {
+          res.status(422).json({ error: result.error });
           return;
         }
-
-        // Resolve each skill to a SkillRevisionDocument
-        const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
-          if (!storageConnectionString && !storageAccountName) {
-            throw new Error("Blob storage not configured — cannot store skill archives");
-          }
-          let blobServiceClient: BlobServiceClient;
-          if (storageConnectionString) {
-            blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
-          } else {
-            const credential = new DefaultAzureCredential();
-            blobServiceClient = new BlobServiceClient(
-              `https://${storageAccountName}.blob.core.windows.net`,
-              credential
-            );
-          }
-          const containerClient = blobServiceClient.getContainerClient("skill-archives");
-          await containerClient.createIfNotExists();
-          const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
-          await blockBlobClient.upload(data, data.length, {
-            blobHTTPHeaders: { blobContentType: "application/gzip" },
-          });
-          return blockBlobClient.url;
-        };
-
-        const revisionRefs: string[] = [];
-        for (const skill of existingSkills) {
-          try {
-            const revision = await skillResolver.resolve(
-              skill.source,
-              skill.skillName,
-              skillRevisionStore,
-              uploadArchive
-            );
-            revisionRefs.push(revision.ref);
-          } catch (resolveError) {
-            console.error(`Failed to resolve skill "${skill._id}":`, resolveError);
-            res.status(422).json({
-              error: `Failed to resolve skill "${skill._id}": ${resolveError instanceof Error ? resolveError.message : String(resolveError)}`,
-            });
-            return;
-          }
-        }
-        resolvedSkillRevisions = revisionRefs;
+        resolvedSkillRevisions = result.refs;
       }
     }
 
@@ -5867,6 +5819,91 @@ apiRoute(app, registry, {
 });
 
 // =====================================================================
+// Shared helpers
+// =====================================================================
+
+/** Parse "slug@commitHash" → { slug, commitHash } or "slug" → { slug } */
+function parseSkillSpec(spec: string): { slug: string; commitHash?: string } {
+  const at = spec.lastIndexOf("@");
+  if (at > 0) return { slug: spec.substring(0, at), commitHash: spec.substring(at + 1) };
+  return { slug: spec };
+}
+
+/**
+ * Resolve skill specs (slug or slug@commitHash) to revision refs.
+ * - If spec has @commitHash → look up that specific revision
+ * - If spec has no hash → resolve to latest revision via skillResolver
+ */
+async function resolveSkillSpecs(specs: string[]): Promise<{ refs?: string[]; error?: string }> {
+  if (!specs.length) return { refs: [] };
+
+  // Extract unique slugs from specs
+  const parsedSpecs = specs.map(parseSkillSpec);
+  const slugs = [...new Set(parsedSpecs.map((p) => p.slug))];
+
+  // Validate all slugs exist in DB
+  const existingSkills = await skillCollection
+    .find({ _id: { $in: slugs }, deletedAt: { $exists: false } })
+    .toArray();
+  const existingMap = new Map(existingSkills.map((s: SkillDocument) => [s._id, s]));
+  const missing = slugs.filter((slug) => !existingMap.has(slug));
+  if (missing.length > 0) {
+    return { error: `Skill(s) not found: ${missing.join(", ")}` };
+  }
+
+  const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
+    if (!storageConnectionString && !storageAccountName) {
+      throw new Error("Blob storage not configured — cannot store skill archives");
+    }
+    let blobServiceClient: BlobServiceClient;
+    if (storageConnectionString) {
+      blobServiceClient = BlobServiceClient.fromConnectionString(storageConnectionString);
+    } else {
+      const credential = new DefaultAzureCredential();
+      blobServiceClient = new BlobServiceClient(
+        `https://${storageAccountName}.blob.core.windows.net`,
+        credential
+      );
+    }
+    const containerClient = blobServiceClient.getContainerClient("skill-archives");
+    await containerClient.createIfNotExists();
+    const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
+    await blockBlobClient.upload(data, data.length, {
+      blobHTTPHeaders: { blobContentType: "application/gzip" },
+    });
+    return blockBlobClient.url;
+  };
+
+  const refs: string[] = [];
+  for (const { slug, commitHash } of parsedSpecs) {
+    const skill = existingMap.get(slug)!;
+    if (commitHash) {
+      // Pinned to specific revision — validate it exists
+      const ref = `${slug}@${commitHash}`;
+      const revision = await skillRevisionStore.getByRef(ref);
+      if (!revision) {
+        return { error: `Skill revision not found: ${ref}` };
+      }
+      refs.push(revision.ref);
+    } else {
+      // Resolve to latest revision
+      try {
+        const revision = await skillResolver.resolve(
+          skill.source,
+          skill.skillName,
+          skillRevisionStore,
+          uploadArchive,
+        );
+        refs.push(revision.ref);
+      } catch (resolveError) {
+        return { error: `Failed to resolve skill "${skill._id}": ${resolveError instanceof Error ? resolveError.message : String(resolveError)}` };
+      }
+    }
+  }
+  return { refs };
+}
+
+// =====================================================================
 // Profiles API
 // =====================================================================
 
@@ -5906,6 +5943,17 @@ apiRoute(app, registry, {
         resolvedExtensions = resolvedSpecs;
       }
 
+      // Resolve skill specs to pinned revision refs
+      let resolvedSkillRevisions: string[] | undefined;
+      if (skillRevisions && skillRevisions.length > 0) {
+        const result = await resolveSkillSpecs(skillRevisions);
+        if (result.error) {
+          res.status(422).json({ error: result.error });
+          return;
+        }
+        resolvedSkillRevisions = result.refs;
+      }
+
       const profileDoc: ProfileDocument = {
         _id: profileId,
         name,
@@ -5922,7 +5970,7 @@ apiRoute(app, registry, {
         model,
         ...(agentVersion ? { agentVersion } : {}),
         ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
-        ...(skillRevisions && skillRevisions.length > 0 ? { skillRevisions } : {}),
+        ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
         ...(resolvedExtensions && resolvedExtensions.length > 0 ? { extensions: resolvedExtensions } : {}),
         createdAt: now,
       };
@@ -6100,6 +6148,17 @@ apiRoute(app, registry, {
         resolvedExtensions = resolvedSpecs;
       }
 
+      // Resolve skill specs to pinned revision refs
+      let resolvedSkillRevisions: string[] | undefined;
+      if (skillRevisions && skillRevisions.length > 0) {
+        const result = await resolveSkillSpecs(skillRevisions);
+        if (result.error) {
+          res.status(422).json({ error: result.error });
+          return;
+        }
+        resolvedSkillRevisions = result.refs;
+      }
+
       const versionDoc: ProfileVersionDocument = {
         _id: versionId,
         profileId: profile._id,
@@ -6108,7 +6167,7 @@ apiRoute(app, registry, {
         model,
         ...(agentVersion ? { agentVersion } : {}),
         ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
-        ...(skillRevisions && skillRevisions.length > 0 ? { skillRevisions } : {}),
+        ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
         ...(resolvedExtensions && resolvedExtensions.length > 0 ? { extensions: resolvedExtensions } : {}),
         createdAt: now,
       };

@@ -66,6 +66,68 @@ describe("Profile API Endpoints", () => {
       expect(versionCol.insertOne).toHaveBeenCalledOnce();
     });
 
+    it("resolves skill slugs to revision refs", async () => {
+      const profileCol = mocks.profileCollection as any;
+      const versionCol = mocks.profileVersionCollection as any;
+      const skillCol = mocks.skillCollection as any;
+
+      profileCol.insertOne = vi.fn().mockResolvedValue({ insertedId: "p-new" });
+      versionCol.insertOne = vi.fn().mockResolvedValue({ insertedId: "pv-new" });
+      skillCol.find = vi.fn().mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([
+          { _id: "github/org/my-skill", source: "github/org", skillName: "my-skill" },
+        ]),
+      });
+      mocks.skillResolver.resolve = vi.fn().mockResolvedValue({
+        ref: "github/org/my-skill@abc1234",
+      });
+
+      const res = await request(app)
+        .post("/api/v1/profiles")
+        .send({
+          name: "With Skills",
+          workerType: "coder-acp-copilot",
+          model: "gpt-4o",
+          skillRevisions: ["github/org/my-skill"],
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.version.skillRevisions).toEqual(["github/org/my-skill@abc1234"]);
+      expect(mocks.skillResolver.resolve).toHaveBeenCalledOnce();
+    });
+
+    it("accepts pre-pinned skill specs (slug@hash)", async () => {
+      const profileCol = mocks.profileCollection as any;
+      const versionCol = mocks.profileVersionCollection as any;
+      const skillCol = mocks.skillCollection as any;
+
+      profileCol.insertOne = vi.fn().mockResolvedValue({ insertedId: "p-new" });
+      versionCol.insertOne = vi.fn().mockResolvedValue({ insertedId: "pv-new" });
+      skillCol.find = vi.fn().mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([
+          { _id: "github/org/my-skill", source: "github/org", skillName: "my-skill" },
+        ]),
+      });
+      mocks.skillRevisionStore.getByRef = vi.fn().mockResolvedValue({
+        ref: "github/org/my-skill@abc1234",
+        commitHash: "abc1234",
+      });
+
+      const res = await request(app)
+        .post("/api/v1/profiles")
+        .send({
+          name: "Pinned Skills",
+          workerType: "coder-acp-copilot",
+          model: "gpt-4o",
+          skillRevisions: ["github/org/my-skill@abc1234"],
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.version.skillRevisions).toEqual(["github/org/my-skill@abc1234"]);
+      expect(mocks.skillRevisionStore.getByRef).toHaveBeenCalledWith("github/org/my-skill@abc1234");
+      expect(mocks.skillResolver.resolve).not.toHaveBeenCalled();
+    });
+
     it("rejects missing name", async () => {
       const res = await request(app)
         .post("/api/v1/profiles")

@@ -16,6 +16,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { parseSkillSpec } from "@/components/SkillPicker";
 import { toast } from "sonner";
 
 export function ProfileDetail() {
@@ -186,9 +187,17 @@ export function ProfileDetail() {
                     <div>
                       <Label>Skills</Label>
                       <div className="flex flex-wrap gap-1 mt-1">
-                        {displayVersion.skillRevisions.map((s) => (
-                          <Badge key={s} variant="outline" className="font-mono text-xs">{s}</Badge>
-                        ))}
+                        {displayVersion.skillRevisions.map((s) => {
+                          const { slug, commitHash } = parseSkillSpec(s);
+                          return (
+                            <Badge key={s} variant="outline" className="font-mono text-xs gap-1">
+                              {slug}
+                              {commitHash && (
+                                <span className="text-muted-foreground">@{commitHash.substring(0, 7)}</span>
+                              )}
+                            </Badge>
+                          );
+                        })}
                       </div>
                     </div>
                   </>
@@ -241,7 +250,7 @@ export function ProfileDetail() {
                     </div>
                     <div className="text-xs text-muted-foreground flex items-center gap-1">
                       <Clock className="h-3 w-3" />
-                      {new Date(v.createdAt).toLocaleDateString()}
+                      {new Date(v.createdAt).toLocaleString()}
                     </div>
                   </button>
                 ))}

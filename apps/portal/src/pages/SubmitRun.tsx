@@ -17,7 +17,7 @@ import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles,
 import { WORKER_TYPES, type CodingAgent, type McpServerDocument, type ProfileWithVersion, type ProfileVersionDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
-import { SkillPicker } from "@/components/SkillPicker";
+import { SkillPicker, parseSkillSpec } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { Stepper } from "@/components/Stepper";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
@@ -748,11 +748,17 @@ export function SubmitRun() {
                   <>
                     <span className="text-muted-foreground">Skills</span>
                     <div className="flex flex-wrap gap-1">
-                      {selectedSkills.map((s) => (
-                        <Badge key={s} variant="secondary" className="font-mono text-xs">
-                          {s}
-                        </Badge>
-                      ))}
+                      {selectedSkills.map((s) => {
+                        const { slug, commitHash } = parseSkillSpec(s);
+                        return (
+                          <Badge key={s} variant="secondary" className="font-mono text-xs gap-1">
+                            {slug}
+                            {commitHash && (
+                              <span className="text-muted-foreground">@{commitHash.substring(0, 7)}</span>
+                            )}
+                          </Badge>
+                        );
+                      })}
                     </div>
                   </>
                 )}

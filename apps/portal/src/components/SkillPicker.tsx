@@ -9,9 +9,55 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { X, Search, Download, Loader2, ChevronDown, ChevronUp, Globe, BookOpen } from "lucide-react";
-import type { SkillDocument, SkillSearchResult } from "@/types";
+import type { SkillDocument, SkillRevisionDocument, SkillSearchResult } from "@/types";
 import { toast } from "sonner";
+
+// ---------------------------------------------------------------------------
+// Parse "slug@commitHash" → { slug, commitHash } or "slug" → { slug }
+// ---------------------------------------------------------------------------
+export function parseSkillSpec(spec: string): { slug: string; commitHash?: string } {
+  const at = spec.lastIndexOf("@");
+  if (at > 0) return { slug: spec.substring(0, at), commitHash: spec.substring(at + 1) };
+  return { slug: spec };
+}
+
+// ---------------------------------------------------------------------------
+// Revision selector for a single selected skill
+// ---------------------------------------------------------------------------
+function RevisionSelector({ slug, currentCommitHash, onRevisionChange }: {
+  slug: string;
+  currentCommitHash?: string;
+  onRevisionChange: (commitHash?: string) => void;
+}) {
+  const { data: revisions = [], isLoading } = useQuery({
+    queryKey: ["skill-revisions", slug],
+    queryFn: () => api.listSkillRevisions(slug),
+  });
+
+  return (
+    <div className="flex items-center gap-2 pl-6">
+      <Select
+        value={currentCommitHash ?? "__latest__"}
+        onValueChange={(v) => onRevisionChange(v === "__latest__" ? undefined : v)}
+      >
+        <SelectTrigger className="h-7 w-52 text-xs font-mono">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__latest__">latest</SelectItem>
+          {isLoading && <SelectItem value="__loading__" disabled>Loading…</SelectItem>}
+          {revisions.map((r: SkillRevisionDocument, idx: number) => (
+            <SelectItem key={r.ref} value={r.commitHash}>
+              {r.commitHash.substring(0, 7)}{idx === 0 ? " (latest)" : ""} — {new Date(r.resolvedAt).toLocaleDateString()}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Hook: debounce a value
@@ -29,10 +75,10 @@ function useDebounce<T>(value: T, delayMs: number): T {
 // Props
 // ---------------------------------------------------------------------------
 interface SkillPickerProps {
-  /** Currently selected skill slugs */
+  /** Currently selected skill specs (slug or slug@commitHash) */
   selected: string[];
   /** Called when selection changes */
-  onChange: (slugs: string[]) => void;
+  onChange: (specs: string[]) => void;
   /** If true, hide the selection badges / multi-select — only show search+import (for SkillList page) */
   importOnly?: boolean;
   /** If true, show selected items as read-only (no remove, no search) */
@@ -177,24 +223,45 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
     },
   });
 
+  // ─── Parse selected specs into a map for quick lookup ─────────────
+  const selectedMap = useMemo(() => {
+    const map = new Map<string, string | undefined>(); // slug → commitHash|undefined
+    for (const spec of selected) {
+      const { slug, commitHash } = parseSkillSpec(spec);
+      map.set(slug, commitHash);
+    }
+    return map;
+  }, [selected]);
+
   // ─── Selection helpers ──────────────────────────────────────────────
   const toggleItem = useCallback(
     (id: string) => {
       if (importOnly) return;
-      if (selected.includes(id)) {
-        onChange(selected.filter((s) => s !== id));
+      if (selectedMap.has(id)) {
+        onChange(selected.filter((s) => parseSkillSpec(s).slug !== id));
       } else {
-        onChange([...selected, id]);
+        onChange([...selected, id]); // Add without hash (latest)
       }
       setQuery("");
       inputRef.current?.focus();
     },
-    [selected, onChange, importOnly],
+    [selected, selectedMap, onChange, importOnly],
   );
 
-  const removeItem = (id: string) => {
-    onChange(selected.filter((s) => s !== id));
+  const removeItem = (slug: string) => {
+    onChange(selected.filter((s) => parseSkillSpec(s).slug !== slug));
   };
+
+  const updateRevision = useCallback(
+    (slug: string, commitHash?: string) => {
+      onChange(selected.map((spec) => {
+        const parsed = parseSkillSpec(spec);
+        if (parsed.slug === slug) return commitHash ? `${slug}@${commitHash}` : slug;
+        return spec;
+      }));
+    },
+    [selected, onChange],
+  );
 
   // ─── Keyboard ───────────────────────────────────────────────────────
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -214,7 +281,8 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
     } else if (e.key === "Escape") {
       setOpen(false);
     } else if (e.key === "Backspace" && !query && selected.length > 0 && !importOnly) {
-      removeItem(selected[selected.length - 1]);
+      const lastSpec = selected[selected.length - 1];
+      removeItem(parseSkillSpec(lastSpec).slug);
     }
   };
 
@@ -226,21 +294,39 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
 
   return (
     <div ref={containerRef} className="relative space-y-2">
-      {/* Selected badges */}
+      {/* Selected skills with revision selectors */}
       {!importOnly && selected.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {selected.map((id) => (
-            <Badge key={id} variant="secondary" className="gap-1 font-mono text-xs">
-              <BookOpen className="h-3 w-3" />
-              {id}
-              {!disabled && (
-                <X
-                  className="h-3 w-3 cursor-pointer hover:text-destructive"
-                  onClick={() => removeItem(id)}
-                />
-              )}
-            </Badge>
-          ))}
+        <div className="space-y-1.5">
+          {selected.map((spec) => {
+            const { slug, commitHash } = parseSkillSpec(spec);
+            return (
+              <div key={slug} className="rounded-md border p-2 space-y-1">
+                <div className="flex items-center gap-1.5">
+                  <BookOpen className="h-3 w-3 text-muted-foreground" />
+                  <span className="font-mono text-xs font-medium flex-1">{slug}</span>
+                  {commitHash && (
+                    <Badge variant="outline" className="text-[10px] font-mono">{commitHash.substring(0, 7)}</Badge>
+                  )}
+                  {!commitHash && (
+                    <Badge variant="secondary" className="text-[10px]">latest</Badge>
+                  )}
+                  {!disabled && (
+                    <X
+                      className="h-3 w-3 cursor-pointer text-muted-foreground hover:text-destructive"
+                      onClick={() => removeItem(slug)}
+                    />
+                  )}
+                </div>
+                {!disabled && (
+                  <RevisionSelector
+                    slug={slug}
+                    currentCommitHash={commitHash}
+                    onRevisionChange={(hash) => updateRevision(slug, hash)}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -279,7 +365,7 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
                   </div>
                 )}
                 {internalMatches.map((skill, idx) => {
-                  const isSelected = selected.includes(skill._id);
+                  const isSelected = selectedMap.has(skill._id);
                   return (
                     <button
                       key={skill._id}
