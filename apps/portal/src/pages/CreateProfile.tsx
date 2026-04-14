@@ -115,6 +115,16 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
       };
 
       if (editProfileId) {
+        // Update identity (name/description) if changed
+        const identityChanged =
+          name !== existingProfile?.name ||
+          (description || "") !== (existingProfile?.description || "");
+        if (identityChanged) {
+          await api.updateProfileIdentity(editProfileId, {
+            name,
+            ...(description ? { description } : {}),
+          });
+        }
         // Create new version of existing profile
         const { name: _, description: __, ...versionBody } = body;
         return api.createProfileVersion(editProfileId, versionBody);
