@@ -44,6 +44,7 @@ ENV SERVICE_DIR=workers/coder-acp-copilot
 ENV WORKER_NAME=coder-acp-copilot
 COPY scripts/dev-entrypoint.sh /app/scripts/dev-entrypoint.sh
 COPY config /app/config/
+RUN chown -R node:node /app/packages/shared/dist /app/apps/workers/coder-acp-copilot/dist
 USER node
 CMD ["/app/scripts/dev-entrypoint.sh"]
 

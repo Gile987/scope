@@ -83,9 +83,11 @@ interface ExtensionPickerProps {
   onChange: (ids: string[]) => void;
   /** If true, hide selection badges — only show search+import (for ExtensionList page) */
   importOnly?: boolean;
+  /** If true, show selected items as read-only (no remove, no search) */
+  disabled?: boolean;
 }
 
-export function ExtensionPicker({ selected, onChange, importOnly = false }: ExtensionPickerProps) {
+export function ExtensionPicker({ selected, onChange, importOnly = false, disabled = false }: ExtensionPickerProps) {
   const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -273,16 +275,20 @@ export function ExtensionPicker({ selected, onChange, importOnly = false }: Exte
                   {!version && (
                     <Badge variant="secondary" className="text-[10px]">latest</Badge>
                   )}
-                  <X
-                    className="h-3 w-3 cursor-pointer text-muted-foreground hover:text-destructive"
-                    onClick={() => removeItem(id)}
-                  />
+                  {!disabled && (
+                    <X
+                      className="h-3 w-3 cursor-pointer text-muted-foreground hover:text-destructive"
+                      onClick={() => removeItem(id)}
+                    />
+                  )}
                 </div>
-                <VersionSelector
-                  extensionId={id}
-                  currentVersion={version}
-                  onVersionChange={(v) => updateVersion(id, v)}
-                />
+                {!disabled && (
+                  <VersionSelector
+                    extensionId={id}
+                    currentVersion={version}
+                    onVersionChange={(v) => updateVersion(id, v)}
+                  />
+                )}
               </div>
             );
           })}
@@ -290,6 +296,7 @@ export function ExtensionPicker({ selected, onChange, importOnly = false }: Exte
       )}
 
       {/* Search input */}
+      {!disabled && (
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
@@ -308,6 +315,7 @@ export function ExtensionPicker({ selected, onChange, importOnly = false }: Exte
           <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
         )}
       </div>
+      )}
 
       {/* Dropdown */}
       {showDropdown && (

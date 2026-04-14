@@ -8,8 +8,8 @@ import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
-import { TaskPromptStore, SkillRevisionStore, SkillResolver } from "shared";
-import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument } from "shared";
+import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError } from "shared";
+import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, ProfileDocument, ProfileVersionDocument } from "shared";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
 import { registerFeatureFlagRoutes } from "./routes/feature-flags.js";
@@ -27,6 +27,7 @@ import { registerSkillsRoutes } from "./routes/skills.js";
 import { registerExtensionsRoutes } from "./routes/extensions.js";
 import { registerInsightsRoutes } from "./routes/insights.js";
 import { registerSecretsRoutes } from "./routes/secrets.js";
+import { registerProfilesRoutes } from "./routes/profiles.js";
 import { VALID_WORKERS } from "./route-context.js";
 import type { RouteContext } from "./route-context.js";
 import type {
@@ -46,6 +47,11 @@ import type {
 } from "./route-context.js";
 
 dotenv.config();
+
+const TOKEN_MANAGER_URL = process.env.TOKEN_MANAGER_URL || "";
+const mcpSecretClient: McpSecretClient | null = TOKEN_MANAGER_URL
+  ? new McpSecretClient(TOKEN_MANAGER_URL)
+  : null;
 
 const app: Express = express();
 app.use(cors());
@@ -83,6 +89,8 @@ let skillCollection: Collection<SkillDocument>;
 let extensionCollection: Collection<ExtensionDocument>;
 let skillRevisionCollection: Collection<SkillRevisionDocument>;
 let skillRevisionStore: SkillRevisionStore;
+let profileCollection: Collection<ProfileDocument>;
+let profileVersionCollection: Collection<ProfileVersionDocument>;
 let skillResolver: SkillResolver;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
@@ -112,6 +120,8 @@ async function initializeClients(): Promise<void> {
   skillResolver = new SkillResolver({
     githubToken: process.env.GITHUB_TOKEN,
   });
+  profileCollection = db.collection<ProfileDocument>("profiles");
+  profileVersionCollection = db.collection<ProfileVersionDocument>("profile-versions");
 
   // Note: Collection indexes are managed by db-migrations (see 002-create-indexes.ts).
   // Run `pnpm migrate:up` to apply pending migrations.
@@ -220,7 +230,10 @@ const routeCtx: RouteContext = {
   get agentCollection() { return agentCollection; },
   get modelCollection() { return modelCollection; },
   get mcpServerCollection() { return mcpServerCollection; },
+  get mcpSecretClient() { return mcpSecretClient; },
   get insightsCollection() { return insightsCollection; },
+  get profileCollection() { return profileCollection; },
+  get profileVersionCollection() { return profileVersionCollection; },
   get taskPromptCollection() { return taskPromptCollection; },
   get featureFlagCollection() { return featureFlagCollection; },
   get skillCollection() { return skillCollection; },
@@ -246,6 +259,7 @@ registerCriteriaRoutes(routeCtx);
 registerPromptFeaturesRoutes(routeCtx);
 registerTaskPromptsRoutes(routeCtx);
 registerReportsRoutes(routeCtx);
+registerProfilesRoutes(routeCtx);
 registerReportTemplatesRoutes(routeCtx);
 registerAgentsRoutes(routeCtx);
 registerModelsRoutes(routeCtx);
@@ -257,6 +271,10 @@ registerFeatureFlagRoutes(routeCtx);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof McpSecretUnavailableError) {
+    res.status(503).json({ error: err.message });
+    return;
+  }
   console.error("Error:", err);
   res.status(500).json({ error: err.message || "Internal server error" });
 });
@@ -292,6 +310,8 @@ export interface TestDependencies {
   modelCollection?: Collection<ModelDocument>;
   mcpServerCollection?: Collection<McpServerDocument>;
   insightsCollection?: Collection<InsightDocument>;
+  profileCollection?: Collection<ProfileDocument>;
+  profileVersionCollection?: Collection<ProfileVersionDocument>;
   taskPromptCollection?: Collection<TaskPromptDocument>;
   taskPromptStore?: TaskPromptStore;
   featureFlagCollection?: Collection<FeatureFlagDocument>;
@@ -316,6 +336,8 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.modelCollection) modelCollection = deps.modelCollection;
   if (deps.mcpServerCollection) mcpServerCollection = deps.mcpServerCollection;
   if (deps.insightsCollection) insightsCollection = deps.insightsCollection;
+  if (deps.profileCollection) profileCollection = deps.profileCollection;
+  if (deps.profileVersionCollection) profileVersionCollection = deps.profileVersionCollection;
   if (deps.taskPromptCollection) taskPromptCollection = deps.taskPromptCollection;
   if (deps.taskPromptStore) taskPromptStore = deps.taskPromptStore;
   if (deps.featureFlagCollection) featureFlagCollection = deps.featureFlagCollection;

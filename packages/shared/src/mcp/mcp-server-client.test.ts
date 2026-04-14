@@ -131,6 +131,7 @@ describe("McpServerClient", () => {
 
     expect(config.slug).toBe("db-server");
     expect((config as any)._id).toBeUndefined();
+    expect(config.slug).toBe("db-server");
     expect((config as any).createdAt).toBeUndefined();
     expect((config as any).updatedAt).toBeUndefined();
     expect((config as any).deletedAt).toBeUndefined();

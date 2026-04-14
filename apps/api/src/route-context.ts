@@ -13,6 +13,9 @@ import type {
   SkillResolver,
   SkillDocument,
   SkillRevisionDocument,
+  McpSecretClient,
+  ProfileDocument,
+  ProfileVersionDocument,
   // Zod response schemas → inferred types replace hand-written interfaces
   CriteriaResponseSchema,
   ExtensionResponseSchema,
@@ -87,11 +90,16 @@ export interface RouteContext {
   skillCollection: Collection<SkillDocument>;
   extensionCollection: Collection<ExtensionDocument>;
   skillRevisionCollection: Collection<SkillRevisionDocument>;
+  profileCollection: Collection<ProfileDocument>;
+  profileVersionCollection: Collection<ProfileVersionDocument>;
 
   // Services
   taskPromptStore: TaskPromptStore;
   skillRevisionStore: SkillRevisionStore;
   skillResolver: SkillResolver;
+
+  // Token Manager client (null when TOKEN_MANAGER_URL not set)
+  mcpSecretClient: McpSecretClient | null;
 
   // Queue
   queueClients: Map<WorkerType, QueueClient>;

@@ -101,7 +101,7 @@ describe("McpGatewayClient", () => {
 
       const config: McpServerConfig = {
         slug: "my-server",
-        name: "My Server Display",
+        name: "my-server",
         type: "http",
         url: "https://example.com/mcp",
       };
@@ -134,7 +134,7 @@ describe("McpGatewayClient", () => {
     it("registers an SSE server with correct transport mapping", async () => {
       mockFetch.mockResolvedValueOnce(okResponse());
 
-      await client.registerServer({ slug: "sse-srv", name: "SSE Srv", type: "sse", url: "https://example.com/sse" });
+      await client.registerServer({ slug: "sse-srv", name: "sse-srv", type: "sse", url: "https://example.com/sse" });
 
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(body.transport).toBe("sse");
@@ -145,7 +145,7 @@ describe("McpGatewayClient", () => {
 
       const config: McpServerConfig = {
         slug: "fs-server",
-        name: "FS Server",
+        name: "fs-server",
         type: "stdio",
         command: "npx",
         args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
@@ -167,7 +167,7 @@ describe("McpGatewayClient", () => {
     it("omits env from stdio body when empty", async () => {
       mockFetch.mockResolvedValueOnce(okResponse());
 
-      await client.registerServer({ slug: "fs", name: "FS", type: "stdio", command: "npx", args: [] });
+      await client.registerServer({ slug: "fs", name: "fs", type: "stdio", command: "npx", args: [] });
 
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(body).not.toHaveProperty("env");
@@ -178,7 +178,7 @@ describe("McpGatewayClient", () => {
 
       await client.registerServer({
         slug: "auth-srv",
-        name: "Auth Srv",
+        name: "auth-srv",
         type: "http",
         url: "https://example.com/mcp",
         headers: [{ name: "Authorization", value: "Bearer token" }],
@@ -191,7 +191,7 @@ describe("McpGatewayClient", () => {
     it("omits headers from body when empty array", async () => {
       mockFetch.mockResolvedValueOnce(okResponse());
 
-      await client.registerServer({ slug: "srv", name: "Srv", type: "http", url: "https://example.com/mcp", headers: [] });
+      await client.registerServer({ slug: "srv", name: "srv", type: "http", url: "https://example.com/mcp", headers: [] });
 
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(body).not.toHaveProperty("headers");
@@ -202,7 +202,7 @@ describe("McpGatewayClient", () => {
 
       await client.registerServer({
         slug: "srv",
-        name: "Srv",
+        name: "srv",
         type: "http",
         url: "https://example.com/mcp",
         sessionMode: "stateful",
@@ -215,7 +215,7 @@ describe("McpGatewayClient", () => {
     it("throws on non-ok response", async () => {
       mockFetch.mockResolvedValueOnce(errorResponse(400, "bad request"));
       await expect(
-        client.registerServer({ slug: "srv", name: "Srv", type: "http", url: "https://example.com/mcp" })
+        client.registerServer({ slug: "srv", name: "srv", type: "http", url: "https://example.com/mcp" })
       ).rejects.toThrow("[McpGatewayClient] POST /api/v0/servers failed: 400");
     });
   });

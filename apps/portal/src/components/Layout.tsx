@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch, Plug, Puzzle } from "lucide-react";
+import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch, Plug, Puzzle, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet, SheetContent, SheetTrigger, SheetTitle,
@@ -30,12 +30,13 @@ const navItems: NavItem[] = [
   { to: "/insights", label: "Insights", icon: Lightbulb },
   { to: "/criteria", label: "Criteria", icon: FlaskConical },
   { to: "/prompt-features", label: "Features", icon: Tags },
-  { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
+  { to: "/profiles", label: "Profiles", icon: SlidersHorizontal, featureKey: "profiles" },
   { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
   { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
   { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
   { to: "/skills", label: "Skills", icon: BookOpen, featureKey: "skills" },
   { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions" },
+  { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
 ];
 
 /** Width reserved for the "More" overflow button (icon + padding) */
