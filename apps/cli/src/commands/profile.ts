@@ -175,9 +175,20 @@ profile
     }
   });
 
+// ─── Version subcommand ────────────────────────────────────────────────────────
+
+const version = profile
+  .command("version")
+  .description("Manage profile versions")
+  .action(() => {
+    version.help();
+  });
+
+configureHelp(version);
+
 withOutputOption(
-profile
-  .command("versions")
+version
+  .command("list")
   .description("List all versions of a profile")
   .requiredOption("-i, --id <id>", "Profile ID")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
@@ -206,6 +217,95 @@ profile
         { key: 'createdAt', label: 'Created', formatter: (v: any) => new Date(v.createdAt).toLocaleDateString() },
       ];
       console.log(formatData(versions, displayFields, format));
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+withOutputOption(
+version
+  .command("get")
+  .description("Get details of a specific profile version")
+  .requiredOption("-i, --id <id>", "Profile ID")
+  .requiredOption("-v, --version <version>", "Version number")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+)
+  .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles/${options.id}/versions/${options.version}`);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+      const ver = await response.json();
+      if (!isMachineReadable(format)) {
+        console.log(label(`Version v${ver.version}:`));
+        console.log(`  ${label('Worker:')}  ${value(ver.workerType)}`);
+        console.log(`  ${label('Model:')}   ${value(ver.model)}`);
+        if (ver.agentVersion) console.log(`  ${label('Agent:')}   ${value(ver.agentVersion)}`);
+        if (ver.mcpServers?.length) console.log(`  ${label('MCP:')}     ${ver.mcpServers.join(', ')}`);
+        if (ver.skillRevisions?.length) console.log(`  ${label('Skills:')}  ${ver.skillRevisions.join(', ')}`);
+        if (ver.extensions?.length) console.log(`  ${label('Exts:')}    ${ver.extensions.join(', ')}`);
+        console.log(`  ${label('Created:')} ${dimTimestamp(new Date(ver.createdAt).toLocaleString())}`);
+      } else {
+        const displayFields: DisplayField[] = [
+          { key: 'version', label: 'Version' },
+          { key: 'workerType', label: 'Worker' },
+          { key: 'model', label: 'Model' },
+          { key: 'agentVersion', label: 'Agent Version', formatter: (v: any) => v.agentVersion || '' },
+          { key: 'mcpServers', label: 'MCP Servers', formatter: (v: any) => (v.mcpServers || []).join(', ') },
+          { key: 'skillRevisions', label: 'Skills', formatter: (v: any) => (v.skillRevisions || []).join(', ') },
+          { key: 'extensions', label: 'Extensions', formatter: (v: any) => (v.extensions || []).join(', ') },
+          { key: 'createdAt', label: 'Created' },
+        ];
+        console.log(formatData([ver], displayFields, format));
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+version
+  .command("create")
+  .description("Create a new version of a profile")
+  .requiredOption("-i, --id <id>", "Profile ID")
+  .requiredOption("-w, --worker <type>", "Worker type")
+  .requiredOption("-m, --model <model>", "Model name")
+  .option("--agent-version <version>", "Agent version")
+  .option("--mcp-servers <ids...>", "MCP server IDs")
+  .option("--skills <refs...>", "Skill revision references")
+  .option("--extensions <ids...>", "Extension IDs (publisher.name or publisher.name@version)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    try {
+      const body: Record<string, unknown> = {
+        workerType: options.worker,
+        model: options.model,
+      };
+      if (options.agentVersion) body.agentVersion = options.agentVersion;
+      if (options.mcpServers) body.mcpServers = options.mcpServers;
+      if (options.skills) body.skillRevisions = options.skills;
+      if (options.extensions) body.extensions = options.extensions;
+
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles/${options.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(errorText("Error:"), error.error || JSON.stringify(error));
+        process.exit(1);
+      }
+
+      const result = await response.json();
+      console.log(successText(`Version v${result.version} created.`));
+      console.log(`  ${label('ID:')} ${value(result._id)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
