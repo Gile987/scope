@@ -121,7 +121,17 @@ export function NewProfileVersion() {
     );
   }
 
-  const canSubmit = worker && model;
+  const ev = profile?.version;
+  const hasChanges = !!ev && (
+    worker !== ev.workerType ||
+    model !== ev.model ||
+    (selectedAgentVersion || "") !== (ev.agentVersion || "") ||
+    JSON.stringify([...selectedMcpServers].sort()) !== JSON.stringify([...(ev.mcpServers ?? [])].sort()) ||
+    JSON.stringify([...selectedSkills].sort()) !== JSON.stringify([...(ev.skillRevisions ?? [])].sort()) ||
+    JSON.stringify([...selectedExtensions].sort()) !== JSON.stringify([...(ev.extensions ?? [])].sort())
+  );
+
+  const canSubmit = worker && model && hasChanges;
 
   return (
     <div className="space-y-6 max-w-3xl">
