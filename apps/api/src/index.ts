@@ -8,7 +8,7 @@ import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
-import { TaskPromptStore, SkillRevisionStore, SkillResolver } from "shared";
+import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError } from "shared";
 import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, ProfileDocument, ProfileVersionDocument } from "shared";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
@@ -47,6 +47,11 @@ import type {
 } from "./route-context.js";
 
 dotenv.config();
+
+const TOKEN_MANAGER_URL = process.env.TOKEN_MANAGER_URL || "";
+const mcpSecretClient: McpSecretClient | null = TOKEN_MANAGER_URL
+  ? new McpSecretClient(TOKEN_MANAGER_URL)
+  : null;
 
 const app: Express = express();
 app.use(cors());
@@ -225,6 +230,7 @@ const routeCtx: RouteContext = {
   get agentCollection() { return agentCollection; },
   get modelCollection() { return modelCollection; },
   get mcpServerCollection() { return mcpServerCollection; },
+  get mcpSecretClient() { return mcpSecretClient; },
   get insightsCollection() { return insightsCollection; },
   get profileCollection() { return profileCollection; },
   get profileVersionCollection() { return profileVersionCollection; },
@@ -265,6 +271,10 @@ registerFeatureFlagRoutes(routeCtx);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof McpSecretUnavailableError) {
+    res.status(503).json({ error: err.message });
+    return;
+  }
   console.error("Error:", err);
   res.status(500).json({ error: err.message || "Internal server error" });
 });

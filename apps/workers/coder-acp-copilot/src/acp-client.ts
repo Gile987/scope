@@ -187,9 +187,7 @@ export async function runACPSession(
 
     // Create a new session
     if (mcpServers.length > 0) {
-      onLog(`Configuring ${mcpServers.length} MCP server(s): ${mcpServers.map((s) => `${s.name} (${s.type})`).join(", ")}`);
-    } else {
-      onLog(`No MCP servers configured for this session`);
+      onLog(`Configuring ${mcpServers.length} MCP server(s) via ACP session: ${mcpServers.map((s) => `${s.name} (${s.type})`).join(", ")}`);
     }
     const sessionResult = await connection.newSession({
       cwd,

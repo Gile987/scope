@@ -142,7 +142,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
           await log("debug", msg);
         },
         mcpServers: this.gateway && this.mcpConfigs.length > 0
-          ? [{ type: "http" as const, name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
+          ? [{ type: "http" as const, slug: "mcp-gateway", name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
           : [],
       });
 
@@ -188,6 +188,7 @@ async function main(): Promise<void> {
     redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),
     redisPassword: process.env.REDIS_PASSWORD || "",
     apiBaseUrl: process.env.SCOPE_MT_API_URL,
+    tokenManagerUrl: process.env.TOKEN_MANAGER_URL,
   };
 
   const processor = new ClaudeCodeProcessor();

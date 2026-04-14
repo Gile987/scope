@@ -54,6 +54,7 @@ export class McpServerClient {
 function mapToMcpServerConfig(data: McpServerDocument): McpServerConfig {
   return {
     type: data.type,
+    slug: data._id,
     name: data.name,
     ...(data.url ? { url: data.url } : {}),
     ...(data.command ? { command: data.command } : {}),

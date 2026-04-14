@@ -33,9 +33,19 @@ export interface McpServerDocument {
   deletedAt?: Date;               // Soft-delete timestamp
 }
 
+/** MCP server secret document stored in Token Manager MongoDB (values live in Key Vault only) */
+export interface McpSecretDocument {
+  _id: string;        // MongoDB ObjectId as hex string
+  mcpId: string;      // McpServerDocument._id slug (e.g. "azure")
+  name: string;       // Secret name (e.g. "AZURE_CLIENT_SECRET" or "Authorization")
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 /** Resolved MCP server configuration passed to workers at runtime */
 export interface McpServerConfig {
   type: McpTransportType;
+  slug: string;                   // _id slug used for secret resolution & identification
   name: string;
   url?: string;                   // required for sse/http
   command?: string;               // required for stdio

@@ -412,6 +412,7 @@ export function McpServerDetail() {
                     />
                     <Input
                       placeholder="Header value"
+                      type="password"
                       value={header.value}
                       onChange={(e) => updateHeader(idx, "value", e.target.value)}
                       className="font-mono text-sm"
@@ -473,6 +474,7 @@ export function McpServerDetail() {
                     />
                     <Input
                       placeholder="value"
+                      type="password"
                       value={pair.value}
                       onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
                       className="font-mono text-sm"
@@ -490,7 +492,7 @@ export function McpServerDetail() {
                 {Object.entries(server.env).map(([k, v]) => (
                   <div key={k} className="flex items-center gap-2 text-sm">
                     <Badge variant="secondary" className="font-mono text-xs">{k}</Badge>
-                    <span className="text-muted-foreground font-mono text-xs">{v}</span>
+                    <span className="text-muted-foreground font-mono text-xs">{v === "<secret>" ? "••••••••" : v}</span>
                   </div>
                 ))}
               </div>
