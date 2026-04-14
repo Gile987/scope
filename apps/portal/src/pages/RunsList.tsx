@@ -25,6 +25,7 @@ import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey } from "@/types";
 import { formatStatRange } from "@/lib/grouping";
+import { FillHeight } from "@/components/FillHeight";
 
 export function RunsList() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -892,6 +893,7 @@ export function RunsList() {
           No runs found. <Link to="/runs/new" className="text-primary underline">Submit one?</Link>
         </div>
       ) : (
+        <FillHeight bottomOffset={48}>
         <Table>
           <TableHeader>
             <TableRow>
@@ -960,6 +962,7 @@ export function RunsList() {
             )}
           </TableBody>
         </Table>
+        </FillHeight>
       )}
 
       {/* Pagination controls */}
