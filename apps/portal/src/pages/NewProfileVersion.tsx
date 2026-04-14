@@ -2,28 +2,24 @@
 // Licensed under the MIT License.
 
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { CodingAgent, McpServerDocument } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
-import { ArrowLeft, Loader2, Save, Zap } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ArrowLeft, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 
-export function CreateProfile() {
+export function NewProfileVersion() {
+  const { profileId } = useParams<{ profileId: string }>();
   const navigate = useNavigate();
-
-  // Identity fields
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
 
   // Configuration fields
   const [worker, setWorker] = useState("");
@@ -32,6 +28,13 @@ export function CreateProfile() {
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+
+  // Fetch profile to pre-fill from latest version
+  const { data: profile, isLoading: profileLoading } = useQuery({
+    queryKey: ["profile", profileId],
+    queryFn: () => api.getProfile(profileId!),
+    enabled: !!profileId,
+  });
 
   // Fetch agents (workers)
   const { data: agents = [] } = useQuery({
@@ -44,6 +47,18 @@ export function CreateProfile() {
     queryKey: ["mcp-servers"],
     queryFn: api.listMcpServers,
   });
+
+  // Pre-fill from latest version
+  useEffect(() => {
+    if (profile?.version) {
+      setWorker(profile.version.workerType);
+      setModel(profile.version.model);
+      setSelectedAgentVersion(profile.version.agentVersion ?? "");
+      setSelectedMcpServers(profile.version.mcpServers ?? []);
+      setSelectedSkills(profile.version.skillRevisions ?? []);
+      setSelectedExtensions(profile.version.extensions ?? []);
+    }
+  }, [profile]);
 
   // Find selected agent for model/version lists
   const selectedAgent = agents.find((a: CodingAgent) => a._id === worker);
@@ -68,17 +83,8 @@ export function CreateProfile() {
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 
-  // Auto-select latest agent version when versions load
-  useEffect(() => {
-    if (sortedVersions.length > 0 && !selectedAgentVersion) {
-      setSelectedAgentVersion(sortedVersions[0].agentVersion);
-    }
-  }, [sortedVersions.length]);
-
-  const createMutation = useMutation({
-    mutationFn: () => api.createProfile({
-      name,
-      ...(description ? { description } : {}),
+  const createVersionMutation = useMutation({
+    mutationFn: () => api.createProfileVersion(profileId!, {
       workerType: worker,
       model,
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
@@ -87,118 +93,50 @@ export function CreateProfile() {
       ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
     }),
     onSuccess: (data) => {
-      const profileId = "_id" in data ? data._id : (data as { profileId: string }).profileId;
-      toast.success(`Profile "${name}" created`);
+      toast.success(`Created version ${data.version} of profile`);
       navigate(`/profiles/${profileId}`);
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to create profile");
+      toast.error(error instanceof Error ? error.message : "Failed to create version");
     },
   });
 
-  const generateIdentity = () => {
-    const parts: string[] = [];
-    const descParts: string[] = [];
+  if (profileLoading) {
+    return (
+      <div className="space-y-6 max-w-3xl">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
 
-    const agentName = selectedAgent?.name ?? worker;
-    if (agentName) {
-      const workerLabel = selectedAgentVersion ? `${agentName}@${selectedAgentVersion}` : agentName;
-      parts.push(workerLabel);
-      descParts.push(workerLabel);
-    }
-    if (model) {
-      parts.push(model);
-      descParts.push(`model: ${model}`);
-    }
-    if (selectedMcpServers.length > 0) {
-      parts.push(selectedMcpServers.join(", "));
-      descParts.push(`MCP: ${selectedMcpServers.join(", ")}`);
-    }
-    if (selectedSkills.length > 0) {
-      const shortSkills = selectedSkills.map((s) => s.split("/").pop() ?? s);
-      parts.push(shortSkills.join(", "));
-      descParts.push(`Skills: ${selectedSkills.join(", ")}`);
-    }
-    if (selectedExtensions.length > 0) {
-      const shortExts = selectedExtensions.map((e) => e.split("/").pop() ?? e);
-      parts.push(shortExts.join(", "));
-      descParts.push(`Extensions: ${selectedExtensions.join(", ")}`);
-    }
+  if (!profile) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" onClick={() => navigate("/profiles")}>
+          <ArrowLeft className="mr-2 h-4 w-4" /> Back
+        </Button>
+        <p className="text-muted-foreground">Profile not found.</p>
+      </div>
+    );
+  }
 
-    setName(parts.join(" + ").slice(0, 128));
-    setDescription(descParts.join(". ").slice(0, 512));
-  };
-
-  const canSubmit = name.trim() && name.length <= 128 && description.length <= 512 && worker && model;
+  const canSubmit = worker && model;
 
   return (
     <div className="space-y-6 max-w-3xl">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/profiles")}>
+        <Button variant="ghost" size="icon" onClick={() => navigate(`/profiles/${profileId}`)}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-2xl font-bold">Create Profile</h1>
+          <h1 className="text-2xl font-bold">New Version</h1>
           <p className="text-muted-foreground">
-            Save a reusable run configuration for reproducible benchmarking.
+            Create a new immutable configuration snapshot for <span className="font-medium text-foreground">{profile.name}</span>.
+            The previous version is preserved.
           </p>
         </div>
       </div>
-
-      {/* Identity */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Identity</CardTitle>
-              <CardDescription>Name and description for this profile</CardDescription>
-            </div>
-            {worker && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={generateIdentity}
-              >
-                <Zap className="h-3.5 w-3.5" />
-                Auto-fill
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="name">Name *</Label>
-              {name.length > 128 && <span className="text-xs text-destructive">{name.length}/128</span>}
-            </div>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Azure Skills + Learn MCP"
-              className={name.length > 128 ? "border-destructive" : undefined}
-            />
-            {name.length > 128 && <p className="text-xs text-destructive">Name must be 128 characters or fewer</p>}
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="description">Description</Label>
-              {description.length > 512 && <span className="text-xs text-destructive">{description.length}/512</span>}
-            </div>
-            <Textarea
-              id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional description"
-              rows={2}
-              className={description.length > 512 ? "border-destructive" : undefined}
-            />
-            {description.length > 512 && <p className="text-xs text-destructive">Description must be 512 characters or fewer</p>}
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Agent Configuration */}
       <Card>
@@ -262,7 +200,7 @@ export function CreateProfile() {
         <Card>
           <CardHeader>
             <CardTitle>MCP Servers</CardTitle>
-            <CardDescription>Select MCP servers to include in this profile</CardDescription>
+            <CardDescription>Select MCP servers to include in this version</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
@@ -312,17 +250,17 @@ export function CreateProfile() {
 
       {/* Save */}
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => navigate("/profiles")}>
+        <Button variant="outline" onClick={() => navigate(`/profiles/${profileId}`)}>
           Cancel
         </Button>
         <Button
-          onClick={() => createMutation.mutate()}
-          disabled={!canSubmit || createMutation.isPending}
+          onClick={() => createVersionMutation.mutate()}
+          disabled={!canSubmit || createVersionMutation.isPending}
         >
-          {createMutation.isPending ? (
+          {createVersionMutation.isPending ? (
             <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating...</>
           ) : (
-            <><Save className="mr-2 h-4 w-4" /> Create Profile</>
+            <><Save className="mr-2 h-4 w-4" /> Create Version</>
           )}
         </Button>
       </div>

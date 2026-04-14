@@ -39,7 +39,7 @@ import { ExtensionDetail } from "@/pages/ExtensionDetail";
 import { ProfileList } from "@/pages/ProfileList";
 import { ProfileDetail } from "@/pages/ProfileDetail";
 import { CreateProfile } from "@/pages/CreateProfile";
-import { EditProfileWrapper } from "@/pages/EditProfileWrapper";
+import { NewProfileVersion } from "@/pages/NewProfileVersion";
 import { InsightsList } from "@/pages/InsightsList";
 import { InsightDetail } from "@/pages/InsightDetail";
 import { CriteriaMdpView } from "@/pages/CriteriaMdpView";
@@ -108,7 +108,7 @@ export function App() {
         <Route path="/profiles/new" element={<FeatureRoute featureKey="profiles"><CreateProfile /></FeatureRoute>} />
         <Route path="/profiles/:profileId" element={<FeatureRoute featureKey="profiles"><ProfileDetail /></FeatureRoute>} />
         <Route path="/profiles/:profileId/v/:version" element={<FeatureRoute featureKey="profiles"><ProfileDetail /></FeatureRoute>} />
-        <Route path="/profiles/:profileId/edit" element={<FeatureRoute featureKey="profiles"><EditProfileWrapper /></FeatureRoute>} />
+        <Route path="/profiles/:profileId/new-version" element={<FeatureRoute featureKey="profiles"><NewProfileVersion /></FeatureRoute>} />
         <Route path="/admin" element={<Admin />} />
       </Route>
     </Routes>

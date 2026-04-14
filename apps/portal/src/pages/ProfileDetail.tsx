@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -10,7 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Edit, Trash2, Clock, Layers } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { ArrowLeft, Edit, Trash2, Clock, Layers, Plus, Check, X } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -26,6 +29,11 @@ export function ProfileDetail() {
 
   const isSpecificVersion = !!versionParam;
   const versionNumber = versionParam ? parseInt(versionParam, 10) : undefined;
+
+  // Inline identity editing state
+  const [editingIdentity, setEditingIdentity] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
 
   // Fetch profile (with latest version)
   const { data: profile, isLoading: profileLoading } = useQuery({
@@ -59,6 +67,30 @@ export function ProfileDetail() {
       toast.error(error instanceof Error ? error.message : "Failed to delete profile");
     },
   });
+
+  const identityMutation = useMutation({
+    mutationFn: () => api.updateProfileIdentity(profileId!, {
+      name: editName,
+      ...(editDescription ? { description: editDescription } : {}),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["profile", profileId] });
+      queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      setEditingIdentity(false);
+      toast.success("Profile updated");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to update profile");
+    },
+  });
+
+  const startEditingIdentity = () => {
+    if (profile) {
+      setEditName(profile.name);
+      setEditDescription(profile.description ?? "");
+      setEditingIdentity(true);
+    }
+  };
 
   if (profileLoading) {
     return (
@@ -94,23 +126,63 @@ export function ProfileDetail() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold">{profile.name}</h1>
-              {displayVersion && (
-                <Badge variant={isSpecificVersion ? "outline" : "secondary"}>
-                  v{displayVersion.version}
-                  {!isSpecificVersion && " (latest)"}
-                </Badge>
-              )}
-            </div>
-            {profile.description && (
-              <p className="text-muted-foreground">{profile.description}</p>
+            {editingIdentity ? (
+              <div className="space-y-2">
+                <Input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="text-xl font-bold h-auto py-1"
+                  autoFocus
+                />
+                <Textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Optional description"
+                  rows={2}
+                  className="text-sm"
+                />
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => identityMutation.mutate()}
+                    disabled={!editName.trim() || editName.length > 128 || editDescription.length > 512 || identityMutation.isPending}
+                  >
+                    <Check className="mr-1 h-3 w-3" /> Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setEditingIdentity(false)}
+                    disabled={identityMutation.isPending}
+                  >
+                    <X className="mr-1 h-3 w-3" /> Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-2xl font-bold">{profile.name}</h1>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={startEditingIdentity}>
+                    <Edit className="h-3.5 w-3.5" />
+                  </Button>
+                  {displayVersion && (
+                    <Badge variant={isSpecificVersion ? "outline" : "secondary"}>
+                      v{displayVersion.version}
+                      {!isSpecificVersion && " (latest)"}
+                    </Badge>
+                  )}
+                </div>
+                {profile.description && (
+                  <p className="text-muted-foreground">{profile.description}</p>
+                )}
+              </>
             )}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => navigate(`/profiles/${profileId}/edit`)}>
-            <Edit className="mr-2 h-4 w-4" /> Edit (New Version)
+          <Button variant="outline" onClick={() => navigate(`/profiles/${profileId}/new-version`)}>
+            <Plus className="mr-2 h-4 w-4" /> New Version
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
