@@ -42,7 +42,7 @@ function makeMockDb(requestsIds: any[] = [], reportsIds: any[] = [], updateManyI
 
 // ─── Import migration after helpers defined ────────────────────────────────
 
-const { RemoveLogsFromDocs } = await import("./009-remove-logs-from-docs.js");
+const { RemoveLogsFromDocs } = await import("./013-remove-logs-from-docs.js");
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 

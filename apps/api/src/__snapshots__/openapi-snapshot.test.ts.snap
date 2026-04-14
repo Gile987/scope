@@ -1178,38 +1178,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "properties": {},
         "type": "object",
       },
-      "LogEvent": {
-        "properties": {
-          "data": {
-            "additionalProperties": {},
-            "type": "object",
-          },
-          "level": {
-            "enum": [
-              "info",
-              "warn",
-              "error",
-              "debug",
-            ],
-            "type": "string",
-          },
-          "message": {
-            "type": "string",
-          },
-          "source": {
-            "type": "string",
-          },
-          "timestamp": {
-            "type": "string",
-          },
-        },
-        "required": [
-          "timestamp",
-          "level",
-          "message",
-        ],
-        "type": "object",
-      },
       "McpServerHeader": {
         "properties": {
           "name": {
@@ -1756,12 +1724,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
-          "logs": {
-            "items": {
-              "$ref": "#/components/schemas/LogEvent",
-            },
-            "type": "array",
-          },
           "reporter": {
             "$ref": "#/components/schemas/Reporter",
           },
@@ -1792,7 +1754,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "_id",
           "requestId",
           "status",
-          "logs",
           "createdAt",
         ],
         "type": "object",
@@ -2066,12 +2027,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "harUrl": {
             "type": "string",
-          },
-          "logs": {
-            "items": {
-              "$ref": "#/components/schemas/LogEvent",
-            },
-            "type": "array",
           },
           "maxIterations": {
             "type": "number",
