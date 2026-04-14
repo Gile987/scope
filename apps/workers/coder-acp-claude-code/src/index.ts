@@ -142,7 +142,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
           await log("debug", msg);
         },
         mcpServers: this.gateway && this.mcpConfigs.length > 0
-          ? [{ type: "http" as const, name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
+          ? [{ type: "http" as const, slug: "mcp-gateway", name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
           : [],
       });
 
