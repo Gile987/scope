@@ -82,19 +82,31 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       const tokenManagerUrl = (this.config as QueueProcessorConfig).tokenManagerUrl;
       if (tokenManagerUrl) {
         const secretClient = new McpSecretClient(tokenManagerUrl);
+        const hydratedNames: string[] = [];
         mcpServerConfigs = await Promise.all(
           mcpServerConfigs.map(async (config) => {
-            const resolved = await secretClient.resolveSecrets(config.slug);
-            if ('env' in resolved && resolved.env && Object.keys(resolved.env).length > 0) {
-              return { ...config, env: resolved.env };
+            try {
+              const resolved = await secretClient.resolveSecrets(config.slug);
+              if ('env' in resolved && resolved.env && Object.keys(resolved.env).length > 0) {
+                hydratedNames.push(config.name);
+                return { ...config, env: resolved.env };
+              }
+              if ('headers' in resolved && resolved.headers && resolved.headers.length > 0) {
+                hydratedNames.push(config.name);
+                return { ...config, headers: resolved.headers };
+              }
+              return config;
+            } catch (err) {
+              await log("warn", `Failed to hydrate secrets for MCP server '${config.name}' (${config.slug})`, {
+                error: err instanceof Error ? err.message : String(err),
+              });
+              return config;
             }
-            if ('headers' in resolved && resolved.headers && resolved.headers.length > 0) {
-              return { ...config, headers: resolved.headers };
-            }
-            return config;
           })
         );
-        await log("info", `Hydrated secrets for MCP servers: ${mcpServerConfigs.map(s => s.name).join(", ")}`);
+        if (hydratedNames.length > 0) {
+          await log("info", `Hydrated secrets for MCP servers: ${hydratedNames.join(", ")}`);
+        }
       } else {
         await log("warn", "TOKEN_MANAGER_URL not configured — MCP server secrets will not be resolved");
       }
