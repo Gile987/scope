@@ -47,8 +47,8 @@ class ClaudeCodeProcessor implements WorkerProcessor {
   async teardown(log: WorkerLogFn): Promise<void> {
     if (this.gateway && this.mcpConfigs.length > 0) {
       await Promise.all(this.mcpConfigs.map((c) =>
-        this.gateway!.deregisterServer(c.name).catch((err) => {
-          log("warn", `Failed to deregister MCP server "${c.name}" — will be purged on next run`, { error: String(err) });
+        this.gateway!.deregisterServer(c.slug).catch((err) => {
+          log("warn", `Failed to deregister MCP server "${c.name}" (${c.slug}) — will be purged on next run`, { error: String(err) });
         })
       ));
       this.gateway = null;

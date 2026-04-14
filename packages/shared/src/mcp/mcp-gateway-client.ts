@@ -50,7 +50,8 @@ export class McpGatewayClient {
   /** Register a server with the gateway (force=true is idempotent) */
   async registerServer(config: McpServerConfig): Promise<void> {
     const transport = TRANSPORT_MAP[config.type] ?? config.type;
-    const body: Record<string, unknown> = { name: config.name, transport };
+    // Use slug (gateway-safe identifier) as the name — display name may contain spaces
+    const body: Record<string, unknown> = { name: config.slug, transport };
 
     if (config.type === 'stdio') {
       body.command = config.command;
