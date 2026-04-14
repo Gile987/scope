@@ -327,12 +327,36 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
-      "versions": {
-        "options": [
-          "--id",
-          "--output",
-          "--url",
-        ],
+      "version": {
+        "subcommands": {
+          "create": {
+            "options": [
+              "--agent-version",
+              "--extensions",
+              "--id",
+              "--mcp-servers",
+              "--model",
+              "--skills",
+              "--url",
+              "--worker",
+            ],
+          },
+          "get": {
+            "options": [
+              "--id",
+              "--output",
+              "--url",
+              "--version",
+            ],
+          },
+          "list": {
+            "options": [
+              "--id",
+              "--output",
+              "--url",
+            ],
+          },
+        },
       },
     },
   },
