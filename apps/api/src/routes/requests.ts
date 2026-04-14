@@ -29,7 +29,7 @@ import {
   parseExtensionSpec,
   resolveAgentVersion,
 } from "shared";
-import type { SkillDocument, SkillRevisionDocument } from "shared";
+import type { ProfileDocument, ProfileVersionDocument } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import { VALID_WORKERS } from "../route-context.js";
 import type {
@@ -43,6 +43,7 @@ import { computeAnalysis } from "../analysis.js";
 import type { AnalysisResponse, AnalyzableRun } from "../analysis.js";
 import { parseStateKey } from "../criteria-mdp.js";
 import { buildGroupingPipeline } from "../grouping.js";
+import { resolveSkillSpecs } from "../utils/skill-helpers.js";
 import {
   blobNameFromSnapshotsUrl,
   detectBundledChatFiles,
@@ -78,8 +79,77 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion } = req.body;
-    const worker = req.query.worker as string;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId } = req.body;
+    let worker = req.query.worker as string;
+
+    // --- Profile resolution: if profileId is provided, resolve the version and use its values ---
+    let profileId: string | undefined;
+    let profileVersionId: string | undefined;
+    let profileVersion: ProfileVersionDocument | null = null;
+    if (requestedProfileId) {
+      const profile = await ctx.profileCollection.findOne({
+        _id: requestedProfileId,
+        deletedAt: { $exists: false },
+      });
+      if (!profile) {
+        res.status(404).json({ error: `Profile not found: ${requestedProfileId}` });
+        return;
+      }
+      profileVersion = await ctx.profileVersionCollection.findOne({
+        profileId: profile._id,
+        version: profile.latestVersion,
+      });
+      if (!profileVersion) {
+        res.status(404).json({ error: `Profile version not found for profile: ${requestedProfileId}` });
+        return;
+      }
+      profileId = profile._id;
+      profileVersionId = profileVersion._id;
+
+      // Reject requests where client-supplied fields conflict with profile values.
+      // Clients should either omit these fields or send values that match the profile.
+      const conflicts: string[] = [];
+      if (worker && worker !== profileVersion.workerType) {
+        conflicts.push(`worker: sent "${worker}", profile requires "${profileVersion.workerType}"`);
+      }
+      if (requestedModel && requestedModel !== profileVersion.model) {
+        conflicts.push(`model: sent "${requestedModel}", profile requires "${profileVersion.model}"`);
+      }
+      if (mcpServerSlugs !== undefined) {
+        const profileMcp = profileVersion.mcpServers ?? [];
+        if (JSON.stringify([...mcpServerSlugs].sort()) !== JSON.stringify([...profileMcp].sort())) {
+          conflicts.push(`mcpServers: sent ${JSON.stringify(mcpServerSlugs)}, profile requires ${JSON.stringify(profileMcp)}`);
+        }
+      }
+      if (skillSlugs !== undefined) {
+        const profileSkills = profileVersion.skillRevisions ?? [];
+        if (JSON.stringify([...skillSlugs].sort()) !== JSON.stringify([...profileSkills].sort())) {
+          conflicts.push(`skills: sent ${JSON.stringify(skillSlugs)}, profile requires ${JSON.stringify(profileSkills)}`);
+        }
+      }
+      if (extensionIds !== undefined) {
+        const profileExts = profileVersion.extensions ?? [];
+        if (JSON.stringify([...extensionIds].sort()) !== JSON.stringify([...profileExts].sort())) {
+          conflicts.push(`extensions: sent ${JSON.stringify(extensionIds)}, profile requires ${JSON.stringify(profileExts)}`);
+        }
+      }
+      if (conflicts.length > 0) {
+        res.status(400).json({
+          error: `Profile "${profileId}" controls these fields. Either omit them or match the profile values.`,
+          conflicts,
+        });
+        return;
+      }
+
+      // Profile fields take precedence
+      worker = profileVersion.workerType;
+    }
+
+    // Effective values: profile overrides client inputs for controlled fields
+    const effectiveModel = profileVersion ? profileVersion.model : requestedModel;
+    const effectiveMcpServers = profileVersion ? (profileVersion.mcpServers ?? undefined) : mcpServerSlugs;
+    const effectiveSkills = profileVersion ? (profileVersion.skillRevisions ?? undefined) : skillSlugs;
+    const effectiveExtensions = profileVersion ? (profileVersion.extensions ?? undefined) : extensionIds;
 
     if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
       res.status(400).json({ error: "scenario.task is required and must be a string" });
@@ -134,7 +204,7 @@ apiRoute(ctx.app, ctx.registry, {
     const workerType = worker as WorkerType;
 
     // Resolve model: validate against agent's supportedModels if available
-    let model: string | undefined = requestedModel;
+    let model: string | undefined = effectiveModel;
     const agentDoc = await ctx.agentCollection.findOne({ _id: workerType, deletedAt: { $exists: false } });
     if (agentDoc && agentDoc.supportedModels.length > 0) {
       if (model && !agentDoc.supportedModels.includes(model)) {
@@ -174,100 +244,53 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Validate MCP server slugs if provided
     let validatedMcpServers: string[] | undefined;
-    if (mcpServerSlugs !== undefined) {
-      if (!Array.isArray(mcpServerSlugs) || !mcpServerSlugs.every((s: unknown) => typeof s === "string")) {
+    if (effectiveMcpServers !== undefined) {
+      if (!Array.isArray(effectiveMcpServers) || !effectiveMcpServers.every((s: unknown) => typeof s === "string")) {
         res.status(400).json({ error: "mcpServers must be an array of strings (MCP server slugs)" });
         return;
       }
-      if (mcpServerSlugs.length > 0) {
+      if (effectiveMcpServers.length > 0) {
         const existingServers = await ctx.mcpServerCollection
-          .find({ _id: { $in: mcpServerSlugs }, deletedAt: { $exists: false } })
+          .find({ _id: { $in: effectiveMcpServers }, deletedAt: { $exists: false } })
           .toArray();
         const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
-        const missingSlugs = mcpServerSlugs.filter((slug: string) => !existingSlugs.has(slug));
+        const missingSlugs = effectiveMcpServers.filter((slug: string) => !existingSlugs.has(slug));
         if (missingSlugs.length > 0) {
           res.status(400).json({ error: `MCP server(s) not found: ${missingSlugs.join(", ")}` });
           return;
         }
-        validatedMcpServers = mcpServerSlugs;
+        validatedMcpServers = effectiveMcpServers;
       }
     }
 
     // Validate and resolve skill slugs if provided
     let resolvedSkillRevisions: string[] | undefined;
-    if (skillSlugs !== undefined) {
-      if (!Array.isArray(skillSlugs) || !skillSlugs.every((s: unknown) => typeof s === "string")) {
+    if (effectiveSkills !== undefined) {
+      if (!Array.isArray(effectiveSkills) || !effectiveSkills.every((s: unknown) => typeof s === "string")) {
         res.status(400).json({ error: "skills must be an array of strings (skill slugs)" });
         return;
       }
-      if (skillSlugs.length > 0) {
-        // Validate skill slugs exist in our DB
-        const existingSkills = await ctx.skillCollection
-          .find({ _id: { $in: skillSlugs }, deletedAt: { $exists: false } })
-          .toArray();
-        const existingSkillSlugs = new Set(existingSkills.map((s: SkillDocument) => s._id));
-        const missingSkillSlugs = skillSlugs.filter((slug: string) => !existingSkillSlugs.has(slug));
-        if (missingSkillSlugs.length > 0) {
-          res.status(400).json({ error: `Skill(s) not found: ${missingSkillSlugs.join(", ")}` });
+      if (effectiveSkills.length > 0) {
+        const result = await resolveSkillSpecs(effectiveSkills, ctx);
+        if (result.error) {
+          const status = result.error.startsWith("Failed to resolve") ? 422 : 400;
+          res.status(status).json({ error: result.error });
           return;
         }
-
-        // Resolve each skill to a SkillRevisionDocument
-        const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
-          if (!ctx.storageConnectionString && !ctx.storageAccountName) {
-            throw new Error("Blob storage not configured — cannot store skill archives");
-          }
-          let blobServiceClient: BlobServiceClient;
-          if (ctx.storageConnectionString) {
-            blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
-          } else {
-            const credential = new DefaultAzureCredential();
-            blobServiceClient = new BlobServiceClient(
-              `https://${ctx.storageAccountName}.blob.core.windows.net`,
-              credential
-            );
-          }
-          const containerClient = blobServiceClient.getContainerClient("skill-archives");
-          await containerClient.createIfNotExists();
-          const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
-          await blockBlobClient.upload(data, data.length, {
-            blobHTTPHeaders: { blobContentType: "application/gzip" },
-          });
-          return blockBlobClient.url;
-        };
-
-        const revisionRefs: string[] = [];
-        for (const skill of existingSkills) {
-          try {
-            const revision = await ctx.skillResolver.resolve(
-              skill.source,
-              skill.skillName,
-              ctx.skillRevisionStore,
-              uploadArchive
-            );
-            revisionRefs.push(revision.ref);
-          } catch (resolveError) {
-            console.error(`Failed to resolve skill "${skill._id}":`, resolveError);
-            res.status(422).json({
-              error: `Failed to resolve skill "${skill._id}": ${resolveError instanceof Error ? resolveError.message : String(resolveError)}`,
-            });
-            return;
-          }
-        }
-        resolvedSkillRevisions = revisionRefs;
+        resolvedSkillRevisions = result.refs;
       }
     }
 
     // Validate extension specs if provided (supports "id" or "id@version" format)
     let validatedExtensions: string[] | undefined;
-    if (extensionIds !== undefined) {
-      if (!Array.isArray(extensionIds) || !extensionIds.every((s: unknown) => typeof s === "string")) {
+    if (effectiveExtensions !== undefined) {
+      if (!Array.isArray(effectiveExtensions) || !effectiveExtensions.every((s: unknown) => typeof s === "string")) {
         res.status(400).json({ error: "extensions must be an array of strings (extension IDs or id@version specs)" });
         return;
       }
-      if (extensionIds.length > 0) {
+      if (effectiveExtensions.length > 0) {
         // Parse specs to extract bare IDs for DB validation
-        const parsedSpecs = extensionIds.map((spec: string) => parseExtensionSpec(spec));
+        const parsedSpecs = effectiveExtensions.map((spec: string) => parseExtensionSpec(spec));
         const bareIds = parsedSpecs.map((s) => s.id);
         const existingExtensions = await ctx.extensionCollection
           .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
@@ -346,6 +369,8 @@ apiRoute(ctx.app, ctx.registry, {
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
           ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+          ...(profileId ? { profileId } : {}),
+          ...(profileVersionId ? { profileVersionId } : {}),
           submissionId,
         };
         newDocs.push(requestDoc);
@@ -402,6 +427,8 @@ apiRoute(ctx.app, ctx.registry, {
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
       ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+      ...(profileId ? { profileId } : {}),
+      ...(profileVersionId ? { profileVersionId } : {}),
       submissionId,
     };
 
@@ -604,10 +631,11 @@ apiRoute(ctx.app, ctx.registry, {
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
     const submissionIdFilter = req.query.submissionId as string;
+    const profileIdFilter = req.query.profileId as string;
     const statusFilter = req.query.status as string;
     const outcomeFilter = req.query.outcome as string;
     const includeDeleted = req.query.includeDeleted === "true";
-    const groupByParam = req.query.groupBy as "task" | "submissionId" | undefined;
+    const groupByParam = req.query.groupBy as "task" | "submissionId" | "profile" | undefined;
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
     const afterParam = req.query.after as string | undefined;
     const beforeParam = req.query.before as string | undefined;
@@ -629,6 +657,9 @@ apiRoute(ctx.app, ctx.registry, {
     }
     if (outcomeFilter) {
       filter.outcome = outcomeFilter;
+    }
+    if (profileIdFilter) {
+      filter.profileId = profileIdFilter;
     }
     if (submissionIdFilter) {
       // Prefix-based matching: allow filtering by partial submission ID
@@ -664,7 +695,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Grouped mode: paginated RunGroup[] via two-phase aggregation
     if (groupByParam) {
-      const groupByField = groupByParam === "task" ? "taskPromptId" : "submissionId";
+      const groupByField = groupByParam === "task" ? "taskPromptId" : groupByParam === "profile" ? "profileId" : "submissionId";
       const groupByAggField = `$${groupByField}`;
 
       // Decode group cursor
@@ -917,6 +948,64 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    // Resolve profile override (once for the entire batch)
+    let overrideProfileId: string | null | undefined = overrides?.profileId;
+    let overrideProfileVersionId: string | undefined;
+    let overrideProfileVersion: ProfileVersionDocument | null = null;
+    if (typeof overrideProfileId === "string") {
+      const profile = await ctx.profileCollection.findOne({
+        _id: overrideProfileId,
+        deletedAt: { $exists: false },
+      });
+      if (!profile) {
+        res.status(404).json({ error: `Profile not found: ${overrideProfileId}` });
+        return;
+      }
+      overrideProfileVersion = await ctx.profileVersionCollection.findOne({
+        profileId: profile._id,
+        version: profile.latestVersion,
+      });
+      if (!overrideProfileVersion) {
+        res.status(404).json({ error: `Profile version not found for profile: ${overrideProfileId}` });
+        return;
+      }
+      overrideProfileVersionId = overrideProfileVersion._id;
+
+      // Reject individual overrides that conflict with the profile's controlled fields
+      const conflicts: string[] = [];
+      if (overrides?.workerType && overrides.workerType !== overrideProfileVersion.workerType) {
+        conflicts.push(`workerType: sent "${overrides.workerType}", profile requires "${overrideProfileVersion.workerType}"`);
+      }
+      if (overrides?.model !== undefined && overrides.model !== overrideProfileVersion.model) {
+        conflicts.push(`model: sent "${overrides.model}", profile requires "${overrideProfileVersion.model}"`);
+      }
+      if (overrides?.mcpServers !== undefined) {
+        const profileMcp = overrideProfileVersion.mcpServers ?? [];
+        if (JSON.stringify([...overrides.mcpServers!].sort()) !== JSON.stringify([...profileMcp].sort())) {
+          conflicts.push(`mcpServers: sent ${JSON.stringify(overrides.mcpServers)}, profile requires ${JSON.stringify(profileMcp)}`);
+        }
+      }
+      if (overrides?.skillRevisions !== undefined) {
+        const profileSkills = overrideProfileVersion.skillRevisions ?? [];
+        if (JSON.stringify([...overrides.skillRevisions!].sort()) !== JSON.stringify([...profileSkills].sort())) {
+          conflicts.push(`skillRevisions: sent ${JSON.stringify(overrides.skillRevisions)}, profile requires ${JSON.stringify(profileSkills)}`);
+        }
+      }
+      if (overrides?.extensions !== undefined) {
+        const profileExts = overrideProfileVersion.extensions ?? [];
+        if (JSON.stringify([...overrides.extensions!].sort()) !== JSON.stringify([...profileExts].sort())) {
+          conflicts.push(`extensions: sent ${JSON.stringify(overrides.extensions)}, profile requires ${JSON.stringify(profileExts)}`);
+        }
+      }
+      if (conflicts.length > 0) {
+        res.status(400).json({
+          error: `Profile "${overrideProfileId}" controls these fields. Either omit them or match the profile values.`,
+          conflicts,
+        });
+        return;
+      }
+    }
+
     // Fetch original runs
     const originalRuns = await ctx.requestCollection.find(
       { _id: { $in: ids }, deletedAt: { $exists: false } }
@@ -935,13 +1024,55 @@ apiRoute(ctx.app, ctx.registry, {
         const requestId = uuidv4();
         newIds.push(requestId);
 
-        // Resolve effective values: override > original > omit
-        const effectiveWorkerType = (overrides?.workerType ?? original.workerType) as WorkerType;
-        const effectiveModel = overrides?.model !== undefined ? overrides.model : original.model;
+        // Determine effective profile for this run
+        // overrideProfileId: undefined = keep original, null = detach, string = use new profile
+        let effectiveProfileId: string | undefined;
+        let effectiveProfileVersionId: string | undefined;
+        let activeProfileVersion: ProfileVersionDocument | null = null;
+        if (overrideProfileId === null) {
+          // Explicitly detached — no profile
+        } else if (typeof overrideProfileId === "string") {
+          effectiveProfileId = overrideProfileId;
+          effectiveProfileVersionId = overrideProfileVersionId;
+          activeProfileVersion = overrideProfileVersion;
+        } else {
+          // undefined — keep from original
+          effectiveProfileId = original.profileId;
+          effectiveProfileVersionId = original.profileVersionId;
+          // If the original had a profile, resolve its version for field overrides
+          if (original.profileId && original.profileVersionId) {
+            activeProfileVersion = await ctx.profileVersionCollection.findOne({ _id: original.profileVersionId });
+          }
+        }
+
+        // When a profile is active, its values take precedence over individual overrides
+        // for the fields it controls: workerType, model, mcpServers, skillRevisions, extensions
+        const effectiveWorkerType = (activeProfileVersion
+          ? activeProfileVersion.workerType
+          : (overrides?.workerType ?? original.workerType)) as WorkerType;
+        const effectiveModel = activeProfileVersion
+          ? activeProfileVersion.model
+          : (overrides?.model !== undefined ? overrides.model : original.model);
         const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
-        const effectiveMcpServers = overrides?.mcpServers !== undefined ? overrides.mcpServers : original.mcpServers;
-        const effectiveSkillRevisions = overrides?.skillRevisions !== undefined ? overrides.skillRevisions : original.skillRevisions;
-        const effectiveExtensions = overrides?.extensions !== undefined ? overrides.extensions : original.extensions;
+        const effectiveMcpServers = activeProfileVersion
+          ? (activeProfileVersion.mcpServers ?? null)
+          : (overrides?.mcpServers !== undefined ? overrides.mcpServers : original.mcpServers);
+        const effectiveSkillRevisions = activeProfileVersion
+          ? (activeProfileVersion.skillRevisions ?? null)
+          : (overrides?.skillRevisions !== undefined ? overrides.skillRevisions : original.skillRevisions);
+        // Resolve skill specs to pinned refs (handles both bare slugs and already-pinned refs)
+        let resolvedSkillRevisions: string[] | null = null;
+        if (effectiveSkillRevisions && effectiveSkillRevisions.length > 0) {
+          const result = await resolveSkillSpecs(effectiveSkillRevisions, ctx);
+          if (result.error) {
+            res.status(422).json({ error: `Skill resolution failed during resubmit: ${result.error}` });
+            return;
+          }
+          resolvedSkillRevisions = result.refs ?? null;
+        }
+        const effectiveExtensions = activeProfileVersion
+          ? (activeProfileVersion.extensions ?? null)
+          : (overrides?.extensions !== undefined ? overrides.extensions : original.extensions);
         // Strip extensions for non-vscode workers (they don't support VS Code extensions)
         const isVscodeWorker = effectiveWorkerType.includes("vscode");
 
@@ -966,10 +1097,12 @@ apiRoute(ctx.app, ctx.registry, {
           ...(original.persona ? { persona: original.persona } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
-          ...(effectiveSkillRevisions && effectiveSkillRevisions.length > 0 ? { skillRevisions: effectiveSkillRevisions } : {}),
+          ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
           ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
           ...(original.taskPromptId ? { taskPromptId: original.taskPromptId } : {}),
+          ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
+          ...(effectiveProfileVersionId ? { profileVersionId: effectiveProfileVersionId } : {}),
           submissionId,
         };
 

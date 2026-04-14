@@ -20,10 +20,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown, ChevronLeft } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown, ChevronLeft, Lock } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
-import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey } from "@/types";
+import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
 import { formatStatRange } from "@/lib/grouping";
 
 export function RunsList() {
@@ -79,7 +79,7 @@ export function RunsList() {
   const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
     queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
     queryFn: () => api.listRunGroups({
-      groupBy: groupBy as "task" | "submissionId",
+      groupBy: groupBy as "task" | "submissionId" | "profile",
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId: effectiveTaskPromptId,
       status: effectiveStatus,
@@ -109,6 +109,24 @@ export function RunsList() {
     queryFn: api.listAgents,
   });
   const activeAgents = useMemo(() => agents.filter((a) => !a.deletedAt), [agents]);
+
+  // Fetch profiles for name lookup
+  const { data: profiles = [] } = useQuery<ProfileWithVersion[]>({
+    queryKey: ["profiles"],
+    queryFn: () => api.listProfiles(),
+  });
+  const profileNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of profiles) map.set(p._id, p.name);
+    return map;
+  }, [profiles]);
+
+  // Parse version number from profileVersionId (format: "<profileId>@<version>")
+  const parseProfileVersion = (pvId?: string): number | null => {
+    if (!pvId) return null;
+    const v = pvId.split("@")[1];
+    return v ? Number(v) : null;
+  };
 
   // Fetch bulk report summary for all visible runs
   const runIds = useMemo(() => runs.map((r) => r._id), [runs]);
@@ -141,7 +159,7 @@ export function RunsList() {
   // Compute summary of selected runs' values for the resubmit dialog
   const selectedRunsSummary = useMemo(() => {
     const selected = runs.filter((r) => selectedIds.has(r._id));
-    if (selected.length === 0) return { worker: null, model: null, maxIterations: null, mcpServers: null };
+    if (selected.length === 0) return { worker: null, model: null, maxIterations: null, mcpServers: null, profileId: null };
 
     const workers = [...new Set(selected.map((r) => r.workerType))];
     const models = [...new Set(selected.map((r) => r.model ?? ""))];
@@ -152,6 +170,10 @@ export function RunsList() {
     const uniqueSkills = [...new Set(skillSets)];
     const extSets = selected.map((r) => (r.extensions ?? []).sort().join(","));
     const uniqueExts = [...new Set(extSets)];
+    const profileIds = [...new Set(selected.map((r) => r.profileId ?? ""))];
+    const profileVersions = [...new Set(selected.map((r) =>
+      parseProfileVersion(r.profileVersionId) ?? 0
+    ))];
 
     return {
       worker: workers.length === 1 ? workers[0] : null,
@@ -160,17 +182,33 @@ export function RunsList() {
       mcpServers: uniqueMcp.length === 1 ? (selected[0].mcpServers ?? []) : null,
       skillRevisions: uniqueSkills.length === 1 ? (selected[0].skillRevisions ?? []) : null,
       extensions: uniqueExts.length === 1 ? (selected[0].extensions ?? []) : null,
+      profileId: profileIds.length === 1 ? (profileIds[0] || null) : null,
+      profileVersion: profileVersions.length === 1 ? (profileVersions[0] || null) : null,
       isMultiWorker: workers.length > 1,
       isMultiModel: models.length > 1,
       isMultiIterations: iterations.length > 1,
       isMultiMcp: uniqueMcp.length > 1,
       isMultiSkills: uniqueSkills.length > 1,
       isMultiExtensions: uniqueExts.length > 1,
+      isMultiProfile: profileIds.length > 1,
     };
   }, [runs, selectedIds]);
 
+  // Determine the active profile for the resubmit dialog
+  // undefined = keep from source, null = detach, string = specific profile
+  const activeProfileId = resubmitOverrides.profileId !== undefined
+    ? resubmitOverrides.profileId
+    : selectedRunsSummary.profileId;
+  const activeProfile = useMemo(
+    () => activeProfileId ? profiles.find((p) => p._id === activeProfileId) ?? null : null,
+    [profiles, activeProfileId],
+  );
+
   // Determine supported models for the effective worker in the resubmit dialog
-  const effectiveWorker = resubmitOverrides.workerType ?? selectedRunsSummary.worker;
+  // When a profile is active, its values take precedence
+  const effectiveWorker = activeProfile
+    ? activeProfile.version.workerType
+    : (resubmitOverrides.workerType ?? selectedRunsSummary.worker);
   const effectiveAgent = useMemo(
     () => activeAgents.find((a) => a._id === effectiveWorker),
     [activeAgents, effectiveWorker],
@@ -353,6 +391,7 @@ export function RunsList() {
               <SelectItem value="none">None</SelectItem>
               <SelectItem value="task">Task</SelectItem>
               <SelectItem value="submissionId">Submission ID</SelectItem>
+              <SelectItem value="profile">Profile</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -523,9 +562,68 @@ export function RunsList() {
                 <div className="border-t pt-4">
                   <p className="text-sm font-medium mb-3">Overrides <span className="text-muted-foreground font-normal">(leave unchanged to copy from source)</span></p>
 
-                  {/* Worker type override */}
+                  {/* Profile override */}
                   <div className="flex items-center gap-4 mb-3">
-                    <Label className="text-sm w-32 shrink-0">Worker</Label>
+                    <Label className="text-sm w-32 shrink-0">Profile</Label>
+                    <Select
+                      value={resubmitOverrides.profileId === null ? "__none__" : resubmitOverrides.profileId ?? "__keep__"}
+                      onValueChange={(v) => setResubmitOverrides((prev) => {
+                        const next = { ...prev };
+                        if (v === "__keep__") {
+                          delete next.profileId;
+                        } else if (v === "__none__") {
+                          next.profileId = null;
+                        } else {
+                          next.profileId = v;
+                        }
+                        // Clear individual overrides for profile-controlled fields when
+                        // switching profiles — profile values take precedence
+                        delete next.workerType;
+                        delete next.model;
+                        delete next.mcpServers;
+                        delete next.skillRevisions;
+                        delete next.extensions;
+                        return next;
+                      })}
+                    >
+                      <SelectTrigger className="w-56">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__keep__">
+                          {selectedRunsSummary.profileId
+                            ? <>
+                                {profileNameMap.get(selectedRunsSummary.profileId) ?? formatId(selectedRunsSummary.profileId)}
+                                {selectedRunsSummary.profileVersion && <span className="text-muted-foreground"> v{selectedRunsSummary.profileVersion}</span>}
+                              </>
+                            : selectedRunsSummary.isMultiProfile ? "Mixed (keep each)" : "None"}
+                        </SelectItem>
+                        <SelectItem value="__none__">None (detach profile)</SelectItem>
+                        {profiles.map((p) => (
+                          <SelectItem key={p._id} value={p._id}>
+                            {p.name} <span className="text-muted-foreground">v{p.latestVersion}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {activeProfile && (
+                    <div className="flex items-center gap-2 mb-3 px-1 py-1.5 text-xs text-muted-foreground bg-muted/50 rounded">
+                      <Lock className="h-3 w-3 shrink-0" />
+                      Worker, model, MCP servers, skills, and extensions are controlled by the profile
+                    </div>
+                  )}
+
+                  {/* Worker type override */}
+                  <div className="flex items-center gap-4 mb-3" title={activeProfile ? "Controlled by profile" : undefined}>
+                    <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
+                      {activeProfile && <Lock className="h-3 w-3 text-muted-foreground" />}
+                      Worker
+                    </Label>
+                    {activeProfile ? (
+                      <span className="text-sm text-muted-foreground">{activeProfile.version.workerType}</span>
+                    ) : (
                     <Select
                       value={resubmitOverrides.workerType ?? "__keep__"}
                       onValueChange={(v) => setResubmitOverrides((prev) => {
@@ -557,11 +655,18 @@ export function RunsList() {
                         ))}
                       </SelectContent>
                     </Select>
+                    )}
                   </div>
 
                   {/* Model override */}
-                  <div className="flex items-center gap-4 mb-3">
-                    <Label className="text-sm w-32 shrink-0">Model</Label>
+                  <div className="flex items-center gap-4 mb-3" title={activeProfile ? "Controlled by profile" : undefined}>
+                    <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
+                      {activeProfile && <Lock className="h-3 w-3 text-muted-foreground" />}
+                      Model
+                    </Label>
+                    {activeProfile ? (
+                      <span className="text-sm text-muted-foreground">{activeProfile.version.model}</span>
+                    ) : (
                     <Select
                       value={resubmitOverrides.model === null ? "__clear__" : resubmitOverrides.model ?? "__keep__"}
                       onValueChange={(v) => setResubmitOverrides((prev) => {
@@ -594,6 +699,7 @@ export function RunsList() {
                         )}
                       </SelectContent>
                     </Select>
+                    )}
                   </div>
 
                   {/* Max iterations override */}
@@ -627,6 +733,16 @@ export function RunsList() {
                   </div>
 
                   {/* MCP servers override */}
+                  {activeProfile ? (
+                  <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                    <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                      <Lock className="h-3 w-3 text-muted-foreground" />MCP Servers
+                    </Label>
+                    <span className="text-sm text-muted-foreground">
+                      {activeProfile.version.mcpServers?.join(", ") || "None"}
+                    </span>
+                  </div>
+                  ) : (
                   <div className="flex items-start gap-4">
                     <Label className="text-sm w-32 shrink-0 pt-2">MCP Servers</Label>
                     <div className="flex-1 space-y-1.5">
@@ -690,8 +806,19 @@ export function RunsList() {
                       )}
                     </div>
                   </div>
+                  )}
 
                   {/* Skills override */}
+                  {activeProfile ? (
+                  <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                    <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                      <Lock className="h-3 w-3 text-muted-foreground" />Skills
+                    </Label>
+                    <span className="text-sm text-muted-foreground">
+                      {activeProfile.version.skillRevisions?.map((r) => r.split("@")[0].split("/").pop()).join(", ") || "None"}
+                    </span>
+                  </div>
+                  ) : (
                   <div className="flex items-start gap-4">
                     <Label className="text-sm w-32 shrink-0 pt-2">Skills</Label>
                     <div className="flex-1 space-y-1.5">
@@ -765,9 +892,22 @@ export function RunsList() {
                       })()}
                     </div>
                   </div>
+                  )}
 
                   {/* Extensions override — only for VS Code workers */}
-                  {effectiveWorker?.includes("vscode") && (
+                  {activeProfile ? (
+                    effectiveWorker?.includes("vscode") && (
+                    <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                      <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                        <Lock className="h-3 w-3 text-muted-foreground" />Extensions
+                      </Label>
+                      <span className="text-sm text-muted-foreground">
+                        {activeProfile.version.extensions?.join(", ") || "None"}
+                      </span>
+                    </div>
+                    )
+                  ) : (
+                  effectiveWorker?.includes("vscode") && (
                   <div className="flex items-start gap-4">
                     <Label className="text-sm w-32 shrink-0 pt-2">Extensions</Label>
                     <div className="flex-1 space-y-1.5">
@@ -838,7 +978,7 @@ export function RunsList() {
                       })()}
                     </div>
                   </div>
-                  )}
+                  ))}
                 </div>
               </div>
               <AlertDialogFooter>
@@ -913,6 +1053,7 @@ export function RunsList() {
               <TableHead>MCP</TableHead>
               <TableHead>Skills</TableHead>
               <TableHead>Extensions</TableHead>
+              <TableHead>Profile</TableHead>
               <TableHead className="w-[100px]">Status</TableHead>
               <TableHead className="w-[100px]">Outcome</TableHead>
               <TableHead className="w-[100px]">Report</TableHead>
@@ -939,6 +1080,7 @@ export function RunsList() {
                     reportSummaries={reportSummaries}
                     deleteMutation={deleteMutation}
                     groupBy={groupBy}
+                    profileNameMap={profileNameMap}
                     workerFilter={workerFilter === "all" ? undefined : workerFilter}
                     statusFilter={effectiveStatus}
                     outcomeFilter={effectiveOutcome}
@@ -955,6 +1097,7 @@ export function RunsList() {
                   onToggleSelect={toggleSelect}
                   reportSummaries={reportSummaries}
                   deleteMutation={deleteMutation}
+                  profileNameMap={profileNameMap}
                 />
               ))
             )}
@@ -997,12 +1140,14 @@ function RunRow({
   onToggleSelect,
   reportSummaries,
   deleteMutation,
+  profileNameMap,
 }: {
   run: Run;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
+  profileNameMap: Map<string, string>;
 }) {
   return (
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
@@ -1102,6 +1247,15 @@ function RunRow({
         )}
       </TableCell>
       <TableCell>
+        {run.profileId ? (
+          <Link to={`/profiles/${run.profileId}`} className="text-primary hover:underline">
+            {profileNameMap.get(run.profileId) ?? formatId(run.profileId)}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">–</span>
+        )}
+      </TableCell>
+      <TableCell>
         <StatusBadge status={run.status} />
       </TableCell>
       <TableCell>
@@ -1190,6 +1344,7 @@ function GroupRows({
   reportSummaries,
   deleteMutation,
   groupBy,
+  profileNameMap,
   workerFilter,
   statusFilter,
   outcomeFilter,
@@ -1203,6 +1358,7 @@ function GroupRows({
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   groupBy: GroupByKey;
+  profileNameMap: Map<string, string>;
   workerFilter?: string;
   statusFilter?: string;
   outcomeFilter?: string;
@@ -1218,6 +1374,8 @@ function GroupRows({
     if (groupBy === "task") {
       // group.key is taskPromptId (or scenario.task fallback)
       opts.taskPromptId = group.key;
+    } else if (groupBy === "profile") {
+      opts.profileId = group.key === "no-profile" ? undefined : group.key;
     } else {
       opts.submissionId = group.key === "no-submission" ? undefined : group.key;
     }
@@ -1377,6 +1535,20 @@ function GroupRows({
             </div>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>
+        {/* Profile */}
+        <TableCell>
+          {groupBy === "profile" ? (
+            group.key !== "no-profile" ? (
+              <Link
+                to={`/profiles/${group.key}`}
+                className="text-primary hover:underline font-medium"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {profileNameMap.get(group.key) ?? formatId(group.key)}
+              </Link>
+            ) : <span className="font-medium text-muted-foreground">{group.label}</span>
+          ) : null}
+        </TableCell>
         {/* Status */}
         <TableCell>
           {(() => {
@@ -1476,7 +1648,7 @@ function GroupRows({
       {isExpanded && (
         isExpandLoading ? (
           <TableRow>
-            <TableCell colSpan={18} className="text-center py-4">
+            <TableCell colSpan={19} className="text-center py-4">
               <RefreshCw className="h-4 w-4 animate-spin inline-block mr-2" />
               Loading runs…
             </TableCell>
@@ -1490,6 +1662,7 @@ function GroupRows({
               onToggleSelect={onToggleSelect}
               reportSummaries={mergedReportSummaries}
               deleteMutation={deleteMutation}
+              profileNameMap={profileNameMap}
             />
           ))
         )

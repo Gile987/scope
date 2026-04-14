@@ -23,4 +23,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "008-backfill-ai-call-count.ts",
   "009-add-requests-filter-indexes.ts",
   "010-add-requests-pagination-index.ts",
+  "011-add-profile-indexes.ts",
 ];

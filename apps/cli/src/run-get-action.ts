@@ -36,6 +36,7 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
       { key: 'id', label: 'ID' },
       { key: 'workerType', label: 'Worker' },
       { key: 'model', label: 'Model' },
+      { key: 'profileId', label: 'Profile', formatter: (r: any) => r.profileId ?? '' },
       { key: 'status', label: 'Status' },
       { key: 'maxIterations', label: 'Max Iterations' },
       { key: 'turnsCount', label: 'Turns' },
@@ -63,6 +64,8 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   console.log(`${label('ID:')}             ${value(run.id)}`);
   console.log(`${label('Worker:')}         ${value(run.workerType)}`);
   if (run.model) console.log(`${label('Model:')}          ${value(run.model)}`);
+  if (run.profileId) console.log(`${label('Profile:')}        ${value(run.profileId)}`);
+  if (run.profileVersionId) console.log(`${label('Profile Ver:')}    ${dimTimestamp(run.profileVersionId)}`);
 
   const statusColor = run.outcome === 'succeeded' ? successText
     : (run.outcome === 'failed' || run.outcome === 'finished') ? errorText

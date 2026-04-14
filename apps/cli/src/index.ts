@@ -17,6 +17,7 @@ import { registerSkillCommands } from "./commands/skill.js";
 import { registerExtensionCommands } from "./commands/extension.js";
 import { registerInsightCommands } from "./commands/insight.js";
 import { registerTaskPromptCommands } from "./commands/task-prompt.js";
+import { registerProfileCommands } from "./commands/profile.js";
 
 dotenv.config();
 
@@ -45,6 +46,7 @@ registerSkillCommands(program);
 registerExtensionCommands(program);
 registerInsightCommands(program);
 registerTaskPromptCommands(program);
+registerProfileCommands(program);
 
 // Only parse when run directly (not when imported by tests)
 const isDirectRun = process.argv[1] && (

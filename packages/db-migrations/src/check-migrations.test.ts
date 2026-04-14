@@ -41,6 +41,7 @@ describe("checkMigrations", () => {
       "008-backfill-ai-call-count.ts",
       "009-add-requests-filter-indexes.ts",
       "010-add-requests-pagination-index.ts",
+      "011-add-profile-indexes.ts",
     ]);
     const result = await checkMigrations(db);
     expect(result.ready).toBe(true);
@@ -56,6 +57,7 @@ describe("checkMigrations", () => {
       "008-backfill-ai-call-count.ts",
       "009-add-requests-filter-indexes.ts",
       "010-add-requests-pagination-index.ts",
+      "011-add-profile-indexes.ts",
     ]);
   });
 
@@ -63,7 +65,7 @@ describe("checkMigrations", () => {
     const db = makeMockDb(["001-backfill-task-prompts.ts"]);
     const result = await checkMigrations(db);
     expect(result.ready).toBe(false);
-    expect(result.pending).toEqual(["002-create-indexes.ts", "003-create-skill-indexes.ts", "004-add-submission-id-index.ts", "005-backfill-iteration-durations.ts", "006-split-status-outcome.ts", "007-rename-exhausted-to-finished.ts", "008-backfill-ai-call-count.ts", "009-add-requests-filter-indexes.ts", "010-add-requests-pagination-index.ts"]);
+    expect(result.pending).toEqual(["002-create-indexes.ts", "003-create-skill-indexes.ts", "004-add-submission-id-index.ts", "005-backfill-iteration-durations.ts", "006-split-status-outcome.ts", "007-rename-exhausted-to-finished.ts", "008-backfill-ai-call-count.ts", "009-add-requests-filter-indexes.ts", "010-add-requests-pagination-index.ts", "011-add-profile-indexes.ts"]);
     expect(result.applied).toEqual(["001-backfill-task-prompts.ts"]);
   });
 
@@ -82,6 +84,7 @@ describe("checkMigrations", () => {
       "008-backfill-ai-call-count.ts",
       "009-add-requests-filter-indexes.ts",
       "010-add-requests-pagination-index.ts",
+      "011-add-profile-indexes.ts",
     ]);
     expect(result.applied).toEqual([]);
   });
@@ -98,6 +101,7 @@ describe("checkMigrations", () => {
       "008-backfill-ai-call-count.ts",
       "009-add-requests-filter-indexes.ts",
       "010-add-requests-pagination-index.ts",
+      "011-add-profile-indexes.ts",
       "999-future-migration.ts",
     ]);
     const result = await checkMigrations(db);
