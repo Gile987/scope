@@ -43,7 +43,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       const now = new Date();
       const profileId = uuidv4();
-      const versionId = uuidv4();
+      const versionId = `${profileId}@1`;
 
       // Resolve extension versions (same pattern as run submission)
       let resolvedExtensions: string[] | undefined;
@@ -255,7 +255,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       const now = new Date();
       const newVersion = profile.latestVersion + 1;
-      const versionId = uuidv4();
+      const versionId = `${profile._id}@${newVersion}`;
 
       // Resolve extension versions
       let resolvedExtensions: string[] | undefined;

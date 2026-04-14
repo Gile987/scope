@@ -597,7 +597,7 @@ export function RunDetail() {
                     <div>
                       <span className="text-muted-foreground">Version:</span>{" "}
                       <span className="font-medium">
-                        {profile ? `v${profile.version.version}` : <Skeleton className="inline-block h-4 w-8 align-middle" />}
+                        {(() => { const v = run.profileVersionId.split("@")[1]; return v ? `v${v}` : run.profileVersionId; })()}
                       </span>
                     </div>
                   )}

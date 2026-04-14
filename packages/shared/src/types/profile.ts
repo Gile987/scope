@@ -28,7 +28,7 @@ export interface ProfileDocument {
  * `ProfileDocument.latestVersion` atomically.
  */
 export interface ProfileVersionDocument {
-  _id: string;                    // UUID — unique per version
+  _id: string;                    // Composite: "<profileId>@<version>" (e.g. "abc123@3")
   profileId: string;              // FK → ProfileDocument._id
   version: number;                // Auto-incrementing per profileId (1, 2, 3, …)
   workerType: string;             // FK → CodingAgentDocument._id
