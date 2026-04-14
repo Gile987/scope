@@ -84,7 +84,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         const secretClient = new McpSecretClient(tokenManagerUrl);
         mcpServerConfigs = await Promise.all(
           mcpServerConfigs.map(async (config) => {
-            const resolved = await secretClient.resolveSecrets(config.name);
+            const resolved = await secretClient.resolveSecrets(config.slug);
             if ('env' in resolved && resolved.env && Object.keys(resolved.env).length > 0) {
               return { ...config, env: resolved.env };
             }

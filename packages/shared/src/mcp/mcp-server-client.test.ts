@@ -68,6 +68,7 @@ describe("McpServerClient", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
       type: "sse",
+      slug: "my-search",
       name: "My Search",
       url: "https://search.example.com/sse",
     } satisfies McpServerConfig);
@@ -127,6 +128,7 @@ describe("McpServerClient", () => {
     const config = result[0];
 
     expect((config as any)._id).toBeUndefined();
+    expect(config.slug).toBe("db-server");
     expect((config as any).createdAt).toBeUndefined();
     expect((config as any).updatedAt).toBeUndefined();
     expect((config as any).deletedAt).toBeUndefined();
