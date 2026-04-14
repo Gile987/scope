@@ -346,7 +346,9 @@ export function CreateMcpServer() {
                     className="font-mono text-sm"
                   />
                   <Input
-                    placeholder="value"                      type="password"                    value={pair.value}
+                    placeholder="value"
+                    type="password"
+                    value={pair.value}
                     onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
                     className="font-mono text-sm"
                   />
