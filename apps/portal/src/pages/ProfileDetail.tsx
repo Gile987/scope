@@ -17,13 +17,14 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Edit, Trash2, Clock, Layers, Plus } from "lucide-react";
+import { ArrowLeft, Edit, Trash2, Clock, Layers, Plus, Zap } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { parseSkillSpec } from "@/components/SkillPicker";
+import { KbdBadge } from "@/components/KbdBadge";
 import { toast } from "sonner";
 
 export function ProfileDetail() {
@@ -127,8 +128,53 @@ export function ProfileDetail() {
       <Dialog open={editingIdentity} onOpenChange={setEditingIdentity}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit Profile</DialogTitle>
-            <DialogDescription>Update the profile name and description.</DialogDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle>Edit Profile</DialogTitle>
+                <DialogDescription>Update the profile name and description.</DialogDescription>
+              </div>
+              {displayVersion && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    const parts: string[] = [];
+                    const descParts: string[] = [];
+                    const w = displayVersion.workerType;
+                    if (w) {
+                      const label = displayVersion.agentVersion ? `${w}@${displayVersion.agentVersion}` : w;
+                      parts.push(label);
+                      descParts.push(label);
+                    }
+                    if (displayVersion.model) {
+                      parts.push(displayVersion.model);
+                      descParts.push(`model: ${displayVersion.model}`);
+                    }
+                    if (displayVersion.mcpServers?.length) {
+                      parts.push(displayVersion.mcpServers.join(", "));
+                      descParts.push(`MCP: ${displayVersion.mcpServers.join(", ")}`);
+                    }
+                    if (displayVersion.skillRevisions?.length) {
+                      const short = displayVersion.skillRevisions.map((s) => s.split("/").pop() ?? s);
+                      parts.push(short.join(", "));
+                      descParts.push(`Skills: ${displayVersion.skillRevisions.join(", ")}`);
+                    }
+                    if (displayVersion.extensions?.length) {
+                      const short = displayVersion.extensions.map((e) => e.split("/").pop() ?? e);
+                      parts.push(short.join(", "));
+                      descParts.push(`Extensions: ${displayVersion.extensions.join(", ")}`);
+                    }
+                    setEditName(parts.join(" + ").slice(0, 128));
+                    setEditDescription(descParts.join(". ").slice(0, 512));
+                  }}
+                >
+                  <Zap className="h-3.5 w-3.5" />
+                  Auto-fill
+                </Button>
+              )}
+            </div>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
@@ -162,10 +208,18 @@ export function ProfileDetail() {
               Cancel
             </Button>
             <Button
+              data-command-enter
+              className="gap-1.5"
               onClick={() => identityMutation.mutate()}
-              disabled={!editName.trim() || editName.length > 128 || editDescription.length > 512 || identityMutation.isPending}
+              disabled={
+                !editName.trim() ||
+                editName.length > 128 ||
+                editDescription.length > 512 ||
+                identityMutation.isPending ||
+                (editName === profile?.name && editDescription === (profile?.description ?? ""))
+              }
             >
-              {identityMutation.isPending ? "Saving..." : "Save"}
+              {identityMutation.isPending ? "Saving..." : <>Save <KbdBadge /></>}
             </Button>
           </DialogFooter>
         </DialogContent>
