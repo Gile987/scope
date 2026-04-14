@@ -125,16 +125,35 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
             ...(description ? { description } : {}),
           });
         }
-        // Create new version of existing profile
-        const { name: _, description: __, ...versionBody } = body;
-        return api.createProfileVersion(editProfileId, versionBody);
+
+        // Detect config changes — skip version creation if only identity changed
+        const ev = existingProfile?.version;
+        const configChanged = !ev ||
+          worker !== ev.workerType ||
+          model !== ev.model ||
+          (selectedAgentVersion || "") !== (ev.agentVersion || "") ||
+          JSON.stringify([...selectedMcpServers].sort()) !== JSON.stringify([...(ev.mcpServers ?? [])].sort()) ||
+          JSON.stringify([...selectedSkills].sort()) !== JSON.stringify([...(ev.skillRevisions ?? [])].sort()) ||
+          JSON.stringify([...selectedExtensions].sort()) !== JSON.stringify([...(ev.extensions ?? [])].sort());
+
+        if (configChanged) {
+          const { name: _, description: __, ...versionBody } = body;
+          return api.createProfileVersion(editProfileId, versionBody);
+        }
+
+        // Identity-only update — return a sentinel so onSuccess knows
+        return { identityOnly: true } as unknown as ReturnType<typeof api.createProfile>;
       }
       return api.createProfile(body);
     },
     onSuccess: (data) => {
       const profileId = editProfileId ?? ("_id" in data ? data._id : (data as { profileId: string }).profileId);
       if (editProfileId) {
-        toast.success(`Created version ${(data as { version: number }).version} of profile`);
+        if ((data as { identityOnly?: boolean }).identityOnly) {
+          toast.success("Profile updated");
+        } else {
+          toast.success(`Created version ${(data as { version: number }).version} of profile`);
+        }
       } else {
         toast.success(`Profile "${name}" created`);
       }
@@ -197,11 +216,11 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
         </Button>
         <div>
           <h1 className="text-2xl font-bold">
-            {editProfileId ? "New Profile Version" : "Create Profile"}
+            {editProfileId ? "Edit Profile" : "Create Profile"}
           </h1>
           <p className="text-muted-foreground">
             {editProfileId
-              ? "Editing creates a new immutable version. The original version is preserved."
+              ? "Update name/description directly, or change configuration to create a new immutable version."
               : "Save a reusable run configuration for reproducible benchmarking."}
           </p>
         </div>
@@ -215,7 +234,7 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
               <CardTitle>Identity</CardTitle>
               <CardDescription>Name and description for this profile</CardDescription>
             </div>
-            {!editProfileId && worker && (
+            {worker && (
               <Button
                 type="button"
                 variant="outline"
@@ -240,7 +259,6 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Azure Skills + Learn MCP"
-              disabled={!!editProfileId}
               className={name.length > 128 ? "border-destructive" : undefined}
             />
             {name.length > 128 && <p className="text-xs text-destructive">Name must be 128 characters or fewer</p>}
@@ -256,7 +274,6 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Optional description"
               rows={2}
-              disabled={!!editProfileId}
               className={description.length > 512 ? "border-destructive" : undefined}
             />
             {description.length > 512 && <p className="text-xs text-destructive">Description must be 512 characters or fewer</p>}
