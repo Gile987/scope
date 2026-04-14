@@ -101,6 +101,17 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
     }
   }, [sortedVersions.length]);
 
+  // Detect whether config fields differ from the existing version (used for
+  // button label + deciding whether to create a new version on save).
+  const ev = existingProfile?.version;
+  const configChanged = !editProfileId || !ev ||
+    worker !== ev.workerType ||
+    model !== ev.model ||
+    (selectedAgentVersion || "") !== (ev.agentVersion || "") ||
+    JSON.stringify([...selectedMcpServers].sort()) !== JSON.stringify([...(ev.mcpServers ?? [])].sort()) ||
+    JSON.stringify([...selectedSkills].sort()) !== JSON.stringify([...(ev.skillRevisions ?? [])].sort()) ||
+    JSON.stringify([...selectedExtensions].sort()) !== JSON.stringify([...(ev.extensions ?? [])].sort());
+
   const createMutation = useMutation({
     mutationFn: async () => {
       const body = {
@@ -125,16 +136,6 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
             ...(description ? { description } : {}),
           });
         }
-
-        // Detect config changes — skip version creation if only identity changed
-        const ev = existingProfile?.version;
-        const configChanged = !ev ||
-          worker !== ev.workerType ||
-          model !== ev.model ||
-          (selectedAgentVersion || "") !== (ev.agentVersion || "") ||
-          JSON.stringify([...selectedMcpServers].sort()) !== JSON.stringify([...(ev.mcpServers ?? [])].sort()) ||
-          JSON.stringify([...selectedSkills].sort()) !== JSON.stringify([...(ev.skillRevisions ?? [])].sort()) ||
-          JSON.stringify([...selectedExtensions].sort()) !== JSON.stringify([...(ev.extensions ?? [])].sort());
 
         if (configChanged) {
           const { name: _, description: __, ...versionBody } = body;
@@ -403,7 +404,7 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
           {createMutation.isPending ? (
             <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</>
           ) : (
-            <><Save className="mr-2 h-4 w-4" /> {editProfileId ? "Create New Version" : "Create Profile"}</>
+            <><Save className="mr-2 h-4 w-4" /> {!editProfileId ? "Create Profile" : configChanged ? "Create New Version" : "Update Profile"}</>
           )}
         </Button>
       </div>
