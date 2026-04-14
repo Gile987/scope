@@ -13,7 +13,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Edit, Trash2, Clock, Layers, Plus, Check, X } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { ArrowLeft, Edit, Trash2, Clock, Layers, Plus } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -119,6 +123,54 @@ export function ProfileDetail() {
 
   return (
     <div className="space-y-6">
+      {/* Edit Identity Dialog */}
+      <Dialog open={editingIdentity} onOpenChange={setEditingIdentity}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Profile</DialogTitle>
+            <DialogDescription>Update the profile name and description.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Name</Label>
+              <Input
+                id="edit-name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                autoFocus
+              />
+              {editName.length > 128 && (
+                <p className="text-xs text-destructive">Name must be 128 characters or fewer</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Description</Label>
+              <Textarea
+                id="edit-description"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Optional description"
+                rows={3}
+              />
+              {editDescription.length > 512 && (
+                <p className="text-xs text-destructive">Description must be 512 characters or fewer</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingIdentity(false)} disabled={identityMutation.isPending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => identityMutation.mutate()}
+              disabled={!editName.trim() || editName.length > 128 || editDescription.length > 512 || identityMutation.isPending}
+            >
+              {identityMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -126,57 +178,20 @@ export function ProfileDetail() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            {editingIdentity ? (
-              <div className="space-y-2">
-                <Input
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="text-xl font-bold h-auto py-1"
-                  autoFocus
-                />
-                <Textarea
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  placeholder="Optional description"
-                  rows={2}
-                  className="text-sm"
-                />
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => identityMutation.mutate()}
-                    disabled={!editName.trim() || editName.length > 128 || editDescription.length > 512 || identityMutation.isPending}
-                  >
-                    <Check className="mr-1 h-3 w-3" /> Save
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setEditingIdentity(false)}
-                    disabled={identityMutation.isPending}
-                  >
-                    <X className="mr-1 h-3 w-3" /> Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-2xl font-bold">{profile.name}</h1>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={startEditingIdentity}>
-                    <Edit className="h-3.5 w-3.5" />
-                  </Button>
-                  {displayVersion && (
-                    <Badge variant={isSpecificVersion ? "outline" : "secondary"}>
-                      v{displayVersion.version}
-                      {!isSpecificVersion && " (latest)"}
-                    </Badge>
-                  )}
-                </div>
-                {profile.description && (
-                  <p className="text-muted-foreground">{profile.description}</p>
-                )}
-              </>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold">{profile.name}</h1>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={startEditingIdentity}>
+                <Edit className="h-3.5 w-3.5" />
+              </Button>
+              {displayVersion && (
+                <Badge variant={isSpecificVersion ? "outline" : "secondary"}>
+                  v{displayVersion.version}
+                  {!isSpecificVersion && " (latest)"}
+                </Badge>
+              )}
+            </div>
+            {profile.description && (
+              <p className="text-muted-foreground">{profile.description}</p>
             )}
           </div>
         </div>
@@ -224,16 +239,16 @@ export function ProfileDetail() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label>Worker</Label>
+                    <FieldLabel>Worker</FieldLabel>
                     <p className="font-mono text-sm">{displayVersion.workerType}</p>
                   </div>
                   <div>
-                    <Label>Model</Label>
+                    <FieldLabel>Model</FieldLabel>
                     <p className="font-mono text-sm">{displayVersion.model}</p>
                   </div>
                   {displayVersion.agentVersion && (
                     <div>
-                      <Label>Agent Version</Label>
+                      <FieldLabel>Agent Version</FieldLabel>
                       <p className="font-mono text-sm">{displayVersion.agentVersion}</p>
                     </div>
                   )}
@@ -243,7 +258,7 @@ export function ProfileDetail() {
                   <>
                     <Separator />
                     <div>
-                      <Label>MCP Servers</Label>
+                      <FieldLabel>MCP Servers</FieldLabel>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {displayVersion.mcpServers.map((s) => (
                           <Badge key={s} variant="outline" className="font-mono text-xs">{s}</Badge>
@@ -257,7 +272,7 @@ export function ProfileDetail() {
                   <>
                     <Separator />
                     <div>
-                      <Label>Skills</Label>
+                      <FieldLabel>Skills</FieldLabel>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {displayVersion.skillRevisions.map((s) => {
                           const { slug, commitHash } = parseSkillSpec(s);
@@ -279,7 +294,7 @@ export function ProfileDetail() {
                   <>
                     <Separator />
                     <div>
-                      <Label>Extensions</Label>
+                      <FieldLabel>Extensions</FieldLabel>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {displayVersion.extensions.map((e) => {
                           const at = e.lastIndexOf("@");
@@ -343,6 +358,6 @@ export function ProfileDetail() {
   );
 }
 
-function Label({ children }: { children: React.ReactNode }) {
+function FieldLabel({ children }: { children: React.ReactNode }) {
   return <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{children}</p>;
 }
