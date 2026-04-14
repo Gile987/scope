@@ -24,4 +24,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "009-add-requests-filter-indexes.ts",
   "010-add-requests-pagination-index.ts",
   "011-add-profile-indexes.ts",
+  "012-add-profile-name-index.ts",
 ];
