@@ -49,7 +49,8 @@ export class McpServerClient {
 
 /**
  * Map an API response (McpServerDocument) to a McpServerConfig,
- * stripping DB metadata (createdAt, updatedAt, deletedAt, _id).
+ * stripping DB metadata (createdAt, updatedAt, deletedAt).
+ * _id (slug) is preserved as the gateway-safe identifier.
  */
 function mapToMcpServerConfig(data: McpServerDocument): McpServerConfig {
   return {

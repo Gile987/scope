@@ -45,8 +45,8 @@ export interface McpSecretDocument {
 /** Resolved MCP server configuration passed to workers at runtime */
 export interface McpServerConfig {
   type: McpTransportType;
-  slug: string;                   // _id slug used for secret resolution & identification
-  name: string;
+  slug: string;                   // Gateway-safe identifier (^[a-zA-Z0-9_-]+$), maps from McpServerDocument._id; used for secret resolution
+  name: string;                   // Human-readable display name
   url?: string;                   // required for sse/http
   command?: string;               // required for stdio
   args?: string[];

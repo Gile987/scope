@@ -122,6 +122,15 @@ describe("McpGatewayClient", () => {
       );
     });
 
+    it("uses slug (not display name) so spaces in name don't cause gateway rejection", async () => {
+      mockFetch.mockResolvedValueOnce(okResponse());
+
+      await client.registerServer({ slug: "ms-learn", name: "MS Learn", type: "http", url: "https://learn.microsoft.com/mcp" });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.name).toBe("ms-learn");
+    });
+
     it("registers an SSE server with correct transport mapping", async () => {
       mockFetch.mockResolvedValueOnce(okResponse());
 
