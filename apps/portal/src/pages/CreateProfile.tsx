@@ -75,12 +75,13 @@ export function CreateProfile({ editProfileId }: CreateProfilePageProps = {}) {
   const supportedModels = selectedAgent?.supportedModels ?? [];
   const isVscodeWorker = worker.includes("vscode");
 
-  // Clear extensions when switching to a non-vscode worker
+  // Clear extensions when the user switches to a non-vscode worker.
+  // Skip when worker is empty (initial state before profile loads).
   useEffect(() => {
-    if (!isVscodeWorker) {
+    if (worker && !isVscodeWorker) {
       setSelectedExtensions([]);
     }
-  }, [isVscodeWorker]);
+  }, [worker, isVscodeWorker]);
 
   // Fetch agent versions
   const { data: agentVersions = [] } = useQuery({
