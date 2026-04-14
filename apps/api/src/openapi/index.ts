@@ -16,7 +16,6 @@
 // skill-revisions: registered via apiRoute() in index.ts
 import "./routes/keys.js";
 import "./routes/accounts.js";
-import "./routes/mcp-secrets.js";
 // feature-flags: registered via apiRoute() in index.ts
 
 export { registry, generateOpenAPIDocument } from "./registry.js";
