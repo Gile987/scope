@@ -18,3 +18,4 @@ export * from "./extension.js";
 export * from "./token.js";
 export * from "./account.js";
 export * from "./feature-flag.js";
+export * from "./profile.js";

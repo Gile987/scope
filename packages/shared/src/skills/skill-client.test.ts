@@ -43,6 +43,7 @@ describe('SkillClient', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
+      ref: 'owner/repo/skill@abc1234',
       name: 'Test Skill',
       description: 'A test skill',
       content: '# SKILL.md content',

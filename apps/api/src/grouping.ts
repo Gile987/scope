@@ -12,12 +12,12 @@ import type { GroupByKey, RunGroup, AggregateStats, GroupUniformValues } from "s
  * The pipeline is appended after a $match stage with the caller's filter.
  */
 export function buildGroupingPipeline(
-  groupBy: "task" | "submissionId",
+  groupBy: "task" | "submissionId" | "profile",
 ): Document[] {
   const groupField =
-    groupBy === "task" ? "$taskPromptId" : "$submissionId";
+    groupBy === "task" ? "$taskPromptId" : groupBy === "profile" ? "$profileId" : "$submissionId";
   const fallbackGroupField =
-    groupBy === "task" ? "$scenario.task" : { $literal: "no-submission" };
+    groupBy === "task" ? "$scenario.task" : groupBy === "profile" ? { $literal: "no-profile" } : { $literal: "no-submission" };
 
   return [
     // 1. Compute per-run derived values
@@ -145,10 +145,12 @@ export function buildGroupingPipeline(
         key: "$_id",
         runIds: "$_runIds",
         label: {
-          $cond: {
-            if: { $eq: ["$_id", "no-submission"] },
-            then: "No submission ID",
-            else: { $ifNull: ["$_firstTask", "$_id"] },
+          $switch: {
+            branches: [
+              { case: { $eq: ["$_id", "no-submission"] }, then: "No submission ID" },
+              { case: { $eq: ["$_id", "no-profile"] }, then: "No profile" },
+            ],
+            default: { $ifNull: ["$_firstTask", "$_id"] },
           },
         },
         aggregates: {

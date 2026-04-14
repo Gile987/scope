@@ -21,8 +21,9 @@ Benchmark runs — the core entity. Each document represents a single coding age
 | `outcome` | `{ outcome: 1 }` | | 009 |
 | `workerType` | `{ workerType: 1 }` | | 009 |
 | `deletedAt` | `{ deletedAt: 1 }` | | 009 |
+| `profileId` | `{ profileId: 1 }` | sparse | 010 |
 
-Key fields: `status`, `outcome`, `workerType`, `taskPromptId`, `submissionId`, `scenario.task`, `turns[]`, `tokenUsage`, `model`, `agentVersion`, `os.platform`, `mcpServers[]`, `skillRevisions[]`, `deletedAt`, `createdAt`.
+Key fields: `status`, `outcome`, `workerType`, `taskPromptId`, `submissionId`, `profileId`, `scenario.task`, `turns[]`, `tokenUsage`, `model`, `agentVersion`, `os.platform`, `mcpServers[]`, `skillRevisions[]`, `deletedAt`, `createdAt`.
 
 ### `task-prompts`
 
@@ -138,6 +139,24 @@ Runtime feature flags.
 |-------|-----|---------|-----------|
 | `_id` | `{ _id: 1 }` | default | — |
 | `key` | `{ key: 1 }` | unique | 002 |
+
+### `profiles`
+
+Run configuration profiles — named collections of settings (worker, task, model, etc.).
+
+| Index | Key | Options | Migration |
+|-------|-----|---------|-----------|
+| `_id` | `{ _id: 1 }` | default | — |
+| `createdAt` | `{ createdAt: -1 }` | | 010 |
+
+### `profile-versions`
+
+Immutable versioned snapshots of profile configurations. Each version captures the full settings at a point in time.
+
+| Index | Key | Options | Migration |
+|-------|-----|---------|-----------|
+| `_id` | `{ _id: 1 }` | default | — |
+| `profileId_version` | `{ profileId: 1, version: -1 }` | | 010 |
 
 ### Other collections
 

@@ -14,6 +14,8 @@ import type {
   SkillDocument,
   SkillRevisionDocument,
   McpSecretClient,
+  ProfileDocument,
+  ProfileVersionDocument,
   // Zod response schemas → inferred types replace hand-written interfaces
   CriteriaResponseSchema,
   ExtensionResponseSchema,
@@ -88,6 +90,8 @@ export interface RouteContext {
   skillCollection: Collection<SkillDocument>;
   extensionCollection: Collection<ExtensionDocument>;
   skillRevisionCollection: Collection<SkillRevisionDocument>;
+  profileCollection: Collection<ProfileDocument>;
+  profileVersionCollection: Collection<ProfileVersionDocument>;
 
   // Services
   taskPromptStore: TaskPromptStore;
