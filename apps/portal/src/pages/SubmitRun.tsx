@@ -399,6 +399,10 @@ export function SubmitRun() {
                   <span className="text-muted-foreground font-normal">(select from registry)</span>
                 </Label>
                 <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  Required when max iterations &gt; 1. Optional for single-iteration runs (no judge evaluation).
+                </p>
               </div>
 
               <div className="space-y-2">
