@@ -12,7 +12,6 @@ const minimalRun = {
   workerType: 'coder-acp-copilot',
   status: 'pending',
   scenario: { task: 'Add a button', criteria: ['has_button'] },
-  logs: [],
   createdAt: '2025-06-01T10:00:00Z',
 };
 
@@ -61,10 +60,6 @@ const fullRun = {
         { criterionId: 'has_tests', passed: true, evaluated: true },
       ],
     },
-  ],
-  logs: [
-    { timestamp: '2025-06-01T10:00:00Z', level: 'info', message: 'started' },
-    { timestamp: '2025-06-01T10:10:00Z', level: 'info', message: 'done' },
   ],
   createdAt: '2025-06-01T10:00:00Z',
   updatedAt: '2025-06-01T10:10:00Z',
@@ -171,10 +166,6 @@ describe('run get', () => {
       expect(output).toContain('Turn 1');
       expect(output).toContain('Turn 2');
       expect(output).toContain('3/3 criteria passed');
-
-      // Logs count
-      expect(output).toContain('2');
-      expect(output).toContain('entries');
 
       // Prompt feature extraction
       expect(output).toContain('pfe-abc');

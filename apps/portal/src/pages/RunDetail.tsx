@@ -59,15 +59,15 @@ export function RunDetail() {
   // Must be called unconditionally (before any early returns) per Rules of Hooks
   const logStream = useLogStream({
     id: run?._id ?? "",
-    enabled: isActive && !!run,
+    enabled: !!run,
     fromStart: true,
   });
 
-  // For completed/failed/finished runs, use REST-fetched logs instead of SSE
-  const effectiveLogs = isActive ? logStream.logs : (run?.logs ?? []);
-  const effectiveIsConnected = isActive ? logStream.isConnected : false;
-  const effectiveIsDone = isActive ? logStream.isDone : true;
-  const effectiveError = isActive ? logStream.error : null;
+  // Always use SSE — completed runs replay logs from blob storage and send event: done
+  const effectiveLogs = logStream.logs;
+  const effectiveIsConnected = logStream.isConnected;
+  const effectiveIsDone = logStream.isDone;
+  const effectiveError = logStream.error;
 
   // Fetch linked task prompt (if present) — provides prompt features
   const taskPromptId = run?.taskPromptId;

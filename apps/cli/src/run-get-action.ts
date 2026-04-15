@@ -43,7 +43,6 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
       { key: 'passed', label: 'Passed' },
       { key: 'task', label: 'Task' },
       { key: 'criteriaCount', label: 'Criteria' },
-      { key: 'logsCount', label: 'Logs' },
       { key: 'createdAt', label: 'Created' },
       { key: 'updatedAt', label: 'Updated' },
       { key: 'error', label: 'Error' },
@@ -54,7 +53,6 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
       passed: run.outcome === 'succeeded' ? 'yes' : run.outcome === 'failed' || run.outcome === 'finished' ? 'no' : '-',
       task: run.scenario?.task ?? '',
       criteriaCount: run.scenario?.criteria?.length ?? 0,
-      logsCount: run.logs?.length ?? 0,
     };
     console.log(formatData([row], fields, format));
     return;
@@ -123,11 +121,6 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   // Error
   if (run.error) {
     console.log(`${label('Error:')}          ${errorText(run.error)}`);
-  }
-
-  // Logs count
-  if (run.logs?.length != null) {
-    console.log(`${label('Logs:')}           ${value(String(run.logs.length))} entries`);
   }
 
   // Prompt feature extraction

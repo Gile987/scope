@@ -45,16 +45,16 @@ export function ReportDetail() {
 
   const logStream = useLogStream({
     id: report?._id ?? "",
-    enabled: isActive && !!report,
+    enabled: !!report,
     fromStart: true,
     urlBuilder: api.reportLogsUrl,
   });
 
-  // For completed/failed reports, use REST-fetched logs instead of SSE
-  const effectiveLogs = isActive ? logStream.logs : (report?.logs ?? []);
-  const effectiveIsConnected = isActive ? logStream.isConnected : false;
-  const effectiveIsDone = isActive ? logStream.isDone : true;
-  const effectiveError = isActive ? logStream.error : null;
+  // Always use SSE — completed reports replay logs from blob storage and send event: done
+  const effectiveLogs = logStream.logs;
+  const effectiveIsConnected = logStream.isConnected;
+  const effectiveIsDone = logStream.isDone;
+  const effectiveError = logStream.error;
 
   const copyId = () => {
     navigator.clipboard.writeText(id ?? "");
