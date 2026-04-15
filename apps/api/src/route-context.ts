@@ -6,6 +6,7 @@ import type { Collection, Db } from "mongodb";
 import type { QueueClient } from "@azure/storage-queue";
 import type { Express } from "express";
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import type { BlobStorage } from "shared";
 import type {
   TaskPromptStore,
   TaskPromptDocument,
@@ -110,4 +111,7 @@ export interface RouteContext {
   validWorkers: readonly string[];
   storageConnectionString: string;
   storageAccountName: string;
+
+  // Blob Storage
+  blobStorage: BlobStorage;
 }

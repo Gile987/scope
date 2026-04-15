@@ -8,7 +8,7 @@ import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
-import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError } from "shared";
+import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage } from "shared";
 import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, ProfileDocument, ProfileVersionDocument } from "shared";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
@@ -248,6 +248,7 @@ const routeCtx: RouteContext = {
   validWorkers: VALID_WORKERS,
   storageConnectionString,
   storageAccountName,
+  blobStorage: new BlobStorage({ storageAccountName, storageConnectionString }),
 };
 
 // ─── Route registration ───────────────────────────────────────────────────────
