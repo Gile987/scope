@@ -542,7 +542,7 @@ services:
       [
         "sh",
         "-c",
-        "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'",
+        "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs /workspace && chmod -v 775 /har-output /certs /workspace && echo 'Done'",
       ]
     volumes:
       - vscode_electron_har_output:/har-output
