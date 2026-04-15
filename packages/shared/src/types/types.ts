@@ -126,7 +126,6 @@ export interface RequestDocument {
   outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;
-  logs?: LogEvent[];
   createdAt: Date;
   updatedAt?: Date;
   // Multi-turn fields
@@ -351,7 +350,6 @@ export interface ReportDocument {
   content?: string;      // Generated markdown report
   status: ReportStatus;
   error?: string;
-  logs: LogEvent[];
   insightReferences?: InsightReference[];  // Insights discovered/referenced by this report
   createdAt: Date;
   updatedAt?: Date;

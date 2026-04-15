@@ -284,7 +284,6 @@ describe("request schemas", () => {
       scenario: validScenario,
       workerType: "coder-acp-copilot",
       status: "pending",
-      logs: [],
       createdAt: NOW,
     };
 
@@ -621,7 +620,6 @@ describe("report schemas", () => {
       _id: "rep1",
       requestId: "req1",
       status: "pending",
-      logs: [],
       createdAt: NOW,
     };
 

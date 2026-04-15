@@ -104,7 +104,6 @@ export const RequestResponseSchema = z
     outcome: RequestOutcomeSchema.optional(),
     result: z.string().optional(),
     error: z.string().optional(),
-    logs: z.array(LogEventSchema).optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     maxIterations: z.number().optional(),

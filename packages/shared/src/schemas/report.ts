@@ -42,7 +42,6 @@ export const ReportResponseSchema = z
     content: z.string().optional(),
     status: ReportStatusSchema,
     error: z.string().optional(),
-    logs: z.array(LogEventSchema),
     insightReferences: z.array(InsightReferenceSchema).optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
