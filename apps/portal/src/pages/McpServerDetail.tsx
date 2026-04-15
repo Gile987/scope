@@ -21,6 +21,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Trash2, Loader2, Save, Plus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { unmaskSecretValue } from "@/lib/mcp-secrets";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
 
@@ -56,11 +57,11 @@ export function McpServerDetail() {
       setUrl(server.url ?? "");
       setCommand(server.command ?? "");
       setArgs(server.args ? server.args.join(" ") : "");
-      setEnvPairs(server.env ? Object.entries(server.env).map(([k, v]) => ({ name: k, value: v })) : []);
+      setEnvPairs(server.env ? Object.entries(server.env).map(([k, v]) => ({ name: k, value: unmaskSecretValue(v) })) : []);
       setSessionMode(server.sessionMode ?? "stateless");
       setVersion(server.version ?? "");
       setDescription(server.description ?? "");
-      setHeaders(server.headers ? [...server.headers] : []);
+      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: unmaskSecretValue(h.value) })) : []);
     }
   }, [server]);
 
@@ -118,11 +119,11 @@ export function McpServerDetail() {
       setUrl(server.url ?? "");
       setCommand(server.command ?? "");
       setArgs(server.args ? server.args.join(" ") : "");
-      setEnvPairs(server.env ? Object.entries(server.env).map(([k, v]) => ({ name: k, value: v })) : []);
+      setEnvPairs(server.env ? Object.entries(server.env).map(([k, v]) => ({ name: k, value: unmaskSecretValue(v) })) : []);
       setSessionMode(server.sessionMode ?? "stateless");
       setVersion(server.version ?? "");
       setDescription(server.description ?? "");
-      setHeaders(server.headers ? [...server.headers] : []);
+      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: unmaskSecretValue(h.value) })) : []);
     }
   };
 
@@ -473,7 +474,7 @@ export function McpServerDetail() {
                       className="font-mono text-sm"
                     />
                     <Input
-                      placeholder="value"
+                      placeholder={pair.value === "" && server?.env?.[pair.name] === "<secret>" ? "(already set — enter new value to change)" : "value"}
                       type="password"
                       value={pair.value}
                       onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
