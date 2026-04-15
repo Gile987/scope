@@ -1756,12 +1756,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
-          "logs": {
-            "items": {
-              "$ref": "#/components/schemas/LogEvent",
-            },
-            "type": "array",
-          },
           "reporter": {
             "$ref": "#/components/schemas/Reporter",
           },
@@ -1792,7 +1786,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "_id",
           "requestId",
           "status",
-          "logs",
           "createdAt",
         ],
         "type": "object",
@@ -2066,12 +2059,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "harUrl": {
             "type": "string",
-          },
-          "logs": {
-            "items": {
-              "$ref": "#/components/schemas/LogEvent",
-            },
-            "type": "array",
           },
           "maxIterations": {
             "type": "number",
