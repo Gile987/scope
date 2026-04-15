@@ -551,18 +551,26 @@ describe("runMultiTurnLoop — optional criteria (issue #605)", () => {
     expect(judgeEvaluate).toHaveBeenCalledTimes(1);
   });
 
-  it("still calls judge when criteria is empty but maxIterations > 1", async () => {
-    const judgeEvaluate = vi.fn().mockResolvedValue({ passed: false, feedback: "Not done" });
+  it("throws when criteria is empty and maxIterations > 1", async () => {
     const config = makeConfig({
       criteria: [],
       maxIterations: 2,
-      judgeClient: { evaluate: judgeEvaluate },
     });
 
-    const result = await runMultiTurnLoop(config as any);
+    await expect(runMultiTurnLoop(config as any)).rejects.toThrow(
+      "Criteria is required when maxIterations > 1",
+    );
+  });
 
-    // Judge is called because maxIterations > 1 (even though criteria is empty)
-    expect(judgeEvaluate).toHaveBeenCalled();
+  it("throws when criteria is undefined and maxIterations > 1", async () => {
+    const config = makeConfig({
+      criteria: undefined,
+      maxIterations: 3,
+    });
+
+    await expect(runMultiTurnLoop(config as any)).rejects.toThrow(
+      "Criteria is required when maxIterations > 1",
+    );
   });
 
   it("persists turn via onTurnComplete when judge is skipped", async () => {

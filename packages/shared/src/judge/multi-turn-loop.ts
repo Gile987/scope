@@ -96,6 +96,12 @@ export async function runMultiTurnLoop(
     workspacePath,
   } = config;
 
+  // Defensive: criteria is required when maxIterations > 1
+  const hasCriteria = criteria && criteria.length > 0;
+  if (!hasCriteria && maxIterations > 1) {
+    throw new Error("Criteria is required when maxIterations > 1");
+  }
+
   const turns: ConversationTurn[] = [];
   let nextPrompt = task;
   const startTime = Date.now();
@@ -339,7 +345,6 @@ export async function runMultiTurnLoop(
 
     // Skip judge evaluation when no criteria are provided and maxIterations is 1
     // (single-iteration pass-through mode: run the agent, snapshot, done)
-    const hasCriteria = criteria && criteria.length > 0;
     if (!hasCriteria && maxIterations === 1) {
       await iterLog("info", "No criteria provided with maxIterations=1 — skipping judge evaluation");
 
