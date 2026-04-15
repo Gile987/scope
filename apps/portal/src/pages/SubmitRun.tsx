@@ -395,7 +395,7 @@ export function SubmitRun() {
 
               <div className="space-y-2">
                 <Label htmlFor="criteria">
-                  Criteria *{" "}
+                  Criteria {parseInt(maxIterations, 10) !== 1 && "* "}
                   <span className="text-muted-foreground font-normal">(select from registry)</span>
                 </Label>
                 <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
@@ -680,7 +680,7 @@ export function SubmitRun() {
             ) : (
               <div />
             )}
-            <Button type="button" onClick={handleContinue} disabled={!task.trim() || (selectedAgent && selectedAgent.supportedModels.length > 0 && !model) || pickedCriteria.length === 0} className="gap-1.5">
+            <Button type="button" onClick={handleContinue} disabled={!task.trim() || (selectedAgent && selectedAgent.supportedModels.length > 0 && !model) || (parseInt(maxIterations, 10) !== 1 && pickedCriteria.length === 0)} className="gap-1.5">
               Continue <ArrowRight className="h-4 w-4" /> <KbdBadge />
             </Button>
           </div>
