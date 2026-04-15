@@ -6,6 +6,7 @@ import { QueueClient, DequeuedMessageItem } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { LogEvent, BaseQueueProcessorConfig } from "../types/types.js";
 import { LogPublisher } from "../logging/log-publisher.js";
+import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
 
 /**
@@ -115,14 +116,18 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
     this.collection = this.db.collection<TDocument>(this.config.mongoCollection);
     console.log(`[${this.workerName}] Connected to MongoDB`);
 
-    // Initialize log publisher
+    // Initialize log publisher with blob storage for persistence
+    const blobStorage = new BlobStorage({
+      storageAccountName: this.config.storageAccountName,
+      storageConnectionString: this.config.storageConnectionString,
+    });
     this.logPublisher = new LogPublisher(
       {
         redisHost: this.config.redisHost,
         redisPort: this.config.redisPort,
         redisPassword: this.config.redisPassword,
       },
-      this.collection as unknown as Collection<any>,
+      blobStorage,
       this.workerName
     );
 
