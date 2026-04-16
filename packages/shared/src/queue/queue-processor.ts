@@ -245,9 +245,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       maxIterations: requestDoc.maxIterations,
     });
 
-    // JudgeClient is only called when criteria exist; use a placeholder URL otherwise
-    // to satisfy the constructor (runMultiTurnLoop will skip judge evaluation).
-    const judgeClient = new JudgeClient(judgeServiceUrl || "http://unused");
+    // Only create JudgeClient when criteria exist and judge will actually be called
+    const judgeClient = hasCriteria && judgeServiceUrl ? new JudgeClient(judgeServiceUrl) : undefined;
     const blobStorage = new BlobStorage({
       storageAccountName: this.config.storageAccountName,
       storageConnectionString: this.config.storageConnectionString,

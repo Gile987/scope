@@ -29,8 +29,8 @@ export interface MultiTurnConfig {
   maxIterations: number;
   /** Workspace directory to snapshot (must be resolved by caller after setup) */
   workspacePath: string;
-  /** Judge REST API client */
-  judgeClient: JudgeClient;
+  /** Judge REST API client (required when criteria are provided) */
+  judgeClient?: JudgeClient;
   /** Blob storage client for workspace snapshots */
   blobStorage: BlobStorage;
   /** Request ID (for snapshot naming) */
@@ -384,7 +384,7 @@ export async function runMultiTurnLoop(
     let judgeFeedback: string;
     let criteriaResults: CriterionResult[] | undefined;
     try {
-      const judgeResult = await judgeClient.evaluate({
+      const judgeResult = await judgeClient!.evaluate({
         snapshotUrl,
         criteria: criteria!,
         conversationHistory: turns,
