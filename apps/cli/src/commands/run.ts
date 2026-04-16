@@ -540,6 +540,106 @@ run
   });
 
 run
+  .command("download-batch")
+  .description("Download multiple runs at once into a single batch archive")
+  .option("-i, --ids <ids...>", "One or more run IDs")
+  .option("--submission-id <id>", "Download all runs for a submission")
+  .option("-o, --output <path>", "Output file path (default: batch-<timestamp>.tar.gz)")
+  .option("-e, --extract", "Extract the archive after downloading")
+  .option("-d, --dir <path>", "Extraction directory (implies --extract)")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    const { url } = options;
+    const shouldExtract = options.extract || !!options.dir;
+
+    try {
+      // Resolve IDs: either from --ids or by querying --submission-id
+      let ids: string[] = options.ids || [];
+
+      if (options.submissionId) {
+        console.log(`${label('Fetching runs for submission')} ${value(options.submissionId)}...`);
+        const listResp = await fetch(`${normalizeUrl(url)}/api/v1/requests?submissionId=${encodeURIComponent(options.submissionId)}&limit=1000`);
+        if (!listResp.ok) {
+          const error = await listResp.json();
+          console.error(errorText("Error fetching runs:"), error);
+          process.exit(1);
+        }
+        const listData = await listResp.json();
+        const runs = listData.data || listData;
+        if (!Array.isArray(runs) || runs.length === 0) {
+          console.error(errorText("No runs found for this submission"));
+          process.exit(1);
+        }
+        ids = runs.map((r: { _id: string }) => r._id);
+        console.log(`${label('Found')} ${value(String(ids.length))} runs`);
+      }
+
+      if (ids.length === 0) {
+        console.error(errorText("Error: provide --ids or --submission-id"));
+        process.exit(1);
+      }
+
+      // Determine output file
+      const downloadDir = process.env.SCOPE_MT_DOWNLOAD_OUTPUT_DIR;
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const defaultFile = downloadDir ? join(downloadDir, `batch-${timestamp}.tar.gz`) : `batch-${timestamp}.tar.gz`;
+      const outputFile = options.output || defaultFile;
+
+      console.log(`${label('Downloading batch archive for')} ${value(String(ids.length))} runs...`);
+
+      // POST to batch archive endpoint
+      const archiveResp = await fetch(`${normalizeUrl(url)}/api/v1/requests/archive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!archiveResp.ok || !archiveResp.body) {
+        const error = await archiveResp.json().catch(() => ({ error: archiveResp.statusText }));
+        console.error(errorText("Error downloading batch archive:"), error);
+        process.exit(1);
+      }
+
+      const outputPath = resolve(outputFile);
+      mkdirSync(dirname(outputPath), { recursive: true });
+      const fileStream = createWriteStream(outputPath);
+      await pipeline(Readable.fromWeb(archiveResp.body as any), fileStream);
+      console.log(`${successText('Archive:')} ${value(outputPath)}`);
+
+      // Optionally extract
+      if (shouldExtract) {
+        const extractDir = options.dir || downloadDir || ".";
+        mkdirSync(extractDir, { recursive: true });
+        execSync(`tar xzf "${outputPath}" -C "${extractDir}"`, { stdio: "pipe" });
+
+        // Extract nested iteration-*.tar.gz files for each run directory
+        const extractedEntries = readdirSync(extractDir).filter(f => {
+          const fullPath = join(extractDir, f);
+          return statSync(fullPath).isDirectory() && existsSync(join(fullPath, "run.yaml"));
+        });
+
+        for (const runDir of extractedEntries) {
+          const runExtractDir = join(extractDir, runDir);
+          const nestedArchives = readdirSync(runExtractDir).filter(f => f.startsWith("iteration-") && f.endsWith(".tar.gz"));
+          for (const archive of nestedArchives) {
+            const iterName = archive.replace(".tar.gz", "");
+            const iterDir = join(runExtractDir, iterName);
+            mkdirSync(iterDir, { recursive: true });
+            execSync(`tar xzf "${join(runExtractDir, archive)}" -C "${iterDir}"`, { stdio: "pipe" });
+            rmSync(join(runExtractDir, archive), { force: true });
+          }
+        }
+
+        rmSync(outputPath, { force: true });
+        console.log(`${successText('Extracted')} ${value(String(extractedEntries.length))} runs to ${value(resolve(extractDir))}`);
+      }
+
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+run
   .command("upload")
   .description("Upload a run archive to the API (previously downloaded via 'run download')")
   .argument("<path>", "Path to .tar.gz archive or extracted directory")

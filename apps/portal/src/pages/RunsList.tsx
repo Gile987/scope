@@ -23,7 +23,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2 } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2 } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
@@ -306,6 +306,18 @@ export function RunsList() {
     },
     onError: (error) => {
       toast.error("Failed to re-submit runs", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const batchDownloadMutation = useMutation({
+    mutationFn: (ids: string[]) => api.batchArchive(ids),
+    onSuccess: () => {
+      toast.success(`Downloading ${selectedIds.size} run${selectedIds.size !== 1 ? "s" : ""}`);
+    },
+    onError: (error) => {
+      toast.error("Failed to download batch archive", {
         description: error instanceof Error ? error.message : "Unknown error",
       });
     },
@@ -1072,6 +1084,16 @@ export function RunsList() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={batchDownloadMutation.isPending}
+            onClick={() => batchDownloadMutation.mutate(Array.from(selectedIds))}
+          >
+            <Archive className="h-4 w-4" />
+            {batchDownloadMutation.isPending ? "Downloading…" : "Download selected"}
+          </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive" size="sm" className="gap-1.5">
