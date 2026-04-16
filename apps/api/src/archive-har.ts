@@ -8,6 +8,11 @@
  * is independently testable without Express, MongoDB, or blob-storage mocks.
  */
 
+import type { Pack } from "tar-stream";
+import { stringify as yamlStringify } from "yaml";
+import { pipeline } from "stream/promises";
+import type { RestError } from "@azure/storage-blob";
+
 /**
  * Extract the blob name from an Azure Blob Storage URL whose container is "snapshots".
  * Works with both production URLs and Azurite (local emulator) URLs.
@@ -202,4 +207,123 @@ export async function uploadBundledChatFiles(opts: {
   }
 
   return topLevelChatUrl;
+}
+
+/** Minimal interface for blob download needed by packRunIntoTar. */
+export interface BlobDownloader {
+  getBlockBlobClient(blobName: string): {
+    download(): Promise<{
+      readableStreamBody?: NodeJS.ReadableStream;
+      contentLength?: number;
+    }>;
+  };
+}
+
+/** A run document with the fields needed for archive packing. */
+export interface ArchivableRun {
+  _id: string;
+  harUrl?: string;
+  rawChatUrl?: string;
+  turns?: Array<{
+    iteration: number;
+    snapshotUrl?: string;
+    harUrl?: string;
+    rawChatUrl?: string;
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
+}
+
+/**
+ * Pack a single run's artifacts into a tar-stream pack instance.
+ *
+ * Writes entries under `{prefix}/` (typically the run ID). This function does
+ * NOT finalize the pack — the caller is responsible for calling `pack.finalize()`
+ * after all runs have been packed.
+ *
+ * @param pack       - tar-stream pack instance (shared across runs in batch mode)
+ * @param resource   - the run document
+ * @param container  - blob storage container client for downloading snapshots/HARs/chats
+ * @param prefix     - directory prefix inside the tar (defaults to resource._id)
+ * @param isRestError - predicate to check if an error is a blob-not-found RestError
+ */
+export async function packRunIntoTar(
+  pack: Pack,
+  resource: ArchivableRun,
+  container: BlobDownloader,
+  prefix?: string,
+  isRestError?: (err: unknown) => boolean,
+): Promise<void> {
+  const id = prefix ?? resource._id;
+  const isBlobNotFound = isRestError ?? (() => false);
+
+  // Entry 1: run.yaml — the full run document (with relative HAR paths)
+  const archiveResource = rewriteHarUrlsForArchive(resource);
+  const yamlContent = yamlStringify(archiveResource, { lineWidth: 120 });
+  const yamlBuf = Buffer.from(yamlContent, "utf-8");
+  pack.entry({ name: `${id}/run.yaml`, size: yamlBuf.length }, yamlBuf);
+
+  // Entries 2..N: iteration snapshots as-is (.tar.gz blobs)
+  for (const turn of resource.turns ?? []) {
+    if (!turn.snapshotUrl) continue;
+    try {
+      const blobName = blobNameFromSnapshotsUrl(turn.snapshotUrl);
+      if (!blobName) continue;
+      const blobClient = container.getBlockBlobClient(blobName);
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
+      const entry = pack.entry({
+        name: `${id}/iteration-${turn.iteration}.tar.gz`,
+        size: downloadResponse.contentLength,
+      });
+      await pipeline(downloadResponse.readableStreamBody, entry);
+    } catch (blobError) {
+      if (isBlobNotFound(blobError)) continue;
+      throw blobError;
+    }
+  }
+
+  // Bundle HAR files into the archive
+  const harEntries: Array<{ url: string; entryName: string }> = [];
+  for (const turn of resource.turns ?? []) {
+    if (turn.harUrl) harEntries.push({ url: turn.harUrl, entryName: `${id}/iteration-${turn.iteration}.har` });
+  }
+  if (resource.harUrl) harEntries.push({ url: resource.harUrl, entryName: `${id}/run.har` });
+
+  for (const { url, entryName } of harEntries) {
+    try {
+      const blobName = blobNameFromSnapshotsUrl(url);
+      if (!blobName) continue;
+      const blobClient = container.getBlockBlobClient(blobName);
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
+      const entry = pack.entry({ name: entryName, size: downloadResponse.contentLength });
+      await pipeline(downloadResponse.readableStreamBody, entry);
+    } catch (blobError) {
+      if (isBlobNotFound(blobError)) continue;
+      throw blobError;
+    }
+  }
+
+  // Bundle raw chat export files into the archive
+  const chatEntries: Array<{ url: string; entryName: string }> = [];
+  for (const turn of resource.turns ?? []) {
+    if (turn.rawChatUrl) chatEntries.push({ url: turn.rawChatUrl, entryName: `${id}/iteration-${turn.iteration}.chat-export.json` });
+  }
+  if (resource.rawChatUrl) chatEntries.push({ url: resource.rawChatUrl, entryName: `${id}/run.chat-export.json` });
+
+  for (const { url, entryName } of chatEntries) {
+    try {
+      const blobName = blobNameFromSnapshotsUrl(url);
+      if (!blobName) continue;
+      const blobClient = container.getBlockBlobClient(blobName);
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
+      const entry = pack.entry({ name: entryName, size: downloadResponse.contentLength });
+      await pipeline(downloadResponse.readableStreamBody, entry);
+    } catch (blobError) {
+      if (isBlobNotFound(blobError)) continue;
+      throw blobError;
+    }
+  }
 }
