@@ -9,7 +9,10 @@ import {
   uploadBundledHarFiles,
   detectBundledChatFiles,
   uploadBundledChatFiles,
+  packRunIntoTar,
   type BlobUploader,
+  type BlobDownloader,
+  type ArchivableRun,
 } from "./archive-har.js";
 
 // --- rewriteHarUrlsForArchive ---
@@ -396,5 +399,165 @@ describe("uploadBundledChatFiles", () => {
 
     expect(topLevelUrl).toBeUndefined();
     expect(uploaded).toHaveLength(0);
+  });
+});
+
+// --- packRunIntoTar ---
+
+describe("packRunIntoTar", () => {
+  function makeMockBlobContainer(blobs: Record<string, { body: Buffer; length: number }> = {}): BlobDownloader {
+    return {
+      getBlockBlobClient(blobName: string) {
+        return {
+          async download() {
+            const blob = blobs[blobName];
+            if (!blob) throw Object.assign(new Error("Not found"), { statusCode: 404, code: "BlobNotFound" });
+            const { Readable } = await import("stream");
+            return {
+              readableStreamBody: Readable.from(blob.body),
+              contentLength: blob.length,
+            };
+          },
+        };
+      },
+    };
+  }
+
+  function collectPackEntries(pack: import("tar-stream").Pack): Promise<Array<{ name: string; size: number; data: Buffer }>> {
+    return new Promise((resolve, reject) => {
+      const { extract } = require("tar-stream");
+      const ex = extract();
+      const entries: Array<{ name: string; size: number; data: Buffer }> = [];
+      ex.on("entry", (header: any, stream: any, next: any) => {
+        const chunks: Buffer[] = [];
+        stream.on("data", (c: Buffer) => chunks.push(c));
+        stream.on("end", () => {
+          entries.push({ name: header.name, size: header.size, data: Buffer.concat(chunks) });
+          next();
+        });
+      });
+      ex.on("finish", () => resolve(entries));
+      ex.on("error", reject);
+      pack.pipe(ex);
+    });
+  }
+
+  it("packs run.yaml with rewritten URLs", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const container = makeMockBlobContainer();
+
+    const run: ArchivableRun = {
+      _id: "run-001",
+      harUrl: "https://storage.blob.core.windows.net/snapshots/run-001/capture.har",
+      turns: [],
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-001", () => true);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    expect(entries).toHaveLength(1);
+    expect(entries[0].name).toBe("run-001/run.yaml");
+    // The YAML should have rewritten harUrl
+    const content = entries[0].data.toString();
+    expect(content).toContain("run.har");
+    expect(content).not.toContain("blob.core.windows.net");
+  });
+
+  it("includes iteration snapshots from blob storage", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const snapshotData = Buffer.from("fake-snapshot-data");
+    const container = makeMockBlobContainer({
+      "run-002/iteration-1/workspace.tar.gz": { body: snapshotData, length: snapshotData.length },
+    });
+
+    const run: ArchivableRun = {
+      _id: "run-002",
+      turns: [
+        { iteration: 1, snapshotUrl: "https://storage.blob.core.windows.net/snapshots/run-002/iteration-1/workspace.tar.gz" },
+      ],
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-002", () => true);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    const names = entries.map(e => e.name);
+    expect(names).toContain("run-002/run.yaml");
+    expect(names).toContain("run-002/iteration-1.tar.gz");
+    expect(entries.find(e => e.name === "run-002/iteration-1.tar.gz")!.data).toEqual(snapshotData);
+  });
+
+  it("bundles HAR and chat export files", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const harData = Buffer.from('{"log":{}}');
+    const chatData = Buffer.from('{"messages":[]}');
+    const container = makeMockBlobContainer({
+      "run-003/capture.har": { body: harData, length: harData.length },
+      "run-003/chat-export.json": { body: chatData, length: chatData.length },
+    });
+
+    const run: ArchivableRun = {
+      _id: "run-003",
+      harUrl: "https://storage.blob.core.windows.net/snapshots/run-003/capture.har",
+      rawChatUrl: "https://storage.blob.core.windows.net/snapshots/run-003/chat-export.json",
+      turns: [],
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-003", () => true);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    const names = entries.map(e => e.name);
+    expect(names).toContain("run-003/run.yaml");
+    expect(names).toContain("run-003/run.har");
+    expect(names).toContain("run-003/run.chat-export.json");
+  });
+
+  it("skips missing blobs when isRestError returns true", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const container = makeMockBlobContainer({}); // no blobs — all downloads will fail
+
+    const run: ArchivableRun = {
+      _id: "run-004",
+      turns: [
+        { iteration: 1, snapshotUrl: "https://storage.blob.core.windows.net/snapshots/run-004/iteration-1/workspace.tar.gz" },
+      ],
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    // isRestError returns true for all errors → blobs are skipped
+    await packRunIntoTar(p, run, container, "run-004", () => true);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    // Only run.yaml should be present; the snapshot was skipped
+    expect(entries).toHaveLength(1);
+    expect(entries[0].name).toBe("run-004/run.yaml");
+  });
+
+  it("uses custom prefix for tar entries", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const container = makeMockBlobContainer();
+
+    const run: ArchivableRun = {
+      _id: "run-005",
+      turns: [],
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "custom-prefix", () => true);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    expect(entries[0].name).toBe("custom-prefix/run.yaml");
   });
 });
