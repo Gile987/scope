@@ -385,6 +385,7 @@ export function SubmitRun() {
                     max={50}
                     value={maxIterations}
                     onChange={(e) => setMaxIterations(e.target.value)}
+                    onBlur={() => { if (!maxIterations.trim() || parseInt(maxIterations, 10) < 1) setMaxIterations("1"); }}
                   />
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Info className="h-3.5 w-3.5 shrink-0" />
