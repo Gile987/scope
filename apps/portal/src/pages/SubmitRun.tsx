@@ -41,7 +41,7 @@ export function SubmitRun() {
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
   const [worker, setWorker] = useState<string>("coder-acp-copilot");
   const [model, setModel] = useState<string>("");
-  const [maxIterations, setMaxIterations] = useState<string>("10");
+  const [maxIterations, setMaxIterations] = useState<number>(10);
   const [occurrences, setOccurrences] = useState<number>(5);
 
   // MCP servers
@@ -255,7 +255,7 @@ export function SubmitRun() {
       },
       worker,
       ...(model ? { model } : {}),
-      maxIterations: parseInt(maxIterations, 10) || undefined,
+      maxIterations,
       ...(occurrences > 1 ? { count: occurrences } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
@@ -384,8 +384,7 @@ export function SubmitRun() {
                     min={1}
                     max={50}
                     value={maxIterations}
-                    onChange={(e) => setMaxIterations(e.target.value)}
-                    onBlur={() => { if (!maxIterations.trim() || parseInt(maxIterations, 10) < 1) setMaxIterations("1"); }}
+                    onChange={(e) => setMaxIterations(Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
                   />
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Info className="h-3.5 w-3.5 shrink-0" />
@@ -396,7 +395,7 @@ export function SubmitRun() {
 
               <div className="space-y-2">
                 <Label htmlFor="criteria">
-                  Criteria {parseInt(maxIterations, 10) !== 1 && "* "}
+                  Criteria {maxIterations !== 1 && "* "}
                   <span className="text-muted-foreground font-normal">(select from registry)</span>
                 </Label>
                 <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
@@ -685,7 +684,7 @@ export function SubmitRun() {
             ) : (
               <div />
             )}
-            <Button type="button" onClick={handleContinue} disabled={!task.trim() || (selectedAgent && selectedAgent.supportedModels.length > 0 && !model) || (parseInt(maxIterations, 10) !== 1 && pickedCriteria.length === 0)} className="gap-1.5">
+            <Button type="button" onClick={handleContinue} disabled={!task.trim() || (selectedAgent && selectedAgent.supportedModels.length > 0 && !model) || (maxIterations !== 1 && pickedCriteria.length === 0)} className="gap-1.5">
               Continue <ArrowRight className="h-4 w-4" /> <KbdBadge />
             </Button>
           </div>
