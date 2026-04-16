@@ -139,7 +139,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     }
 
     // Determine if this is a multi-turn request (criteria present in scenario)
-    const isMultiTurn = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
+    // Also route through multi-turn when maxIterations is explicitly 1 without criteria,
+    // so that the run still gets a recorded turn with snapshot/HAR/video.
+    const hasCriteria = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
+    const isMultiTurn = hasCriteria || requestDoc.maxIterations !== undefined;
 
     if (isMultiTurn) {
       await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs, extensionConfigs);
