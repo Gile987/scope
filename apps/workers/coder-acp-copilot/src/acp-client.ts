@@ -9,9 +9,11 @@
  */
 
 import { spawn, ChildProcess } from "node:child_process";
-import { Duplex } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { McpServerConfig } from "shared";
+
+/** Default ACP session timeout: 30 minutes */
+const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface ACPClientOptions {
   command: string;
@@ -20,6 +22,8 @@ export interface ACPClientOptions {
   cwd: string;
   onLog?: (message: string) => void;
   mcpServers?: McpServerConfig[];
+  /** Session timeout in milliseconds (default: 30 min). Set to 0 to disable. */
+  sessionTimeoutMs?: number;
 }
 
 export interface ACPSessionResult {
@@ -116,6 +120,7 @@ export async function runACPSession(
   options: ACPClientOptions
 ): Promise<ACPSessionResult> {
   const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [] } = options;
+  const sessionTimeoutMs = options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
 
   onLog(`Starting ACP agent: ${command} ${args.join(" ")}`);
 
@@ -129,6 +134,24 @@ export async function runACPSession(
   if (!agentProcess.stdin || !agentProcess.stdout) {
     throw new Error("Failed to create agent process streams");
   }
+
+  // Track whether the ACP session has completed (to avoid spurious exit errors)
+  let sessionCompleted = false;
+
+  // Create a promise that rejects when the subprocess exits unexpectedly
+  const exitPromise = new Promise<never>((_, reject) => {
+    agentProcess.on("exit", (code, signal) => {
+      if (!sessionCompleted) {
+        const reason = signal ? `signal ${signal}` : `code ${code}`;
+        reject(new Error(`ACP agent process exited unexpectedly (${reason})`));
+      }
+    });
+    agentProcess.on("error", (err) => {
+      if (!sessionCompleted) {
+        reject(new Error(`ACP agent process failed to start: ${err.message}`));
+      }
+    });
+  });
 
   // Create duplex stream for ACP communication
   const stdinStream = agentProcess.stdin;
@@ -164,6 +187,8 @@ export async function runACPSession(
   );
 
   try {
+    // Build the actual ACP session work as a promise
+    const sessionWork = async (): Promise<ACPSessionResult> => {
     // Initialize the connection
     const initResult = await connection.initialize({
       protocolVersion: acp.PROTOCOL_VERSION,
@@ -239,6 +264,24 @@ export async function runACPSession(
       response: clientHandler.getResponse(),
       stopReason: promptResult.stopReason,
     };
+    };
+
+    // Race the session work against subprocess exit and optional timeout
+    const racers: Promise<ACPSessionResult>[] = [sessionWork(), exitPromise];
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (sessionTimeoutMs > 0) {
+      racers.push(new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`ACP session timed out after ${sessionTimeoutMs}ms`));
+        }, sessionTimeoutMs);
+      }));
+    }
+
+    const result = await Promise.race(racers);
+    sessionCompleted = true;
+    if (timeoutId) clearTimeout(timeoutId);
+    return result;
   } catch (error) {
     // Better error serialization
     if (error instanceof Error) {
@@ -246,6 +289,7 @@ export async function runACPSession(
     }
     throw new Error(JSON.stringify(error, null, 2));
   } finally {
+    sessionCompleted = true;
     // Cleanup
     stdinStream.end();
     agentProcess.kill();

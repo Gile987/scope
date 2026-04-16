@@ -88,7 +88,7 @@ describe("check-versions", () => {
       expect(result.worker).toBe("coder-acp-claude-code");
       expect(result.versionsEnvPath).toBe("apps/workers/coder-acp-claude-code/versions.env");
       expect(result.components).toHaveLength(2);
-      expect(result.components[0].name).toBe("claude-code-acp");
+      expect(result.components[0].name).toBe("claude-agent-acp");
       expect(result.components[0].envVar).toBe("CLAUDE_CODE_ACP_VERSION");
       expect(result.components[0].current).toBe("0.16.0");
       expect(result.components[0].latest).toBe("0.16.0");
@@ -143,7 +143,7 @@ describe("check-versions", () => {
       );
 
       const result = await fetchNpmPackageVersion(
-        "@zed-industries/claude-code-acp",
+        "@agentclientprotocol/claude-agent-acp",
         "latest"
       );
 
@@ -159,7 +159,7 @@ describe("check-versions", () => {
       );
 
       await expect(
-        fetchNpmPackageVersion("@zed-industries/claude-code-acp", "99.99.99")
+        fetchNpmPackageVersion("@agentclientprotocol/claude-agent-acp", "99.99.99")
       ).rejects.toThrow("npm registry returned 404");
     });
   });
