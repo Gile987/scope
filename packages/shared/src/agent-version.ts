@@ -7,8 +7,8 @@ import { execSync } from "node:child_process";
  * Detect the version of a globally-installed CLI binary by running `<command> --version`
  * and parsing the output. The result is cached so the binary is only spawned once.
  *
- * @param command  The CLI command name (e.g. "copilot", "claude-code-acp")
- * @param packageName  npm package name prefix (e.g. "@github/copilot", "@zed-industries/claude-code-acp")
+ * @param command  The CLI command name (e.g. "copilot", "claude-agent-acp")
+ * @param packageName  npm package name prefix (e.g. "@github/copilot", "@agentclientprotocol/claude-agent-acp")
  * @returns A version string like "@github/copilot@0.0.415" or "unknown" on failure
  */
 export function detectCliVersion(command: string, packageName: string): string {

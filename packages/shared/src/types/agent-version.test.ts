@@ -43,18 +43,18 @@ describe("AgentVersion type", () => {
 
   it("supports claude-code with sdk version", () => {
     const version: AgentVersion = {
-      agentVersion: "claude-code-acp-0.16.0-sdk-0.2.34",
-      workerVersion: "claude-code-acp-0.16.0-sdk-0.2.34-20260318T163730Z-44d16d6",
-      components: { CLAUDE_CODE_ACP_VERSION: "0.16.0", CLAUDE_AGENT_SDK_VERSION: "0.2.34" },
+      agentVersion: "claude-agent-acp-0.29.0-sdk-0.2.111",
+      workerVersion: "claude-agent-acp-0.29.0-sdk-0.2.111-20260318T163730Z-44d16d6",
+      components: { CLAUDE_CODE_ACP_VERSION: "0.29.0", CLAUDE_AGENT_SDK_VERSION: "0.2.111" },
       gitCommit: "44d16d6",
       buildTime: "20260318T163730Z",
-      imageTag: "claude-code-acp-0.16.0-sdk-0.2.34-20260318T163730Z-44d16d6",
+      imageTag: "claude-agent-acp-0.29.0-sdk-0.2.111-20260318T163730Z-44d16d6",
       queueName: "coder-acp-claude-code",
       status: "active",
       createdAt: new Date(),
     };
 
-    expect(version.agentVersion).toBe("claude-code-acp-0.16.0-sdk-0.2.34");
+    expect(version.agentVersion).toBe("claude-agent-acp-0.29.0-sdk-0.2.111");
   });
 
   it("supports retired status", () => {

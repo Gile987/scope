@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 /**
- * Check for new versions of @zed-industries/claude-code-acp and its
+ * Check for new versions of @agentclientprotocol/claude-agent-acp and its
  * bundled @anthropic-ai/claude-agent-sdk dependency.
  *
  * Exports pure functions for fetching and comparing versions so they
@@ -65,7 +65,7 @@ export async function fetchNpmPackageVersion(
 }
 
 /**
- * Fetch the latest version of @zed-industries/claude-code-acp and extract
+ * Fetch the latest version of @agentclientprotocol/claude-agent-acp and extract
  * both the ACP version and the bundled @anthropic-ai/claude-agent-sdk version.
  */
 export async function fetchLatestVersions(): Promise<{
@@ -73,7 +73,7 @@ export async function fetchLatestVersions(): Promise<{
   claudeAgentSdkVersion: string;
 }> {
   const data = await fetchNpmPackageVersion(
-    "@zed-industries/claude-code-acp",
+    "@agentclientprotocol/claude-agent-acp",
     "latest",
   );
 
@@ -82,7 +82,7 @@ export async function fetchLatestVersions(): Promise<{
   if (!claudeAgentSdkVersion) {
     throw new Error(
       "@anthropic-ai/claude-agent-sdk not found in dependencies of " +
-        `@zed-industries/claude-code-acp@${data.version}`
+        `@agentclientprotocol/claude-agent-acp@${data.version}`
     );
   }
 
@@ -94,13 +94,13 @@ export async function fetchLatestVersions(): Promise<{
 
 /**
  * Fetch the @anthropic-ai/claude-agent-sdk version bundled in a specific
- * version of @zed-industries/claude-code-acp.
+ * version of @agentclientprotocol/claude-agent-acp.
  */
 export async function fetchBundledSdkVersion(
   acpVersion: string,
 ): Promise<string> {
   const data = await fetchNpmPackageVersion(
-    "@zed-industries/claude-code-acp",
+    "@agentclientprotocol/claude-agent-acp",
     acpVersion,
   );
 
@@ -108,7 +108,7 @@ export async function fetchBundledSdkVersion(
   if (!sdkVersion) {
     throw new Error(
       "@anthropic-ai/claude-agent-sdk not found in dependencies of " +
-        `@zed-industries/claude-code-acp@${acpVersion}`
+        `@agentclientprotocol/claude-agent-acp@${acpVersion}`
     );
   }
 
@@ -133,11 +133,11 @@ export function compareVersions(
       current.claudeAgentSdkVersion !== latest.claudeAgentSdkVersion,
     components: [
       {
-        name: "claude-code-acp",
+        name: "claude-agent-acp",
         envVar: "CLAUDE_CODE_ACP_VERSION",
         current: current.claudeCodeAcpVersion,
         latest: latest.claudeCodeAcpVersion,
-        link: "https://www.npmjs.com/package/@zed-industries/claude-code-acp",
+        link: "https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp",
       },
       {
         name: "claude-agent-sdk",
