@@ -20,6 +20,7 @@ import {
   CreateRequestInputSchema,
   ExtensionClient,
   ListRequestsQuerySchema,
+  MULTI_TURN_DEFAULTS,
   PaginatedRunGroupsResponseSchema,
   PaginatedRunsResponseSchema,
   ReportResponseSchema,
@@ -181,10 +182,14 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
-    // At least one criterion is required
-    if (!scenarioObj.criteria || !Array.isArray(scenarioObj.criteria) || scenarioObj.criteria.length === 0) {
-      res.status(400).json({ error: "At least one criterion is required in scenario.criteria" });
-      return;
+    // At least one criterion is required — unless maxIterations is explicitly 1
+    // (single-iteration mode allows running the agent without judge evaluation)
+    const effectiveMaxIter = maxIterations ?? MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
+    if (effectiveMaxIter !== 1) {
+      if (!scenarioObj.criteria || !Array.isArray(scenarioObj.criteria) || scenarioObj.criteria.length === 0) {
+        res.status(400).json({ error: "At least one criterion is required in scenario.criteria when maxIterations > 1" });
+        return;
+      }
     }
 
     // Validate maxIterations if provided

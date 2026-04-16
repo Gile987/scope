@@ -470,3 +470,123 @@ describe("runMultiTurnLoop — aiCallCount", () => {
     expect(result.turns[0].aiCallCount).toBeUndefined();
   });
 });
+
+describe("runMultiTurnLoop — optional criteria (issue #605)", () => {
+  const mockLog = vi.fn().mockResolvedValue(undefined);
+  const mockOnTurnComplete = vi.fn().mockResolvedValue(undefined);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSanitizeHarFile.mockReset().mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
+    mockExtractToolCalls.mockReset().mockReturnValue([]);
+  });
+
+  function makeConfig(overrides: Record<string, unknown> = {}) {
+    return {
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi.fn().mockResolvedValue({ response: "done" } satisfies WorkerResult),
+      },
+      task: "Do something",
+      criteria: ["check"],
+      maxIterations: 1,
+      workspacePath: "/workspace",
+      judgeClient: { evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "OK" }) } as any,
+      blobStorage: {
+        uploadFile: vi.fn().mockResolvedValue("https://blob/har"),
+        uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
+      } as any,
+      requestId: "req1",
+      log: mockLog,
+      onTurnComplete: mockOnTurnComplete,
+      ...overrides,
+    };
+  }
+
+  it("skips judge and returns passed when maxIterations=1 and criteria is empty", async () => {
+    const judgeEvaluate = vi.fn();
+    const config = makeConfig({
+      criteria: [],
+      maxIterations: 1,
+      judgeClient: { evaluate: judgeEvaluate },
+    });
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(true);
+    expect(result.hadError).toBe(false);
+    expect(result.turns).toHaveLength(1);
+    expect(result.turns[0].passed).toBe(true);
+    expect(result.turns[0].judgeFeedback).toContain("skipped");
+    expect(judgeEvaluate).not.toHaveBeenCalled();
+  });
+
+  it("skips judge and returns passed when maxIterations=1 and criteria is undefined", async () => {
+    const judgeEvaluate = vi.fn();
+    const config = makeConfig({
+      criteria: undefined,
+      maxIterations: 1,
+      judgeClient: { evaluate: judgeEvaluate },
+    });
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(true);
+    expect(result.hadError).toBe(false);
+    expect(result.turns).toHaveLength(1);
+    expect(judgeEvaluate).not.toHaveBeenCalled();
+  });
+
+  it("still calls judge when maxIterations=1 and criteria is provided", async () => {
+    const judgeEvaluate = vi.fn().mockResolvedValue({ passed: true, feedback: "OK" });
+    const config = makeConfig({
+      criteria: ["has_button"],
+      maxIterations: 1,
+      judgeClient: { evaluate: judgeEvaluate },
+    });
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(true);
+    expect(judgeEvaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws when criteria is empty and maxIterations > 1", async () => {
+    const config = makeConfig({
+      criteria: [],
+      maxIterations: 2,
+    });
+
+    await expect(runMultiTurnLoop(config as any)).rejects.toThrow(
+      "Criteria is required when maxIterations > 1",
+    );
+  });
+
+  it("throws when criteria is undefined and maxIterations > 1", async () => {
+    const config = makeConfig({
+      criteria: undefined,
+      maxIterations: 3,
+    });
+
+    await expect(runMultiTurnLoop(config as any)).rejects.toThrow(
+      "Criteria is required when maxIterations > 1",
+    );
+  });
+
+  it("persists turn via onTurnComplete when judge is skipped", async () => {
+    const config = makeConfig({
+      criteria: [],
+      maxIterations: 1,
+    });
+
+    await runMultiTurnLoop(config as any);
+
+    expect(mockOnTurnComplete).toHaveBeenCalledTimes(1);
+    expect(mockOnTurnComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        passed: true,
+        snapshotUrl: "https://blob/snapshot",
+      }),
+    );
+  });
+});
