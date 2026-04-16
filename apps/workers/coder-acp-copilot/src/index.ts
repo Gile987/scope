@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces, throwIfCopilotError } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -171,11 +171,6 @@ class CopilotProcessor implements WorkerProcessor {
         stopReason: result.stopReason,
         responseLength: result.response.length 
       });
-
-      // Copilot sometimes returns error details as a JSON response body
-      // rather than as thrown exceptions. Convert them to real errors so the
-      // multi-turn loop records hadError: true and sets outcome: "failed".
-      throwIfCopilotError(result.response);
 
       const response = result.response || `[${this.workerName}] No response from Copilot`;
       const { harFilePath, tokenUsage, aiCallCount } = devProxy
