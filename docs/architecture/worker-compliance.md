@@ -31,6 +31,6 @@ This document tracks which [coding worker requirements](worker-requirements.md) 
 |----------|-------------|-------------|-------------|------------------|
 | **Agent interface** | ACP (subprocess) | ACP (subprocess) | Playwright (browser automation) | Driver extension (HTTP → `vscode.commands.executeCommand`) |
 | **Token types** | GitHub PAT / OAuth | Anthropic API key / OAuth | GitHub OAuth cookie state | Scopeless GitHub OAuth (from VS Code's OAuth app) |
-| **Agent version format** | `copilot-{COPILOT_CLI_VERSION}` | `claude-code-acp-{ACP_VERSION}-sdk-{SDK_VERSION}` | `vscode-{VSCODE_VERSION}-copilot-{CHAT_VERSION}` | `vscode-electron-{VSCODE_VERSION}-copilot-{CHAT_VERSION}` |
+| **Agent version format** | `copilot-{COPILOT_CLI_VERSION}` | `claude-agent-acp-{ACP_VERSION}-sdk-{SDK_VERSION}` | `vscode-{VSCODE_VERSION}-copilot-{CHAT_VERSION}` | `vscode-electron-{VSCODE_VERSION}-copilot-{CHAT_VERSION}` |
 | **Unit tests** | ✅ `subprocess-env.test.ts` | ✅ `acp-client.test.ts` | ✅ `chat-machine.test.ts` (16 tests), `chat-actions.test.ts` (4 tests), `index.test.ts` (3 tests) | ✅ `extension-driver-client.test.ts` (8 tests), `index.test.ts` (4 tests) |
 | **Integration tests** | ✅ `copilot-cli.integration.test.ts` | ❌ | ✅ `vscode-web.integration.test.ts` (Docker-based, two-prompt flow) | ✅ `vscode-electron.integration.test.ts` (Docker-based, two-prompt flow) |

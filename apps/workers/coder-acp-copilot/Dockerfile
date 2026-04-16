@@ -1,6 +1,6 @@
 ARG COPILOT_CLI_VERSION
 
-FROM node:22.22.0-slim AS builder
+FROM node:24-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 
@@ -44,11 +44,12 @@ ENV SERVICE_DIR=workers/coder-acp-copilot
 ENV WORKER_NAME=coder-acp-copilot
 COPY scripts/dev-entrypoint.sh /app/scripts/dev-entrypoint.sh
 COPY config /app/config/
+RUN chown -R node:node /app/packages/shared/dist /app/apps/workers/coder-acp-copilot/dist
 USER node
 CMD ["/app/scripts/dev-entrypoint.sh"]
 
 # --- Production stage ---
-FROM node:22.22.0-slim
+FROM node:24-slim
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 

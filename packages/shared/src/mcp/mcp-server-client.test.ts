@@ -68,6 +68,7 @@ describe("McpServerClient", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
       type: "sse",
+      slug: "my-search",
       name: "My Search",
       url: "https://search.example.com/sse",
     } satisfies McpServerConfig);
@@ -83,7 +84,9 @@ describe("McpServerClient", () => {
     const result = await client.resolveServers(["server-a", "server-b"]);
 
     expect(result).toHaveLength(2);
+    expect(result[0].slug).toBe("server-a");
     expect(result[0].name).toBe("Server A");
+    expect(result[1].slug).toBe("server-b");
     expect(result[1].name).toBe("Server B");
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
@@ -114,7 +117,7 @@ describe("McpServerClient", () => {
     expect(result[0].headers).toBeUndefined();
   });
 
-  it("strips DB metadata from config (no _id, createdAt, etc.)", async () => {
+  it("strips DB metadata from config (no createdAt, updatedAt, etc.) and maps _id to slug", async () => {
     const doc = makeServerDoc({
       _id: "db-server",
       createdAt: new Date(),
@@ -126,7 +129,9 @@ describe("McpServerClient", () => {
     const result = await client.resolveServers(["db-server"]);
     const config = result[0];
 
+    expect(config.slug).toBe("db-server");
     expect((config as any)._id).toBeUndefined();
+    expect(config.slug).toBe("db-server");
     expect((config as any).createdAt).toBeUndefined();
     expect((config as any).updatedAt).toBeUndefined();
     expect((config as any).deletedAt).toBeUndefined();
@@ -163,6 +168,16 @@ describe("McpServerClient", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "https://api.scope-mt.dev/api/v1/mcp/servers/server%2Fspecial"
     );
+  });
+
+  it("maps display name with spaces to gateway-safe slug (regression: MS Learn)", async () => {
+    const doc = makeServerDoc({ _id: "ms-learn", name: "MS Learn", type: "http", url: "https://learn.microsoft.com/mcp" });
+    mockFetch.mockResolvedValueOnce(jsonResponse(doc));
+
+    const result = await client.resolveServers(["ms-learn"]);
+
+    expect(result[0].slug).toBe("ms-learn");
+    expect(result[0].name).toBe("MS Learn");
   });
 
   it("fails fast on first error in multiple slugs", async () => {

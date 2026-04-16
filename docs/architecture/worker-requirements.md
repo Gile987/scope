@@ -233,7 +233,7 @@ getComponentVersions(): Record<string, string> {
 
 The queue processor uses `getAgentVersion()` to build the `workerVersion` field stamped on each run: `{agentVersion}-{buildTime}-{gitCommit}`.
 
-**Naming convention:** Agent version is `{agent}-{semver}` (e.g., `copilot-0.0.415`, `claude-code-acp-0.1.2-sdk-1.0.0`).
+**Naming convention:** Agent version is `{agent}-{semver}` (e.g., `copilot-0.0.415`, `claude-agent-acp-0.1.2-sdk-1.0.0`).
 
 **Source:** [`packages/shared/src/types/types.ts`](../../packages/shared/src/types/types.ts) — `getAgentVersion()`, `getComponentVersions()`.
 

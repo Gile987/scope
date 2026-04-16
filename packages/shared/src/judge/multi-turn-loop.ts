@@ -23,14 +23,14 @@ export interface MultiTurnConfig {
   processor: WorkerProcessor;
   /** The task to perform */
   task: string;
-  /** Judge evaluation criteria */
-  criteria: string[];
+  /** Judge evaluation criteria (optional when maxIterations is 1) */
+  criteria?: string[];
   /** Maximum number of iterations before giving up */
   maxIterations: number;
   /** Workspace directory to snapshot (must be resolved by caller after setup) */
   workspacePath: string;
-  /** Judge REST API client */
-  judgeClient: JudgeClient;
+  /** Judge REST API client (required when criteria are provided) */
+  judgeClient?: JudgeClient;
   /** Blob storage client for workspace snapshots */
   blobStorage: BlobStorage;
   /** Request ID (for snapshot naming) */
@@ -95,6 +95,12 @@ export async function runMultiTurnLoop(
     extensionConfigs,
     workspacePath,
   } = config;
+
+  // Defensive: criteria is required when maxIterations > 1
+  const hasCriteria = criteria && criteria.length > 0;
+  if (!hasCriteria && maxIterations > 1) {
+    throw new Error("Criteria is required when maxIterations > 1");
+  }
 
   const turns: ConversationTurn[] = [];
   let nextPrompt = task;
@@ -337,15 +343,50 @@ export async function runMultiTurnLoop(
 
     await iterLog("info", "Snapshot uploaded", { snapshotUrl });
 
+    // Skip judge evaluation when no criteria are provided and maxIterations is 1
+    // (single-iteration pass-through mode: run the agent, snapshot, done)
+    if (!hasCriteria && maxIterations === 1) {
+      await iterLog("info", "No criteria provided with maxIterations=1 — skipping judge evaluation");
+
+      const turn: ConversationTurn = {
+        iteration,
+        codingAgentResponse: codingResponse,
+        judgeFeedback: "No criteria — judge evaluation skipped",
+        snapshotUrl,
+        passed: true,
+        timestamp: new Date(),
+        startedAt: iterationStartedAt,
+        durationMs: Date.now() - iterationStartedAt.getTime(),
+        ...(turnHarUrl && { harUrl: turnHarUrl }),
+        ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+        ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
+        ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
+        ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
+        ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
+        ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+      };
+      turns.push(turn);
+      if (onTurnComplete) {
+        await onTurnComplete(turn);
+      }
+
+      return {
+        turns,
+        passed: true,
+        hadError: false,
+        finalResult: codingResponse,
+      };
+    }
+
     // Step 3: Call the judge
     await iterLog("info", "Calling judge for evaluation...");
     let judgePassed: boolean;
     let judgeFeedback: string;
     let criteriaResults: CriterionResult[] | undefined;
     try {
-      const judgeResult = await judgeClient.evaluate({
+      const judgeResult = await judgeClient!.evaluate({
         snapshotUrl,
-        criteria,
+        criteria: criteria!,
         conversationHistory: turns,
         personaInstructions,
         requestId,

@@ -42,6 +42,7 @@ export class SkillClient {
 
       const data = await res.json() as SkillRevisionDocument;
       configs.push({
+        ref,
         name: data.name,
         description: data.description,
         content: data.content,

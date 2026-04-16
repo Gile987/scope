@@ -90,6 +90,7 @@ export const CreateRequestInputSchema = z
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
+    profileId: z.string().optional(),
   })
   .openapi("CreateRequestInput");
 
@@ -117,6 +118,8 @@ export const RequestResponseSchema = z
     extensions: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
     workerVersion: z.string().optional(),
+    profileId: z.string().optional(),
+    profileVersionId: z.string().optional(),
     harUrl: z.string().optional(),
     videoUrls: z.array(z.string()).optional(),
     setupVideoUrls: z.array(z.string()).optional(),
@@ -134,9 +137,10 @@ export const ListRequestsQuerySchema = z
     taskPromptId: z.string().optional(),
     criteria: z.string().optional(),
     submissionId: z.string().optional(),
+    profileId: z.string().optional(),
     status: RequestStatusSchema.optional(),
     outcome: RequestOutcomeSchema.optional(),
-    groupBy: z.enum(["task", "submissionId"]).optional(),
+    groupBy: z.enum(["task", "submissionId", "profile"]).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
     after: z.string().optional(),
     before: z.string().optional(),
@@ -220,6 +224,7 @@ export const BulkResubmitInputSchema = z
     count: z.number().int().min(1).max(10).optional().default(1),
     overrides: z
       .object({
+        profileId: z.string().nullable().optional(),
         workerType: z.string().optional(),
         model: z.string().nullable().optional(),
         maxIterations: z.number().nullable().optional(),

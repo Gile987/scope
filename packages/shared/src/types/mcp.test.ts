@@ -63,6 +63,7 @@ describe("McpServerConfig", () => {
   it("contains only runtime fields (no DB metadata)", () => {
     const config: McpServerConfig = {
       type: "http",
+      slug: "my-server",
       name: "My Server",
       url: "https://example.com/mcp",
     };
@@ -80,6 +81,7 @@ describe("McpServerConfig", () => {
   it("supports headers", () => {
     const config: McpServerConfig = {
       type: "sse",
+      slug: "auth-server",
       name: "Auth Server",
       url: "https://example.com/sse",
       headers: [{ name: "Authorization", value: "Bearer abc" }],

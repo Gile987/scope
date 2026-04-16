@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, RunGroup, CursorPaginatedResponse } from "@/types";
+import type { Run, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse } from "@/types";
 
 import { qs } from "./url";
 
@@ -14,7 +14,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || `HTTP ${res.status}`);
+    const message = body.error || `HTTP ${res.status}`;
+    const details = body.details as Array<{ path: string; message: string }> | undefined;
+    if (details?.length) {
+      throw new Error(`${message}: ${details.map((d) => `${d.path || "body"}: ${d.message}`).join(", ")}`);
+    }
+    throw new Error(message);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -22,7 +27,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   /** List runs with cursor-based pagination */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; limit?: number; after?: string; before?: string }): Promise<CursorPaginatedResponse<Run>> => {
+  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; profileId?: string; limit?: number; after?: string; before?: string }): Promise<CursorPaginatedResponse<Run>> => {
     return request(`/requests${qs({
       worker: opts?.worker,
       taskPromptId: opts?.taskPromptId,
@@ -30,6 +35,7 @@ export const api = {
       outcome: opts?.outcome,
       criteria: opts?.criteria,
       submissionId: opts?.submissionId,
+      profileId: opts?.profileId,
       limit: opts?.limit ? String(opts.limit) : undefined,
       after: opts?.after,
       before: opts?.before,
@@ -37,7 +43,7 @@ export const api = {
   },
 
   /** List runs grouped by task or submissionId, with cursor-based pagination */
-  listRunGroups: (opts: { groupBy: "task" | "submissionId"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; limit?: number; after?: string; before?: string }): Promise<CursorPaginatedResponse<RunGroup>> => {
+  listRunGroups: (opts: { groupBy: "task" | "submissionId" | "profile"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; limit?: number; after?: string; before?: string }): Promise<CursorPaginatedResponse<RunGroup>> => {
     return request(`/requests${qs({
       groupBy: opts.groupBy,
       worker: opts.worker,
@@ -112,6 +118,29 @@ export const api = {
   /** Get full run archive download URL (.tar.gz with run.yaml + iteration snapshots) */
   archiveUrl: (id: string): string => {
     return `${BASE}/requests/${id}/archive`;
+  },
+
+  /** Download a batch archive of multiple runs as a single .tar.gz */
+  batchArchive: async (ids: string[]): Promise<void> => {
+    const resp = await fetch(`${BASE}/requests/archive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(err.error ?? "Failed to download batch archive");
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    a.download = `batch-${timestamp}.tar.gz`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   },
 
   /** Get video stream URL for a request (optionally per-iteration, per-index, or setup phase) */
@@ -808,5 +837,77 @@ export const api = {
   /** Soft-delete an extension */
   deleteExtension: (id: string): Promise<{ id: string; deleted: boolean }> => {
     return request(`/extensions/${id}`, { method: "DELETE" });
+  },
+
+  // ─── Profiles ────────────────────────────────────────────────────────────
+
+  /** List all profiles (latest version of each) */
+  listProfiles: (opts?: { workerType?: string }): Promise<ProfileWithVersion[]> => {
+    const params = new URLSearchParams();
+    if (opts?.workerType) params.set("workerType", opts.workerType);
+    return request(`/profiles?${params}`);
+  },
+
+  /** Get a profile with its latest version */
+  getProfile: (profileId: string): Promise<ProfileWithVersion> => {
+    return request(`/profiles/${profileId}`);
+  },
+
+  /** List all versions of a profile */
+  listProfileVersions: (profileId: string): Promise<ProfileVersionDocument[]> => {
+    return request(`/profiles/${profileId}/versions`);
+  },
+
+  /** Get a specific version of a profile */
+  getProfileVersion: (profileId: string, version: number): Promise<ProfileVersionDocument> => {
+    return request(`/profiles/${profileId}/versions/${version}`);
+  },
+
+  /** Create a new profile (version 1) */
+  createProfile: (body: {
+    name: string;
+    description?: string;
+    workerType: string;
+    model: string;
+    agentVersion?: string;
+    mcpServers?: string[];
+    skillRevisions?: string[];
+    extensions?: string[];
+  }): Promise<ProfileWithVersion> => {
+    return request("/profiles", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Create a new version of an existing profile */
+  createProfileVersion: (profileId: string, body: {
+    workerType: string;
+    model: string;
+    agentVersion?: string;
+    mcpServers?: string[];
+    skillRevisions?: string[];
+    extensions?: string[];
+  }): Promise<ProfileVersionDocument> => {
+    return request(`/profiles/${profileId}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Update profile identity (name/description) */
+  updateProfileIdentity: (profileId: string, body: {
+    name?: string;
+    description?: string;
+  }): Promise<ProfileDocument> => {
+    return request(`/profiles/${profileId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Soft-delete a profile */
+  deleteProfile: (profileId: string): Promise<void> => {
+    return request(`/profiles/${profileId}`, { method: "DELETE" });
   },
 };

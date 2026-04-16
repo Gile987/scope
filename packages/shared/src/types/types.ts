@@ -141,6 +141,8 @@ export interface RequestDocument {
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
   extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
+  profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
+  profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
   workerVersion?: string;          // Exact build that processed this run (e.g. "copilot-0.0.415-20260318T163740Z-44d16d6")
   os?: OsInfo;                     // Worker OS info captured at processing time
   harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
@@ -237,13 +239,14 @@ export interface BaseQueueProcessorConfig {
 // Configuration for the coding agent queue processor
 export interface QueueProcessorConfig extends BaseQueueProcessorConfig {
   apiBaseUrl?: string; // For auto-triggering report generation via REST API
+  tokenManagerUrl?: string; // For resolving MCP server secrets at job dispatch time
 }
 
 // --- Enhanced Criteria System types ---
 
 // --- Runs grouping types (shared between API and portal) ---
 
-export type GroupByKey = "none" | "task" | "submissionId";
+export type GroupByKey = "none" | "task" | "submissionId" | "profile";
 
 export interface AggregateStats {
   min: number;

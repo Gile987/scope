@@ -9,7 +9,7 @@ dotenv.config();
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-claude-code";
 const tokenClient = new TokenManagerClient();
-const AGENT_VERSION = `claude-code-acp-${process.env.CLAUDE_CODE_ACP_VERSION || "unknown"}-sdk-${process.env.CLAUDE_AGENT_SDK_VERSION || "unknown"}`;
+const AGENT_VERSION = `claude-agent-acp-${process.env.CLAUDE_CODE_ACP_VERSION || "unknown"}-sdk-${process.env.CLAUDE_AGENT_SDK_VERSION || "unknown"}`;
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
@@ -47,8 +47,8 @@ class ClaudeCodeProcessor implements WorkerProcessor {
   async teardown(log: WorkerLogFn): Promise<void> {
     if (this.gateway && this.mcpConfigs.length > 0) {
       await Promise.all(this.mcpConfigs.map((c) =>
-        this.gateway!.deregisterServer(c.name).catch((err) => {
-          log("warn", `Failed to deregister MCP server "${c.name}" — will be purged on next run`, { error: String(err) });
+        this.gateway!.deregisterServer(c.slug).catch((err) => {
+          log("warn", `Failed to deregister MCP server "${c.name}" (${c.slug}) — will be purged on next run`, { error: String(err) });
         })
       ));
       this.gateway = null;
@@ -134,7 +134,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       }
       // MCP gateway lifecycle is handled in setup()/teardown() — servers are already registered
       const result = await runACPSession(message, {
-        command: "claude-code-acp",
+        command: "claude-agent-acp",
         args: [],
         env,
         cwd: this.workspacePath!,
@@ -142,7 +142,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
           await log("debug", msg);
         },
         mcpServers: this.gateway && this.mcpConfigs.length > 0
-          ? [{ type: "http" as const, name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
+          ? [{ type: "http" as const, slug: "mcp-gateway", name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
           : [],
       });
 
@@ -188,6 +188,7 @@ async function main(): Promise<void> {
     redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),
     redisPassword: process.env.REDIS_PASSWORD || "",
     apiBaseUrl: process.env.SCOPE_MT_API_URL,
+    tokenManagerUrl: process.env.TOKEN_MANAGER_URL,
   };
 
   const processor = new ClaudeCodeProcessor();

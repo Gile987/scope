@@ -234,7 +234,7 @@ services:
         post "/api/v1/agents" '{"_id":"coder-acp-claude-code","name":"Claude Code (ACP)","description":"Anthropic Claude Code coding agent via ACP protocol","modelProvider":"anthropic"}'
 
         # Register dev version: coder-acp-claude-code
-        post "/api/v1/agents/coder-acp-claude-code/versions" '{"agentVersion":"claude-code-acp-dev-sdk-dev","workerVersion":"claude-code-acp-dev-sdk-dev-local-dev","components":{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-claude-code"}'
+        post "/api/v1/agents/coder-acp-claude-code/versions" '{"agentVersion":"claude-agent-acp-dev-sdk-dev","workerVersion":"claude-agent-acp-dev-sdk-dev-local-dev","components":{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-claude-code"}'
 
 
 
@@ -542,7 +542,7 @@ services:
       [
         "sh",
         "-c",
-        "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs && chmod -v 775 /har-output /certs && echo 'Done'",
+        "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs /workspace && chmod -v 775 /har-output /certs /workspace && echo 'Done'",
       ]
     volumes:
       - vscode_electron_har_output:/har-output

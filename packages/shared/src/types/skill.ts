@@ -64,9 +64,10 @@ export interface SkillRevisionDocument {
 
 /**
  * Resolved skill configuration passed to workers at runtime.
- * Contains the minimal information needed for prompt injection.
+ * Contains the minimal information needed to download and install the skill.
  */
 export interface SkillConfig {
+  ref: string;                    // Revision ref (e.g. "owner/repo/skill@commitHash")
   name: string;
   description: string;
   content: string;                // SKILL.md markdown body

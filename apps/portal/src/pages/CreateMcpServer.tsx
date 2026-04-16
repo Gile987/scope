@@ -306,6 +306,7 @@ export function CreateMcpServer() {
                   />
                   <Input
                     placeholder="Header value"
+                    type="password"
                     value={header.value}
                     onChange={(e) => updateHeader(idx, "value", e.target.value)}
                     className="font-mono text-sm"
@@ -346,6 +347,7 @@ export function CreateMcpServer() {
                   />
                   <Input
                     placeholder="value"
+                    type="password"
                     value={pair.value}
                     onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
                     className="font-mono text-sm"
