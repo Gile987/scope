@@ -120,6 +120,29 @@ export const api = {
     return `${BASE}/requests/${id}/archive`;
   },
 
+  /** Download a batch archive of multiple runs as a single .tar.gz */
+  batchArchive: async (ids: string[]): Promise<void> => {
+    const resp = await fetch(`${BASE}/requests/archive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(err.error ?? "Failed to download batch archive");
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    a.download = `batch-${timestamp}.tar.gz`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
   /** Get video stream URL for a request (optionally per-iteration, per-index, or setup phase) */
   videoUrl: (id: string, iteration?: number, index = 0, phase?: string): string => {
     const params = new URLSearchParams();
