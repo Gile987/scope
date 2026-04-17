@@ -4,17 +4,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LogEvent } from "../types/types.js";
 
-// ─── Mock withRetry ────────────────────────────────────────────────────────
-// Replace with a synchronous pass-through to avoid real backoff delays.
-// vi.mock works for ESM imports; withRetry is loaded as such.
-
-const mockWithRetry = vi.fn();
-
-vi.mock("../utils/retry.js", () => ({
-  withRetry: mockWithRetry,
-  isCosmosDb429: vi.fn().mockReturnValue(false),
-}));
-
 // ─── Import after mocks ────────────────────────────────────────────────────
 
 const { LogPublisher } = await import("./log-publisher.js");
@@ -38,11 +27,6 @@ const mockBlobStorage = {
 } as any;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
-
-/** Default withRetry behaviour: execute fn() once, pass result through. */
-function withRetryPassthrough() {
-  mockWithRetry.mockImplementation(async (fn: () => Promise<unknown>) => fn());
-}
 
 function makePublisher() {
   const publisher = new LogPublisher(
@@ -68,7 +52,6 @@ function makePublisher() {
 describe("LogPublisher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    withRetryPassthrough();
     mockAppendLogEvent.mockResolvedValue(undefined);
     mockRedis.publish.mockResolvedValue(1);
   });
@@ -87,11 +70,10 @@ describe("LogPublisher", () => {
       expect(parsed.source).toBe("test-worker");
     });
 
-    it("persists the log event via withRetry wrapping appendLogEvent", async () => {
+    it("persists the log event directly via appendLogEvent (SDK handles retries)", async () => {
       const publisher = makePublisher();
       await publisher.publish("run-abc", "warn", "something happened");
 
-      expect(mockWithRetry).toHaveBeenCalledOnce();
       expect(mockAppendLogEvent).toHaveBeenCalledOnce();
       const [requestId, event] = mockAppendLogEvent.mock.calls[0];
       expect(requestId).toBe("run-abc");
@@ -112,40 +94,15 @@ describe("LogPublisher", () => {
       const publisher = makePublisher();
 
       await expect(publisher.publish("run-abc", "info", "msg")).resolves.toBeUndefined();
-      expect(mockWithRetry).toHaveBeenCalledOnce();
+      expect(mockAppendLogEvent).toHaveBeenCalledOnce();
     });
 
-    it("does not throw when blob storage append fails after all retries", async () => {
+    it("does not throw when blob storage append fails", async () => {
       const err = Object.assign(new Error("BlobServiceError"), { statusCode: 500 });
-      mockWithRetry.mockRejectedValue(err);
+      mockAppendLogEvent.mockRejectedValue(err);
       const publisher = makePublisher();
 
       await expect(publisher.publish("run-abc", "info", "msg")).resolves.toBeUndefined();
-    });
-
-    it("passes an isRetryable predicate that accepts 429, 500, and 503", async () => {
-      const publisher = makePublisher();
-      await publisher.publish("run-abc", "info", "msg");
-
-      const [, opts] = mockWithRetry.mock.calls[0];
-      const isRetryable = opts?.isRetryable as (err: unknown) => boolean;
-      expect(isRetryable).toBeDefined();
-
-      expect(isRetryable({ statusCode: 429 })).toBe(true);
-      expect(isRetryable({ statusCode: 500 })).toBe(true);
-      expect(isRetryable({ statusCode: 503 })).toBe(true);
-    });
-
-    it("passes an isRetryable predicate that rejects non-transient errors", async () => {
-      const publisher = makePublisher();
-      await publisher.publish("run-abc", "info", "msg");
-
-      const [, opts] = mockWithRetry.mock.calls[0];
-      const isRetryable = opts?.isRetryable as (err: unknown) => boolean;
-
-      expect(isRetryable({ statusCode: 400 })).toBe(false);
-      expect(isRetryable({ statusCode: 404 })).toBe(false);
-      expect(isRetryable({})).toBe(false);
     });
   });
 

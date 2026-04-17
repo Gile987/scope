@@ -125,6 +125,32 @@ describe("SSE log endpoints — blob replay", () => {
       expect(mocks.blobStorage.getLogEvents).not.toHaveBeenCalled();
     });
 
+    it("sends event:error and closes stream when getLogEvents throws", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "run-done",
+        status: "done",
+        outcome: "succeeded",
+      });
+      (mocks.blobStorage.getLogEvents as any).mockRejectedValue(
+        Object.assign(new Error("BlobServiceError"), { statusCode: 503 }),
+      );
+
+      const res = await request(app)
+        .get("/api/v1/requests/run-done/logs?fromStart=true")
+        .buffer(true)
+        .parse((res, cb) => {
+          let data = "";
+          res.on("data", (chunk: Buffer) => (data += chunk.toString()));
+          res.on("end", () => cb(null, data));
+        });
+
+      expect(res.headers["content-type"]).toMatch("text/event-stream");
+      const events = parseSse(res.body as string);
+      const errorEvent = events.find((e) => e.event === "error");
+      expect(errorEvent).toBeDefined();
+      expect(JSON.parse(errorEvent!.data!)).toMatchObject({ message: "Failed to load logs" });
+    });
+
     it("sends event:done immediately (no blob data) for a done run with no logs", async () => {
       (mocks.collection.findOne as any).mockResolvedValue({
         _id: "run-empty",
@@ -254,6 +280,31 @@ describe("SSE log endpoints — blob replay", () => {
         });
 
       expect(mocks.blobStorage.getLogEvents).not.toHaveBeenCalled();
+    });
+
+    it("sends event:error and closes stream when getLogEvents throws for a report", async () => {
+      (mocks.reportCollection.findOne as any).mockResolvedValue({
+        _id: "report-done",
+        status: "completed",
+      });
+      (mocks.blobStorage.getLogEvents as any).mockRejectedValue(
+        Object.assign(new Error("BlobServiceError"), { statusCode: 503 }),
+      );
+
+      const res = await request(app)
+        .get("/api/v1/reports/report-done/logs?fromStart=true")
+        .buffer(true)
+        .parse((res, cb) => {
+          let data = "";
+          res.on("data", (chunk: Buffer) => (data += chunk.toString()));
+          res.on("end", () => cb(null, data));
+        });
+
+      expect(res.headers["content-type"]).toMatch("text/event-stream");
+      const events = parseSse(res.body as string);
+      const errorEvent = events.find((e) => e.event === "error");
+      expect(errorEvent).toBeDefined();
+      expect(JSON.parse(errorEvent!.data!)).toMatchObject({ message: "Failed to load logs" });
     });
   });
 });

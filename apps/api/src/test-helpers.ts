@@ -165,7 +165,7 @@ export function createMockBlobStorage(): BlobStorage {
     getLogEvents: vi.fn().mockResolvedValue([]),
     appendLogEvent: vi.fn().mockResolvedValue(undefined),
     ensureContainer: vi.fn().mockResolvedValue(undefined),
-    uploadSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
+    uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
     downloadSnapshot: vi.fn().mockResolvedValue(undefined),
     listSnapshots: vi.fn().mockResolvedValue([]),
   } as unknown as BlobStorage;

@@ -46,7 +46,7 @@ const { RemoveLogsFromDocs } = await import("./013-remove-logs-from-docs.js");
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
-describe("migration 009: RemoveLogsFromDocs", () => {
+describe("migration 013: RemoveLogsFromDocs", () => {
   describe("up()", () => {
     it("calls $unset logs on both requests and reports collections", async () => {
       const ids = [makeObjectId(1), makeObjectId(2)];

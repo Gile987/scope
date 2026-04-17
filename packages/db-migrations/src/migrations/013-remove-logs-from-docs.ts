@@ -34,49 +34,55 @@ async function batchUnset(
   label: string,
 ): Promise<number> {
   let total = 0;
-  const ids: ObjectId[] = [];
+  let batchNum = 0;
+  let batch: ObjectId[] = [];
 
   const cursor = col.find({ logs: { $exists: true } }, { projection: { _id: 1 } });
-  for await (const doc of cursor) {
-    ids.push(doc._id);
-  }
 
-  if (ids.length === 0) {
-    console.log(`  ${label}: 0 documents to update`);
-    return 0;
-  }
-
-  console.log(`  ${label}: ${ids.length} documents in ${Math.ceil(ids.length / BATCH_SIZE)} batches`);
-
-  for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-    const batch = ids.slice(i, i + BATCH_SIZE);
-    let retries = 0;
+  const flushBatch = async (b: ObjectId[]) => {
+    if (b.length === 0) return;
+    const retries = 0;
     const maxRetries = 10;
+    let attempt = retries;
 
-    if (i > 0) await sleep(INTER_BATCH_DELAY_MS);
+    if (batchNum > 0) await sleep(INTER_BATCH_DELAY_MS);
+    batchNum++;
 
-    while (retries < maxRetries) {
+    while (attempt < maxRetries) {
       try {
         const result = await col.updateMany(
-          { _id: { $in: batch } },
+          { _id: { $in: b } },
           { $unset: { logs: "" } },
         );
         total += result.modifiedCount;
-        break;
+        return;
       } catch (err: any) {
-        if (err?.code === 16500 && retries < maxRetries - 1) {
+        if (err?.code === 16500 && attempt < maxRetries - 1) {
           const delay = Math.max(getRetryAfterMs(err), 500);
-          console.log(`  ${label}: 429 batch ${Math.floor(i / BATCH_SIZE) + 1}, retry ${retries + 1}/${maxRetries - 1}, waiting ${delay}ms...`);
+          console.log(`  ${label}: 429 batch ${batchNum}, retry ${attempt + 1}/${maxRetries - 1}, waiting ${delay}ms...`);
           await sleep(delay);
-          retries++;
+          attempt++;
         } else {
           throw err;
         }
       }
     }
-  }
+  };
 
-  console.log(`  ${label}: ${total} documents updated`);
+  for await (const doc of cursor) {
+    batch.push(doc._id);
+    if (batch.length >= BATCH_SIZE) {
+      await flushBatch(batch);
+      batch = [];
+    }
+  }
+  await flushBatch(batch);
+
+  if (total === 0 && batchNum === 0) {
+    console.log(`  ${label}: 0 documents to update`);
+  } else {
+    console.log(`  ${label}: ${total} documents updated in ${batchNum} batches`);
+  }
   return total;
 }
 

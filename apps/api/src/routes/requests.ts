@@ -513,9 +513,16 @@ apiRoute(ctx.app, ctx.registry, {
 
     // If fromStart=true, replay existing logs from blob storage
     if (fromStart) {
-      const pastLogs = await ctx.blobStorage.getLogEvents(id);
-      for (const log of pastLogs) {
-        res.write(`data: ${JSON.stringify(log)}\n\n`);
+      try {
+        const pastLogs = await ctx.blobStorage.getLogEvents(id);
+        for (const log of pastLogs) {
+          res.write(`data: ${JSON.stringify(log)}\n\n`);
+        }
+      } catch (err) {
+        console.error(`Failed to replay logs for request ${id}:`, err);
+        res.write(`event: error\ndata: ${JSON.stringify({ message: "Failed to load logs" })}\n\n`);
+        res.end();
+        return;
       }
     }
 

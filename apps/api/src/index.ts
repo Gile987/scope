@@ -274,7 +274,6 @@ registerExtensionsRoutes(routeCtx);
 registerInsightsRoutes(routeCtx);
 registerFeatureFlagRoutes(routeCtx);
 
-
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof McpSecretUnavailableError) {
