@@ -520,7 +520,7 @@ apiRoute(ctx.app, ctx.registry, {
         }
       } catch (err) {
         console.error(`Failed to replay logs for request ${id}:`, err);
-        res.write(`event: error\ndata: ${JSON.stringify({ message: "Failed to load logs" })}\n\n`);
+        res.write(`event: error\ndata: ${JSON.stringify({ message: "Cannot connect to log storage" })}\n\n`);
         res.end();
         return;
       }

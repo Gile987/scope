@@ -148,7 +148,7 @@ describe("SSE log endpoints — blob replay", () => {
       const events = parseSse(res.body as string);
       const errorEvent = events.find((e) => e.event === "error");
       expect(errorEvent).toBeDefined();
-      expect(JSON.parse(errorEvent!.data!)).toMatchObject({ message: "Failed to load logs" });
+      expect(JSON.parse(errorEvent!.data!)).toMatchObject({ message: "Cannot connect to log storage" });
     });
 
     it("sends event:done immediately (no blob data) for a done run with no logs", async () => {
@@ -304,7 +304,7 @@ describe("SSE log endpoints — blob replay", () => {
       const events = parseSse(res.body as string);
       const errorEvent = events.find((e) => e.event === "error");
       expect(errorEvent).toBeDefined();
-      expect(JSON.parse(errorEvent!.data!)).toMatchObject({ message: "Failed to load logs" });
+      expect(JSON.parse(errorEvent!.data!)).toMatchObject({ message: "Cannot connect to log storage" });
     });
   });
 });
