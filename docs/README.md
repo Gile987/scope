@@ -14,6 +14,7 @@ Central documentation hub for the Scope platform — an AI coding agent benchmar
 | [Worker Requirements](architecture/worker-requirements.md) | Requirements checklist for coding agent workers |
 | [Worker Compliance](architecture/worker-compliance.md) | Per-worker compliance matrix against requirements |
 | [Database Migrations](architecture/db-migrations.md) | Lightweight MongoDB migration framework, writing and running migrations |
+| [Database Collection Scaling](architecture/db-collection-scaling.md) | Per-collection autoscale throughput, ASO reconcile policy, operator runbook |
 | [GitOps & Deployment](architecture/gitops-deploy.md) | FluxCD design, kustomization phases, variable substitution |
 
 ## Infrastructure
