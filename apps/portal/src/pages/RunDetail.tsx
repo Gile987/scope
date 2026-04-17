@@ -150,7 +150,6 @@ export function RunDetail() {
     );
   }
 
-  const isV2 = run.scenario?.version === "v2";
   const hasHarData = !!(run.harUrl || run.turns?.some(t => t.harUrl));
   const hasVideoData = !!(run.videoUrls?.length || run.setupVideoUrls?.length || run.turns?.some(t => t.videoUrls?.length));
   const videoCount = (run.setupVideoUrls?.length ?? 0)
@@ -366,7 +365,7 @@ export function RunDetail() {
 
         {/* Logs tab */}
         <TabsContent value="logs" className="mt-4 space-y-4">
-          {isV2 && run.scenario?.criteria && run.scenario.criteria.length > 0 && (
+          {run.scenario?.criteria && run.scenario.criteria.length > 0 && (
             <CriteriaGraphView
               scenarioCriteria={run.scenario!.criteria}
               logs={effectiveLogs}
