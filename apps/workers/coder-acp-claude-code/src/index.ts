@@ -9,7 +9,7 @@ dotenv.config();
 
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-claude-code";
 const tokenClient = new TokenManagerClient();
-const AGENT_VERSION = `claude-code-acp-${process.env.CLAUDE_CODE_ACP_VERSION || "unknown"}-sdk-${process.env.CLAUDE_AGENT_SDK_VERSION || "unknown"}`;
+const AGENT_VERSION = `claude-agent-acp-${process.env.CLAUDE_CODE_ACP_VERSION || "unknown"}-sdk-${process.env.CLAUDE_AGENT_SDK_VERSION || "unknown"}`;
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
@@ -134,7 +134,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       }
       // MCP gateway lifecycle is handled in setup()/teardown() — servers are already registered
       const result = await runACPSession(message, {
-        command: "claude-code-acp",
+        command: "claude-agent-acp",
         args: [],
         env,
         cwd: this.workspacePath!,

@@ -17,14 +17,60 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, ChevronRight, ChevronDown, ChevronLeft, Lock } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2 } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
 import { formatStatRange } from "@/lib/grouping";
+
+// --- Column visibility ---
+// We store *hidden* columns so that newly added columns are visible by default.
+type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "status" | "outcome" | "report" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+
+const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
+  { id: "id", label: "ID" },
+  { id: "submission", label: "Submission" },
+  { id: "task", label: "Task" },
+  { id: "worker", label: "Worker" },
+  { id: "version", label: "Version" },
+  { id: "os", label: "OS" },
+  { id: "mcp", label: "MCP" },
+  { id: "skills", label: "Skills" },
+  { id: "extensions", label: "Extensions" },
+  { id: "profile", label: "Profile" },
+  { id: "status", label: "Status" },
+  { id: "outcome", label: "Outcome" },
+  { id: "report", label: "Report" },
+  { id: "turns", label: "Turns" },
+  { id: "llmCalls", label: "LLM Calls" },
+  { id: "duration", label: "Duration" },
+  { id: "tokens", label: "Tokens" },
+  { id: "created", label: "Created" },
+];
+
+const ALL_COLUMN_IDS: ColumnId[] = COLUMN_DEFS.map((c) => c.id);
+const STORAGE_KEY = "scope:runs-hidden-columns";
+
+function loadHiddenColumns(): Set<ColumnId> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as ColumnId[];
+      if (Array.isArray(parsed)) return new Set(parsed.filter((c) => ALL_COLUMN_IDS.includes(c)));
+    }
+  } catch { /* ignore */ }
+  return new Set();
+}
+
+function saveHiddenColumns(hidden: Set<ColumnId>) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...hidden]));
+}
 
 export function RunsList() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -44,7 +90,20 @@ export function RunsList() {
   const [resubmitOverrides, setResubmitOverrides] = useState<BulkResubmitOverrides>({});
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [cursorDirection, setCursorDirection] = useState<"after" | "before" | undefined>(undefined);
+  const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(loadHiddenColumns);
   const queryClient = useQueryClient();
+
+  const toggleColumn = useCallback((col: ColumnId) => {
+    setHiddenColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(col)) next.delete(col);
+      else next.add(col);
+      saveHiddenColumns(next);
+      return next;
+    });
+  }, []);
+
+  const isCol = useCallback((col: ColumnId) => !hiddenColumns.has(col), [hiddenColumns]);
 
   const resetCursor = useCallback(() => {
     setCursor(undefined);
@@ -252,6 +311,18 @@ export function RunsList() {
     },
   });
 
+  const batchDownloadMutation = useMutation({
+    mutationFn: (ids: string[]) => api.batchArchive(ids),
+    onSuccess: () => {
+      toast.success(`Downloading ${selectedIds.size} run${selectedIds.size !== 1 ? "s" : ""}`);
+    },
+    onError: (error) => {
+      toast.error("Failed to download batch archive", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
   const bulkReportMutation = useMutation({
     mutationFn: (ids: string[]) => api.bulkTriggerReports(ids),
     onSuccess: (data) => {
@@ -395,6 +466,27 @@ export function RunsList() {
             </SelectContent>
           </Select>
         </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5">
+              <Settings2 className="h-4 w-4" /> Columns
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {COLUMN_DEFS.map((col) => (
+              <DropdownMenuCheckboxItem
+                key={col.id}
+                checked={!hiddenColumns.has(col.id)}
+                onCheckedChange={() => toggleColumn(col.id)}
+                onSelect={(e) => e.preventDefault()}
+              >
+                {col.label}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <div className="flex-1" />
         {(isRefetching || isGroupsRefetching) && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
         <span className="text-sm text-muted-foreground">
@@ -992,6 +1084,16 @@ export function RunsList() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={batchDownloadMutation.isPending}
+            onClick={() => batchDownloadMutation.mutate(Array.from(selectedIds))}
+          >
+            <Archive className="h-4 w-4" />
+            {batchDownloadMutation.isPending ? "Downloading…" : "Download selected"}
+          </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive" size="sm" className="gap-1.5">
@@ -1044,24 +1146,24 @@ export function RunsList() {
                   />
                 )}
               </TableHead>
-              <TableHead className="w-[100px]">ID</TableHead>
-              <TableHead className="w-[100px]">Submission</TableHead>
-              <TableHead>Task</TableHead>
-              <TableHead className="w-[180px]">Worker</TableHead>
-              <TableHead>Version</TableHead>
-              <TableHead className="w-[80px]">OS</TableHead>
-              <TableHead>MCP</TableHead>
-              <TableHead>Skills</TableHead>
-              <TableHead>Extensions</TableHead>
-              <TableHead>Profile</TableHead>
-              <TableHead className="w-[100px]">Status</TableHead>
-              <TableHead className="w-[100px]">Outcome</TableHead>
-              <TableHead className="w-[100px]">Report</TableHead>
-              <TableHead className="w-[80px]">Turns</TableHead>
-              <TableHead className="w-[80px]">LLM Calls</TableHead>
-              <TableHead className="w-[100px]">Duration</TableHead>
-              <TableHead className="w-[120px]">Tokens</TableHead>
-              <TableHead className="w-[160px]">Created</TableHead>
+              {isCol("id") && <TableHead className="w-[100px]">ID</TableHead>}
+              {isCol("submission") && <TableHead className="w-[100px]">Submission</TableHead>}
+              {isCol("task") && <TableHead>Task</TableHead>}
+              {isCol("worker") && <TableHead className="w-[180px]">Worker</TableHead>}
+              {isCol("version") && <TableHead>Version</TableHead>}
+              {isCol("os") && <TableHead className="w-[80px]">OS</TableHead>}
+              {isCol("mcp") && <TableHead>MCP</TableHead>}
+              {isCol("skills") && <TableHead>Skills</TableHead>}
+              {isCol("extensions") && <TableHead>Extensions</TableHead>}
+              {isCol("profile") && <TableHead>Profile</TableHead>}
+              {isCol("status") && <TableHead className="w-[100px]">Status</TableHead>}
+              {isCol("outcome") && <TableHead className="w-[100px]">Outcome</TableHead>}
+              {isCol("report") && <TableHead className="w-[100px]">Report</TableHead>}
+              {isCol("turns") && <TableHead className="w-[80px]">Turns</TableHead>}
+              {isCol("llmCalls") && <TableHead className="w-[80px]">LLM Calls</TableHead>}
+              {isCol("duration") && <TableHead className="w-[100px]">Duration</TableHead>}
+              {isCol("tokens") && <TableHead className="w-[120px]">Tokens</TableHead>}
+              {isCol("created") && <TableHead className="w-[160px]">Created</TableHead>}
               <TableHead className="w-[100px] text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -1085,6 +1187,7 @@ export function RunsList() {
                     statusFilter={effectiveStatus}
                     outcomeFilter={effectiveOutcome}
                     criteriaState={criteriaState}
+                    hiddenColumns={hiddenColumns}
                   />
                 );
               })
@@ -1098,6 +1201,7 @@ export function RunsList() {
                   reportSummaries={reportSummaries}
                   deleteMutation={deleteMutation}
                   profileNameMap={profileNameMap}
+                  hiddenColumns={hiddenColumns}
                 />
               ))
             )}
@@ -1141,6 +1245,7 @@ function RunRow({
   reportSummaries,
   deleteMutation,
   profileNameMap,
+  hiddenColumns,
 }: {
   run: Run;
   selectedIds: Set<string>;
@@ -1148,7 +1253,9 @@ function RunRow({
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   profileNameMap: Map<string, string>;
+  hiddenColumns: Set<ColumnId>;
 }) {
+  const isCol = (col: ColumnId) => !hiddenColumns.has(col);
   return (
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
       <TableCell>
@@ -1158,12 +1265,12 @@ function RunRow({
           aria-label={`Select run ${formatId(run._id)}`}
         />
       </TableCell>
-      <TableCell className="font-mono text-xs">
+      {isCol("id") && <TableCell className="font-mono text-xs">
         <Link to={`/runs/${run._id}`} className="text-primary hover:underline">
           {formatId(run._id)}
         </Link>
-      </TableCell>
-      <TableCell className="font-mono text-xs">
+      </TableCell>}
+      {isCol("submission") && <TableCell className="font-mono text-xs">
         {run.submissionId ? (
           <Link
             to={`/runs?submissionId=${run.submissionId}`}
@@ -1175,31 +1282,31 @@ function RunRow({
         ) : (
           <span className="text-muted-foreground">–</span>
         )}
-      </TableCell>
-      <TableCell className="max-w-[300px]">
+      </TableCell>}
+      {isCol("task") && <TableCell className="max-w-[300px]">
         <span title={run.scenario?.task ?? "–"}>{truncate(run.scenario?.task ?? "–", 60)}</span>
-      </TableCell>
-      <TableCell>
+      </TableCell>}
+      {isCol("worker") && <TableCell>
         <span className="font-mono text-xs">{run.workerType}</span>
         {run.model && (
           <span className="block font-mono text-xs text-muted-foreground">{run.model}</span>
         )}
-      </TableCell>
-      <TableCell>
+      </TableCell>}
+      {isCol("version") && <TableCell>
         {run.agentVersion ? (
           <span className="font-mono text-xs">{run.agentVersion}</span>
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
-      </TableCell>
-      <TableCell className="text-center">
+      </TableCell>}
+      {isCol("os") && <TableCell className="text-center">
         {run.os ? (
           <PlatformIcon platform={run.os.platform} className="h-4 w-4 inline-block" />
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
-      </TableCell>
-      <TableCell>
+      </TableCell>}
+      {isCol("mcp") && <TableCell>
         {run.mcpServers && run.mcpServers.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {run.mcpServers.map((slug) => (
@@ -1211,8 +1318,8 @@ function RunRow({
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
-      </TableCell>
-      <TableCell>
+      </TableCell>}
+      {isCol("skills") && <TableCell>
         {run.skillRevisions && run.skillRevisions.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {run.skillRevisions.map((ref) => {
@@ -1228,8 +1335,8 @@ function RunRow({
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
-      </TableCell>
-      <TableCell>
+      </TableCell>}
+      {isCol("extensions") && <TableCell>
         {run.extensions && run.extensions.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {run.extensions.map((id) => {
@@ -1245,8 +1352,8 @@ function RunRow({
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
-      </TableCell>
-      <TableCell>
+      </TableCell>}
+      {isCol("profile") && <TableCell>
         {run.profileId ? (
           <Link to={`/profiles/${run.profileId}`} className="text-primary hover:underline">
             {profileNameMap.get(run.profileId) ?? formatId(run.profileId)}
@@ -1254,14 +1361,14 @@ function RunRow({
         ) : (
           <span className="text-muted-foreground">–</span>
         )}
-      </TableCell>
-      <TableCell>
+      </TableCell>}
+      {isCol("status") && <TableCell>
         <StatusBadge status={run.status} />
-      </TableCell>
-      <TableCell>
+      </TableCell>}
+      {isCol("outcome") && <TableCell>
         <OutcomeBadge outcome={run.outcome} />
-      </TableCell>
-      <TableCell>
+      </TableCell>}
+      {isCol("report") && <TableCell>
         {reportSummaries?.[run._id] ? (
           <Link to={`/runs/${run._id}/reports`} className="block">
             <ReportProgressBar summary={reportSummaries[run._id]} />
@@ -1269,20 +1376,20 @@ function RunRow({
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
-      </TableCell>
-      <TableCell className="text-center">
+      </TableCell>}
+      {isCol("turns") && <TableCell className="text-center">
         {run.turns?.length ?? "–"}
-      </TableCell>
-      <TableCell className="text-center font-mono text-xs">
+      </TableCell>}
+      {isCol("llmCalls") && <TableCell className="text-center font-mono text-xs">
         {run.aiCallCount !== undefined ? run.aiCallCount : <span className="text-muted-foreground">–</span>}
-      </TableCell>
-      <TableCell className="font-mono text-xs">
+      </TableCell>}
+      {isCol("duration") && <TableCell className="font-mono text-xs">
         {(() => {
           const totalDuration = run.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
           return totalDuration ? formatDuration(totalDuration) : <span className="text-muted-foreground">–</span>;
         })()}
-      </TableCell>
-      <TableCell className="font-mono text-xs">
+      </TableCell>}
+      {isCol("tokens") && <TableCell className="font-mono text-xs">
         {(() => {
           const usage = run.tokenUsage
             ?? (run.turns?.some(t => t.tokenUsage)
@@ -1302,10 +1409,10 @@ function RunRow({
             ? <>{usage.promptTokens.toLocaleString()}↑ · {usage.completionTokens.toLocaleString()}↓</>
             : <span className="text-muted-foreground">–</span>;
         })()}
-      </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
+      </TableCell>}
+      {isCol("created") && <TableCell className="text-xs text-muted-foreground">
         {formatDate(run.createdAt)}
-      </TableCell>
+      </TableCell>}
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1">
           <Link to={`/runs/${run._id}`}>
@@ -1349,6 +1456,7 @@ function GroupRows({
   statusFilter,
   outcomeFilter,
   criteriaState,
+  hiddenColumns,
 }: {
   group: RunGroup;
   isExpanded: boolean;
@@ -1363,10 +1471,12 @@ function GroupRows({
   statusFilter?: string;
   outcomeFilter?: string;
   criteriaState?: string;
+  hiddenColumns: Set<ColumnId>;
 }) {
   const { aggregates, uniform } = group;
   const fmtDur = (v: number) => formatDuration(Math.round(v));
   const fmtNum = (v: number) => Math.round(v).toLocaleString();
+  const isCol = (col: ColumnId) => !hiddenColumns.has(col);
 
   // Fetch runs for this group on expand
   const expandFilter = useMemo(() => {
@@ -1430,14 +1540,14 @@ function GroupRows({
           />
         </TableCell>
         {/* ID */}
-        <TableCell className="font-medium">
+        {isCol("id") && <TableCell className="font-medium">
           <div className="flex items-center gap-2">
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             <span>{aggregates.count} run{aggregates.count !== 1 ? "s" : ""}</span>
           </div>
-        </TableCell>
+        </TableCell>}
         {/* Submission */}
-        <TableCell className="font-mono text-xs">
+        {isCol("submission") && <TableCell className="font-mono text-xs">
           {groupBy === "submissionId" ? (
             group.key !== "no-submission" ? (
               <Link
@@ -1459,17 +1569,17 @@ function GroupRows({
               {formatId(uniform.submissionId)}
             </Link>
           ) : <span className="text-muted-foreground">–</span>}
-        </TableCell>
+        </TableCell>}
         {/* Task */}
-        <TableCell className="max-w-[300px]">
+        {isCol("task") && <TableCell className="max-w-[300px]">
           {groupBy === "task" ? (
             <span className="font-medium" title={group.label}>{truncate(group.label, 60)}</span>
           ) : uniform.task ? (
             <span title={uniform.task}>{truncate(uniform.task, 60)}</span>
           ) : <span className="text-muted-foreground">–</span>}
-        </TableCell>
+        </TableCell>}
         {/* Worker */}
-        <TableCell>
+        {isCol("worker") && <TableCell>
           {uniform.workerType ? (
             <>
               <span className="font-mono text-xs">{uniform.workerType}</span>
@@ -1478,21 +1588,21 @@ function GroupRows({
               )}
             </>
           ) : <span className="text-xs text-muted-foreground">–</span>}
-        </TableCell>
+        </TableCell>}
         {/* Version */}
-        <TableCell>
+        {isCol("version") && <TableCell>
           {uniform.agentVersion ? (
             <span className="font-mono text-xs">{uniform.agentVersion}</span>
           ) : <span className="text-xs text-muted-foreground">–</span>}
-        </TableCell>
+        </TableCell>}
         {/* Platform */}
-        <TableCell className="text-center">
+        {isCol("os") && <TableCell className="text-center">
           {uniform.platform ? (
             <PlatformIcon platform={uniform.platform} className="h-4 w-4 inline-block" />
           ) : <span className="text-xs text-muted-foreground">–</span>}
-        </TableCell>
+        </TableCell>}
         {/* MCP */}
-        <TableCell>
+        {isCol("mcp") && <TableCell>
           {uniform.mcpServers && uniform.mcpServers.length > 0 ? (
             <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
               {uniform.mcpServers.map((slug) => (
@@ -1502,9 +1612,9 @@ function GroupRows({
               ))}
             </div>
           ) : <span className="text-xs text-muted-foreground">–</span>}
-        </TableCell>
+        </TableCell>}
         {/* Skills */}
-        <TableCell>
+        {isCol("skills") && <TableCell>
           {uniform.skillRevisions && uniform.skillRevisions.length > 0 ? (
             <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
               {uniform.skillRevisions.map((ref) => {
@@ -1518,9 +1628,9 @@ function GroupRows({
               })}
             </div>
           ) : <span className="text-xs text-muted-foreground">–</span>}
-        </TableCell>
+        </TableCell>}
         {/* Extensions */}
-        <TableCell>
+        {isCol("extensions") && <TableCell>
           {uniform.extensions && uniform.extensions.length > 0 ? (
             <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
               {uniform.extensions.map((id) => {
@@ -1534,9 +1644,9 @@ function GroupRows({
               })}
             </div>
           ) : <span className="text-xs text-muted-foreground">–</span>}
-        </TableCell>
+        </TableCell>}
         {/* Profile */}
-        <TableCell>
+        {isCol("profile") && <TableCell>
           {groupBy === "profile" ? (
             group.key !== "no-profile" ? (
               <Link
@@ -1548,9 +1658,9 @@ function GroupRows({
               </Link>
             ) : <span className="font-medium text-muted-foreground">{group.label}</span>
           ) : null}
-        </TableCell>
+        </TableCell>}
         {/* Status */}
-        <TableCell>
+        {isCol("status") && <TableCell>
           {(() => {
             const statusColors: Record<string, string> = {
               pending: "bg-gray-500",
@@ -1576,9 +1686,9 @@ function GroupRows({
               </div>
             );
           })()}
-        </TableCell>
+        </TableCell>}
         {/* Outcome */}
-        <TableCell>
+        {isCol("outcome") && <TableCell>
           {(() => {
             const outcomeColors: Record<string, string> = {
               succeeded: "bg-green-500",
@@ -1605,9 +1715,9 @@ function GroupRows({
               </div>
             );
           })()}
-        </TableCell>
+        </TableCell>}
         {/* Report */}
-        <TableCell>
+        {isCol("report") && <TableCell>
           {(() => {
             if (!mergedReportSummaries || groupRunIds.length === 0) return <span className="text-xs text-muted-foreground">–</span>;
             let total = 0, completed = 0, pending = 0, generating = 0, failed = 0;
@@ -1623,25 +1733,25 @@ function GroupRows({
             if (total === 0) return <span className="text-xs text-muted-foreground">–</span>;
             return <ReportProgressBar summary={{ total, completed, pending, generating, failed }} />;
           })()}
-        </TableCell>
+        </TableCell>}
         {/* Turns */}
-        <TableCell className="text-center font-mono text-xs">
+        {isCol("turns") && <TableCell className="text-center font-mono text-xs">
           {formatStatRange(aggregates.turns, fmtNum)}
-        </TableCell>
+        </TableCell>}
         {/* LLM Calls */}
-        <TableCell />
+        {isCol("llmCalls") && <TableCell />}
         {/* Duration */}
-        <TableCell className="font-mono text-xs">
+        {isCol("duration") && <TableCell className="font-mono text-xs">
           {formatStatRange(aggregates.duration, fmtDur)}
-        </TableCell>
+        </TableCell>}
         {/* Tokens */}
-        <TableCell className="font-mono text-xs">
+        {isCol("tokens") && <TableCell className="font-mono text-xs">
           {aggregates.promptTokens
             ? <>{formatStatRange(aggregates.promptTokens, fmtNum)}↑</>
             : <span className="text-muted-foreground">–</span>}
-        </TableCell>
+        </TableCell>}
         {/* Created */}
-        <TableCell />
+        {isCol("created") && <TableCell />}
         {/* Actions */}
         <TableCell />
       </TableRow>
@@ -1663,6 +1773,7 @@ function GroupRows({
               reportSummaries={mergedReportSummaries}
               deleteMutation={deleteMutation}
               profileNameMap={profileNameMap}
+              hiddenColumns={hiddenColumns}
             />
           ))
         )

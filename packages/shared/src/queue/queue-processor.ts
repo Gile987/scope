@@ -138,14 +138,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolved extensions: ${extensionConfigs.map(e => e.version ? `${e.id}@${e.version}` : e.id).join(", ")}`);
     }
 
-    // Determine if this is a multi-turn request (criteria present in scenario)
-    const isMultiTurn = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
-
-    if (isMultiTurn) {
-      await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs, extensionConfigs);
-    } else {
-      await this.processOneShot(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs, extensionConfigs);
-    }
+    await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs, extensionConfigs);
   }
 
   /**
@@ -206,177 +199,6 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   }
 
   /**
-   * Original one-shot processing (backward compatible).
-   */
-  private async processOneShot(
-    requestDoc: RequestDocument,
-    message: DequeuedMessageItem,
-    currentPopReceipt: string,
-    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
-    mcpServerConfigs?: McpServerConfig[],
-    skillConfigs?: SkillConfig[],
-    extensionConfigs?: ExtensionConfig[]
-  ): Promise<void> {
-    const requestId = requestDoc._id;
-
-    // Update status to processing (preserve logs from handleRequest — MCP/skill resolution)
-    const versionFields = this.getVersionFields();
-    await withRetry(() => this.collection.updateOne(
-      { _id: requestId },
-      { $set: { status: "processing", updatedAt: new Date(), ...versionFields } }
-    ));
-
-    await log("info", `Starting processing with ${this.processor.workerName}`);
-
-    // Lifecycle: call setup() before processMessage so workers can acquire expensive resources
-    if (this.processor.setup) {
-      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
-
-      // Upload setup-phase videos (e.g. TOTP login recording) to a dedicated blob path
-      if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
-        try {
-          const blobStorage = new BlobStorage({
-            storageAccountName: this.config.storageAccountName,
-            storageConnectionString: this.config.storageConnectionString,
-          });
-          const setupVideoUrls: string[] = [];
-          for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
-            const videoBlobName = `${requestId}/setup/video-${i}.webm`;
-            const videoUrl = await blobStorage.uploadFile(
-              setupResult.videoFilePaths[i],
-              videoBlobName,
-              "video/webm"
-            );
-            setupVideoUrls.push(videoUrl);
-          }
-          await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
-          if (setupVideoUrls.length > 0) {
-            await withRetry(() => this.collection.updateOne(
-              { _id: requestId },
-              { $set: { setupVideoUrls, updatedAt: new Date() } }
-            ));
-          }
-        } catch (uploadError) {
-          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-          await log("warn", `Failed to upload setup video files: ${msg}`);
-        }
-      }
-    }
-
-    // Extract skills after setup() so workspacePath points to the fresh temp directory
-    if (skillConfigs) {
-      await this.extractSkills(requestDoc, skillConfigs, log);
-    }
-
-    let workerResult;
-    try {
-      // Process the task using the worker-specific processor
-      workerResult = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
-    } catch (error) {
-      // Upload HAR from the error if the worker attached it before re-throwing
-      const errorHarFilePath: string | undefined = (error as any)?.harFilePath;
-      if (errorHarFilePath) {
-        try {
-          await sanitizeHarFile(errorHarFilePath, errorHarFilePath);
-          const blobStorage = new BlobStorage({
-            storageAccountName: this.config.storageAccountName,
-            storageConnectionString: this.config.storageConnectionString,
-          });
-          const harUrl = await blobStorage.uploadFile(
-            errorHarFilePath,
-            `${requestId}/devproxy.har`,
-            "application/json"
-          );
-          await log("info", "HAR file uploaded from failed request", { harUrl });
-          await withRetry(() => this.collection.updateOne(
-            { _id: requestId },
-            { $set: { harUrl, updatedAt: new Date() } }
-          ));
-        } catch (uploadError) {
-          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-          await log("warn", `Failed to upload HAR file from failed request: ${msg}`);
-        }
-      }
-      throw error;
-    } finally {
-      // Lifecycle: always call teardown() if setup() exists, even on error
-      if (this.processor.teardown) {
-        await this.processor.teardown(log);
-      }
-    }
-
-    await log("info", "Processing completed", { responseLength: workerResult.response.length, final: true });
-
-    // Upload HAR file to blob storage if available (sanitized to strip credentials)
-    let harUrl: string | undefined;
-    if (workerResult.harFilePath) {
-      try {
-        await sanitizeHarFile(workerResult.harFilePath, workerResult.harFilePath);
-        const blobStorage = new BlobStorage({
-          storageAccountName: this.config.storageAccountName,
-          storageConnectionString: this.config.storageConnectionString,
-        });
-        harUrl = await blobStorage.uploadFile(
-          workerResult.harFilePath,
-          `${requestId}/devproxy.har`,
-          "application/json"
-        );
-        await log("info", "HAR file uploaded to blob storage", { harUrl });
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        await log("warn", `Failed to upload HAR file: ${msg}`);
-      }
-    }
-
-    // Upload video files to blob storage if available
-    let videoUrls: string[] | undefined;
-    if (workerResult.videoFilePaths && workerResult.videoFilePaths.length > 0) {
-      try {
-        const blobStorage = new BlobStorage({
-          storageAccountName: this.config.storageAccountName,
-          storageConnectionString: this.config.storageConnectionString,
-        });
-        videoUrls = [];
-        for (let i = 0; i < workerResult.videoFilePaths.length; i++) {
-          const videoUrl = await blobStorage.uploadFile(
-            workerResult.videoFilePaths[i],
-            `${requestId}/video-${i}.webm`,
-            "video/webm"
-          );
-          videoUrls.push(videoUrl);
-        }
-        await log("info", "Video files uploaded to blob storage", { videoUrls });
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        await log("warn", `Failed to upload video files: ${msg}`);
-      }
-    }
-
-    // Update request with result and HAR URL
-    await withRetry(() => this.collection.updateOne(
-      { _id: requestId },
-      {
-        $set: {
-          status: "done",
-          outcome: "succeeded",
-          result: workerResult.response,
-          ...(harUrl && { harUrl }),
-          ...(videoUrls && videoUrls.length > 0 && { videoUrls }),
-          ...(workerResult.tokenUsage && { tokenUsage: workerResult.tokenUsage }),
-          updatedAt: new Date(),
-        },
-      }
-    ));
-
-    console.log(`[${this.workerName}] Completed request ${requestId}`);
-
-    // Fire-and-forget report generation
-    await this.triggerReportGeneration(requestId);
-
-    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
-  }
-
-  /**
    * Multi-turn processing with judge loop.
    */
   private async processMultiTurn(
@@ -389,10 +211,11 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     extensionConfigs?: ExtensionConfig[]
   ): Promise<void> {
     const requestId = requestDoc._id;
+    const hasCriteria = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
     const judgeServiceUrl = process.env.JUDGE_SERVICE_URL;
 
-    if (!judgeServiceUrl) {
-      throw new Error("JUDGE_SERVICE_URL is not configured but multi-turn request received (criteria present)");
+    if (hasCriteria && !judgeServiceUrl) {
+      throw new Error("JUDGE_SERVICE_URL is not configured but request has criteria to evaluate");
     }
 
     // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution)
@@ -422,7 +245,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       maxIterations: requestDoc.maxIterations,
     });
 
-    const judgeClient = new JudgeClient(judgeServiceUrl);
+    // Only create JudgeClient when criteria exist and judge will actually be called
+    const judgeClient = hasCriteria && judgeServiceUrl ? new JudgeClient(judgeServiceUrl) : undefined;
     const blobStorage = new BlobStorage({
       storageAccountName: this.config.storageAccountName,
       storageConnectionString: this.config.storageConnectionString,

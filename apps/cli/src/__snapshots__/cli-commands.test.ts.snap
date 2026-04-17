@@ -538,6 +538,16 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
+      "download-batch": {
+        "options": [
+          "--dir",
+          "--extract",
+          "--ids",
+          "--output",
+          "--submission-id",
+          "--url",
+        ],
+      },
       "get": {
         "options": [
           "--id",

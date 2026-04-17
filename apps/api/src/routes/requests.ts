@@ -9,8 +9,7 @@ import { execSync } from "child_process";
 import { join, basename } from "path";
 import { mkdtempSync, rmSync, existsSync, readdirSync, statSync } from "fs";
 import { pack as tarPack } from "tar-stream";
-import { parse as yamlParse, stringify as yamlStringify } from "yaml";
-import { pipeline } from "stream/promises";
+import { parse as yamlParse } from "yaml";
 import { readFile } from "fs/promises";
 import { tmpdir } from "os";
 import { v4 as uuidv4 } from "uuid";
@@ -20,6 +19,7 @@ import {
   CreateRequestInputSchema,
   ExtensionClient,
   ListRequestsQuerySchema,
+  MULTI_TURN_DEFAULTS,
   PaginatedRunGroupsResponseSchema,
   PaginatedRunsResponseSchema,
   ReportResponseSchema,
@@ -45,10 +45,9 @@ import { parseStateKey } from "../criteria-mdp.js";
 import { buildGroupingPipeline } from "../grouping.js";
 import { resolveSkillSpecs } from "../utils/skill-helpers.js";
 import {
-  blobNameFromSnapshotsUrl,
   detectBundledChatFiles,
   detectBundledHarFiles,
-  rewriteHarUrlsForArchive,
+  packRunIntoTar,
   uploadBundledChatFiles,
   uploadBundledHarFiles,
 } from "../archive-har.js";
@@ -181,10 +180,14 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
-    // At least one criterion is required
-    if (!scenarioObj.criteria || !Array.isArray(scenarioObj.criteria) || scenarioObj.criteria.length === 0) {
-      res.status(400).json({ error: "At least one criterion is required in scenario.criteria" });
-      return;
+    // At least one criterion is required — unless maxIterations is explicitly 1
+    // (single-iteration mode allows running the agent without judge evaluation)
+    const effectiveMaxIter = maxIterations ?? MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
+    if (effectiveMaxIter !== 1) {
+      if (!scenarioObj.criteria || !Array.isArray(scenarioObj.criteria) || scenarioObj.criteria.length === 0) {
+        res.status(400).json({ error: "At least one criterion is required in scenario.criteria when maxIterations > 1" });
+        return;
+      }
     }
 
     // Validate maxIterations if provided
@@ -1341,93 +1344,10 @@ apiRoute(ctx.app, ctx.registry, {
     const gzip = createGzip();
     pack.pipe(gzip).pipe(res);
 
-    // Build a copy of the resource with harUrl fields rewritten to relative paths
-    const archiveResource = rewriteHarUrlsForArchive(resource);
+    const isBlobNotFound = (err: unknown) =>
+      err instanceof RestError && (err.statusCode === 404 || err.code === "ContainerNotFound" || err.code === "BlobNotFound");
 
-    // Entry 1: run.yaml — the full run document (with relative HAR paths)
-    const yamlContent = yamlStringify(archiveResource, { lineWidth: 120 });
-    const yamlBuf = Buffer.from(yamlContent, "utf-8");
-    pack.entry({ name: `${id}/run.yaml`, size: yamlBuf.length }, yamlBuf);
-
-    // Entries 2..N: iteration snapshots as-is (.tar.gz blobs)
-    for (const turn of resource.turns) {
-      if (!turn.snapshotUrl) continue;
-
-      try {
-        const blobName = blobNameFromSnapshotsUrl(turn.snapshotUrl);
-        if (!blobName) continue;
-
-        const blobClient = containerClient.getBlockBlobClient(blobName);
-        const downloadResponse = await blobClient.download();
-
-        if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
-
-        // Add the snapshot blob as a tar entry, streaming directly from blob storage
-        const entry = pack.entry({
-          name: `${id}/iteration-${turn.iteration}.tar.gz`,
-          size: downloadResponse.contentLength,
-        });
-        await pipeline(downloadResponse.readableStreamBody, entry);
-      } catch (blobError) {
-        // Skip snapshots that fail to download (e.g. deleted blobs)
-        if (blobError instanceof RestError && (blobError.statusCode === 404 || blobError.code === "ContainerNotFound" || blobError.code === "BlobNotFound")) {
-          continue;
-        }
-        throw blobError;
-      }
-    }
-
-    // Bundle HAR files into the archive
-    const harEntries: Array<{ url: string; entryName: string }> = [];
-    for (const turn of resource.turns) {
-      if (turn.harUrl) harEntries.push({ url: turn.harUrl, entryName: `${id}/iteration-${turn.iteration}.har` });
-    }
-    if (resource.harUrl) harEntries.push({ url: resource.harUrl, entryName: `${id}/run.har` });
-
-    for (const { url, entryName } of harEntries) {
-      try {
-        const blobName = blobNameFromSnapshotsUrl(url);
-        if (!blobName) continue;
-
-        const blobClient = containerClient.getBlockBlobClient(blobName);
-        const downloadResponse = await blobClient.download();
-        if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
-
-        const entry = pack.entry({ name: entryName, size: downloadResponse.contentLength });
-        await pipeline(downloadResponse.readableStreamBody, entry);
-      } catch (blobError) {
-        if (blobError instanceof RestError && (blobError.statusCode === 404 || blobError.code === "ContainerNotFound" || blobError.code === "BlobNotFound")) {
-          continue;
-        }
-        throw blobError;
-      }
-    }
-
-    // Bundle raw chat export files into the archive
-    const chatEntries: Array<{ url: string; entryName: string }> = [];
-    for (const turn of resource.turns) {
-      if (turn.rawChatUrl) chatEntries.push({ url: turn.rawChatUrl, entryName: `${id}/iteration-${turn.iteration}.chat-export.json` });
-    }
-    if (resource.rawChatUrl) chatEntries.push({ url: resource.rawChatUrl, entryName: `${id}/run.chat-export.json` });
-
-    for (const { url, entryName } of chatEntries) {
-      try {
-        const blobName = blobNameFromSnapshotsUrl(url);
-        if (!blobName) continue;
-
-        const blobClient = containerClient.getBlockBlobClient(blobName);
-        const downloadResponse = await blobClient.download();
-        if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
-
-        const entry = pack.entry({ name: entryName, size: downloadResponse.contentLength });
-        await pipeline(downloadResponse.readableStreamBody, entry);
-      } catch (blobError) {
-        if (blobError instanceof RestError && (blobError.statusCode === 404 || blobError.code === "ContainerNotFound" || blobError.code === "BlobNotFound")) {
-          continue;
-        }
-        throw blobError;
-      }
-    }
+    await packRunIntoTar(pack, resource, containerClient, id, isBlobNotFound);
 
     // Finalize the tar archive
     pack.finalize();
@@ -1443,6 +1363,79 @@ apiRoute(ctx.app, ctx.registry, {
       res.destroy();
     }
   }
+  },
+});
+
+// Download a batch archive of multiple runs
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/archive",
+  tags: ["Requests"],
+  summary: "Download batch archive of multiple runs",
+  body: z.object({ ids: z.array(z.string()).min(1).max(100) }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Gzipped batch archive containing individual run archives",
+  errorResponses: {
+    400: { description: "Invalid input" },
+    404: { description: "One or more runs not found" },
+  },
+  handler: async (req, res) => {
+    try {
+      const { ids } = req.body;
+
+      // Fetch all requested runs
+      const runs = await ctx.requestCollection.find({ _id: { $in: ids } }).toArray();
+      const foundIds = new Set(runs.map(r => r._id));
+      const missingIds = ids.filter(id => !foundIds.has(id));
+      if (missingIds.length > 0) {
+        res.status(404).json({ error: "Runs not found", missingIds });
+        return;
+      }
+
+      // Connect to blob storage
+      let blobServiceClient: BlobServiceClient;
+      if (ctx.storageConnectionString) {
+        blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
+      } else {
+        blobServiceClient = new BlobServiceClient(
+          `https://${ctx.storageAccountName}.blob.core.windows.net`,
+          new DefaultAzureCredential()
+        );
+      }
+      const containerClient = blobServiceClient.getContainerClient("snapshots");
+
+      // Set response headers before streaming
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      res.setHeader("Content-Type", "application/gzip");
+      res.setHeader("Content-Disposition", `attachment; filename="batch-${timestamp}.tar.gz"`);
+
+      // Create streaming tar+gzip pipeline → response
+      const pack = tarPack();
+      const gzip = createGzip();
+      pack.pipe(gzip).pipe(res);
+
+      const isBlobNotFound = (err: unknown) =>
+        err instanceof RestError && (err.statusCode === 404 || err.code === "ContainerNotFound" || err.code === "BlobNotFound");
+
+      // Pack each run into the archive
+      for (const run of runs) {
+        await packRunIntoTar(pack, run, containerClient, run._id, isBlobNotFound);
+      }
+
+      // Finalize the tar archive
+      pack.finalize();
+    } catch (error) {
+      if (!res.headersSent) {
+        if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+          res.status(404).json({ error: "Snapshot not found — the blob may have been deleted or is no longer available" });
+          return;
+        }
+        throw error;
+      } else {
+        res.destroy();
+      }
+    }
   },
 });
 

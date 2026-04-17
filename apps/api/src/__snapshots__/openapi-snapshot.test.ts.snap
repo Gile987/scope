@@ -6457,6 +6457,47 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/archive": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "ids",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "description": "Gzipped batch archive containing individual run archives",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+          "404": {
+            "description": "One or more runs not found",
+          },
+        },
+        "summary": "Download batch archive of multiple runs",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/bulk": {
       "delete": {
         "requestBody": {
