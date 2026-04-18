@@ -143,6 +143,7 @@ jobs:
       (
         github.event_name == 'workflow_dispatch' ||
         needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
+        needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
         needs.detect-changes.outputs.shared == 'true'
       )
     runs-on: ubuntu-latest
@@ -189,6 +190,22 @@ jobs:
                 --target dev \
                 --build-arg VSCODE_VERSION=$VSCODE_VERSION \
                 --build-arg COPILOT_CHAT_VERSION=$COPILOT_CHAT_VERSION \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --load \
+                .
+          - name: claude-code-acp
+            dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
+            versions_env: apps/workers/coder-acp-claude-code/versions.env
+            test_pattern: apps/workers/coder-acp-claude-code
+            images: |
+              source apps/workers/coder-acp-claude-code/versions.env
+              docker buildx build \
+                -t coder-acp-claude-code-integration-test \
+                -f apps/workers/coder-acp-claude-code/Dockerfile \
+                --target dev \
+                --build-arg CLAUDE_CODE_ACP_VERSION=$CLAUDE_CODE_ACP_VERSION \
+                --build-arg CLAUDE_AGENT_SDK_VERSION=$CLAUDE_AGENT_SDK_VERSION \
                 --cache-from type=local,src=/tmp/.buildx-cache \
                 --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
                 --load \
@@ -243,6 +260,7 @@ jobs:
           GH_AUTH_PASSWORD: ${{ secrets.GH_AUTH_PASSWORD }}
           GH_AUTH_TOTP_SECRET: ${{ secrets.GH_AUTH_TOTP_SECRET }}
           GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Generate GitHub test summary from CTRF
         if: always()
