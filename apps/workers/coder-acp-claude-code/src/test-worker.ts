@@ -71,7 +71,7 @@ async function main(): Promise<void> {
     const promptResult: PromptResult = { success: false };
     try {
       emit(`calling runACPSession (${label})...`);
-      const credentialEnv = oauthToken
+      const credentialEnv: Record<string, string> = oauthToken
         ? { CLAUDE_CODE_OAUTH_TOKEN: oauthToken }
         : { ANTHROPIC_API_KEY: apiKey! };
 

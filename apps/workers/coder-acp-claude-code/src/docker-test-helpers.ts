@@ -71,7 +71,10 @@ export async function buildImage(
         }
         resolve();
       },
-      () => {},
+      (event: { stream?: string; error?: string }) => {
+        if (event.stream) process.stderr.write(event.stream);
+        if (event.error) process.stderr.write(`ERROR: ${event.error}\n`);
+      },
     );
   });
 }
