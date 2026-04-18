@@ -10,10 +10,11 @@
  *
  * Usage: npx tsx src/test-worker.ts
  *
- * Env vars:
- *   ANTHROPIC_API_KEY — Anthropic API key (required)
- *   TEST_PROMPT       — First prompt to send (required)
- *   TEST_PROMPT_2     — Optional second prompt (tests session reuse)
+ * Env vars (one credential required):
+ *   ANTHROPIC_API_KEY      — Anthropic API key
+ *   CLAUDE_CODE_OAUTH_TOKEN — Claude Code subscription OAuth token
+ *   TEST_PROMPT            — First prompt to send (required)
+ *   TEST_PROMPT_2          — Optional second prompt (tests session reuse)
  */
 import { runACPSession } from "./acp-client.js";
 import { createFreshWorkspace } from "shared";
@@ -46,8 +47,9 @@ async function main(): Promise<void> {
   emit("test-worker starting");
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY env var is required");
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (!apiKey && !oauthToken) {
+    throw new Error("ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN env var is required");
   }
 
   const prompts = [process.env.TEST_PROMPT].filter(Boolean) as string[];
@@ -69,11 +71,15 @@ async function main(): Promise<void> {
     const promptResult: PromptResult = { success: false };
     try {
       emit(`calling runACPSession (${label})...`);
+      const credentialEnv = oauthToken
+        ? { CLAUDE_CODE_OAUTH_TOKEN: oauthToken }
+        : { ANTHROPIC_API_KEY: apiKey! };
+
       const acpResult = await runACPSession(prompt, {
         command: "claude-agent-acp",
         args: [],
         env: {
-          ANTHROPIC_API_KEY: apiKey,
+          ...credentialEnv,
           HTTP_PROXY: "",
           HTTPS_PROXY: "",
           http_proxy: "",

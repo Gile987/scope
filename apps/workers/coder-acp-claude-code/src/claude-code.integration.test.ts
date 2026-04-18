@@ -8,8 +8,9 @@
  * container, which exercises runACPSession() end-to-end with a real
  * Anthropic API key and the claude-agent-acp binary.
  *
- * Credentials are passed as env vars:
- *   ANTHROPIC_API_KEY — Anthropic API key
+ * Credentials are passed as env vars (one of):
+ *   ANTHROPIC_API_KEY      — Anthropic API key
+ *   CLAUDE_CODE_OAUTH_TOKEN — Claude Code subscription OAuth token
  *
  * Requires Docker. Skipped automatically when Docker or credentials are unavailable.
  */
@@ -28,7 +29,8 @@ const IMAGE_TAG = "coder-acp-claude-code-integration-test";
 // ---------------------------------------------------------------------------
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const hasCredentials = !!ANTHROPIC_API_KEY;
+const CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+const hasCredentials = !!(ANTHROPIC_API_KEY || CLAUDE_CODE_OAUTH_TOKEN);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -111,7 +113,7 @@ describe("coder-acp-claude-code integration", async () => {
 
   if (!canRun) {
     const reasons: string[] = [];
-    if (!hasCredentials) reasons.push("missing ANTHROPIC_API_KEY");
+    if (!hasCredentials) reasons.push("missing ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
     if (!dockerAvailable) reasons.push("Docker unavailable");
     log(`Skipping: ${reasons.join("; ")}`);
   }
@@ -152,8 +154,12 @@ describe("coder-acp-claude-code integration", async () => {
     async () => {
       log("Starting e2e test: Claude Code with real credentials");
 
+      const credentialEnv = CLAUDE_CODE_OAUTH_TOKEN
+        ? `CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}`
+        : `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}`;
+
       const { result, exitCode } = await runTestWorker(docker, [
-        `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}`,
+        credentialEnv,
         "TEST_PROMPT=Generate a Hello World REST API in Python using Flask.",
         "TEST_PROMPT_2=Add a /health endpoint to the Flask app that returns 200 OK.",
       ]);
