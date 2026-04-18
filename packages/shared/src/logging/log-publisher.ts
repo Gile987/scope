@@ -4,10 +4,9 @@
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const Redis = require("ioredis");
-import { Collection } from "mongodb";
 import { circuitBreaker, handleAll, ConsecutiveBreaker, CircuitState } from "cockatiel";
-import { LogEvent, RequestDocument } from "../types/types.js";
-import { withRetry } from "../utils/retry.js";
+import { LogEvent } from "../types/types.js";
+import { BlobStorage } from "../storage/blob-storage.js";
 
 export interface RedisConfig {
   redisHost: string;
@@ -19,14 +18,14 @@ export type LogPublisherConfig = RedisConfig;
 
 export class LogPublisher {
   private redis: InstanceType<typeof Redis>;
-  private collection: Collection<RequestDocument>;
+  private blobStorage: BlobStorage;
   private source: string;
   private redisBreaker = circuitBreaker(handleAll, {
     halfOpenAfter: 60_000, // Try again after 1 minute
     breaker: new ConsecutiveBreaker(3), // Open after 3 consecutive failures
   });
 
-  constructor(config: LogPublisherConfig, collection: Collection<RequestDocument>, source: string = "coder") {
+  constructor(config: LogPublisherConfig, blobStorage: BlobStorage, source: string = "coder") {
     // Support both local Redis (no TLS) and Azure Redis (TLS)
     // Use REDIS_TLS env var if set, otherwise infer from password + non-localhost host
     const useTls = process.env.REDIS_TLS === "true" ||
@@ -46,7 +45,7 @@ export class LogPublisher {
         return Math.min(times * 1000, 3000); // Exponential backoff, max 3s
       },
     });
-    this.collection = collection;
+    this.blobStorage = blobStorage;
     this.source = source;
 
     // Handle ioredis errors to prevent "Unhandled error event" spam
@@ -93,17 +92,13 @@ export class LogPublisher {
       // Silently ignore - circuit breaker handles logging state changes
     }
 
-    // Append to MongoDB for persistence (retry on CosmosDB 429)
+    // Append to blob storage for persistence (avoids CosmosDB RU pressure).
+    // The Azure SDK's built-in StorageRetryPolicy handles transient failures
+    // (429, 500, 503, network errors) with exponential backoff — default: 3 attempts.
     try {
-      await withRetry(() => this.collection.updateOne(
-        { _id: requestId },
-        {
-          $push: { logs: logEvent },
-          $set: { updatedAt: new Date() },
-        }
-      ));
+      await this.blobStorage.appendLogEvent(requestId, logEvent);
     } catch (error) {
-      console.error(`Failed to persist log to MongoDB: ${error}`);
+      console.error(`Failed to persist log to blob storage: ${error}`);
     }
   }
 
@@ -113,9 +108,9 @@ export class LogPublisher {
 }
 
 /**
- * Lightweight Redis-only log publisher for services that don't own MongoDB persistence.
+ * Lightweight Redis-only log publisher for services that don't own blob-storage persistence.
  * Used by the judge service to publish real-time criterion evaluation progress.
- * Workers persist logs to MongoDB via the full LogPublisher — this only publishes to Redis.
+ * Workers persist logs to blob storage via the full LogPublisher — this only publishes to Redis.
  */
 export class RedisLogPublisher {
   private redis: InstanceType<typeof Redis>;

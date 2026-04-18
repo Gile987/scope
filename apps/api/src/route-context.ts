@@ -6,6 +6,7 @@ import type { Collection, Db } from "mongodb";
 import type { QueueClient } from "@azure/storage-queue";
 import type { Express } from "express";
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import type { BlobStorage } from "shared";
 import type {
   TaskPromptStore,
   TaskPromptDocument,
@@ -105,6 +106,9 @@ export interface RouteContext {
   queueClients: Map<WorkerType, QueueClient>;
   reportQueueClient: QueueClient;
   getOrCreateQueueClient: (queueName: string) => QueueClient;
+
+  // Blob storage (log persistence + snapshots)
+  blobStorage: BlobStorage;
 
   // Config
   validWorkers: readonly string[];

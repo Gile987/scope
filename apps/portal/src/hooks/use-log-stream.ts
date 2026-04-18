@@ -71,11 +71,24 @@ export function useLogStream({
       es.close();
     });
 
+    es.addEventListener("error", (event: MessageEvent) => {
+      try {
+        const { message } = JSON.parse(event.data) as { message: string };
+        setError(message);
+      } catch {
+        setError("Cannot connect to log storage");
+      }
+      setIsConnected(false);
+      es.close();
+    });
+
     es.onerror = () => {
       setIsConnected(false);
-      // EventSource auto-reconnects; only set error if CLOSED
+      // EventSource auto-reconnects; only set error if CLOSED.
+      // Use functional update to avoid overwriting a more specific error
+      // already set by the named "error" event listener.
       if (es.readyState === EventSource.CLOSED) {
-        setError("Connection lost");
+        setError((prev) => prev ?? "Connection lost");
       }
     };
 

@@ -25,4 +25,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "010-add-requests-pagination-index.ts",
   "011-add-profile-indexes.ts",
   "012-add-profile-name-index.ts",
+  "013-remove-logs-from-docs.ts",
 ];

@@ -77,7 +77,6 @@ apiRoute(ctx.app, ctx.registry, {
         requestId,
         ...(templateId ? { templateId } : {}),
         status: "pending",
-        logs: [],
         createdAt: new Date(),
       };
 
@@ -171,7 +170,6 @@ apiRoute(ctx.app, ctx.registry, {
           _id: reportId,
           requestId,
           status: "pending",
-          logs: [],
           createdAt: new Date(),
         };
         await ctx.reportCollection.insertOne(reportDoc);
@@ -362,10 +360,18 @@ apiRoute(ctx.app, ctx.registry, {
       res.setHeader("X-Accel-Buffering", "no");
       res.flushHeaders();
 
-      // Replay existing logs if requested
-      if (fromStart && report.logs && report.logs.length > 0) {
-        for (const log of report.logs) {
-          res.write(`data: ${JSON.stringify(log)}\n\n`);
+      // Replay existing logs from blob storage if requested
+      if (fromStart) {
+        try {
+          const pastLogs = await ctx.blobStorage.getLogEvents(id);
+          for (const log of pastLogs) {
+            res.write(`data: ${JSON.stringify(log)}\n\n`);
+          }
+        } catch (err) {
+          console.error(`Failed to replay logs for report ${id}:`, err);
+          res.write(`event: error\ndata: ${JSON.stringify({ message: "Cannot connect to log storage" })}\n\n`);
+          res.end();
+          return;
         }
       }
 
@@ -517,7 +523,6 @@ apiRoute(ctx.app, ctx.registry, {
             requestId,
             templateId: template.id,
             status: "pending",
-            logs: [],
             createdAt: new Date(),
           };
           await ctx.reportCollection.insertOne(reportDoc);
@@ -591,7 +596,6 @@ apiRoute(ctx.app, ctx.registry, {
               requestId: run._id,
               templateId: template.id,
               status: "pending",
-              logs: [],
               createdAt: new Date(),
             };
             await ctx.reportCollection.insertOne(reportDoc);

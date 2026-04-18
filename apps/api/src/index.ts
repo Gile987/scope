@@ -8,7 +8,7 @@ import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
-import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError } from "shared";
+import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage } from "shared";
 import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, ProfileDocument, ProfileVersionDocument } from "shared";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
@@ -92,6 +92,7 @@ let skillRevisionStore: SkillRevisionStore;
 let profileCollection: Collection<ProfileDocument>;
 let profileVersionCollection: Collection<ProfileVersionDocument>;
 let skillResolver: SkillResolver;
+let blobStorage: BlobStorage;
 const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
@@ -211,6 +212,9 @@ async function initializeClients(): Promise<void> {
   console.log(`Ensured queue exists: ${queueReport}`);
 
   console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}, report`);
+
+  // Initialize blob storage (used for log persistence and snapshots)
+  blobStorage = new BlobStorage({ storageAccountName, storageConnectionString });
 }
 
 // --- OpenAPI documentation (lazy — Swagger UI mounted in main() after all routes register) ---
@@ -244,6 +248,7 @@ const routeCtx: RouteContext = {
   get skillResolver() { return skillResolver; },
   get queueClients() { return queueClients; },
   get reportQueueClient() { return reportQueueClient; },
+  get blobStorage() { return blobStorage; },
   getOrCreateQueueClient: createQueueClientFactory(storageConnectionString, storageAccountName),
   validWorkers: VALID_WORKERS,
   storageConnectionString,
@@ -322,6 +327,7 @@ export interface TestDependencies {
   skillResolver?: SkillResolver;
   queueClients?: Map<WorkerType, QueueClient>;
   reportQueueClient?: QueueClient;
+  blobStorage?: BlobStorage;
 }
 
 /** @internal — used by tests only to inject mock dependencies */
@@ -348,6 +354,7 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.skillResolver) skillResolver = deps.skillResolver;
   if (deps.queueClients) queueClients.clear(), deps.queueClients.forEach((v, k) => queueClients.set(k, v));
   if (deps.reportQueueClient) reportQueueClient = deps.reportQueueClient;
+  if (deps.blobStorage) blobStorage = deps.blobStorage;
 }
 
 // ─── Start server (skipped in test environment) ──────────────────────────────

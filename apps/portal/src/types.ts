@@ -77,7 +77,6 @@ export interface Run {
   outcome?: RunOutcome;
   result?: string;
   error?: string;
-  logs?: LogEvent[];
   maxIterations?: number;
   turns?: ConversationTurn[];
   personaInstructions?: string;
@@ -359,7 +358,6 @@ export interface Report {
   content?: string;
   status: ReportStatus;
   error?: string;
-  logs: LogEvent[];
   insightReferences?: InsightReference[];
   templateId?: string;
   createdAt: string;

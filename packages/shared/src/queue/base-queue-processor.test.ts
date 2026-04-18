@@ -13,7 +13,7 @@ const testConfig: BaseQueueProcessorConfig = {
   mongoCollection: "test-collection",
   storageAccountName: "devstoreaccount1",
   storageConnectionString:
-    "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;QueueEndpoint=http://localhost:10001/devstoreaccount1;",
+    "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;QueueEndpoint=http://localhost:10001/devstoreaccount1;",
   queueName: "test-queue",
   batchSize: 1,
   pollIntervalMs: 50,
@@ -23,13 +23,13 @@ const testConfig: BaseQueueProcessorConfig = {
 };
 
 // Concrete subclass to test the abstract base
-class TestQueueProcessor extends BaseQueueProcessor<{ _id: string; status: string; logs: LogEvent[] }> {
+class TestQueueProcessor extends BaseQueueProcessor<{ _id: string; status: string }> {
   public handleRequestCalls: string[] = [];
   public handleRequestDelay = 0;
   public cleanupCalled = false;
 
   protected async handleRequest(
-    doc: { _id: string; status: string; logs: LogEvent[] },
+    doc: { _id: string; status: string },
     _message: DequeuedMessageItem,
     _currentPopReceipt: string,
     _log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,

@@ -7,6 +7,7 @@ import type {
   Db,
   Document,
 } from "mongodb";
+import type { BlobStorage } from "shared";
 import type { TestDependencies } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -156,6 +157,21 @@ export function createMockSkillResolver(): Record<string, any> {
 }
 
 // ---------------------------------------------------------------------------
+// Mock BlobStorage
+// ---------------------------------------------------------------------------
+
+export function createMockBlobStorage(): BlobStorage {
+  return {
+    getLogEvents: vi.fn().mockResolvedValue([]),
+    appendLogEvent: vi.fn().mockResolvedValue(undefined),
+    ensureContainer: vi.fn().mockResolvedValue(undefined),
+    uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
+    downloadSnapshot: vi.fn().mockResolvedValue(undefined),
+    listSnapshots: vi.fn().mockResolvedValue([]),
+  } as unknown as BlobStorage;
+}
+
+// ---------------------------------------------------------------------------
 // Aggregate: creates every mock dependency _injectTestDependencies accepts
 // ---------------------------------------------------------------------------
 
@@ -181,6 +197,7 @@ export function createAllMockDependencies() {
   const skillRevisionStore = createMockSkillRevisionStore();
   const skillResolver = createMockSkillResolver();
   const reportQueueClient = createMockQueueClient();
+  const blobStorage = createMockBlobStorage();
 
   const queueClients = new Map<string, ReturnType<typeof createMockQueueClient>>();
   queueClients.set("coder-acp-claude-code", createMockQueueClient());
@@ -209,6 +226,7 @@ export function createAllMockDependencies() {
     skillResolver,
     queueClients,
     reportQueueClient,
+    blobStorage,
   } as unknown as TestDependencies & {
     // Expose typed mocks for fine-grained stubbing
     db: ReturnType<typeof createMockDb>;
@@ -233,5 +251,6 @@ export function createAllMockDependencies() {
     skillResolver: ReturnType<typeof createMockSkillResolver>;
     queueClients: Map<string, ReturnType<typeof createMockQueueClient>>;
     reportQueueClient: ReturnType<typeof createMockQueueClient>;
+    blobStorage: ReturnType<typeof createMockBlobStorage>;
   };
 }
