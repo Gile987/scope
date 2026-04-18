@@ -147,6 +147,12 @@ pnpm test:coverage                # With coverage report
 pnpm test:integration             # Integration tests (requires .env + Docker)
 ```
 
+## Documentation Workflow
+
+**Before starting any task**, read the docs relevant to the components you will be working on (see the table below). Understanding the existing design, data models, and patterns prevents regressions and duplicated work.
+
+**Before completing any task**, update the relevant docs to reflect your changes. This is the last step before calling the work done. If you added a new component, added or changed an API, modified data models, introduced a new pattern, or changed deployment behavior, the corresponding doc must be updated (or a new one created and linked here). Documentation is not optional — outdated docs are worse than no docs.
+
 ## Documentation
 
 | Document | Description |
