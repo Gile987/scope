@@ -246,6 +246,7 @@ export interface ArchivableRun {
  * @param container  - blob storage container client for downloading snapshots/HARs/chats
  * @param prefix     - directory prefix inside the tar (defaults to resource._id)
  * @param isRestError - predicate to check if an error is a blob-not-found RestError
+ * @param logsContainer - optional blob storage container client for downloading logs (run.jsonl)
  */
 export async function packRunIntoTar(
   pack: Pack,
@@ -253,6 +254,7 @@ export async function packRunIntoTar(
   container: BlobDownloader,
   prefix?: string,
   isRestError?: (err: unknown) => boolean,
+  logsContainer?: BlobDownloader,
 ): Promise<void> {
   const id = prefix ?? resource._id;
   const isBlobNotFound = isRestError ?? (() => false);
@@ -324,6 +326,21 @@ export async function packRunIntoTar(
     } catch (blobError) {
       if (isBlobNotFound(blobError)) continue;
       throw blobError;
+    }
+  }
+
+  // Bundle log events (run.jsonl) from the logs container
+  if (logsContainer) {
+    try {
+      const logBlobName = `${resource._id}/run.jsonl`;
+      const blobClient = logsContainer.getBlockBlobClient(logBlobName);
+      const downloadResponse = await blobClient.download();
+      if (downloadResponse.readableStreamBody && downloadResponse.contentLength) {
+        const entry = pack.entry({ name: `${id}/run.jsonl`, size: downloadResponse.contentLength });
+        await pipeline(downloadResponse.readableStreamBody, entry);
+      }
+    } catch (blobError) {
+      if (!isBlobNotFound(blobError)) throw blobError;
     }
   }
 }
