@@ -223,21 +223,78 @@ Content-Type: application/json
 
 ## Scheduler / Dispatcher Design
 
-### Option A: In-Process Scheduler (Recommended for Phase 1)
+### Core Constraint: Keep the Queue Shallow
 
-Run a periodic scheduler loop inside the API process:
+Once a message is in Azure Storage Queue, we **cannot** change its priority, reorder it, or remove it (without consuming it). This means:
+
+- If we dump all pending requests into the queue, we're back to FIFO — priority changes and pause have no effect on already-queued messages.
+- The queue must be treated as a **shallow buffer** — only containing the messages that workers will pick up in the near future.
+
+The scheduler therefore operates as a **throttled valve**: it dispatches only as many messages as workers can consume soon, keeping the bulk of pending work in MongoDB where we retain full control.
+
+### Queue Depth Target
+
+The scheduler maintains a **target queue depth per worker type** — the maximum number of `queued` (dispatched but not yet processing) requests at any time.
+
+```
+targetQueueDepth = concurrencyPerWorkerType × bufferMultiplier
+```
+
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `concurrencyPerWorkerType` | Configured per worker type, or discovered from replica count | How many requests a worker type can process in parallel |
+| `bufferMultiplier` | `1.5` | Small buffer so workers don't starve between scheduler ticks |
+
+**Example**: If `coder-acp-copilot` has 3 replicas, each processing 1 request at a time → `concurrency = 3`, `targetQueueDepth = ceil(3 × 1.5) = 5`. The scheduler will only dispatch new messages when the current `queued` count for that worker type drops below 5.
+
+### Dispatch Algorithm
+
+```
+for each workerType:
+  currentQueued = count({ status: "queued", workerType })
+  slots = targetQueueDepth[workerType] - currentQueued
+
+  if slots <= 0: continue  // queue is full enough
+
+  for i in 0..slots:
+    claimed = findOneAndUpdate(
+      { status: "pending", workerType, deletedAt: null },
+      { $set: { status: "queued", updatedAt: now } },
+      { sort: { priority: -1, createdAt: 1 } }
+    )
+    if !claimed: break  // no more pending work for this worker type
+    sendToQueue(claimed)
+```
+
+This ensures:
+- **Priority takes effect quickly**: when a high-priority request arrives, it gets dispatched on the next tick (within seconds), ahead of lower-priority pending requests — because the queue only has a few messages in it.
+- **Pause takes effect quickly**: paused requests are skipped by the scheduler. Already-queued messages drain naturally (workers finish them), and no new messages for paused requests are added.
+- **Priority changes are respected**: if you bump a pending request's priority, the next scheduler tick will pick it up in the new order.
+
+### What happens to already-queued messages when you pause?
+
+When a request is paused while `status: "queued"` (already dispatched to the queue), the message is still in Azure Storage Queue. The worker will dequeue it, check MongoDB, see `status: "paused"`, **delete the message**, and move on. No work is wasted — the check happens before any expensive processing.
+
+When resumed, the status goes back to `"pending"`, and the scheduler re-dispatches it on the next tick in priority order.
+
+### Scheduler Implementation (Phase 1: In-Process)
 
 ```typescript
 // packages/shared/src/queue/request-scheduler.ts
+
+export interface WorkerTypeConfig {
+  workerType: string;
+  queueClient: QueueClient;
+  targetQueueDepth: number;  // max queued messages for this worker type
+}
 
 export class RequestScheduler {
   private interval: NodeJS.Timeout | null = null;
 
   constructor(
     private collection: Collection<RequestDocument>,
-    private queueClients: Map<string, QueueClient>,  // workerType → queueClient
+    private workerTypes: WorkerTypeConfig[],
     private pollIntervalMs: number = 2000,
-    private batchSize: number = 10,
   ) {}
 
   start(): void {
@@ -249,35 +306,49 @@ export class RequestScheduler {
   }
 
   private async dispatch(): Promise<void> {
-    // Atomically claim up to batchSize pending requests, highest priority first
-    for (let i = 0; i < this.batchSize; i++) {
+    for (const wt of this.workerTypes) {
+      try {
+        await this.dispatchForWorkerType(wt);
+      } catch (err) {
+        console.error(`[Scheduler] Error dispatching for ${wt.workerType}:`, err);
+      }
+    }
+  }
+
+  private async dispatchForWorkerType(wt: WorkerTypeConfig): Promise<void> {
+    // How many are already queued (dispatched but not yet picked up by workers)?
+    const currentQueued = await this.collection.countDocuments({
+      workerType: wt.workerType,
+      status: "queued",
+      deletedAt: { $exists: false },
+    });
+
+    const slots = wt.targetQueueDepth - currentQueued;
+    if (slots <= 0) return;
+
+    for (let i = 0; i < slots; i++) {
       const claimed = await this.collection.findOneAndUpdate(
-        { status: "pending", deletedAt: { $exists: false } },
+        {
+          status: "pending",
+          workerType: wt.workerType,
+          deletedAt: { $exists: false },
+        },
         { $set: { status: "queued", updatedAt: new Date() } },
         { sort: { priority: -1, createdAt: 1 }, returnDocument: "after" }
       );
 
       if (!claimed) break;  // no more pending work
 
-      const queueClient = this.queueClients.get(claimed.workerType);
-      if (!queueClient) {
-        // No queue for this worker type — mark as failed
-        await this.collection.updateOne(
-          { _id: claimed._id },
-          { $set: { status: "done", outcome: "failed",
-                    error: `No queue for worker type: ${claimed.workerType}` } }
-        );
-        continue;
-      }
-
-      const message = Buffer.from(JSON.stringify({ requestId: claimed._id })).toString("base64");
-      await queueClient.sendMessage(message);
+      const message = Buffer.from(
+        JSON.stringify({ requestId: claimed._id })
+      ).toString("base64");
+      await wt.queueClient.sendMessage(message);
     }
   }
 }
 ```
 
-### Option B: Sidecar Scheduler (Phase 2, if needed)
+### Phase 2: Sidecar Scheduler (if needed)
 
 If the API process becomes a bottleneck, extract the scheduler into a standalone container:
 
@@ -304,7 +375,7 @@ Workers **do not need to understand priority or pause**. They continue to:
 3. Fetch document from MongoDB
 4. Process it
 
-The only addition: when a worker fetches a document and sees `status: "paused"`, it should **skip processing and re-queue the message** (or let the visibility timeout expire so it returns to the queue).
+The only addition: when a worker fetches a document and sees `status: "paused"`, it should **delete the message and skip processing**. The request stays in MongoDB as `paused` — the scheduler will re-dispatch it when resumed.
 
 ```typescript
 // In base-queue-processor.ts processMessage():
@@ -316,14 +387,10 @@ if (!doc) {
   return;
 }
 
-// NEW: Skip paused requests — let the message return to the queue
+// NEW: Skip paused requests — delete message, leave doc as paused
 if (doc.status === "paused") {
-  console.log(`[${this.workerName}] Request ${documentId} is paused, skipping`);
-  // Don't delete the message — visibility timeout will return it to the queue
-  // But update visibility to a short timeout so it's retried soon
-  await this.queueClient.updateMessage(
-    message.messageId, currentPopReceipt, "", 60 // retry in 60s
-  );
+  console.log(`[${this.workerName}] Request ${documentId} is paused, dropping queue message`);
+  await this.safeDeleteMessage(message.messageId, currentPopReceipt);
   return;
 }
 ```
@@ -339,10 +406,16 @@ If a request is paused while a worker is already processing it, the current run 
 ### New indexes required
 
 ```javascript
-// Priority scheduling query
+// Priority scheduling query (per worker type)
 db.requests.createIndex(
-  { status: 1, deletedAt: 1, priority: -1, createdAt: 1 },
+  { status: 1, workerType: 1, deletedAt: 1, priority: -1, createdAt: 1 },
   { name: "idx_scheduler_dispatch" }
+);
+
+// Queue depth count (per worker type)
+db.requests.createIndex(
+  { workerType: 1, status: 1, deletedAt: 1 },
+  { name: "idx_queue_depth_count" }
 );
 
 // Pause/resume by submissionId
@@ -421,13 +494,18 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 
 1. **Should pause cancel in-flight work?** Current proposal: no — only affects pending/queued. Cancelling a running coding agent is destructive. We could add a separate "cancel" action later.
 
-2. **Should priority be immutable after queued?** Current proposal: allow changing priority at any time for pending/queued requests (scheduler will pick up the new order). Processing requests are unaffected.
+2. **Should priority be immutable after queued?** Changing priority on a `queued` request has no effect until the message drains from the queue and the request returns to `pending` (e.g. via pause→resume). This is acceptable because the queue is kept shallow — messages spend seconds in it, not minutes. Priority changes on `pending` requests take effect immediately on the next scheduler tick.
 
 3. **Scheduler leader election**: If we run multiple API replicas, `findOneAndUpdate` ensures atomicity. But multiple schedulers polling the same collection increases load. Options:
-   - Single scheduler replica (Phase 3 sidecar)
+   - Single scheduler replica (Phase 2 sidecar)
    - Distributed lock (Redis `SET NX`)
    - Accept the overhead (MongoDB handles it fine at our scale)
 
-4. **Queue message TTL**: If a request is paused and its queue message keeps bouncing, it eventually hits the dequeue limit (5 by default). Should we increase the max dequeue count or delete the message on pause and re-enqueue on resume?
+4. **How to determine `targetQueueDepth` per worker type?** Options:
+   - **Static config**: set per worker type in environment variables (e.g. `SCHEDULER_DEPTH_CODER_ACP_COPILOT=5`). Simple, sufficient for Phase 1.
+   - **Dynamic from Kubernetes**: query replica count via K8s API or KEDA scaler metrics. More accurate, more complex.
+   - **Adaptive**: start with a small number (e.g. 2), increase if workers report idle time, decrease if queue depth grows. Most complex.
+   
+   Recommendation: static config for Phase 1.
 
 5. **Priority inheritance for resubmits**: When using `POST /api/v1/requests/bulk/resubmit`, should the new requests inherit the original priority? Proposal: yes, unless overridden in the resubmit body.
