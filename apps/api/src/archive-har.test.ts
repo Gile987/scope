@@ -406,20 +406,22 @@ describe("uploadBundledChatFiles", () => {
 
 describe("packRunIntoTar", () => {
   function makeMockBlobContainer(blobs: Record<string, { body: Buffer; length: number }> = {}): BlobDownloader {
+    function makeClientFor(blobName: string) {
+      return {
+        async download() {
+          const blob = blobs[blobName];
+          if (!blob) throw Object.assign(new Error("Not found"), { statusCode: 404, code: "BlobNotFound" });
+          const { Readable } = await import("stream");
+          return {
+            readableStreamBody: Readable.from(blob.body),
+            contentLength: blob.length,
+          };
+        },
+      };
+    }
     return {
-      getBlockBlobClient(blobName: string) {
-        return {
-          async download() {
-            const blob = blobs[blobName];
-            if (!blob) throw Object.assign(new Error("Not found"), { statusCode: 404, code: "BlobNotFound" });
-            const { Readable } = await import("stream");
-            return {
-              readableStreamBody: Readable.from(blob.body),
-              contentLength: blob.length,
-            };
-          },
-        };
-      },
+      getBlockBlobClient: makeClientFor,
+      getBlobClient: makeClientFor,
     };
   }
 

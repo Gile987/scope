@@ -217,6 +217,12 @@ export interface BlobDownloader {
       contentLength?: number;
     }>;
   };
+  getBlobClient(blobName: string): {
+    download(): Promise<{
+      readableStreamBody?: NodeJS.ReadableStream;
+      contentLength?: number;
+    }>;
+  };
 }
 
 /** A run document with the fields needed for archive packing. */
@@ -329,11 +335,14 @@ export async function packRunIntoTar(
     }
   }
 
-  // Bundle log events (run.jsonl) from the logs container
+  // Bundle log events (run.jsonl) from the logs container.
+  // Logs are stored as AppendBlobs, so use getBlobClient (type-agnostic) rather
+  // than getBlockBlobClient — the latter returns contentLength: undefined for
+  // append blobs, causing the entry to be silently skipped.
   if (logsContainer) {
     try {
       const logBlobName = `${resource._id}/run.jsonl`;
-      const blobClient = logsContainer.getBlockBlobClient(logBlobName);
+      const blobClient = logsContainer.getBlobClient(logBlobName);
       const downloadResponse = await blobClient.download();
       if (downloadResponse.readableStreamBody && downloadResponse.contentLength) {
         const entry = pack.entry({ name: `${id}/run.jsonl`, size: downloadResponse.contentLength });
