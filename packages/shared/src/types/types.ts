@@ -151,6 +151,20 @@ export interface RequestDocument {
   aiCallCount?: number;             // Total AI completion API calls for the run (sum across turns)
   rawChatUrl?: string;             // Blob storage URL to the raw chat transcript export (one-shot)
   rawChatFormat?: string;          // Format identifier for the raw chat export
+  /**
+   * Per-attempt mutable state (run-retry-attempts feature). Optional during
+   * the additive transition; later commits will populate this on every doc
+   * and remove the legacy top-level fields above.
+   *
+   * Migration 014 nests existing per-attempt fields under this object on
+   * deploy; new submissions should populate it on insert.
+   */
+  run?: RunState;
+  /**
+   * Total number of attempts that have been started for this request.
+   * Starts at 1 on initial submit and increments on every retry.
+   */
+  attemptCount?: number;
 }
 
 // Log event for real-time streaming and persistence

@@ -2002,6 +2002,10 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "aiCallCount": {
             "type": "number",
           },
+          "attemptCount": {
+            "minimum": 1,
+            "type": "integer",
+          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -2068,6 +2072,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "result": {
             "type": "string",
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunState",
           },
           "scenario": {
             "$ref": "#/components/schemas/Scenario",
@@ -2163,6 +2170,102 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "runIds",
           "aggregates",
           "uniform",
+        ],
+        "type": "object",
+      },
+      "RunState": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "aiCallCount": {
+            "type": "number",
+          },
+          "attemptNumber": {
+            "minimum": 1,
+            "type": "integer",
+          },
+          "error": {
+            "type": "string",
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "harUrl": {
+            "type": "string",
+          },
+          "outcome": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "finished",
+            ],
+            "type": "string",
+          },
+          "rawChatFormat": {
+            "type": "string",
+          },
+          "rawChatUrl": {
+            "type": "string",
+          },
+          "result": {
+            "type": "string",
+          },
+          "setupVideoUrls": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "processing",
+              "done",
+            ],
+            "type": "string",
+          },
+          "tokenUsage": {
+            "$ref": "#/components/schemas/TokenUsage",
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationTurn",
+            },
+            "type": "array",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "videoUrls": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "workerVersion": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "_id",
+          "attemptNumber",
+          "status",
         ],
         "type": "object",
       },

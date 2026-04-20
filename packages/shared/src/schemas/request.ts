@@ -127,6 +127,13 @@ export const RequestResponseSchema = z
     submissionId: z.string().optional(),
     rawChatUrl: z.string().optional(),
     rawChatFormat: z.string().optional(),
+    // Run-retry-attempts: nested per-attempt state. Optional during the
+    // additive transition; later commits will tighten this and remove
+    // the legacy top-level fields above.
+    run: z
+      .lazy(() => RunStateSchema)
+      .optional(),
+    attemptCount: z.number().int().min(1).optional(),
   })
   .openapi("RequestResponse");
 

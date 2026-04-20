@@ -38,6 +38,7 @@ import type {
   ReportTemplateDocument,
   InsightDocument,
   RequestDocument,
+  RunHistoryDocument,
   CodingAgentDocument,
   ModelDocument,
   McpServerDocument,
@@ -73,6 +74,7 @@ const port = parseInt(process.env.PORT || "3000", 10);
 let mongoClient: MongoClient;
 let db: Db;
 let collection: Collection<RequestDocument>;
+let runsCol: Collection<RunHistoryDocument>;
 let criteriaCollection: Collection<CriteriaDocument>;
 let promptFeatureCollection: Collection<PromptFeatureDocument>;
 let promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
@@ -102,6 +104,7 @@ async function initializeClients(): Promise<void> {
   await mongoClient.connect();
   db = mongoClient.db(mongoDatabase);
   collection = db.collection<RequestDocument>(mongoCollection);
+  runsCol = db.collection<RunHistoryDocument>("runs");
   criteriaCollection = db.collection<CriteriaDocument>("criteria");
   promptFeatureCollection = db.collection<PromptFeatureDocument>("prompt-features");
   promptFeatureExtractionCollection = db.collection<PromptFeatureExtractionDocument>("prompt-feature-extractions");
@@ -227,6 +230,7 @@ const routeCtx: RouteContext = {
   get registry() { return registry; },
   get db() { return db; },
   get requestCollection() { return collection; },
+  get runsCollection() { return runsCol; },
   get criteriaCollection() { return criteriaCollection; },
   get promptFeatureCollection() { return promptFeatureCollection; },
   get promptFeatureExtractionCollection() { return promptFeatureExtractionCollection; },

@@ -34,6 +34,7 @@ import type {
   ReportTriggerSchema,
   ReportTemplateResponseSchema,
   RequestResponseSchema,
+  RunHistoryDocumentSchema,
 } from "shared";
 
 // ─── Document types (inferred from Zod schemas) ─────────────────────────────
@@ -56,6 +57,7 @@ export type ReportTrigger = z.infer<typeof ReportTriggerSchema>;
 // Omit _id — MongoDB auto-generates it; the document type only uses `id`
 export type ReportTemplateDocument = Omit<z.infer<typeof ReportTemplateResponseSchema>, "_id">;
 export type RequestDocument = z.infer<typeof RequestResponseSchema>;
+export type RunHistoryDocument = z.infer<typeof RunHistoryDocumentSchema>;
 
 export const VALID_WORKERS = [
   "coder-acp-claude-code",
@@ -77,6 +79,7 @@ export interface RouteContext {
   // MongoDB
   db: Db;
   requestCollection: Collection<RequestDocument>;
+  runsCollection: Collection<RunHistoryDocument>;
   criteriaCollection: Collection<CriteriaDocument>;
   promptFeatureCollection: Collection<PromptFeatureDocument>;
   promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
