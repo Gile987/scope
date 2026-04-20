@@ -316,14 +316,11 @@ export class RequestScheduler {
   }
 
   private async dispatchForWorkerType(wt: WorkerTypeConfig): Promise<void> {
-    // How many are already queued (dispatched but not yet picked up by workers)?
-    const currentQueued = await this.collection.countDocuments({
-      workerType: wt.workerType,
-      status: "queued",
-      deletedAt: { $exists: false },
-    });
+    // Use the actual Azure queue depth — not MongoDB — as the source of truth
+    const properties = await wt.queueClient.getProperties();
+    const currentDepth = properties.approximateMessagesCount ?? 0;
 
-    const slots = wt.targetQueueDepth - currentQueued;
+    const slots = wt.targetQueueDepth - currentDepth;
     if (slots <= 0) return;
 
     for (let i = 0; i < slots; i++) {
@@ -412,12 +409,6 @@ db.requests.createIndex(
   { name: "idx_scheduler_dispatch" }
 );
 
-// Queue depth count (per worker type)
-db.requests.createIndex(
-  { workerType: 1, status: 1, deletedAt: 1 },
-  { name: "idx_queue_depth_count" }
-);
-
 // Pause/resume by submissionId
 db.requests.createIndex(
   { submissionId: 1, status: 1 },
@@ -501,11 +492,4 @@ For CosmosDB: these map to composite indexes in the indexing policy.
    - Distributed lock (Redis `SET NX`)
    - Accept the overhead (MongoDB handles it fine at our scale)
 
-4. **How to determine `targetQueueDepth` per worker type?** Options:
-   - **Static config**: set per worker type in environment variables (e.g. `SCHEDULER_DEPTH_CODER_ACP_COPILOT=5`). Simple, sufficient for Phase 1.
-   - **Dynamic from Kubernetes**: query replica count via K8s API or KEDA scaler metrics. More accurate, more complex.
-   - **Adaptive**: start with a small number (e.g. 2), increase if workers report idle time, decrease if queue depth grows. Most complex.
-   
-   Recommendation: static config for Phase 1.
-
-5. **Priority inheritance for resubmits**: When using `POST /api/v1/requests/bulk/resubmit`, should the new requests inherit the original priority? Proposal: yes, unless overridden in the resubmit body.
+4. **Priority inheritance for resubmits**: When using `POST /api/v1/requests/bulk/resubmit`, should the new requests inherit the original priority? Proposal: yes, unless overridden in the resubmit body.
