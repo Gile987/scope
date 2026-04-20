@@ -64,8 +64,25 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
     currentPopReceipt: string,
-    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+    payload?: Record<string, unknown>,
   ): Promise<void> {
+    // Run-retry-attempts: verify the message targets the request's CURRENT run.
+    // If a retry has since started a new attempt, this message is stale and
+    // must be discarded so we don't clobber the new run's state.
+    const messageRunId = typeof payload?.runId === "string" ? payload.runId : undefined;
+    const currentRunId = requestDoc.run?._id;
+    if (messageRunId && currentRunId && messageRunId !== currentRunId) {
+      console.log(
+        `[${this.workerName}] Stale message for ${requestDoc._id}: runId=${messageRunId} but current=${currentRunId} \u2014 discarding`,
+      );
+      await log("warn", `Stale queue message discarded (runId mismatch)`, {
+        messageRunId,
+        currentRunId,
+      });
+      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      return;
+    }
     // Resolve MCP server slugs to configs via API
     let mcpServerConfigs: McpServerConfig[] | undefined;
     if (requestDoc.mcpServers && requestDoc.mcpServers.length > 0) {
@@ -218,11 +235,22 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       throw new Error("JUDGE_SERVICE_URL is not configured but request has criteria to evaluate");
     }
 
-    // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution)
+    // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution).
+    // Write to run.* (run-retry-attempts) plus a top-level updatedAt for index freshness.
     const versionFields = this.getVersionFields();
     await withRetry(() => this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "processing", turns: [], updatedAt: new Date(), ...versionFields } }
+      {
+        $set: {
+          "run.status": "processing",
+          "run.startedAt": new Date(),
+          "run.updatedAt": new Date(),
+          "run.turns": [],
+          "run.workerVersion": versionFields.workerVersion,
+          "run.os": versionFields.os,
+          updatedAt: new Date(),
+        },
+      }
     ));
 
     // Extend queue message visibility for long-running multi-turn.
@@ -274,7 +302,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           if (setupVideoUrls.length > 0) {
             await withRetry(() => this.collection.updateOne(
               { _id: requestId },
-              { $set: { setupVideoUrls, updatedAt: new Date() } }
+              { $set: { "run.setupVideoUrls": setupVideoUrls, "run.updatedAt": new Date(), updatedAt: new Date() } }
             ));
           }
         } catch (uploadError) {
@@ -310,13 +338,14 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         skillConfigs,
         extensionConfigs,
         onTurnComplete: async (turn: ConversationTurn) => {
-          // Persist each turn incrementally to MongoDB (retry on CosmosDB 429)
+          // Persist each turn incrementally to MongoDB (retry on CosmosDB 429).
+          // Push to run.turns (run-retry-attempts shape).
           await withRetry(() => this.collection.updateOne(
             { _id: requestId },
             {
-              $push: { turns: turn },
-              $set: { updatedAt: new Date() },
-            }
+              $push: { "run.turns": turn },
+              $set: { "run.updatedAt": new Date(), updatedAt: new Date() },
+            } as any
           ));
         },
       });
@@ -347,12 +376,14 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       { _id: requestId },
       {
         $set: {
-          status: finalStatus,
-          outcome: finalOutcome,
-          result: result.finalResult,
+          "run.status": finalStatus,
+          "run.outcome": finalOutcome,
+          "run.result": result.finalResult,
+          "run.finishedAt": new Date(),
+          "run.updatedAt": new Date(),
           updatedAt: new Date(),
-          ...(totalAiCallCount > 0 && { aiCallCount: totalAiCallCount }),
-          ...(result.passed ? {} : { error: result.finalResult }),
+          ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
+          ...(result.passed ? {} : { "run.error": result.finalResult }),
         },
       }
     ));
