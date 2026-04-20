@@ -165,7 +165,89 @@ export interface LogEvent {
 // Queue message payload
 export interface QueueMessagePayload {
   requestId: string;
+  /**
+   * Optional run ID that identifies a specific attempt within the request.
+   *
+   * When set (post run-retry-attempts rollout), workers should verify that
+   * the message's `runId` matches `request.run._id` before processing — if
+   * it doesn't, the message is stale (a retry has since started a new
+   * attempt) and should be acked and discarded.
+   *
+   * When omitted, treat as targeting the current `request.run`.
+   */
+  runId?: string;
 }
+
+/**
+ * RunState — represents one execution attempt of a request.
+ *
+ * Per-attempt mutable state is split out from RequestDocument so retries can
+ * preserve a history of previous attempts (in the `runs` collection) while the
+ * request itself keeps its stable identity and immutable configuration.
+ *
+ * The current (latest) attempt is embedded in the request document as
+ * `RequestDocument.run`. When a request is retried, the previous `run` is
+ * snapshotted to the `runs` collection (as a RunHistoryDocument) and a fresh
+ * RunState is created for the new attempt.
+ *
+ * `_id` is unique per attempt — when demoted to history it becomes the
+ * `runs` collection's document `_id`. Reusing the request's `_id` for the
+ * first attempt's `RunState._id` keeps existing artifact blob paths
+ * (`{runId}/iteration-N/...`) valid without rewriting blob storage.
+ */
+export interface RunState {
+  _id: string;                              // Unique per attempt
+  attemptNumber: number;                    // 1, 2, 3…
+  status: "pending" | "processing" | "done";
+  outcome?: "succeeded" | "failed" | "finished";
+  result?: string;
+  error?: string;
+  updatedAt?: Date;
+  startedAt?: Date;                         // When worker picked up this attempt
+  finishedAt?: Date;                        // When this attempt reached "done"
+  turns?: ConversationTurn[];
+  workerVersion?: string;
+  os?: OsInfo;
+  harUrl?: string;
+  videoUrls?: string[];
+  setupVideoUrls?: string[];
+  tokenUsage?: TokenUsage;
+  aiCallCount?: number;
+  rawChatUrl?: string;
+  rawChatFormat?: string;
+}
+
+/**
+ * RunHistoryDocument — a previously-completed attempt stored in the `runs`
+ * collection. Same shape as RunState plus a back-reference to its request.
+ */
+export interface RunHistoryDocument extends RunState {
+  requestId: string;                        // FK → RequestDocument._id
+}
+
+/**
+ * Field names whose values move from `RequestDocument` (top-level, legacy
+ * shape) into `RequestDocument.run: RunState` (new shape introduced for
+ * the run-retry-attempts feature). Useful for migration scripts and
+ * compat code paths.
+ */
+export const RUN_STATE_FIELD_NAMES = [
+  "status",
+  "outcome",
+  "result",
+  "error",
+  "updatedAt",
+  "turns",
+  "workerVersion",
+  "os",
+  "harUrl",
+  "videoUrls",
+  "setupVideoUrls",
+  "tokenUsage",
+  "aiCallCount",
+  "rawChatUrl",
+  "rawChatFormat",
+] as const;
 
 // Options passed to worker processor
 export interface WorkerProcessorOptions {

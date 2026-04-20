@@ -130,6 +130,53 @@ export const RequestResponseSchema = z
   })
   .openapi("RequestResponse");
 
+/**
+ * RunStateSchema — represents one execution attempt of a request.
+ *
+ * Per-attempt state is split out from RequestDocument so that retries can
+ * preserve the history of previous attempts (in the `runs` collection) while
+ * the request itself keeps its stable identity and immutable configuration.
+ *
+ * The current (latest) attempt is embedded in the request document as
+ * `RequestDocument.run`. When a request is retried, the previous `run` is
+ * snapshotted to the `runs` collection (as a RunHistoryDocument) and a fresh
+ * RunState is created for the new attempt.
+ *
+ * RunState `_id` is unique per attempt — when demoted to history it becomes
+ * the `runs` collection's document `_id`.
+ */
+export const RunStateSchema = z
+  .object({
+    _id: z.string(),                                     // Unique per attempt
+    attemptNumber: z.number().int().min(1),              // 1, 2, 3…
+    status: RequestStatusSchema,
+    outcome: RequestOutcomeSchema.optional(),
+    result: z.string().optional(),
+    error: z.string().optional(),
+    updatedAt: z.coerce.date().optional(),
+    startedAt: z.coerce.date().optional(),               // When worker picked up this attempt
+    finishedAt: z.coerce.date().optional(),              // When this attempt reached "done"
+    turns: z.array(ConversationTurnSchema).optional(),
+    workerVersion: z.string().optional(),
+    harUrl: z.string().optional(),
+    videoUrls: z.array(z.string()).optional(),
+    setupVideoUrls: z.array(z.string()).optional(),
+    tokenUsage: TokenUsageSchema.optional(),
+    aiCallCount: z.number().optional(),
+    rawChatUrl: z.string().optional(),
+    rawChatFormat: z.string().optional(),
+  })
+  .openapi("RunState");
+
+/**
+ * RunHistoryDocumentSchema — a previously-completed attempt stored in the
+ * `runs` collection for history. Same shape as RunState plus a back-reference
+ * to the parent request.
+ */
+export const RunHistoryDocumentSchema = RunStateSchema.extend({
+  requestId: z.string(),
+}).openapi("RunHistoryDocument");
+
 export const ListRequestsQuerySchema = z
   .object({
     worker: z.string().optional(),
