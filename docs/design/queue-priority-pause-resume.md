@@ -474,10 +474,17 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 
 ### Phase 3: Portal UI
 
-- [ ] Add priority selector to submission form
-- [ ] Add pause/resume buttons to submission list & detail views
-- [ ] Show priority badge on request cards
+- [ ] Add priority selector to submission form (set priority at submit time)
+- [ ] Add pause/resume action buttons on submission list rows and detail view
+- [ ] Add pause/resume action buttons on individual request rows
+- [ ] Add priority change control on submission detail view (dropdown or input to call `PATCH .../priority`)
+- [ ] Add priority change control on individual request detail view
+- [ ] Show priority badge/column on request and submission lists
 - [ ] Add "paused" status chip styling
+- [ ] Add "queued" status chip styling (new status)
+- [ ] Disable pause/resume buttons for terminal states (`done`) and `processing`
+- [ ] Show confirmation dialog when pausing a submission with in-flight (`processing`) requests, explaining those will complete
+- [ ] Wire SSE log stream to show pause/resume events in the request log viewer
 
 ---
 
