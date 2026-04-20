@@ -60,6 +60,12 @@ const upload = multer({ dest: tmpdir() });
 
 interface QueueMessage {
   requestId: string;
+  /**
+   * The run id (attempt id) this message targets. Workers must verify this
+   * matches `request.run._id` before processing — otherwise the message is
+   * stale (a retry has since started a new attempt) and should be discarded.
+   */
+  runId?: string;
 }
 
 // Submit a request
@@ -375,10 +381,14 @@ apiRoute(ctx.app, ctx.registry, {
           ...(profileId ? { profileId } : {}),
           ...(profileVersionId ? { profileVersionId } : {}),
           submissionId,
+          // Initial attempt: run._id reuses request _id so artifact blob
+          // paths ({runId}/iteration-N/...) remain stable across retries.
+          run: { _id: requestId, attemptNumber: 1, status: "pending" },
+          attemptCount: 1,
         };
         newDocs.push(requestDoc);
 
-        const queueMessage: QueueMessage = { requestId };
+        const queueMessage: QueueMessage = { requestId, runId: requestId };
         const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
         queueMessages.push(messageContent);
       }
@@ -433,13 +443,17 @@ apiRoute(ctx.app, ctx.registry, {
       ...(profileId ? { profileId } : {}),
       ...(profileVersionId ? { profileVersionId } : {}),
       submissionId,
+      // Initial attempt: run._id reuses request _id so artifact blob
+      // paths ({runId}/iteration-N/...) remain stable across retries.
+      run: { _id: requestId, attemptNumber: 1, status: "pending" },
+      attemptCount: 1,
     };
 
     // Store in MongoDB
     await ctx.requestCollection.insertOne(requestDoc);
 
     // Queue the request for the appropriate worker
-    const queueMessage: QueueMessage = { requestId };
+    const queueMessage: QueueMessage = { requestId, runId: requestId };
     const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
     await queueClient.sendMessage(messageContent);
 
@@ -1115,11 +1129,16 @@ apiRoute(ctx.app, ctx.registry, {
           ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
           ...(effectiveProfileVersionId ? { profileVersionId: effectiveProfileVersionId } : {}),
           submissionId,
+          // Bulk re-submit creates a brand-new request — first attempt's
+          // run._id reuses the new request _id (artifact paths are
+          // independent of the original run).
+          run: { _id: requestId, attemptNumber: 1, status: "pending" },
+          attemptCount: 1,
         };
 
         newDocs.push(newDoc);
 
-        const queueMessage: QueueMessage = { requestId };
+        const queueMessage: QueueMessage = { requestId, runId: requestId };
         const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
         queueMessages.push({ workerType: effectiveWorkerType as WorkerType, message: messageContent });
       }
@@ -1874,6 +1893,24 @@ apiRoute(ctx.app, ctx.registry, {
       ...(runDoc.harUrl ? { harUrl: runDoc.harUrl } : {}),
       ...(runDoc.rawChatUrl ? { rawChatUrl: runDoc.rawChatUrl } : {}),
       ...(runDoc.rawChatFormat ? { rawChatFormat: runDoc.rawChatFormat } : {}),
+      // Uploaded archive represents a single (already-finished) attempt.
+      // Mirror the canonical run shape so downstream code can read run.* uniformly.
+      run: {
+        _id: runDoc._id,
+        attemptNumber: 1,
+        status: runDoc.status,
+        ...(runDoc.outcome ? { outcome: runDoc.outcome } : {}),
+        ...(runDoc.result ? { result: runDoc.result } : {}),
+        ...(runDoc.error ? { error: runDoc.error } : {}),
+        ...(runDoc.harUrl ? { harUrl: runDoc.harUrl } : {}),
+        ...(runDoc.rawChatUrl ? { rawChatUrl: runDoc.rawChatUrl } : {}),
+        ...(runDoc.rawChatFormat ? { rawChatFormat: runDoc.rawChatFormat } : {}),
+        turns: turns.map((t: any) => ({
+          ...t,
+          timestamp: t.timestamp ? new Date(t.timestamp as string) : new Date(),
+        })),
+      },
+      attemptCount: 1,
     };
 
     // Insert into MongoDB
