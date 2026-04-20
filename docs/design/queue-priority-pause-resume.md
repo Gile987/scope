@@ -69,7 +69,7 @@ Instead of replacing Azure Storage Queue, we **layer priority and pause/resume o
                                 │
                     ┌───────────▼──────────────────┐
                     │   Scheduler / Dispatcher     │
-                    │   (runs in API or sidecar)   │
+                    │   (standalone service)       │
                     │                              │
                     │   1. Query pending requests   │
                     │      ORDER BY priority DESC,  │
@@ -244,44 +244,28 @@ The scheduler therefore operates as a **throttled valve**: it dispatches only as
 
 ### Queue Depth Target
 
-The scheduler maintains a **target queue depth per worker type** — the maximum number of `queued` (dispatched but not yet processing) requests at any time.
+The scheduler maintains a **target queue depth per worker type** — a plain static config value:
 
+```bash
+SCHEDULER_QUEUE_DEPTH_CODER_ACP_COPILOT=5
+SCHEDULER_QUEUE_DEPTH_CODER_ACP_CLAUDE_CODE=3
+SCHEDULER_QUEUE_DEPTH_REPORT_GENERATOR=2
 ```
-targetQueueDepth = concurrencyPerWorkerType × bufferMultiplier
-```
 
-| Parameter | Default | Meaning |
-|-----------|---------|---------|
-| `concurrencyPerWorkerType` | Configured per worker type, or discovered from replica count | How many requests a worker type can process in parallel |
-| `bufferMultiplier` | `1.5` | Small buffer so workers don't starve between scheduler ticks |
+Set it to a small number, observe, adjust. If you scale worker replicas, bump the config. The exact value matters less than keeping it small — what matters is it's not 500.
 
-**Example**: If `coder-acp-copilot` has 3 replicas, each processing 1 request at a time → `concurrency = 3`, `targetQueueDepth = ceil(3 × 1.5) = 5`. The scheduler will only dispatch new messages when the current `queued` count for that worker type drops below 5.
-
-### Dispatch Algorithm
-
-```
-for each workerType:
-  currentQueued = count({ status: "queued", workerType })
-  slots = targetQueueDepth[workerType] - currentQueued
-
-  if slots <= 0: continue  // queue is full enough
-
-  for i in 0..slots:
-    claimed = findOneAndUpdate(
-      { status: "pending", workerType, deletedAt: null },
-      { $set: { status: "queued", updatedAt: now } },
-      { sort: { priority: -1, createdAt: 1 } }
-    )
-    if !claimed: break  // no more pending work for this worker type
-    sendToQueue(claimed)
-```
+The scheduler reads the **actual Azure Storage Queue message count** via `getProperties().approximateMessagesCount` to decide how many slots are available. This is a cheap metadata call, not a message read.
 
 This ensures:
 - **Priority takes effect quickly**: when a high-priority request arrives, it gets dispatched on the next tick (within seconds), ahead of lower-priority pending requests — because the queue only has a few messages in it.
 - **Pause takes effect immediately**: only `pending` requests can be paused, and the scheduler only picks from `pending` — so a paused request is never dispatched.
 - **Priority changes are respected**: if you bump a pending request's priority, the next scheduler tick will pick it up in the new order.
 
-### Scheduler Implementation (Phase 1: In-Process)
+### Scheduler Service
+
+The scheduler runs as a **standalone service** (its own Kubernetes Deployment, 1 replica). It has its own health check endpoint and connects to MongoDB and Azure Storage Queue directly. It does not run inside the API process.
+
+This keeps the API stateless and focused on request handling. The scheduler is a single writer to the queue, making its behavior easy to reason about (no leader election needed with 1 replica).
 
 ```typescript
 // packages/shared/src/queue/request-scheduler.ts
@@ -348,14 +332,6 @@ export class RequestScheduler {
   }
 }
 ```
-
-### Phase 2: Sidecar Scheduler (if needed)
-
-If the API process becomes a bottleneck, extract the scheduler into a standalone container:
-
-- Separate Kubernetes Deployment (1 replica with leader election)
-- Same logic, own health check endpoint
-- Allows independent scaling and deployment
 
 ### Why `findOneAndUpdate` with sort?
 
@@ -428,10 +404,9 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 
 | Phase | Scope | Risk |
 |-------|-------|------|
-| **Phase 1: Priority only** | Add `priority` to `RequestDocument`, modify submit endpoint, add `sortBy=priority` to list. Scheduler loop in API. | Low — additive change, existing requests get priority=0 |
+| **Phase 1: Priority + Scheduler** | Add `priority` to `RequestDocument`, scheduler service, modify submit to insert-only (no direct queue send). | Low — additive change, existing requests get priority=0 |
 | **Phase 2: Pause/Resume** | Add `paused` status, pause/resume endpoints, worker skip logic | Medium — new state transitions, need UI integration |
-| **Phase 3: Scheduler extraction** | Move scheduler to sidecar if API load requires it | Low — same logic, different process |
-| **Phase 4: Portal UI** | Priority selector on submit form, pause/resume buttons on submission list | Low — frontend only |
+| **Phase 3: Portal UI** | Priority selector on submit form, pause/resume buttons on submission list | Low — frontend only |
 
 ---
 
@@ -444,7 +419,8 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 - [ ] Create database migration to add `priority` default and composite index
 - [ ] Modify `POST /api/v1/requests` to accept `priority` body param
 - [ ] Implement `RequestScheduler` class in `packages/shared/src/queue/`
-- [ ] Integrate scheduler startup in API `app.ts`
+- [ ] Create scheduler service entry point (`apps/scheduler/`) with health check
+- [ ] Add Dockerfile and Kubernetes Deployment manifest for scheduler
 - [ ] Modify API submit flow: insert as `pending` (don't send to queue directly)
 - [ ] Add `PATCH /api/v1/requests/:id/priority` endpoint
 - [ ] Add `PATCH /api/v1/submissions/:id/priority` endpoint
@@ -486,9 +462,4 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 
 1. **Should priority be immutable after queued?** Changing priority on a `queued` request has no effect until the message drains from the queue and the request returns to `pending` (e.g. via pause→resume). This is acceptable because the queue is kept shallow — messages spend seconds in it, not minutes. Priority changes on `pending` requests take effect immediately on the next scheduler tick.
 
-3. **Scheduler leader election**: If we run multiple API replicas, `findOneAndUpdate` ensures atomicity. But multiple schedulers polling the same collection increases load. Options:
-   - Single scheduler replica (Phase 2 sidecar)
-   - Distributed lock (Redis `SET NX`)
-   - Accept the overhead (MongoDB handles it fine at our scale)
-
-4. **Priority inheritance for resubmits**: When using `POST /api/v1/requests/bulk/resubmit`, should the new requests inherit the original priority? Proposal: yes, unless overridden in the resubmit body.
+2. **Priority inheritance for resubmits**: When using `POST /api/v1/requests/bulk/resubmit`, should the new requests inherit the original priority? Proposal: yes, unless overridden in the resubmit body.
