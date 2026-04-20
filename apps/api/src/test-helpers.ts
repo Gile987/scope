@@ -178,6 +178,7 @@ export function createMockBlobStorage(): BlobStorage {
 export function createAllMockDependencies() {
   const db = createMockDb();
   const collection = createMockCollection();
+  const runsCollection = createMockCollection();
   const criteriaCollection = createMockCollection();
   const promptFeatureCollection = createMockCollection();
   const promptFeatureExtractionCollection = createMockCollection();
@@ -206,6 +207,7 @@ export function createAllMockDependencies() {
   return {
     db,
     collection,
+    runsCollection,
     criteriaCollection,
     promptFeatureCollection,
     promptFeatureExtractionCollection,
@@ -231,6 +233,7 @@ export function createAllMockDependencies() {
     // Expose typed mocks for fine-grained stubbing
     db: ReturnType<typeof createMockDb>;
     collection: Collection;
+    runsCollection: Collection;
     criteriaCollection: Collection;
     promptFeatureCollection: Collection;
     promptFeatureExtractionCollection: Collection;

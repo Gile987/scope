@@ -312,6 +312,7 @@ export { app };
 export interface TestDependencies {
   db?: Db;
   collection?: Collection<RequestDocument>;
+  runsCollection?: Collection<RunHistoryDocument>;
   criteriaCollection?: Collection<CriteriaDocument>;
   promptFeatureCollection?: Collection<PromptFeatureDocument>;
   promptFeatureExtractionCollection?: Collection<PromptFeatureExtractionDocument>;
@@ -339,6 +340,7 @@ export interface TestDependencies {
 export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.db) db = deps.db;
   if (deps.collection) collection = deps.collection;
+  if (deps.runsCollection) runsCol = deps.runsCollection;
   if (deps.criteriaCollection) criteriaCollection = deps.criteriaCollection;
   if (deps.promptFeatureCollection) promptFeatureCollection = deps.promptFeatureCollection;
   if (deps.promptFeatureExtractionCollection) promptFeatureExtractionCollection = deps.promptFeatureExtractionCollection;

@@ -6867,6 +6867,148 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/{id}/retry": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {},
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "attemptCount": {
+                      "type": "integer",
+                    },
+                    "attemptNumber": {
+                      "type": "integer",
+                    },
+                    "requestId": {
+                      "type": "string",
+                    },
+                    "runId": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "requestId",
+                    "runId",
+                    "attemptNumber",
+                    "attemptCount",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Request not found",
+          },
+          "409": {
+            "description": "Conflict — request is not in a retryable state, or a concurrent retry won the race",
+          },
+          "422": {
+            "description": "Cannot retry — current run not yet terminal",
+          },
+        },
+        "summary": "Retry a request (start a new attempt)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {},
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Request not found",
+          },
+        },
+        "summary": "List attempts for a request",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Request or run not found",
+          },
+        },
+        "summary": "Get a single attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/{id}/snapshots/{iteration}": {
       "get": {
         "parameters": [

@@ -53,6 +53,8 @@ import {
 } from "../archive-har.js";
 import { subscribeClient, unsubscribeClient } from "../utils/sse.js";
 import type { SSEClient } from "../utils/sse.js";
+import { insertHistoricalRun, listHistoricalRuns, getHistoricalRun } from "../runs-repo.js";
+import type { RunState } from "shared";
 
 /**
  * Build an archive view of a request that exposes per-attempt fields
@@ -1994,6 +1996,208 @@ apiRoute(ctx.app, ctx.registry, {
     } catch (error) {
       next(error);
     }
+  },
+});
+
+// ─── Run-retry-attempts endpoints (issue #658) ────────────────────────────
+
+// List all attempts for a request — current run (inline) + history (runs col),
+// newest first.
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/runs",
+  tags: ["Requests"],
+  summary: "List attempts for a request",
+  params: z.object({ id: z.string() }),
+  response: z.array(z.any()),
+  errorResponses: { 404: { description: "Request not found" } },
+  handler: async (req, res) => {
+    const { id } = req.params;
+    const request = await ctx.requestCollection.findOne({ _id: id });
+    if (!request) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+    const history = await listHistoricalRuns({ runsCollection: ctx.runsCollection }, id);
+    const current = request.run ? [request.run] : [];
+    // Combine current + history; current is always the highest attemptNumber
+    res.json([...current, ...history]);
+  },
+});
+
+// Get a single attempt by run id — checks current run first, then history.
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/runs/:runId",
+  tags: ["Requests"],
+  summary: "Get a single attempt",
+  params: z.object({ id: z.string(), runId: z.string() }),
+  response: z.any(),
+  errorResponses: { 404: { description: "Request or run not found" } },
+  handler: async (req, res) => {
+    const { id, runId } = req.params;
+    const request = await ctx.requestCollection.findOne({ _id: id });
+    if (!request) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+    if (request.run?._id === runId) {
+      res.json(request.run);
+      return;
+    }
+    const historical = await getHistoricalRun({ runsCollection: ctx.runsCollection }, runId);
+    if (!historical || historical.requestId !== id) {
+      res.status(404).json({ error: "Run not found for this request" });
+      return;
+    }
+    res.json(historical);
+  },
+});
+
+// Retry a failed (or otherwise terminal) request — demotes the current run
+// to the history collection, creates a fresh attempt, and re-queues.
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/:id/retry",
+  tags: ["Requests"],
+  summary: "Retry a request (start a new attempt)",
+  params: z.object({ id: z.string() }),
+  body: z.object({}).optional(),
+  response: z.object({
+    requestId: z.string(),
+    runId: z.string(),
+    attemptNumber: z.number().int(),
+    attemptCount: z.number().int(),
+  }),
+  errorResponses: {
+    404: { description: "Request not found" },
+    409: { description: "Conflict — request is not in a retryable state, or a concurrent retry won the race" },
+    422: { description: "Cannot retry — current run not yet terminal" },
+  },
+  handler: async (req, res) => {
+    const { id } = req.params;
+
+    const request = await ctx.requestCollection.findOne({ _id: id });
+    if (!request) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+    if (request.deletedAt) {
+      res.status(409).json({ error: "Cannot retry a deleted request" });
+      return;
+    }
+
+    // The retry contract requires that the current attempt has reached a
+    // terminal state. Use the run.* shape if present; fall back to the
+    // legacy top-level shape for any unmigrated doc.
+    const currentRun: RunState | undefined = request.run;
+    const currentStatus = currentRun?.status ?? request.status;
+    if (currentStatus !== "done") {
+      res.status(422).json({
+        error: `Cannot retry: current run status is '${currentStatus}', expected 'done'`,
+      });
+      return;
+    }
+
+    // If there's no nested run yet (legacy doc that the migration somehow
+    // missed), synthesise one from the top-level fields so we can demote it.
+    const runToDemote: RunState = currentRun ?? {
+      _id: request._id,
+      attemptNumber: 1,
+      status: request.status,
+      ...(request.outcome ? { outcome: request.outcome } : {}),
+      ...(request.result ? { result: request.result } : {}),
+      ...(request.error ? { error: request.error } : {}),
+      ...(request.turns ? { turns: request.turns } : {}),
+      ...(request.workerVersion ? { workerVersion: request.workerVersion } : {}),
+      ...(request.harUrl ? { harUrl: request.harUrl } : {}),
+      ...(request.videoUrls ? { videoUrls: request.videoUrls } : {}),
+      ...(request.setupVideoUrls ? { setupVideoUrls: request.setupVideoUrls } : {}),
+      ...(request.tokenUsage ? { tokenUsage: request.tokenUsage } : {}),
+      ...(request.aiCallCount !== undefined ? { aiCallCount: request.aiCallCount } : {}),
+      ...(request.rawChatUrl ? { rawChatUrl: request.rawChatUrl } : {}),
+      ...(request.rawChatFormat ? { rawChatFormat: request.rawChatFormat } : {}),
+    };
+
+    const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
+    const newRunId = uuidv4();
+    const newAttemptCount = (request.attemptCount ?? 1) + 1;
+    const newRun: RunState = {
+      _id: newRunId,
+      attemptNumber: newAttemptNumber,
+      status: "pending",
+    };
+
+    // 1. Insert the demoted run into the history collection FIRST. If the
+    //    request update fails afterwards we have a duplicate-history-entry
+    //    risk on retry, but never history loss. Insert is idempotent on _id.
+    try {
+      await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote);
+    } catch (err: any) {
+      // Duplicate key (already in history) is fine — proceed.
+      if (err?.code !== 11000) throw err;
+    }
+
+    // 2. Atomically swap the current run on the request, gated on its _id
+    //    so concurrent retries fail fast with a 409.
+    const updateResult = await ctx.requestCollection.updateOne(
+      { _id: id, "run._id": runToDemote._id },
+      {
+        $set: {
+          run: newRun,
+          updatedAt: new Date(),
+        },
+        $inc: { attemptCount: newAttemptCount - (request.attemptCount ?? 1) },
+        // Clear legacy top-level per-attempt fields so reads via the
+        // backward-compat fallbacks see a clean slate for the new attempt.
+        $unset: {
+          status: "",
+          outcome: "",
+          result: "",
+          error: "",
+          turns: "",
+          workerVersion: "",
+          harUrl: "",
+          videoUrls: "",
+          setupVideoUrls: "",
+          tokenUsage: "",
+          aiCallCount: "",
+          rawChatUrl: "",
+          rawChatFormat: "",
+        },
+      },
+    );
+
+    if (updateResult.matchedCount === 0) {
+      // Either the request vanished (deleted) or someone else retried first.
+      res.status(409).json({
+        error: "Retry race lost — another retry started a new attempt first",
+      });
+      return;
+    }
+
+    // 3. Enqueue the new attempt. Workers MUST verify runId matches the
+    //    current request.run._id before processing.
+    const queueClient = ctx.queueClients.get(request.workerType as WorkerType);
+    if (!queueClient) {
+      res.status(500).json({ error: `No queue configured for worker '${request.workerType}'` });
+      return;
+    }
+    const message = Buffer.from(
+      JSON.stringify({ requestId: id, runId: newRunId } satisfies QueueMessage),
+    ).toString("base64");
+    await queueClient.sendMessage(message);
+
+    console.log(
+      `Retried request ${id}: attempt ${newAttemptNumber} (runId=${newRunId}), demoted ${runToDemote._id} to history`,
+    );
+
+    res.status(201).json({
+      requestId: id,
+      runId: newRunId,
+      attemptNumber: newAttemptNumber,
+      attemptCount: newAttemptCount,
+    });
   },
 });
 
