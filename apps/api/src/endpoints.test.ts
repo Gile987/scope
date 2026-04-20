@@ -472,7 +472,7 @@ describe("API Endpoints", () => {
 
       await request(app).get("/api/v1/requests?status=done");
       expect(mocks.collection.find).toHaveBeenCalledWith(
-        expect.objectContaining({ status: "done" }),
+        expect.objectContaining({ "run.status": "done" }),
       );
     });
 
@@ -487,7 +487,7 @@ describe("API Endpoints", () => {
 
       await request(app).get("/api/v1/requests?outcome=succeeded");
       expect(mocks.collection.find).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: "succeeded" }),
+        expect.objectContaining({ "run.outcome": "succeeded" }),
       );
     });
 
@@ -500,7 +500,7 @@ describe("API Endpoints", () => {
       const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
       expect(pipeline[0]).toEqual(
         expect.objectContaining({
-          $match: expect.objectContaining({ status: "done", outcome: "failed" }),
+          $match: expect.objectContaining({ "run.status": "done", "run.outcome": "failed" }),
         }),
       );
     });
@@ -517,8 +517,8 @@ describe("API Endpoints", () => {
       await request(app).get("/api/v1/requests?status=processing&outcome=succeeded&worker=coder-acp-copilot");
       expect(mocks.collection.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: "processing",
-          outcome: "succeeded",
+          "run.status": "processing",
+          "run.outcome": "succeeded",
           workerType: "coder-acp-copilot",
         }),
       );

@@ -54,6 +54,22 @@ import {
 import { subscribeClient, unsubscribeClient } from "../utils/sse.js";
 import type { SSEClient } from "../utils/sse.js";
 
+/**
+ * Build an archive view of a request that exposes per-attempt fields
+ * (turns/harUrl/rawChatUrl) at the top level. Archive packing only
+ * includes the *current* run (not history), so we project run.* into
+ * the shape that ArchivableRun expects, falling back to legacy top-level
+ * fields for any doc the migration hasn't reshaped.
+ */
+function runForArchive<T extends RequestDocument>(resource: T): T {
+  return {
+    ...resource,
+    harUrl: resource.run?.harUrl ?? resource.harUrl,
+    rawChatUrl: resource.run?.rawChatUrl ?? resource.rawChatUrl,
+    turns: resource.run?.turns ?? resource.turns,
+  };
+}
+
 export function registerRequestsRoutes(ctx: RouteContext): void {
 
 const upload = multer({ dest: tmpdir() });
@@ -543,13 +559,18 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
-    // If request already done, send final event and close
-    if (resource.status === "done") {
+    // If request already done, send final event and close.
+    // Per-attempt state lives at run.* (run-retry-attempts); fall back to
+    // top-level for any in-flight legacy doc the migration hasn't reshaped.
+    const currentStatus = resource.run?.status ?? resource.status;
+    const currentOutcome = resource.run?.outcome ?? resource.outcome;
+    const currentTurns = resource.run?.turns ?? resource.turns;
+    if (currentStatus === "done") {
       // For done multi-turn requests, send turns summary
-      if (resource.turns && resource.turns.length > 0) {
-        res.write(`data: ${JSON.stringify({ type: "turns_summary", turns: resource.turns.length, passed: resource.outcome === "succeeded" })}\n\n`);
+      if (currentTurns && currentTurns.length > 0) {
+        res.write(`data: ${JSON.stringify({ type: "turns_summary", turns: currentTurns.length, passed: currentOutcome === "succeeded" })}\n\n`);
       }
-      res.write(`event: done\ndata: ${JSON.stringify({ status: resource.status, outcome: resource.outcome })}\n\n`);
+      res.write(`event: done\ndata: ${JSON.stringify({ status: currentStatus, outcome: currentOutcome })}\n\n`);
       res.end();
       return;
     }
@@ -620,8 +641,10 @@ apiRoute(ctx.app, ctx.registry, {
       changeStream.on("change", (change) => {
         if (change.operationType === "update" && change.fullDocument) {
           const doc = change.fullDocument;
-          if (doc.status === "done") {
-            res.write(`event: done\ndata: ${JSON.stringify({ status: doc.status, outcome: doc.outcome })}\n\n`);
+          const docStatus = doc.run?.status ?? doc.status;
+          const docOutcome = doc.run?.outcome ?? doc.outcome;
+          if (docStatus === "done") {
+            res.write(`event: done\ndata: ${JSON.stringify({ status: docStatus, outcome: docOutcome })}\n\n`);
             client.cleanup();
           }
         }
@@ -678,10 +701,11 @@ apiRoute(ctx.app, ctx.registry, {
       filter.taskPromptId = taskPromptIdFilter;
     }
     if (statusFilter) {
-      filter.status = statusFilter;
+      // Post run-retry-attempts: per-attempt state lives at run.status.
+      filter["run.status"] = statusFilter;
     }
     if (outcomeFilter) {
-      filter.outcome = outcomeFilter;
+      filter["run.outcome"] = outcomeFilter;
     }
     if (profileIdFilter) {
       filter.profileId = profileIdFilter;
@@ -925,19 +949,18 @@ apiRoute(ctx.app, ctx.registry, {
       ? criteriaParam.split(",").map(c => c.trim()).filter(Boolean)
       : undefined;
 
-    // Fetch all done runs (exclude pending/processing, exclude deleted)
+    // Fetch all done runs (exclude pending/processing, exclude deleted).
+    // Per-attempt state lives at run.* (run-retry-attempts).
     const runs = await ctx.requestCollection
       .find({
-        status: "done",
+        "run.status": "done",
         deletedAt: { $exists: false },
       })
       .project({
         _id: 1,
         scenario: 1,
         workerType: 1,
-        status: 1,
-        outcome: 1,
-        turns: 1,
+        run: 1,
       })
       .toArray();
 
@@ -945,9 +968,9 @@ apiRoute(ctx.app, ctx.registry, {
     const analyzableRuns: AnalyzableRun[] = runs.map(r => ({
       scenario: r.scenario,
       workerType: r.workerType,
-      status: r.status,
-      outcome: r.outcome,
-      turns: r.turns,
+      status: r.run?.status ?? "done",
+      outcome: r.run?.outcome,
+      turns: r.run?.turns,
     }));
 
     const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues, selectedCriteria);
@@ -1264,7 +1287,8 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    const turn = resource.turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
+    const turns = resource.run?.turns ?? resource.turns;
+    const turn = turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
     if (!turn?.snapshotUrl) {
       res.status(404).json({ error: `No snapshot for iteration ${iterNum}` });
       return;
@@ -1337,7 +1361,8 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    if (!resource.turns || resource.turns.length === 0) {
+    const allTurns = resource.run?.turns ?? resource.turns;
+    if (!allTurns || allTurns.length === 0) {
       res.status(404).json({ error: "No iterations found for this run" });
       return;
     }
@@ -1366,7 +1391,7 @@ apiRoute(ctx.app, ctx.registry, {
     const isBlobNotFound = (err: unknown) =>
       err instanceof RestError && (err.statusCode === 404 || err.code === "ContainerNotFound" || err.code === "BlobNotFound");
 
-    await packRunIntoTar(pack, resource, containerClient, id, isBlobNotFound);
+    await packRunIntoTar(pack, runForArchive(resource), containerClient, id, isBlobNotFound);
 
     // Finalize the tar archive
     pack.finalize();
@@ -1439,7 +1464,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       // Pack each run into the archive
       for (const run of runs) {
-        await packRunIntoTar(pack, run, containerClient, run._id, isBlobNotFound);
+        await packRunIntoTar(pack, runForArchive(run), containerClient, run._id, isBlobNotFound);
       }
 
       // Finalize the tar archive
@@ -1494,12 +1519,14 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "Invalid iteration number" });
         return;
       }
-      const turn = resource.turns?.find((t: { iteration: number }) => t.iteration === iterNum);
+      const turns = resource.run?.turns ?? resource.turns;
+      const turn = turns?.find((t: { iteration: number }) => t.iteration === iterNum);
       harUrl = turn?.harUrl;
       label = `${id}-iteration-${iterNum}`;
     } else {
-      // One-shot: harUrl on document root; multi-turn fallback: last turn
-      harUrl = resource.harUrl || resource.turns?.[resource.turns.length - 1]?.harUrl;
+      // One-shot: harUrl on run/document root; multi-turn fallback: last turn
+      const turns = resource.run?.turns ?? resource.turns;
+      harUrl = (resource.run?.harUrl ?? resource.harUrl) || turns?.[turns.length - 1]?.harUrl;
       label = id;
     }
 
@@ -1591,7 +1618,7 @@ apiRoute(ctx.app, ctx.registry, {
     let label: string;
 
     if (phaseParam === "setup") {
-      videoUrls = resource.setupVideoUrls;
+      videoUrls = resource.run?.setupVideoUrls ?? resource.setupVideoUrls;
       label = `${id}-setup-video-${videoIndex}`;
     } else if (iterationParam) {
       const iterNum = parseInt(iterationParam, 10);
@@ -1599,12 +1626,14 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "Invalid iteration number" });
         return;
       }
-      const turn = resource.turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
+      const turns = resource.run?.turns ?? resource.turns;
+      const turn = turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
       videoUrls = turn?.videoUrls;
       label = `${id}-iteration-${iterNum}-video-${videoIndex}`;
     } else {
-      // One-shot: videoUrls on document root; multi-turn fallback: last turn
-      videoUrls = resource.videoUrls ?? resource.turns?.[resource.turns.length - 1]?.videoUrls;
+      // One-shot: videoUrls on run/document root; multi-turn fallback: last turn
+      const turns = resource.run?.turns ?? resource.turns;
+      videoUrls = (resource.run?.videoUrls ?? resource.videoUrls) ?? turns?.[turns.length - 1]?.videoUrls;
       label = `${id}-video-${videoIndex}`;
     }
 
@@ -1798,7 +1827,7 @@ apiRoute(ctx.app, ctx.registry, {
     if (existingRun) {
       res.status(409).json({
         error: `Run with ID '${runDoc._id}' already exists`,
-        existingStatus: existingRun.status,
+        existingStatus: existingRun.run?.status ?? existingRun.status,
       });
       return;
     }
