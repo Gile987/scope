@@ -777,11 +777,7 @@ run
       console.log(`${label('Request ID:')} ${value(result.requestId)}`);
       console.log(`${label('New run ID:')} ${value(result.runId)}`);
       console.log(`${label('Attempt:')} ${value(`${result.attemptNumber} of ${result.attemptCount}`)}`);
-      printFollowUpCommands([
-        ["Stream logs", `scope-mt run logs --id ${result.requestId}`],
-        ["Get status", `scope-mt run status --id ${result.requestId}`],
-        ["List attempts", `scope-mt run attempts --id ${result.requestId}`],
-      ]);
+      printFollowUpCommands(result.requestId);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
