@@ -155,6 +155,7 @@ async function initializeClients(): Promise<void> {
     { key: "agents", label: "Agents" },
     { key: "tokens", label: "Tokens" },
     { key: "extensions", label: "VS Code Extensions" },
+    { key: "statistics-graph", label: "Statistics Graph" },
   ];
   for (const flag of defaultFlags) {
     await featureFlagCollection.updateOne(

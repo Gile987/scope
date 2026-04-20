@@ -21,6 +21,7 @@ import {
 import { BarChart3, TrendingUp, CheckCircle, Clock, RefreshCw } from "lucide-react";
 import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
 import { formatDuration } from "@/lib/utils";
+import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 import type { AnalysisResponse, TaskWorkerGroup } from "@/types";
 
 // Color palette for chart lines (distinct colors for different groups)
@@ -439,6 +440,7 @@ function StatisticsSkeleton() {
 
 export function Statistics() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { isFeatureEnabled } = useFeatureFlags();
   
   // Parse selected criteria from URL
   const selectedCriteria = searchParams.get("criteria")?.split(",").filter(Boolean) || [];
@@ -494,7 +496,7 @@ export function Statistics() {
           />
           <SummaryCards data={data} />
           {import.meta.env.VITE_SHOW_PASS_AT_K === "true" && <PassAtKTable data={data} />}
-          <SuccessAtTChart data={data} />
+          {isFeatureEnabled("statistics-graph") && <SuccessAtTChart data={data} />}
           <IterationStatsTable data={data} />
           <DurationStatsTable data={data} />
         </>
