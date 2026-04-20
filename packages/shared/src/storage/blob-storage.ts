@@ -42,7 +42,6 @@ export interface BlobStorageConfig {
 export class BlobStorage {
   private containerClient: ContainerClient;
   private logsContainerClient: ContainerClient;
-  private blobServiceClient: BlobServiceClient;
   private logsContainerReady: Promise<void> | null = null;
   /** Tracks per-blob createIfNotExists — keyed by blobName, value is the settled promise. */
   private initializedBlobs = new Map<string, Promise<void>>();
@@ -62,7 +61,6 @@ export class BlobStorage {
       );
     }
 
-    this.blobServiceClient = blobServiceClient;
     this.containerClient = blobServiceClient.getContainerClient(SNAPSHOTS_CONTAINER);
     this.logsContainerClient = blobServiceClient.getContainerClient(LOGS_CONTAINER);
   }
@@ -103,6 +101,15 @@ export class BlobStorage {
     await this.initializedBlobs.get(blobName);
     const line = JSON.stringify(logEvent) + "\n";
     await appendBlobClient.appendBlock(line, Buffer.byteLength(line));
+  }
+
+  /**
+   * Removes the initialisation cache entry for a run once it is complete.
+   * Prevents the long-lived BlobStorage instance from accumulating one entry
+   * per run over the worker lifetime.
+   */
+  evictRun(requestId: string): void {
+    this.initializedBlobs.delete(`${requestId}/run.jsonl`);
   }
 
   /**

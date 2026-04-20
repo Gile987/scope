@@ -225,6 +225,12 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
       }
 
       await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    } finally {
+      // Evict the per-run blob init cache entry so initializedBlobs doesn't
+      // grow unbounded over the lifetime of a long-running worker process.
+      if (documentId) {
+        this.logPublisher.evictRun(documentId);
+      }
     }
   }
 
