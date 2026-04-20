@@ -134,22 +134,32 @@ export interface RequestDocument {
 ### Status Lifecycle (updated)
 
 ```
-                         pause()
-              ┌──────────────────────────┐
-              │                          ▼
-  pending ──▶ queued ──▶ processing ──▶ done
-              ▲                │
-              │    resume()    │
-              └────────────────┘
-                  paused
+              pause()           
+  pending ──────────────▶ paused
+     ▲        pause()       │
+     │   ┌── queued ──▶ paused
+     │   │                  │
+     │   │     resume()     │
+     │   └──────────────────┘
+     │                  │
+     └──────────────────┘
+     │
+     ▼  (scheduler)
+  queued ──▶ processing ──▶ done
 ```
 
+Both `pending` and `queued` requests can be paused. Only `processing` requests cannot be paused — they must complete.
+
+When a `queued` request is paused, its message is still in Azure Storage Queue. The worker will dequeue it, check MongoDB, see `status: "paused"`, delete the message, and move on.
+
+When resumed, the status returns to `pending` (not `queued`), so the scheduler re-dispatches it in priority order on the next tick.
+
 | Status | Meaning |
-|--------|---------|
-| `pending` | Just created, not yet picked up by the scheduler |
-| `queued` | Scheduler has dispatched it to the Azure queue; awaiting worker |
-| `processing` | Worker has dequeued and is actively working on it |
-| `paused` | Administratively held; scheduler skips it |
+|--------|--------|
+| `pending` | Just created, not yet picked up by the scheduler. Can be paused. |
+| `queued` | Scheduler has dispatched it to the Azure queue; awaiting worker. Can be paused. |
+| `processing` | Worker has dequeued and is actively working on it. Cannot be paused. |
+| `paused` | Administratively held; scheduler skips it. Resume returns to `pending`. |
 | `done` | Terminal state (with outcome: succeeded / failed / finished) |
 
 ### Priority Semantics
@@ -268,14 +278,8 @@ for each workerType:
 
 This ensures:
 - **Priority takes effect quickly**: when a high-priority request arrives, it gets dispatched on the next tick (within seconds), ahead of lower-priority pending requests — because the queue only has a few messages in it.
-- **Pause takes effect quickly**: paused requests are skipped by the scheduler. Already-queued messages drain naturally (workers finish them), and no new messages for paused requests are added.
+- **Pause takes effect immediately**: only `pending` requests can be paused, and the scheduler only picks from `pending` — so a paused request is never dispatched.
 - **Priority changes are respected**: if you bump a pending request's priority, the next scheduler tick will pick it up in the new order.
-
-### What happens to already-queued messages when you pause?
-
-When a request is paused while `status: "queued"` (already dispatched to the queue), the message is still in Azure Storage Queue. The worker will dequeue it, check MongoDB, see `status: "paused"`, **delete the message**, and move on. No work is wasted — the check happens before any expensive processing.
-
-When resumed, the status goes back to `"pending"`, and the scheduler re-dispatches it on the next tick in priority order.
 
 ### Scheduler Implementation (Phase 1: In-Process)
 
@@ -363,16 +367,11 @@ If the API process becomes a bottleneck, extract the scheduler into a standalone
 
 ## Worker Changes
 
-### Minimal changes required
+### Minimal change: skip paused requests
 
-Workers **do not need to understand priority or pause**. They continue to:
+Workers do not need to understand priority. They continue to poll the queue, fetch from MongoDB, and process.
 
-1. Poll Azure Storage Queue
-2. Receive `{ requestId }` messages
-3. Fetch document from MongoDB
-4. Process it
-
-The only addition: when a worker fetches a document and sees `status: "paused"`, it should **delete the message and skip processing**. The request stays in MongoDB as `paused` — the scheduler will re-dispatch it when resumed.
+The only addition: when a worker fetches a document and sees `status: "paused"`, it deletes the queue message and moves on. The request stays in MongoDB as `paused` — the scheduler will re-dispatch it when resumed.
 
 ```typescript
 // In base-queue-processor.ts processMessage():
@@ -384,17 +383,13 @@ if (!doc) {
   return;
 }
 
-// NEW: Skip paused requests — delete message, leave doc as paused
+// Skip paused requests — delete message, leave doc as paused
 if (doc.status === "paused") {
   console.log(`[${this.workerName}] Request ${documentId} is paused, dropping queue message`);
   await this.safeDeleteMessage(message.messageId, currentPopReceipt);
   return;
 }
 ```
-
-### Race condition: pause during processing
-
-If a request is paused while a worker is already processing it, the current run completes. Pause only affects **pending/queued** requests. This is by design — interrupting a running coding agent mid-session would waste the work already done.
 
 ---
 
@@ -467,7 +462,7 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 - [ ] Add `PATCH /api/v1/submissions/:id/pause` endpoint
 - [ ] Add `PATCH /api/v1/submissions/:id/resume` endpoint
 - [ ] Modify scheduler to skip `paused` requests
-- [ ] Modify worker `processMessage()` to handle `paused` documents
+- [ ] Modify worker `processMessage()` to skip and delete messages for `paused` documents
 - [ ] Add unit tests for pause/resume state transitions
 - [ ] Add unit tests for submission-level pause/resume
 - [ ] Update SSE log streaming to emit pause/resume events
@@ -483,16 +478,13 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 - [ ] Add "paused" status chip styling
 - [ ] Add "queued" status chip styling (new status)
 - [ ] Disable pause/resume buttons for terminal states (`done`) and `processing`
-- [ ] Show confirmation dialog when pausing a submission with in-flight (`processing`) requests, explaining those will complete
 - [ ] Wire SSE log stream to show pause/resume events in the request log viewer
 
 ---
 
 ## Open Questions
 
-1. **Should pause cancel in-flight work?** Current proposal: no — only affects pending/queued. Cancelling a running coding agent is destructive. We could add a separate "cancel" action later.
-
-2. **Should priority be immutable after queued?** Changing priority on a `queued` request has no effect until the message drains from the queue and the request returns to `pending` (e.g. via pause→resume). This is acceptable because the queue is kept shallow — messages spend seconds in it, not minutes. Priority changes on `pending` requests take effect immediately on the next scheduler tick.
+1. **Should priority be immutable after queued?** Changing priority on a `queued` request has no effect until the message drains from the queue and the request returns to `pending` (e.g. via pause→resume). This is acceptable because the queue is kept shallow — messages spend seconds in it, not minutes. Priority changes on `pending` requests take effect immediately on the next scheduler tick.
 
 3. **Scheduler leader election**: If we run multiple API replicas, `findOneAndUpdate` ensures atomicity. But multiple schedulers polling the same collection increases load. Options:
    - Single scheduler replica (Phase 2 sidecar)
