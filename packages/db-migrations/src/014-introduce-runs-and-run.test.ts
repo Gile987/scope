@@ -4,11 +4,8 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Db } from "mongodb";
 
-const {
-  IntroduceRunsAndRun,
-  buildRunReshapeUpdate,
-  buildRunUnshapeUpdate,
-} = await import("./migrations/014-introduce-runs-and-run.js");
+const { IntroduceRunsAndRun } = await import("./migrations/014-introduce-runs-and-run.js");
+const { buildRunReshapeUpdate, buildRunUnshapeUpdate } = await import("./014-helpers.js");
 
 describe("buildRunReshapeUpdate", () => {
   it("nests per-attempt fields under run with attemptNumber=1", () => {
