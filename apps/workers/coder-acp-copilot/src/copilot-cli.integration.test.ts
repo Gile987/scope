@@ -163,22 +163,22 @@ describe("coder-acp-copilot integration", async () => {
   }, 60_000);
 
   // -----------------------------------------------------------------------
-  // Tool availability: pwsh, python3, git, uv must be in PATH
+  // Tool availability: each tool gets its own test for CI visibility
   // -----------------------------------------------------------------------
 
-  it.skipIf(!dockerAvailable)(
-    "worker image has required CLI tools in PATH",
-    { timeout: 30_000 },
-    async () => {
-      const { result } = workerResult!;
-      expect(result.toolChecks, "toolChecks missing from result").toBeDefined();
-      for (const tool of ["pwsh", "python3", "git", "uv"]) {
+  for (const tool of ["pwsh", "python3", "git", "uv"]) {
+    it.skipIf(!dockerAvailable)(
+      `has ${tool} in PATH`,
+      { timeout: 30_000 },
+      async () => {
+        const { result } = workerResult!;
+        expect(result.toolChecks, "toolChecks missing from result").toBeDefined();
         const check = result.toolChecks!.find((t) => t.tool === tool);
         expect(check, `${tool} check missing`).toBeTruthy();
         expect(check!.available, `${tool} should be in PATH`).toBe(true);
-      }
-    },
-  );
+      },
+    );
+  }
 
   // -----------------------------------------------------------------------
   // Coding prompt e2e: real auth + coding prompt + session reuse
