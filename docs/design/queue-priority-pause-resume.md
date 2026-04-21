@@ -193,9 +193,9 @@ PATCH  /api/v1/requests/:id/pause          Pause a single request
 PATCH  /api/v1/requests/:id/resume         Resume a single request
 PATCH  /api/v1/requests/:id/priority       Set priority on a single request
 
-PATCH  /api/v1/requests/bulk/pause         Pause multiple requests  { ids: string[] }
-PATCH  /api/v1/requests/bulk/resume        Resume multiple requests { ids: string[] }
-PATCH  /api/v1/requests/bulk/priority      Set priority on multiple { ids: string[], priority: number }
+POST   /api/v1/requests/bulk/pause         Pause multiple requests  { ids: string[] }
+POST   /api/v1/requests/bulk/resume        Resume multiple requests { ids: string[] }
+POST   /api/v1/requests/bulk/priority      Set priority on multiple { ids: string[], priority: number }
 ```
 
 ### Modified Endpoints
@@ -217,7 +217,7 @@ Content-Type: application/json
 ```
 
 ```http
-PATCH /api/v1/requests/bulk/pause
+POST /api/v1/requests/bulk/pause
 Content-Type: application/json
 
 { "ids": ["req-1", "req-2", "req-3"] }
