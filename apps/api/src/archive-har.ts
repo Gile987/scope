@@ -29,30 +29,35 @@ export function blobNameFromSnapshotsUrl(url: string): string | null {
 /**
  * Deep-clone a run resource and rewrite `harUrl` and `rawChatUrl` fields to relative archive paths.
  *
- * - Top-level `harUrl`     → `"run.har"`
- * - Per-turn `harUrl`      → `"iteration-{N}.har"`
- * - Top-level `rawChatUrl` → `"run.chat-export.json"`
- * - Per-turn `rawChatUrl`  → `"iteration-{N}.chat-export.json"`
+ * - `run.harUrl`            → `"run.har"`
+ * - Per-turn `harUrl`        → `"iteration-{N}.har"`
+ * - `run.rawChatUrl`         → `"run.chat-export.json"`
+ * - Per-turn `rawChatUrl`    → `"iteration-{N}.chat-export.json"`
  */
 export function rewriteHarUrlsForArchive<T extends {
-  harUrl?: string;
-  rawChatUrl?: string;
-  turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; [key: string]: unknown }>;
+  run?: {
+    harUrl?: string;
+    rawChatUrl?: string;
+    turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; [key: string]: unknown }>;
+    [key: string]: unknown;
+  };
 }>(resource: T): T {
   const copy = JSON.parse(JSON.stringify(resource));
-  if (copy.harUrl) {
-    copy.harUrl = "run.har";
-  }
-  if (copy.rawChatUrl) {
-    copy.rawChatUrl = "run.chat-export.json";
-  }
-  if (copy.turns) {
-    for (const turn of copy.turns) {
-      if (turn.harUrl) {
-        turn.harUrl = `iteration-${turn.iteration}.har`;
-      }
-      if (turn.rawChatUrl) {
-        turn.rawChatUrl = `iteration-${turn.iteration}.chat-export.json`;
+  if (copy.run) {
+    if (copy.run.harUrl) {
+      copy.run.harUrl = "run.har";
+    }
+    if (copy.run.rawChatUrl) {
+      copy.run.rawChatUrl = "run.chat-export.json";
+    }
+    if (copy.run.turns) {
+      for (const turn of copy.run.turns) {
+        if (turn.harUrl) {
+          turn.harUrl = `iteration-${turn.iteration}.har`;
+        }
+        if (turn.rawChatUrl) {
+          turn.rawChatUrl = `iteration-${turn.iteration}.chat-export.json`;
+        }
       }
     }
   }
@@ -222,15 +227,18 @@ export interface BlobDownloader {
 /** A run document with the fields needed for archive packing. */
 export interface ArchivableRun {
   _id: string;
-  harUrl?: string;
-  rawChatUrl?: string;
-  turns?: Array<{
-    iteration: number;
-    snapshotUrl?: string;
+  run?: {
     harUrl?: string;
     rawChatUrl?: string;
+    turns?: Array<{
+      iteration: number;
+      snapshotUrl?: string;
+      harUrl?: string;
+      rawChatUrl?: string;
+      [key: string]: unknown;
+    }>;
     [key: string]: unknown;
-  }>;
+  };
   [key: string]: unknown;
 }
 
@@ -263,8 +271,13 @@ export async function packRunIntoTar(
   const yamlBuf = Buffer.from(yamlContent, "utf-8");
   pack.entry({ name: `${id}/run.yaml`, size: yamlBuf.length }, yamlBuf);
 
+  // Read per-attempt fields from the run sub-document (migration ensures it exists)
+  const turns = resource.run?.turns ?? [];
+  const topHarUrl = resource.run?.harUrl;
+  const topRawChatUrl = resource.run?.rawChatUrl;
+
   // Entries 2..N: iteration snapshots as-is (.tar.gz blobs)
-  for (const turn of resource.turns ?? []) {
+  for (const turn of turns) {
     if (!turn.snapshotUrl) continue;
     try {
       const blobName = blobNameFromSnapshotsUrl(turn.snapshotUrl);
@@ -285,10 +298,10 @@ export async function packRunIntoTar(
 
   // Bundle HAR files into the archive
   const harEntries: Array<{ url: string; entryName: string }> = [];
-  for (const turn of resource.turns ?? []) {
+  for (const turn of turns) {
     if (turn.harUrl) harEntries.push({ url: turn.harUrl, entryName: `${id}/iteration-${turn.iteration}.har` });
   }
-  if (resource.harUrl) harEntries.push({ url: resource.harUrl, entryName: `${id}/run.har` });
+  if (topHarUrl) harEntries.push({ url: topHarUrl, entryName: `${id}/run.har` });
 
   for (const { url, entryName } of harEntries) {
     try {
@@ -307,10 +320,10 @@ export async function packRunIntoTar(
 
   // Bundle raw chat export files into the archive
   const chatEntries: Array<{ url: string; entryName: string }> = [];
-  for (const turn of resource.turns ?? []) {
+  for (const turn of turns) {
     if (turn.rawChatUrl) chatEntries.push({ url: turn.rawChatUrl, entryName: `${id}/iteration-${turn.iteration}.chat-export.json` });
   }
-  if (resource.rawChatUrl) chatEntries.push({ url: resource.rawChatUrl, entryName: `${id}/run.chat-export.json` });
+  if (topRawChatUrl) chatEntries.push({ url: topRawChatUrl, entryName: `${id}/run.chat-export.json` });
 
   for (const { url, entryName } of chatEntries) {
     try {

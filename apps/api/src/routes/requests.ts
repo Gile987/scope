@@ -56,21 +56,7 @@ import type { SSEClient } from "../utils/sse.js";
 import { insertHistoricalRun, listHistoricalRuns, getHistoricalRun } from "../runs-repo.js";
 import type { RunState } from "shared";
 
-/**
- * Build an archive view of a request that exposes per-attempt fields
- * (turns/harUrl/rawChatUrl) at the top level. Archive packing only
- * includes the *current* run (not history), so we project run.* into
- * the shape that ArchivableRun expects, falling back to legacy top-level
- * fields for any doc the migration hasn't reshaped.
- */
-function runForArchive<T extends RequestDocument>(resource: T): T {
-  return {
-    ...resource,
-    harUrl: resource.run?.harUrl ?? resource.harUrl,
-    rawChatUrl: resource.run?.rawChatUrl ?? resource.rawChatUrl,
-    turns: resource.run?.turns ?? resource.turns,
-  };
-}
+
 
 export function registerRequestsRoutes(ctx: RouteContext): void {
 
@@ -1404,7 +1390,7 @@ apiRoute(ctx.app, ctx.registry, {
     const isBlobNotFound = (err: unknown) =>
       err instanceof RestError && (err.statusCode === 404 || err.code === "ContainerNotFound" || err.code === "BlobNotFound");
 
-    await packRunIntoTar(pack, runForArchive(resource), containerClient, id, isBlobNotFound);
+    await packRunIntoTar(pack, resource, containerClient, id, isBlobNotFound);
 
     // Finalize the tar archive
     pack.finalize();
@@ -1477,7 +1463,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       // Pack each run into the archive
       for (const run of runs) {
-        await packRunIntoTar(pack, runForArchive(run), containerClient, run._id, isBlobNotFound);
+        await packRunIntoTar(pack, run, containerClient, run._id, isBlobNotFound);
       }
 
       // Finalize the tar archive
