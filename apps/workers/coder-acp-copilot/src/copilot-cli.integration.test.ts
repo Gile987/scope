@@ -41,8 +41,16 @@ interface PromptResult {
   error?: string;
 }
 
+interface ToolCheck {
+  tool: string;
+  available: boolean;
+  path?: string;
+  version?: string;
+}
+
 interface TestResult {
   prompts: PromptResult[];
+  toolChecks?: ToolCheck[];
   lastStep?: string;
   logs?: string[];
 }
@@ -109,17 +117,17 @@ describe("coder-acp-copilot integration", async () => {
   const dockerAvailable = await isDockerAvailable();
   const canRun = hasCredentials && dockerAvailable;
 
-  if (!canRun) {
-    const reasons: string[] = [];
-    if (!hasCredentials) reasons.push("missing GITHUB_TOKEN");
-    if (!dockerAvailable) reasons.push("Docker unavailable");
-    log(`Skipping: ${reasons.join("; ")}`);
+  if (!dockerAvailable) {
+    log("Skipping: Docker unavailable");
+  } else if (!hasCredentials) {
+    log("No GITHUB_TOKEN — will run tool checks only");
   }
 
   const docker = new Docker();
+  let workerResult: { result: TestResult; exitCode: number } | undefined;
 
   beforeAll(async () => {
-    if (!canRun) return;
+    if (!dockerAvailable) return;
 
     const versions = loadVersions();
 
@@ -136,6 +144,18 @@ describe("coder-acp-copilot integration", async () => {
       });
       log("Docker build complete");
     }
+
+    // Run the container once — both tests share this result
+    const env: string[] = [];
+    if (hasCredentials) {
+      env.push(
+        `GITHUB_TOKEN=${GITHUB_TOKEN}`,
+        "TEST_PROMPT=Generate a Hello World REST API in Python using Flask.",
+        "TEST_PROMPT_2=Add a /health endpoint to the Flask app that returns 200 OK.",
+      );
+    }
+    workerResult = await runTestWorker(docker, env);
+    log(`exit=${workerResult.exitCode} lastStep=${workerResult.result.lastStep}`);
   }, 600_000); // 10 min for Docker build
 
   afterAll(async () => {
@@ -143,27 +163,36 @@ describe("coder-acp-copilot integration", async () => {
   }, 60_000);
 
   // -----------------------------------------------------------------------
-  // Main e2e test: real auth + coding prompt + session reuse
+  // Tool availability: each tool gets its own test for CI visibility
+  // -----------------------------------------------------------------------
+
+  for (const tool of ["pwsh", "python3", "git", "uv"]) {
+    it.skipIf(!dockerAvailable)(
+      `has ${tool} in PATH`,
+      { timeout: 30_000 },
+      async () => {
+        const { result } = workerResult!;
+        expect(result.toolChecks, "toolChecks missing from result").toBeDefined();
+        const check = result.toolChecks!.find((t) => t.tool === tool);
+        expect(check, `${tool} check missing`).toBeTruthy();
+        expect(check!.available, `${tool} should be in PATH`).toBe(true);
+      },
+    );
+  }
+
+  // -----------------------------------------------------------------------
+  // Coding prompt e2e: real auth + coding prompt + session reuse
   // -----------------------------------------------------------------------
 
   it.skipIf(!canRun)(
-    "processMessage completes a coding prompt with real GitHub auth",
+    "completes coding prompts with real GitHub auth",
     { timeout: 300_000 },
     async () => {
-      log("Starting e2e test: copilot CLI with real credentials");
-
-      const { result, exitCode } = await runTestWorker(docker, [
-        `GITHUB_TOKEN=${GITHUB_TOKEN}`,
-        "TEST_PROMPT=Generate a Hello World REST API in Python using Flask.",
-        "TEST_PROMPT_2=Add a /health endpoint to the Flask app that returns 200 OK.",
-      ]);
-
-      log(`exit=${exitCode} lastStep=${result.lastStep}`);
+      const { result } = workerResult!;
       log(`prompts completed: ${result.prompts.length}`);
 
       // --- First prompt assertions ---
       const first = result.prompts[0];
-      expect(first, "First prompt result missing").toBeTruthy();
       expect(first.error, `First prompt failed: ${first?.error}`).toBeUndefined();
       expect(first.success).toBe(true);
       expect(first.response).toBeTruthy();
