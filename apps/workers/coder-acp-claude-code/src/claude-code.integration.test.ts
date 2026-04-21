@@ -126,6 +126,7 @@ describe("coder-acp-claude-code integration", async () => {
   }
 
   const docker = new Docker();
+  let workerResult: { result: TestResult; exitCode: number } | undefined;
 
   beforeAll(async () => {
     if (!dockerAvailable) return;
@@ -145,6 +146,21 @@ describe("coder-acp-claude-code integration", async () => {
       });
       log("Docker build complete");
     }
+
+    // Run the container once — both tests share this result
+    const env: string[] = [];
+    if (hasCredentials) {
+      const credentialEnv = CLAUDE_CODE_OAUTH_TOKEN
+        ? `CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}`
+        : `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}`;
+      env.push(
+        credentialEnv,
+        "TEST_PROMPT=Generate a Hello World REST API in Python using Flask.",
+        "TEST_PROMPT_2=Add a /health endpoint to the Flask app that returns 200 OK.",
+      );
+    }
+    workerResult = await runTestWorker(docker, env);
+    log(`exit=${workerResult.exitCode} lastStep=${workerResult.result.lastStep}`);
   }, 600_000); // 10 min for Docker build
 
   afterAll(async () => {
@@ -152,43 +168,32 @@ describe("coder-acp-claude-code integration", async () => {
   }, 60_000);
 
   // -----------------------------------------------------------------------
-  // Main e2e test: real auth + coding prompt + session reuse
+  // Tool availability: pwsh, python3, git, uv must be in PATH
   // -----------------------------------------------------------------------
 
   it.skipIf(!dockerAvailable)(
-    "worker image has required CLI tools and completes coding prompts",
-    { timeout: 300_000 },
+    "worker image has required CLI tools in PATH",
+    { timeout: 30_000 },
     async () => {
-      const env: string[] = [];
-      if (hasCredentials) {
-        const credentialEnv = CLAUDE_CODE_OAUTH_TOKEN
-          ? `CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}`
-          : `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}`;
-        env.push(
-          credentialEnv,
-          "TEST_PROMPT=Generate a Hello World REST API in Python using Flask.",
-          "TEST_PROMPT_2=Add a /health endpoint to the Flask app that returns 200 OK.",
-        );
-      }
-
-      const { result, exitCode } = await runTestWorker(docker, env);
-
-      log(`exit=${exitCode} lastStep=${result.lastStep}`);
-
-      // --- Tool check assertions (always run) ---
+      const { result } = workerResult!;
       expect(result.toolChecks, "toolChecks missing from result").toBeDefined();
       for (const tool of ["pwsh", "python3", "git", "uv"]) {
         const check = result.toolChecks!.find((t) => t.tool === tool);
         expect(check, `${tool} check missing`).toBeTruthy();
         expect(check!.available, `${tool} should be in PATH`).toBe(true);
       }
+    },
+  );
 
-      if (!hasCredentials) {
-        log("Credentials unavailable — skipping coding prompt assertions");
-        return;
-      }
+  // -----------------------------------------------------------------------
+  // Coding prompt e2e: real auth + coding prompt + session reuse
+  // -----------------------------------------------------------------------
 
-      // --- Coding prompt assertions (credentials required) ---
+  it.skipIf(!canRun)(
+    "completes coding prompts with real Anthropic auth",
+    { timeout: 300_000 },
+    async () => {
+      const { result } = workerResult!;
       log(`prompts completed: ${result.prompts.length}`);
 
       // --- First prompt assertions ---
