@@ -173,14 +173,14 @@ When resumed, the status returns to `pending` (not `queued`), so the scheduler r
 
 Priority is a plain integer (not an enum) for maximum flexibility. Higher is more urgent.
 
-### Submission-Level Operations
+### Bulk Operations
 
-Since `submissionId` groups requests, pause/resume can operate at both levels:
+Pause, resume, and priority changes support bulk operations via arrays of request IDs:
 
 - **Single request**: `PATCH /api/v1/requests/:id/pause`
-- **Entire submission**: `PATCH /api/v1/submissions/:submissionId/pause`
+- **Bulk**: `PATCH /api/v1/requests/bulk/pause` with `{ ids: [...] }`
 
-The submission-level endpoint updates all non-terminal requests in that group atomically.
+The portal can select multiple requests (e.g. all from a submission) and call the bulk endpoint.
 
 ---
 
@@ -193,9 +193,9 @@ PATCH  /api/v1/requests/:id/pause          Pause a single request
 PATCH  /api/v1/requests/:id/resume         Resume a single request
 PATCH  /api/v1/requests/:id/priority       Set priority on a single request
 
-PATCH  /api/v1/submissions/:id/pause       Pause all pending/queued in submission
-PATCH  /api/v1/submissions/:id/resume      Resume all paused in submission
-PATCH  /api/v1/submissions/:id/priority    Set priority on all non-done in submission
+PATCH  /api/v1/requests/bulk/pause         Pause multiple requests  { ids: string[] }
+PATCH  /api/v1/requests/bulk/resume        Resume multiple requests { ids: string[] }
+PATCH  /api/v1/requests/bulk/priority      Set priority on multiple { ids: string[], priority: number }
 ```
 
 ### Modified Endpoints
@@ -217,8 +217,11 @@ Content-Type: application/json
 ```
 
 ```http
-PATCH /api/v1/submissions/abc-123/pause
-→ 200 { "updated": 4, "skipped": 1 }   // 1 already done
+PATCH /api/v1/requests/bulk/pause
+Content-Type: application/json
+
+{ "ids": ["req-1", "req-2", "req-3"] }
+→ 200 { "updated": 2, "skipped": 1 }   // 1 already processing
 ```
 
 ```http
@@ -379,12 +382,6 @@ db.requests.createIndex(
   { status: 1, workerType: 1, deletedAt: 1, priority: -1, createdAt: 1 },
   { name: "idx_scheduler_dispatch" }
 );
-
-// Pause/resume by submissionId
-db.requests.createIndex(
-  { submissionId: 1, status: 1 },
-  { name: "idx_submission_status" }
-);
 ```
 
 For CosmosDB: these map to composite indexes in the indexing policy.
@@ -423,7 +420,7 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 - [ ] Add Dockerfile and Kubernetes Deployment manifest for scheduler
 - [ ] Modify API submit flow: insert as `pending` (don't send to queue directly)
 - [ ] Add `PATCH /api/v1/requests/:id/priority` endpoint
-- [ ] Add `PATCH /api/v1/submissions/:id/priority` endpoint
+- [ ] Add `PATCH /api/v1/requests/bulk/priority` endpoint
 - [ ] Update request list endpoint with `sortBy=priority` support
 - [ ] Add unit tests for scheduler dispatch ordering
 - [ ] Add unit tests for priority API endpoints
@@ -435,20 +432,20 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 - [ ] Add `pausedAt`, `resumedAt`, `pausedBy` fields to `RequestDocument`
 - [ ] Add `PATCH /api/v1/requests/:id/pause` endpoint
 - [ ] Add `PATCH /api/v1/requests/:id/resume` endpoint
-- [ ] Add `PATCH /api/v1/submissions/:id/pause` endpoint
-- [ ] Add `PATCH /api/v1/submissions/:id/resume` endpoint
+- [ ] Add `PATCH /api/v1/requests/bulk/pause` endpoint
+- [ ] Add `PATCH /api/v1/requests/bulk/resume` endpoint
 - [ ] Modify scheduler to skip `paused` requests
 - [ ] Modify worker `processMessage()` to skip and delete messages for `paused` documents
 - [ ] Add unit tests for pause/resume state transitions
-- [ ] Add unit tests for submission-level pause/resume
+- [ ] Add unit tests for bulk pause/resume
 - [ ] Update SSE log streaming to emit pause/resume events
 
 ### Phase 3: Portal UI
 
 - [ ] Add priority selector to submission form (set priority at submit time)
-- [ ] Add pause/resume action buttons on submission list rows and detail view
+- [ ] Add pause/resume action buttons on submission list rows and detail view (selects all request IDs, calls bulk endpoint)
 - [ ] Add pause/resume action buttons on individual request rows
-- [ ] Add priority change control on submission detail view (dropdown or input to call `PATCH .../priority`)
+- [ ] Add priority change control on submission detail view (calls bulk priority with all request IDs)
 - [ ] Add priority change control on individual request detail view
 - [ ] Show priority badge/column on request and submission lists
 - [ ] Add "paused" status chip styling
