@@ -293,6 +293,7 @@ export function RunDetail() {
               )}
             </div>
           </div>
+          <div className="flex items-center gap-2">
           {run.run?.turns && run.run?.turns.some(t => t.snapshotUrl) && (
             <Button
               variant="outline"
@@ -316,6 +317,7 @@ export function RunDetail() {
               {retryMutation.isPending ? "Retrying…" : "Retry"}
             </Button>
           )}
+          </div>
         </div>
       </div>
 
