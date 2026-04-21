@@ -252,7 +252,7 @@ export interface ArchivableRun {
  * @param container  - blob storage container client for downloading snapshots/HARs/chats
  * @param prefix     - directory prefix inside the tar (defaults to resource._id)
  * @param isRestError - predicate to check if an error is a blob-not-found RestError
- * @param logsContainer - optional blob storage container client for downloading logs (run.jsonl)
+ * @param logsContainer - optional blob storage container client for downloading logs (logs.jsonl)
  */
 export async function packRunIntoTar(
   pack: Pack,
@@ -335,7 +335,7 @@ export async function packRunIntoTar(
     }
   }
 
-  // Bundle log events (run.jsonl) from the logs container.
+  // Bundle log events (logs.jsonl) from the logs container.
   // Logs are stored as AppendBlobs, so use getBlobClient (type-agnostic) rather
   // than getBlockBlobClient — the latter returns contentLength: undefined for
   // append blobs, causing the entry to be silently skipped.
@@ -344,9 +344,10 @@ export async function packRunIntoTar(
       const logBlobName = `${resource._id}/run.jsonl`;
       const blobClient = logsContainer.getBlobClient(logBlobName);
       const downloadResponse = await blobClient.download();
-      if (downloadResponse.readableStreamBody && downloadResponse.contentLength) {
-        const entry = pack.entry({ name: `${id}/run.jsonl`, size: downloadResponse.contentLength });
-        await pipeline(downloadResponse.readableStreamBody, entry);
+      const { readableStreamBody, contentLength } = downloadResponse;
+      if (readableStreamBody && contentLength != null && contentLength > 0) {
+        const entry = pack.entry({ name: `${id}/logs.jsonl`, size: contentLength });
+        await pipeline(readableStreamBody, entry);
       }
     } catch (blobError) {
       if (!isBlobNotFound(blobError)) throw blobError;

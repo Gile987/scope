@@ -563,7 +563,7 @@ describe("packRunIntoTar", () => {
     expect(entries[0].name).toBe("custom-prefix/run.yaml");
   });
 
-  it("includes run.jsonl from logs container", async () => {
+  it("includes logs.jsonl from logs container", async () => {
     const { pack } = await import("tar-stream");
     const p = pack();
     const container = makeMockBlobContainer();
@@ -584,11 +584,11 @@ describe("packRunIntoTar", () => {
     const entries = await entriesPromise;
     const names = entries.map(e => e.name);
     expect(names).toContain("run-006/run.yaml");
-    expect(names).toContain("run-006/run.jsonl");
-    expect(entries.find(e => e.name === "run-006/run.jsonl")!.data).toEqual(logData);
+    expect(names).toContain("run-006/logs.jsonl");
+    expect(entries.find(e => e.name === "run-006/logs.jsonl")!.data).toEqual(logData);
   });
 
-  it("skips run.jsonl when logs blob is missing", async () => {
+  it("skips logs.jsonl when logs blob is missing", async () => {
     const { pack } = await import("tar-stream");
     const p = pack();
     const container = makeMockBlobContainer();
