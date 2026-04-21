@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -22,18 +22,22 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, ChevronRight, Clock } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
+import type { RunState } from "@/types";
 
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const selectedRunId = searchParams.get("runId");
   const [copied, setCopied] = useState(false);
   const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
   const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
+  const [showAttempts, setShowAttempts] = useState(false);
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ["run", id],
@@ -53,7 +57,24 @@ export function RunDetail() {
     enabled: !!run?.profileId,
   });
 
-  const isActive = run?.run?.status === "pending" || run?.run?.status === "processing";
+  // Fetch all attempts when this request has been retried
+  const hasMultipleAttempts = (run?.run?.attemptNumber ?? 1) > 1;
+  const { data: attempts } = useQuery({
+    queryKey: ["run-attempts", id],
+    queryFn: () => api.listRunAttempts(id!),
+    enabled: !!id && hasMultipleAttempts,
+  });
+
+  // When viewing a historical attempt via ?runId=xxx, use that RunState
+  // instead of the current one. The selected attempt may come from the
+  // attempts list or fall back to the current run.
+  const activeRun: RunState | undefined = useMemo(() => {
+    if (!selectedRunId || selectedRunId === run?.run?._id) return run?.run;
+    return attempts?.find((a) => a._id === selectedRunId) ?? run?.run;
+  }, [selectedRunId, run?.run, attempts]);
+  const isViewingHistorical = !!selectedRunId && selectedRunId !== run?.run?._id;
+
+  const isActive = activeRun?.status === "pending" || activeRun?.status === "processing";
   // Note: "done" is terminal — not active, no log streaming needed
 
   // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
@@ -162,17 +183,17 @@ export function RunDetail() {
     );
   }
 
-  const hasHarData = !!(run.run?.harUrl || run.run?.turns?.some(t => t.harUrl));
-  const hasVideoData = !!(run.run?.videoUrls?.length || run.run?.setupVideoUrls?.length || run.run?.turns?.some(t => t.videoUrls?.length));
-  const videoCount = (run.run?.setupVideoUrls?.length ?? 0)
-    + (run.run?.videoUrls?.length ?? 0)
-    + (run.run?.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
+  const hasHarData = !!(activeRun?.harUrl || activeRun?.turns?.some(t => t.harUrl));
+  const hasVideoData = !!(activeRun?.videoUrls?.length || activeRun?.setupVideoUrls?.length || activeRun?.turns?.some(t => t.videoUrls?.length));
+  const videoCount = (activeRun?.setupVideoUrls?.length ?? 0)
+    + (activeRun?.videoUrls?.length ?? 0)
+    + (activeRun?.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
 
-  // Compute aggregate token usage: for one-shot runs use run.run?.tokenUsage,
+  // Compute aggregate token usage: for one-shot runs use activeRun?.tokenUsage,
   // for multi-turn runs sum per-turn token usage
-  const totalTokenUsage = run.run?.tokenUsage
-    ?? (run.run?.turns?.some(t => t.tokenUsage)
-      ? run.run?.turns!.reduce(
+  const totalTokenUsage = activeRun?.tokenUsage
+    ?? (activeRun?.turns?.some(t => t.tokenUsage)
+      ? activeRun?.turns!.reduce(
           (acc, t) => {
             if (!t.tokenUsage) return acc;
             return {
@@ -208,8 +229,13 @@ export function RunDetail() {
               </button>
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <StatusBadge status={run.run?.status ?? "pending"} />
-              {run.run?.status === "done" && <OutcomeBadge outcome={run.run?.outcome} />}
+              <StatusBadge status={activeRun?.status ?? "pending"} />
+              {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
+              {hasMultipleAttempts && (
+                <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium">
+                  Attempt #{activeRun?.attemptNumber ?? "?"}
+                </span>
+              )}
               <span className="font-mono">{run.workerType}</span>
               {run.model && (
                 <>
@@ -220,7 +246,7 @@ export function RunDetail() {
               {run.agentVersion && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs cursor-default" title={run.run?.workerVersion ? `Worker: ${run.run?.workerVersion}` : undefined}>{run.agentVersion}</span>
+                  <span className="font-mono text-xs cursor-default" title={activeRun?.workerVersion ? `Worker: ${activeRun?.workerVersion}` : undefined}>{run.agentVersion}</span>
                 </>
               )}
               <Separator orientation="vertical" className="h-4" />
@@ -232,7 +258,7 @@ export function RunDetail() {
                 </>
               )}
               {(() => {
-                const totalDuration = run.run?.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+                const totalDuration = activeRun?.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
                 return totalDuration ? (
                   <>
                     <Separator orientation="vertical" className="h-4" />
@@ -250,11 +276,11 @@ export function RunDetail() {
                   </span>
                 </>
               )}
-              {run.run?.aiCallCount !== undefined && (
+              {activeRun?.aiCallCount !== undefined && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
                   <span className="font-mono text-xs" title="LLM completion calls">
-                    {run.run?.aiCallCount} LLM calls
+                    {activeRun?.aiCallCount} LLM calls
                   </span>
                 </>
               )}
@@ -294,7 +320,7 @@ export function RunDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-          {run.run?.turns && run.run?.turns.some(t => t.snapshotUrl) && (
+          {activeRun?.turns && activeRun?.turns.some(t => t.snapshotUrl) && (
             <Button
               variant="outline"
               size="sm"
@@ -305,7 +331,7 @@ export function RunDetail() {
               Download Archive
             </Button>
           )}
-          {run.run?.status === "done" && (
+          {activeRun?.status === "done" && !isViewingHistorical && (
             <Button
               variant="outline"
               size="sm"
@@ -321,16 +347,80 @@ export function RunDetail() {
         </div>
       </div>
 
+      {/* Historical attempt banner */}
+      {isViewingHistorical && (
+        <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-700 dark:text-amber-400">
+          <Clock className="h-4 w-4 shrink-0" />
+          <span>
+            Viewing attempt #{activeRun?.attemptNumber} (historical).{" "}
+            <button
+              className="underline hover:no-underline font-medium"
+              onClick={() => navigate(`/runs/${id}/${tab ?? ""}`, { replace: true })}
+            >
+              View latest attempt
+            </button>
+          </span>
+        </div>
+      )}
+
+      {/* Attempts history (collapsible) */}
+      {hasMultipleAttempts && attempts && attempts.length > 0 && (
+        <div className="rounded-md border">
+          <button
+            className="flex w-full items-center gap-2 px-4 py-2 text-sm font-medium hover:bg-accent/50 transition-colors"
+            onClick={() => setShowAttempts((v) => !v)}
+          >
+            {showAttempts ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            Attempts ({attempts.length})
+          </button>
+          {showAttempts && (
+            <div className="border-t divide-y">
+              {attempts.map((attempt) => {
+                const isCurrent = attempt._id === run.run?._id;
+                const isSelected = attempt._id === activeRun?._id;
+                const duration = attempt.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+                return (
+                  <button
+                    key={attempt._id}
+                    className={`flex w-full items-center gap-4 px-4 py-2 text-sm hover:bg-accent/50 transition-colors ${isSelected ? "bg-accent" : ""}`}
+                    onClick={() => {
+                      if (isCurrent) {
+                        navigate(`/runs/${id}/${tab ?? ""}`, { replace: true });
+                      } else {
+                        navigate(`/runs/${id}/${tab ?? ""}?runId=${attempt._id}`, { replace: true });
+                      }
+                    }}
+                  >
+                    <span className="font-mono font-medium w-6 text-right">#{attempt.attemptNumber}</span>
+                    <StatusBadge status={attempt.status ?? "pending"} />
+                    {attempt.status === "done" && <OutcomeBadge outcome={attempt.outcome} />}
+                    {duration ? (
+                      <span className="font-mono text-xs text-muted-foreground">{formatDuration(duration)}</span>
+                    ) : null}
+                    {attempt.finishedAt && (
+                      <span className="text-xs text-muted-foreground ml-auto">{formatDate(attempt.finishedAt)}</span>
+                    )}
+                    {isCurrent && (
+                      <span className="text-xs text-muted-foreground font-medium">(latest)</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Tabs */}
       <Tabs
-        value={tab || (run.run?.turns && run.run?.turns.length > 0 ? "turns" : "logs")}
+        value={tab || (activeRun?.turns && activeRun?.turns.length > 0 ? "turns" : "logs")}
         onValueChange={(value) => navigate(`/runs/${id}/${value}`)}
       >
         <TabsList>
           <TabsTrigger value="turns">
-            Turns {run.run?.turns ? `(${run.run?.turns.length})` : ""}
+            Turns {activeRun?.turns ? `(${activeRun?.turns.length})` : ""}
           </TabsTrigger>
-          {run.run?.turns && run.run?.turns.length > 0 && (
+          {activeRun?.turns && activeRun?.turns.length > 0 && (
             <TabsTrigger value="conversation">Conversation</TabsTrigger>
           )}
           {hasHarData && <TabsTrigger value="network">Network</TabsTrigger>}
@@ -345,13 +435,13 @@ export function RunDetail() {
 
         {/* Turns tab */}
         <TabsContent value="turns" className="mt-4">
-          <TurnTimeline turns={run.run?.turns ?? []} runId={run._id} />
+          <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} />
         </TabsContent>
 
         {/* Conversation tab — chat-style view of agent/judge exchanges */}
-        {run.run?.turns && run.run?.turns.length > 0 && (
+        {activeRun?.turns && activeRun?.turns.length > 0 && (
           <TabsContent value="conversation" className="mt-4">
-            <ConversationView turns={run.run?.turns} task={run.scenario?.task} runId={run._id} />
+            <ConversationView turns={activeRun?.turns} task={run.scenario?.task} runId={run._id} />
           </TabsContent>
         )}
 
@@ -359,8 +449,8 @@ export function RunDetail() {
         {hasHarData && (
           <TabsContent value="network" className="mt-4">
             {/* If multi-turn, show per-iteration selector; otherwise one viewer */}
-            {run.run?.turns && run.run?.turns.some(t => t.harUrl) ? (
-              <HarIterationTabs runId={run._id} turns={run.run?.turns} />
+            {activeRun?.turns && activeRun?.turns.some(t => t.harUrl) ? (
+              <HarIterationTabs runId={run._id} turns={activeRun?.turns} />
             ) : (
               <HarNetworkViewer runId={run._id} />
             )}
@@ -370,18 +460,18 @@ export function RunDetail() {
         {/* Video tab — session recording player */}
         {hasVideoData && (
           <TabsContent value="video" className="mt-4">
-            {run.run?.turns && run.run?.turns.some(t => t.videoUrls?.length) ? (
-              <VideoIterationTabs runId={run._id} turns={run.run?.turns} setupVideoUrls={run.run?.setupVideoUrls} />
+            {activeRun?.turns && activeRun?.turns.some(t => t.videoUrls?.length) ? (
+              <VideoIterationTabs runId={run._id} turns={activeRun?.turns} setupVideoUrls={activeRun?.setupVideoUrls} />
             ) : (
               <div className="space-y-4">
-                {run.run?.setupVideoUrls && run.run?.setupVideoUrls.length > 0 && (
-                  run.run?.setupVideoUrls.map((_, i) => (
+                {activeRun?.setupVideoUrls && activeRun?.setupVideoUrls.length > 0 && (
+                  activeRun?.setupVideoUrls.map((_, i) => (
                     <VideoPlayer key={`setup-${i}`} src={api.videoUrl(run._id, undefined, i, "setup")} label="Setup" />
                   ))
                 )}
-                {run.run?.videoUrls && run.run?.videoUrls.length > 0 && (
-                  run.run?.videoUrls.map((_, i) => (
-                    <VideoPlayer key={i} src={api.videoUrl(run._id, undefined, i)} label={(run.run?.videoUrls?.length ?? 0) > 1 ? `Video ${i + 1}` : undefined} />
+                {activeRun?.videoUrls && activeRun?.videoUrls.length > 0 && (
+                  activeRun?.videoUrls.map((_, i) => (
+                    <VideoPlayer key={i} src={api.videoUrl(run._id, undefined, i)} label={(activeRun?.videoUrls?.length ?? 0) > 1 ? `Video ${i + 1}` : undefined} />
                   ))
                 )}
               </div>
@@ -637,7 +727,7 @@ export function RunDetail() {
             )}
 
             {/* Version Info card */}
-            {(run.agentVersion || run.run?.workerVersion || run.run?.os) && (
+            {(run.agentVersion || activeRun?.workerVersion || activeRun?.os) && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Version Info</CardTitle>
@@ -649,21 +739,21 @@ export function RunDetail() {
                       <span className="font-mono font-medium">{run.agentVersion}</span>
                     </div>
                   )}
-                  {run.run?.workerVersion && (
+                  {activeRun?.workerVersion && (
                     <div>
                       <span className="text-muted-foreground">Worker Version:</span>{" "}
-                      <span className="font-mono font-medium">{run.run?.workerVersion}</span>
+                      <span className="font-mono font-medium">{activeRun?.workerVersion}</span>
                     </div>
                   )}
-                  {run.run?.os && (
+                  {activeRun?.os && (
                     <div>
                       <span className="text-muted-foreground">OS:</span>{" "}
                       <span className="font-mono font-medium">
-                        {run.run?.os.platform}
+                        {activeRun?.os.platform}
                         <span className="text-muted-foreground ml-1">(release </span>
-                        {run.run?.os.release}
+                        {activeRun?.os.release}
                         <span className="text-muted-foreground"> arch </span>
-                        {run.run?.os.arch}
+                        {activeRun?.os.arch}
                         <span className="text-muted-foreground">)</span>
                       </span>
                     </div>
@@ -775,27 +865,27 @@ export function RunDetail() {
             )}
 
             {/* Error card (if failed) */}
-            {run.run?.error && (
+            {activeRun?.error && (
               <Card className="md:col-span-2 border-destructive">
                 <CardHeader>
                   <CardTitle className="text-lg text-destructive">Error</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <pre className="text-sm text-destructive whitespace-pre-wrap font-mono bg-destructive/10 rounded-md p-3">
-                    {run.run?.error}
+                    {activeRun?.error}
                   </pre>
                 </CardContent>
               </Card>
             )}
 
             {/* Result card */}
-            {run.run?.result && (
+            {activeRun?.result && (
               <Card className="md:col-span-2">
                 <CardHeader>
                   <CardTitle className="text-lg">Result</CardTitle>
                 </CardHeader>
                 <CardContent className="prose prose-sm dark:prose-invert max-w-none">
-                  <MarkdownRenderer>{run.run?.result}</MarkdownRenderer>
+                  <MarkdownRenderer>{activeRun?.result}</MarkdownRenderer>
                 </CardContent>
               </Card>
             )}
@@ -805,7 +895,7 @@ export function RunDetail() {
         {/* Tool Calls tab — HAR captures & tool calls summary */}
         {hasHarData && (
           <TabsContent value="tool-calls" className="mt-4 space-y-4">
-            <ToolCallsTab runId={run._id} turns={run.run?.turns} harUrl={run.run?.harUrl} />
+            <ToolCallsTab runId={run._id} turns={activeRun?.turns} harUrl={activeRun?.harUrl} />
           </TabsContent>
         )}
       </Tabs>
