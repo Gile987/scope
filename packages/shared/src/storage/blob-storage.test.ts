@@ -142,6 +142,20 @@ describe("BlobStorage — log helpers", () => {
       const storage = makeStorage();
       await expect(storage.appendLogEvent("run-123", makeLogEvent("fail"))).rejects.toThrow("AppendBlockFailed");
     });
+
+    it("evictRun removes the cache entry so the next append re-initialises the blob", async () => {
+      mockAppendBlobClient.appendBlock.mockResolvedValue(undefined);
+      const storage = makeStorage();
+
+      await storage.appendLogEvent("run-abc", makeLogEvent("before"));
+      expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledTimes(1);
+
+      storage.evictRun("run-abc");
+
+      await storage.appendLogEvent("run-abc", makeLogEvent("after"));
+      // createIfNotExists should be called a second time after eviction
+      expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("getLogEvents", () => {
