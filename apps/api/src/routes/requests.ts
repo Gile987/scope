@@ -1369,6 +1369,7 @@ apiRoute(ctx.app, ctx.registry, {
       );
     }
     const containerClient = blobServiceClient.getContainerClient("snapshots");
+    const logsContainerClient = blobServiceClient.getContainerClient("logs");
 
     // Set response headers before streaming
     res.setHeader("Content-Type", "application/gzip");
@@ -1382,7 +1383,7 @@ apiRoute(ctx.app, ctx.registry, {
     const isBlobNotFound = (err: unknown) =>
       err instanceof RestError && (err.statusCode === 404 || err.code === "ContainerNotFound" || err.code === "BlobNotFound");
 
-    await packRunIntoTar(pack, resource, containerClient, id, isBlobNotFound);
+    await packRunIntoTar(pack, resource, containerClient, id, isBlobNotFound, logsContainerClient);
 
     // Finalize the tar archive
     pack.finalize();
@@ -1439,6 +1440,7 @@ apiRoute(ctx.app, ctx.registry, {
         );
       }
       const containerClient = blobServiceClient.getContainerClient("snapshots");
+      const logsContainerClient = blobServiceClient.getContainerClient("logs");
 
       // Set response headers before streaming
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -1455,7 +1457,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       // Pack each run into the archive
       for (const run of runs) {
-        await packRunIntoTar(pack, run, containerClient, run._id, isBlobNotFound);
+        await packRunIntoTar(pack, run, containerClient, run._id, isBlobNotFound, logsContainerClient);
       }
 
       // Finalize the tar archive

@@ -109,6 +109,14 @@ export class LogPublisher {
   async close(): Promise<void> {
     await this.redis.quit();
   }
+
+  /**
+   * Clears the per-run blob initialisation cache entry once a run is complete.
+   * Prevents the map from growing unbounded in long-lived worker processes.
+   */
+  evictRun(requestId: string, runId: string): void {
+    this.blobStorage.evictRun(requestId, runId);
+  }
 }
 
 /**

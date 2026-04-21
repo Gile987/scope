@@ -152,6 +152,20 @@ describe("BlobStorage — log helpers", () => {
       expect(mockLogsContainerClient.getAppendBlobClient).toHaveBeenCalledWith("run-123/runs/attempt-1/run.jsonl");
       expect(mockLogsContainerClient.getAppendBlobClient).toHaveBeenCalledWith("run-123/runs/attempt-2/run.jsonl");
     });
+
+    it("evictRun removes the cache entry so the next append re-initialises the blob", async () => {
+      mockAppendBlobClient.appendBlock.mockResolvedValue(undefined);
+      const storage = makeStorage();
+
+      await storage.appendLogEvent("run-abc", "attempt-1", makeLogEvent("before"));
+      expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledTimes(1);
+
+      storage.evictRun("run-abc", "attempt-1");
+
+      await storage.appendLogEvent("run-abc", "attempt-1", makeLogEvent("after"));
+      // createIfNotExists should be called a second time after eviction
+      expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("getLogEvents", () => {

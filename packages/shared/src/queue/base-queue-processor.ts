@@ -169,6 +169,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
 
   private async processMessage(message: DequeuedMessageItem): Promise<void> {
     let documentId: string | undefined;
+    let runId: string | undefined;
     let currentPopReceipt = message.popReceipt;
     let payload: Record<string, unknown> | undefined;
 
@@ -194,6 +195,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       const payloadRunId = typeof payload?.runId === "string" ? payload.runId : undefined;
       const docRunId = typeof (doc as any)?.run?._id === "string" ? (doc as any).run._id : undefined;
       const logRunId = payloadRunId ?? docRunId ?? documentId!;
+      runId = logRunId;
 
       // Create log function for this document
       const log = async (
@@ -263,6 +265,12 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       }
 
       await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    } finally {
+      // Evict the per-run blob init cache entry so initializedBlobs doesn't
+      // grow unbounded over the lifetime of a long-running worker process.
+      if (documentId) {
+        this.logPublisher.evictRun(documentId, runId ?? documentId);
+      }
     }
   }
 

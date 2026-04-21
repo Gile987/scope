@@ -222,6 +222,12 @@ export interface BlobDownloader {
       contentLength?: number;
     }>;
   };
+  getBlobClient(blobName: string): {
+    download(): Promise<{
+      readableStreamBody?: NodeJS.ReadableStream;
+      contentLength?: number;
+    }>;
+  };
 }
 
 /** A run document with the fields needed for archive packing. */
@@ -254,6 +260,7 @@ export interface ArchivableRun {
  * @param container  - blob storage container client for downloading snapshots/HARs/chats
  * @param prefix     - directory prefix inside the tar (defaults to resource._id)
  * @param isRestError - predicate to check if an error is a blob-not-found RestError
+ * @param logsContainer - optional blob storage container client for downloading logs (logs.jsonl)
  */
 export async function packRunIntoTar(
   pack: Pack,
@@ -261,6 +268,7 @@ export async function packRunIntoTar(
   container: BlobDownloader,
   prefix?: string,
   isRestError?: (err: unknown) => boolean,
+  logsContainer?: BlobDownloader,
 ): Promise<void> {
   const id = prefix ?? resource._id;
   const isBlobNotFound = isRestError ?? (() => false);
@@ -337,6 +345,25 @@ export async function packRunIntoTar(
     } catch (blobError) {
       if (isBlobNotFound(blobError)) continue;
       throw blobError;
+    }
+  }
+
+  // Bundle log events (logs.jsonl) from the logs container.
+  // Logs are stored as AppendBlobs, so use getBlobClient (type-agnostic) rather
+  // than getBlockBlobClient — the latter returns contentLength: undefined for
+  // append blobs, causing the entry to be silently skipped.
+  if (logsContainer) {
+    try {
+      const logBlobName = `${resource._id}/run.jsonl`;
+      const blobClient = logsContainer.getBlobClient(logBlobName);
+      const downloadResponse = await blobClient.download();
+      const { readableStreamBody, contentLength } = downloadResponse;
+      if (readableStreamBody && contentLength != null && contentLength > 0) {
+        const entry = pack.entry({ name: `${id}/logs.jsonl`, size: contentLength });
+        await pipeline(readableStreamBody, entry);
+      }
+    } catch (blobError) {
+      if (!isBlobNotFound(blobError)) throw blobError;
     }
   }
 }

@@ -425,20 +425,22 @@ describe("uploadBundledChatFiles", () => {
 
 describe("packRunIntoTar", () => {
   function makeMockBlobContainer(blobs: Record<string, { body: Buffer; length: number }> = {}): BlobDownloader {
+    function makeClientFor(blobName: string) {
+      return {
+        async download() {
+          const blob = blobs[blobName];
+          if (!blob) throw Object.assign(new Error("Not found"), { statusCode: 404, code: "BlobNotFound" });
+          const { Readable } = await import("stream");
+          return {
+            readableStreamBody: Readable.from(blob.body),
+            contentLength: blob.length,
+          };
+        },
+      };
+    }
     return {
-      getBlockBlobClient(blobName: string) {
-        return {
-          async download() {
-            const blob = blobs[blobName];
-            if (!blob) throw Object.assign(new Error("Not found"), { statusCode: 404, code: "BlobNotFound" });
-            const { Readable } = await import("stream");
-            return {
-              readableStreamBody: Readable.from(blob.body),
-              contentLength: blob.length,
-            };
-          },
-        };
-      },
+      getBlockBlobClient: makeClientFor,
+      getBlobClient: makeClientFor,
     };
   }
 
@@ -588,5 +590,50 @@ describe("packRunIntoTar", () => {
 
     const entries = await entriesPromise;
     expect(entries[0].name).toBe("custom-prefix/run.yaml");
+  });
+
+  it("includes logs.jsonl from logs container", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const container = makeMockBlobContainer();
+    const logData = Buffer.from('{"level":"info","msg":"hello"}\n{"level":"info","msg":"world"}\n');
+    const logsContainer = makeMockBlobContainer({
+      "run-006/run.jsonl": { body: logData, length: logData.length },
+    });
+
+    const run: ArchivableRun = {
+      _id: "run-006",
+      turns: [],
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-006", () => true, logsContainer);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    const names = entries.map(e => e.name);
+    expect(names).toContain("run-006/run.yaml");
+    expect(names).toContain("run-006/logs.jsonl");
+    expect(entries.find(e => e.name === "run-006/logs.jsonl")!.data).toEqual(logData);
+  });
+
+  it("skips logs.jsonl when logs blob is missing", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const container = makeMockBlobContainer();
+    const logsContainer = makeMockBlobContainer({}); // no blobs
+
+    const run: ArchivableRun = {
+      _id: "run-007",
+      turns: [],
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-007", () => true, logsContainer);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    expect(entries).toHaveLength(1);
+    expect(entries[0].name).toBe("run-007/run.yaml");
   });
 });
