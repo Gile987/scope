@@ -372,7 +372,6 @@ apiRoute(ctx.app, ctx.registry, {
           scenario,
           workerType,
           taskPromptId,
-          status: "pending",
           createdAt: new Date(),
           ...(model ? { model } : {}),
           ...(maxIterations ? { maxIterations } : {}),
@@ -436,7 +435,6 @@ apiRoute(ctx.app, ctx.registry, {
       scenario,
       workerType,
       taskPromptId,
-      status: "pending",
       createdAt: new Date(),
       ...(model ? { model } : {}),
       ...(maxIterations ? { maxIterations } : {}),
@@ -473,7 +471,7 @@ apiRoute(ctx.app, ctx.registry, {
       workerType,
       ...(model ? { model } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
-      status: requestDoc.status,
+      status: requestDoc.run?.status ?? "pending",
       mode,
       message: "Request submitted successfully",
       scenario,
@@ -1135,7 +1133,6 @@ apiRoute(ctx.app, ctx.registry, {
           _id: requestId,
           scenario: original.scenario,
           workerType: effectiveWorkerType,
-          status: "pending",
           createdAt: new Date(),
           ...(effectiveMaxIterations ? { maxIterations: effectiveMaxIterations } : {}),
           ...(original.personaInstructions ? { personaInstructions: original.personaInstructions } : {}),
@@ -1784,9 +1781,9 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Parse run.yaml
     const runYamlContent = await readFile(runYamlPath, "utf-8");
-    let runDoc: RequestDocument;
+    let runDoc: Record<string, any>;
     try {
-      runDoc = yamlParse(runYamlContent) as RequestDocument;
+      runDoc = yamlParse(runYamlContent) as Record<string, any>;
     } catch (parseErr) {
       res.status(400).json({ error: `Failed to parse run.yaml: ${parseErr}` });
       return;
@@ -2076,7 +2073,7 @@ apiRoute(ctx.app, ctx.registry, {
     // terminal state. Use the run.* shape if present; fall back to the
     // legacy top-level shape for any unmigrated doc.
     const currentRun: RunState | undefined = request.run;
-    const currentStatus = currentRun?.status ?? request.status;
+    const currentStatus = currentRun?.status;
     if (currentStatus !== "done") {
       res.status(422).json({
         error: `Cannot retry: current run status is '${currentStatus}', expected 'done'`,
@@ -2084,25 +2081,12 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    // If there's no nested run yet (legacy doc that the migration somehow
-    // missed), synthesise one from the top-level fields so we can demote it.
-    const runToDemote: RunState = currentRun ?? {
-      _id: request._id,
-      attemptNumber: 1,
-      status: request.status,
-      ...(request.outcome ? { outcome: request.outcome } : {}),
-      ...(request.result ? { result: request.result } : {}),
-      ...(request.error ? { error: request.error } : {}),
-      ...(request.turns ? { turns: request.turns } : {}),
-      ...(request.workerVersion ? { workerVersion: request.workerVersion } : {}),
-      ...(request.harUrl ? { harUrl: request.harUrl } : {}),
-      ...(request.videoUrls ? { videoUrls: request.videoUrls } : {}),
-      ...(request.setupVideoUrls ? { setupVideoUrls: request.setupVideoUrls } : {}),
-      ...(request.tokenUsage ? { tokenUsage: request.tokenUsage } : {}),
-      ...(request.aiCallCount !== undefined ? { aiCallCount: request.aiCallCount } : {}),
-      ...(request.rawChatUrl ? { rawChatUrl: request.rawChatUrl } : {}),
-      ...(request.rawChatFormat ? { rawChatFormat: request.rawChatFormat } : {}),
-    };
+    // Migration 014 guarantees all docs have a run sub-document.
+    if (!currentRun) {
+      res.status(422).json({ error: "Request has no run sub-document" });
+      return;
+    }
+    const runToDemote: RunState = currentRun;
 
     const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
     const newRunId = uuidv4();
@@ -2134,23 +2118,6 @@ apiRoute(ctx.app, ctx.registry, {
           updatedAt: new Date(),
         },
         $inc: { attemptCount: newAttemptCount - (request.attemptCount ?? 1) },
-        // Clear legacy top-level per-attempt fields so reads via the
-        // backward-compat fallbacks see a clean slate for the new attempt.
-        $unset: {
-          status: "",
-          outcome: "",
-          result: "",
-          error: "",
-          turns: "",
-          workerVersion: "",
-          harUrl: "",
-          videoUrls: "",
-          setupVideoUrls: "",
-          tokenUsage: "",
-          aiCallCount: "",
-          rawChatUrl: "",
-          rawChatFormat: "",
-        },
       },
     );
 

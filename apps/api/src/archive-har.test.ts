@@ -58,7 +58,8 @@ describe("rewriteHarUrlsForArchive", () => {
   });
 
   it("handles resource with no harUrl at all", () => {
-    const resource = {
+    const resource: ArchivableRun = {
+      _id: "no-har",
       run: {
         turns: [{ iteration: 1 }],
       },
