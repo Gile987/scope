@@ -31,7 +31,7 @@ import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "status" | "outcome" | "report" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
@@ -47,6 +47,7 @@ const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
   { id: "report", label: "Report" },
+  { id: "attempt", label: "Attempt" },
   { id: "turns", label: "Turns" },
   { id: "llmCalls", label: "LLM Calls" },
   { id: "duration", label: "Duration" },
@@ -1159,6 +1160,7 @@ export function RunsList() {
               {isCol("status") && <TableHead className="w-[100px]">Status</TableHead>}
               {isCol("outcome") && <TableHead className="w-[100px]">Outcome</TableHead>}
               {isCol("report") && <TableHead className="w-[100px]">Report</TableHead>}
+              {isCol("attempt") && <TableHead className="w-[60px]">Attempt</TableHead>}
               {isCol("turns") && <TableHead className="w-[80px]">Turns</TableHead>}
               {isCol("llmCalls") && <TableHead className="w-[80px]">LLM Calls</TableHead>}
               {isCol("duration") && <TableHead className="w-[100px]">Duration</TableHead>}
@@ -1376,6 +1378,9 @@ function RunRow({
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
+      </TableCell>}
+      {isCol("attempt") && <TableCell className="text-center font-mono text-xs">
+        {run.run?.attemptNumber != null && run.run.attemptNumber > 1 ? run.run.attemptNumber : <span className="text-muted-foreground">–</span>}
       </TableCell>}
       {isCol("turns") && <TableCell className="text-center">
         {run.run?.turns?.length ?? "–"}
@@ -1734,9 +1739,10 @@ function GroupRows({
             return <ReportProgressBar summary={{ total, completed, pending, generating, failed }} />;
           })()}
         </TableCell>}
+        {/* Attempt */}
+        {isCol("attempt") && <TableCell />}
         {/* Turns */}
         {isCol("turns") && <TableCell className="text-center font-mono text-xs">
-          {formatStatRange(aggregates.turns, fmtNum)}
         </TableCell>}
         {/* LLM Calls */}
         {isCol("llmCalls") && <TableCell />}
@@ -1758,7 +1764,7 @@ function GroupRows({
       {isExpanded && (
         isExpandLoading ? (
           <TableRow>
-            <TableCell colSpan={19} className="text-center py-4">
+            <TableCell colSpan={20} className="text-center py-4">
               <RefreshCw className="h-4 w-4 animate-spin inline-block mr-2" />
               Loading runs…
             </TableCell>
