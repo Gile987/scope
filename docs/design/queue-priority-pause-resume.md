@@ -189,9 +189,9 @@ The portal can select multiple requests (e.g. all from a submission) and call th
 ### New Endpoints
 
 ```
-PATCH  /api/v1/requests/:id/pause          Pause a single request
-PATCH  /api/v1/requests/:id/resume         Resume a single request
-PATCH  /api/v1/requests/:id/priority       Set priority on a single request
+POST   /api/v1/requests/:id/pause          Pause a single request
+POST   /api/v1/requests/:id/resume         Resume a single request
+POST   /api/v1/requests/:id/priority       Set priority on a single request
 
 POST   /api/v1/requests/bulk/pause         Pause multiple requests  { ids: string[] }
 POST   /api/v1/requests/bulk/resume        Resume multiple requests { ids: string[] }
@@ -225,7 +225,7 @@ Content-Type: application/json
 ```
 
 ```http
-PATCH /api/v1/requests/req-456/priority
+POST /api/v1/requests/req-456/priority
 Content-Type: application/json
 
 { "priority": 100 }
