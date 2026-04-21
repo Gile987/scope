@@ -603,7 +603,9 @@ describe("packRunIntoTar", () => {
 
     const run: ArchivableRun = {
       _id: "run-006",
-      turns: [],
+      run: {
+        turns: [],
+      },
     };
 
     const entriesPromise = collectPackEntries(p);
@@ -625,7 +627,9 @@ describe("packRunIntoTar", () => {
 
     const run: ArchivableRun = {
       _id: "run-007",
-      turns: [],
+      run: {
+        turns: [],
+      },
     };
 
     const entriesPromise = collectPackEntries(p);
@@ -635,5 +639,32 @@ describe("packRunIntoTar", () => {
     const entries = await entriesPromise;
     expect(entries).toHaveLength(1);
     expect(entries[0].name).toBe("run-007/run.yaml");
+  });
+
+  it("uses logsUrl from run sub-document for per-attempt log path", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const container = makeMockBlobContainer();
+    const logData = Buffer.from('{"level":"info","msg":"attempt-2"}\n');
+    const logsContainer = makeMockBlobContainer({
+      "run-008/runs/attempt-2/run.jsonl": { body: logData, length: logData.length },
+    });
+
+    const run: ArchivableRun = {
+      _id: "run-008",
+      run: {
+        logsUrl: "https://myaccount.blob.core.windows.net/logs/run-008/runs/attempt-2/run.jsonl",
+        turns: [],
+      },
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-008", () => true, logsContainer);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    const names = entries.map(e => e.name);
+    expect(names).toContain("run-008/logs.jsonl");
+    expect(entries.find(e => e.name === "run-008/logs.jsonl")!.data).toEqual(logData);
   });
 });

@@ -27,6 +27,19 @@ export function blobNameFromSnapshotsUrl(url: string): string | null {
 }
 
 /**
+ * Extract the blob name from an Azure Blob Storage URL whose container is "logs".
+ * Works with both production URLs and Azurite (local emulator) URLs.
+ *
+ * @returns The blob name (path after `/logs/`), or `null` if the URL doesn't match.
+ */
+export function blobNameFromLogsUrl(url: string): string | null {
+  const parsed = new URL(url);
+  const prefix = "/logs/";
+  const idx = parsed.pathname.indexOf(prefix);
+  return idx === -1 ? null : parsed.pathname.substring(idx + prefix.length);
+}
+
+/**
  * Deep-clone a run resource and rewrite `harUrl` and `rawChatUrl` fields to relative archive paths.
  *
  * - `run.harUrl`            → `"run.har"`
@@ -234,6 +247,7 @@ export interface BlobDownloader {
 export interface ArchivableRun {
   _id: string;
   run?: {
+    logsUrl?: string;
     harUrl?: string;
     rawChatUrl?: string;
     turns?: Array<{
@@ -354,7 +368,12 @@ export async function packRunIntoTar(
   // append blobs, causing the entry to be silently skipped.
   if (logsContainer) {
     try {
-      const logBlobName = `${resource._id}/run.jsonl`;
+      // Prefer the per-attempt logsUrl stored on the run sub-document;
+      // fall back to legacy path for pre-migration documents.
+      const logsUrl = resource.run?.logsUrl;
+      const logBlobName = logsUrl
+        ? blobNameFromLogsUrl(logsUrl) ?? `${resource._id}/run.jsonl`
+        : `${resource._id}/run.jsonl`;
       const blobClient = logsContainer.getBlobClient(logBlobName);
       const downloadResponse = await blobClient.download();
       const { readableStreamBody, contentLength } = downloadResponse;
