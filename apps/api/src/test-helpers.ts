@@ -163,6 +163,7 @@ export function createMockSkillResolver(): Record<string, any> {
 export function createMockBlobStorage(): BlobStorage {
   return {
     getLogEvents: vi.fn().mockResolvedValue([]),
+    getLogsBlobUrl: vi.fn().mockImplementation((blobName: string) => `https://mockaccount.blob.core.windows.net/logs/${blobName}`),
     appendLogEvent: vi.fn().mockResolvedValue(undefined),
     ensureContainer: vi.fn().mockResolvedValue(undefined),
     uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),

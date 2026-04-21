@@ -109,18 +109,28 @@ export class BlobStorage {
   }
 
   /**
+   * Returns the full blob URL for a log blob name in the `logs` container.
+   * Use at submit time to store `logsUrl` on the RunState document.
+   */
+  getLogsBlobUrl(blobName: string): string {
+    return this.logsContainerClient.getAppendBlobClient(blobName).url;
+  }
+
+  /**
    * Downloads all persisted log events for a run.
    *
-   * Preferred: pass `logsBlobName` (the blob name stored on the RunState
-   * document, e.g. `{requestId}/runs/{runId}/run.jsonl`).
+   * Preferred: pass `logsUrl` (the full blob URL stored on RunState, e.g.
+   * `https://<account>.blob.core.windows.net/logs/{requestId}/runs/{runId}/run.jsonl`).
+   * The URL is parsed to extract the blob name, matching the pattern used by
+   * `downloadAndExtractSnapshot` for snapshot URLs.
    *
-   * Legacy fallback (for runs created before `logsBlobName` was recorded):
+   * Legacy fallback (for runs created before `logsUrl` was recorded):
    * pass `requestId` + optional `runId`. Tries the per-attempt path first,
    * then the legacy `{requestId}/run.jsonl` path on 404.
    *
    * Returns an empty array if no log blob exists at any location.
    */
-  async getLogEvents(logsBlobNameOrRequestId: string, runId?: string): Promise<LogEvent[]> {
+  async getLogEvents(logsUrlOrRequestId: string, runId?: string): Promise<LogEvent[]> {
     await this.ensureLogsContainer();
 
     const tryDownload = async (blobName: string): Promise<LogEvent[] | undefined> => {
@@ -143,17 +153,27 @@ export class BlobStorage {
       }
     };
 
-    // When the blob name looks like a pre-computed path (contains "/"),
-    // use it directly. This is the primary path for new runs where
-    // `logsBlobName` is stored on the RunState document.
-    if (logsBlobNameOrRequestId.includes("/")) {
-      const fromDirect = await tryDownload(logsBlobNameOrRequestId);
+    // When the first argument looks like a URL, parse it to extract the
+    // blob name — same approach as downloadAndExtractSnapshot for snapshot URLs.
+    if (logsUrlOrRequestId.startsWith("http://") || logsUrlOrRequestId.startsWith("https://")) {
+      const url = new URL(logsUrlOrRequestId);
+      const containerPrefix = `/${LOGS_CONTAINER}/`;
+      const containerIndex = url.pathname.indexOf(containerPrefix);
+      if (containerIndex === -1) {
+        throw new Error(
+          `Logs URL does not contain container '${LOGS_CONTAINER}': ${logsUrlOrRequestId}`
+        );
+      }
+      const blobName = decodeURIComponent(
+        url.pathname.substring(containerIndex + containerPrefix.length)
+      );
+      const fromDirect = await tryDownload(blobName);
       return fromDirect ?? [];
     }
 
     // Legacy: caller passed a requestId (+ optional runId). Try the
     // per-attempt path first, then the old flat layout.
-    const requestId = logsBlobNameOrRequestId;
+    const requestId = logsUrlOrRequestId;
     if (runId) {
       const fromNew = await tryDownload(`${requestId}/runs/${runId}/run.jsonl`);
       if (fromNew !== undefined) return fromNew;

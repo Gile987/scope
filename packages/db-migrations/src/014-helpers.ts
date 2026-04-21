@@ -51,11 +51,6 @@ export function buildRunReshapeUpdate(doc: Document): {
     _id: doc._id,
     attemptNumber: 1,
     status: doc.status ?? "done",
-    // Pre-compute the log blob name so readers can fetch it directly
-    // from the document without reconstructing storage paths.
-    // Legacy docs reused requestId as the runId, so the path is
-    // `{requestId}/runs/{requestId}/run.jsonl`.
-    logsBlobName: `${String(doc._id)}/runs/${String(doc._id)}/run.jsonl`,
   };
 
   for (const field of RUN_FIELDS) {

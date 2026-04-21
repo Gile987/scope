@@ -216,11 +216,12 @@ export interface RunState {
   outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;
-  /** Blob name (inside the `logs` container) where this attempt's JSONL logs
-   *  are persisted, e.g. `{requestId}/runs/{runId}/run.jsonl`.  Set at submit
-   *  time so the SSE replay endpoint can read it directly from the document
-   *  without recomputing storage paths. */
-  logsBlobName?: string;
+  /** Full blob URL pointing to this attempt's JSONL log blob in the `logs`
+   *  container, e.g. `https://<account>.blob.core.windows.net/logs/{requestId}/runs/{runId}/run.jsonl`.
+   *  Set at submit time so the SSE replay endpoint can read it directly from
+   *  the document without recomputing storage paths — matching the pattern
+   *  used by `harUrl`, `videoUrls`, and `snapshotUrl`. */
+  logsUrl?: string;
   updatedAt?: Date;
   startedAt?: Date;                         // When worker picked up this attempt
   finishedAt?: Date;                        // When this attempt reached "done"
