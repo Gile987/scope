@@ -2198,6 +2198,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "harUrl": {
             "type": "string",
           },
+          "logsUrl": {
+            "type": "string",
+          },
           "outcome": {
             "enum": [
               "succeeded",

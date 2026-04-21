@@ -160,6 +160,7 @@ export const RunStateSchema = z
     outcome: RequestOutcomeSchema.optional(),
     result: z.string().optional(),
     error: z.string().optional(),
+    logsUrl: z.string().optional(),
     updatedAt: z.coerce.date().optional(),
     startedAt: z.coerce.date().optional(),               // When worker picked up this attempt
     finishedAt: z.coerce.date().optional(),              // When this attempt reached "done"
