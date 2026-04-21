@@ -293,6 +293,35 @@ export function RunsList() {
     },
   });
 
+  const bulkRetryMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      // Only retry runs that are in terminal state (done)
+      const eligible = runs.filter((r) => ids.includes(r._id) && r.run?.status === "done");
+      const skipped = ids.length - eligible.length;
+      const results = await Promise.allSettled(eligible.map((r) => api.retryRun(r._id)));
+      const succeeded = results.filter((r) => r.status === "fulfilled").length;
+      const failed = results.filter((r) => r.status === "rejected").length;
+      return { succeeded, failed, skipped };
+    },
+    onSuccess: ({ succeeded, failed, skipped }) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      const parts: string[] = [];
+      if (succeeded > 0) parts.push(`${succeeded} retried`);
+      if (skipped > 0) parts.push(`${skipped} skipped (not done)`);
+      if (failed > 0) parts.push(`${failed} failed`);
+      if (failed > 0) {
+        toast.warning(`Bulk retry: ${parts.join(", ")}`);
+      } else {
+        toast.success(`Bulk retry: ${parts.join(", ")}`);
+      }
+    },
+    onError: (error) => {
+      toast.error("Bulk retry failed", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
   const bulkDeleteMutation = useMutation({
     mutationFn: api.bulkDeleteRuns,
     onSuccess: (data) => {
@@ -1098,6 +1127,16 @@ export function RunsList() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={bulkRetryMutation.isPending}
+            onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
+          >
+            <RotateCcw className="h-4 w-4" />
+            {bulkRetryMutation.isPending ? "Retrying…" : "Retry selected"}
+          </Button>
           <Button
             variant="outline"
             size="sm"
