@@ -39,7 +39,7 @@ export const RUN_FIELDS = [
 ] as const;
 
 /**
- * Pure transform: build the `run` subdocument and `attemptCount` from a
+ * Pure transform: build the `run` subdocument from a
  * legacy flat request document. Returns the updates required to reshape
  * the document, with separate `$set` and `$unset` operators.
  */
@@ -67,7 +67,7 @@ export function buildRunReshapeUpdate(doc: Document): {
     run.finishedAt = new Date();
   }
 
-  const $set: Document = { run, attemptCount: 1 };
+  const $set: Document = { run };
   const $unset: Document = {};
   for (const field of RUN_FIELDS) {
     $unset[field] = "";
@@ -78,7 +78,7 @@ export function buildRunReshapeUpdate(doc: Document): {
 
 /**
  * Reverse of `buildRunReshapeUpdate` — for the `down` migration.
- * Lifts `run.*` fields back to the top level and drops `run` + `attemptCount`.
+ * Lifts `run.*` fields back to the top level and drops `run`.
  */
 export function buildRunUnshapeUpdate(doc: Document): {
   $set: Document;

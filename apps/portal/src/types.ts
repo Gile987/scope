@@ -108,8 +108,6 @@ export interface Run {
   agentVersion?: string;
   /** Per-attempt mutable state for the current attempt. */
   run?: RunState;
-  /** Total number of attempts (current + history). */
-  attemptCount?: number;
   maxIterations?: number;
   personaInstructions?: string;
   persona?: Persona;

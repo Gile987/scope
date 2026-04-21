@@ -118,7 +118,6 @@ export const RequestResponseSchema = z
     run: z
       .lazy(() => RunStateSchema)
       .optional(),
-    attemptCount: z.number().int().min(1).optional(),
   })
   .openapi("RequestResponse");
 

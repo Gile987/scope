@@ -143,11 +143,6 @@ export interface RequestDocument {
    * under this object; new submissions populate it on insert.
    */
   run?: RunState;
-  /**
-   * Total number of attempts that have been started for this request.
-   * Starts at 1 on initial submit and increments on every retry.
-   */
-  attemptCount?: number;
 }
 
 // Log event for real-time streaming and persistence

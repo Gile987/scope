@@ -28,7 +28,6 @@ describe("buildRunReshapeUpdate", () => {
 
     const { $set, $unset } = buildRunReshapeUpdate(doc);
 
-    expect($set.attemptCount).toBe(1);
     expect($set.run._id).toBe("req-1");
     expect($set.run.attemptNumber).toBe(1);
     expect($set.run.status).toBe("done");
@@ -92,7 +91,7 @@ describe("buildRunReshapeUpdate", () => {
 });
 
 describe("buildRunUnshapeUpdate", () => {
-  it("lifts run.* fields back to the top level and drops run + attemptCount", () => {
+  it("lifts run.* fields back to the top level and drops run", () => {
     const doc = {
       _id: "req-1",
       run: {
@@ -103,7 +102,6 @@ describe("buildRunUnshapeUpdate", () => {
         turns: [{ iteration: 1 }],
         harUrl: "https://example.com/h.har",
       },
-      attemptCount: 2,
     };
 
     const { $set, $unset } = buildRunUnshapeUpdate(doc);
@@ -233,7 +231,7 @@ describe("migration 014: IntroduceRunsAndRun", () => {
             status: "done",
             outcome: "succeeded",
           },
-          attemptCount: 1,
+
         },
       ]) as any;
 

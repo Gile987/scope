@@ -389,7 +389,6 @@ apiRoute(ctx.app, ctx.registry, {
           // are scoped under `{requestId}/runs/{runId}/...` so retries
           // never overwrite a previous attempt's blobs.
           run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
-          attemptCount: 1,
         };
         newDocs.push(requestDoc);
 
@@ -452,7 +451,6 @@ apiRoute(ctx.app, ctx.registry, {
       // are scoped under `{requestId}/runs/{runId}/...` so retries
       // never overwrite a previous attempt's blobs.
       run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
-      attemptCount: 1,
     };
 
     // Store in MongoDB
@@ -1150,7 +1148,6 @@ apiRoute(ctx.app, ctx.registry, {
           // run id for the first attempt so blob artifacts live under
           // `{requestId}/runs/{runId}/...` (independent of the original run).
           run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
-          attemptCount: 1,
         };
 
         newDocs.push(newDoc);
@@ -1923,7 +1920,6 @@ apiRoute(ctx.app, ctx.registry, {
           timestamp: t.timestamp ? new Date(t.timestamp as string) : new Date(),
         })),
       },
-      attemptCount: 1,
     };
 
     // Insert into MongoDB
@@ -2049,7 +2045,6 @@ apiRoute(ctx.app, ctx.registry, {
     requestId: z.string(),
     runId: z.string(),
     attemptNumber: z.number().int(),
-    attemptCount: z.number().int(),
   }),
   errorResponses: {
     404: { description: "Request not found" },
@@ -2090,7 +2085,6 @@ apiRoute(ctx.app, ctx.registry, {
 
     const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
     const newRunId = uuidv4();
-    const newAttemptCount = (request.attemptCount ?? 1) + 1;
     const newRun: RunState = {
       _id: newRunId,
       attemptNumber: newAttemptNumber,
@@ -2117,7 +2111,6 @@ apiRoute(ctx.app, ctx.registry, {
           run: newRun,
           updatedAt: new Date(),
         },
-        $inc: { attemptCount: newAttemptCount - (request.attemptCount ?? 1) },
       },
     );
 
@@ -2149,7 +2142,6 @@ apiRoute(ctx.app, ctx.registry, {
       requestId: id,
       runId: newRunId,
       attemptNumber: newAttemptNumber,
-      attemptCount: newAttemptCount,
     });
   },
 });

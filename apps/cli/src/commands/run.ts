@@ -776,7 +776,7 @@ run
       console.log(successText("Retry started"));
       console.log(`${label('Request ID:')} ${value(result.requestId)}`);
       console.log(`${label('New run ID:')} ${value(result.runId)}`);
-      console.log(`${label('Attempt:')} ${value(`${result.attemptNumber} of ${result.attemptCount}`)}`);
+      console.log(`${label('Attempt:')} ${value(result.attemptNumber)}`);
       printFollowUpCommands(result.requestId);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);

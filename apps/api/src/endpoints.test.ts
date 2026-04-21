@@ -1212,7 +1212,6 @@ describe("API Endpoints", () => {
         _id: "req-1",
         workerType: "coder-acp-copilot",
         run: { _id: "run-1", attemptNumber: 1, status: "processing" },
-        attemptCount: 1,
       });
       const res = await request(app).post("/api/v1/requests/req-1/retry");
       expect(res.status).toBe(422);
@@ -1224,7 +1223,6 @@ describe("API Endpoints", () => {
         _id: "req-1",
         workerType: "coder-acp-copilot",
         run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed" },
-        attemptCount: 1,
       });
       (mocks.runsCollection.insertOne as any).mockResolvedValue({ insertedId: "run-1" });
       (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
@@ -1234,7 +1232,6 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(201);
       expect(res.body.attemptNumber).toBe(2);
-      expect(res.body.attemptCount).toBe(2);
       expect(res.body.requestId).toBe("req-1");
       expect(typeof res.body.runId).toBe("string");
       expect(mocks.runsCollection.insertOne).toHaveBeenCalledWith(
@@ -1246,7 +1243,6 @@ describe("API Endpoints", () => {
           $set: expect.objectContaining({
             run: expect.objectContaining({ attemptNumber: 2, status: "pending" }),
           }),
-          $inc: { attemptCount: 1 },
         }),
       );
       expect((queueClient.sendMessage as any)).toHaveBeenCalled();
@@ -1257,7 +1253,6 @@ describe("API Endpoints", () => {
         _id: "req-1",
         workerType: "coder-acp-copilot",
         run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed" },
-        attemptCount: 1,
       });
       (mocks.runsCollection.insertOne as any).mockResolvedValue({ insertedId: "run-1" });
       (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
@@ -1282,7 +1277,6 @@ describe("API Endpoints", () => {
         _id: "req-1",
         workerType: "coder-acp-copilot",
         run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed" },
-        attemptCount: 1,
       });
       const dupErr: any = new Error("E11000 duplicate key");
       dupErr.code = 11000;

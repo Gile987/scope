@@ -1999,10 +1999,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "agentVersion": {
             "type": "string",
           },
-          "attemptCount": {
-            "minimum": 1,
-            "type": "integer",
-          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -6858,9 +6854,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "application/json": {
                 "schema": {
                   "properties": {
-                    "attemptCount": {
-                      "type": "integer",
-                    },
                     "attemptNumber": {
                       "type": "integer",
                     },
@@ -6875,7 +6868,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "requestId",
                     "runId",
                     "attemptNumber",
-                    "attemptCount",
                   ],
                   "type": "object",
                 },
