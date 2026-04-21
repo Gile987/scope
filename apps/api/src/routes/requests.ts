@@ -72,24 +72,6 @@ function runForArchive<T extends RequestDocument>(resource: T): T {
   };
 }
 
-/**
- * Lift current-attempt fields from `run.*` to the top level of a request
- * response so existing API consumers (portal, CLI, external tooling) keep
- * seeing a flat shape. The nested `run` and `attemptCount` are preserved
- * for new clients that consume the per-attempt history. Top-level values
- * win when present (covers docs the migration hasn't reshaped yet).
- */
-function flattenRunForResponse<T extends RequestDocument>(resource: T): T {
-  const run = resource.run;
-  if (!run) return resource;
-  const flat: Record<string, unknown> = { ...resource };
-  for (const [k, v] of Object.entries(run)) {
-    if (k === "_id" || k === "attemptNumber") continue;
-    if (flat[k] === undefined && v !== undefined) flat[k] = v;
-  }
-  return flat as T;
-}
-
 export function registerRequestsRoutes(ctx: RouteContext): void {
 
 const upload = multer({ dest: tmpdir() });
@@ -529,9 +511,8 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    // Map _id back to id for API response; flatten run.* for back-compat
-    const flat = flattenRunForResponse(resource);
-    res.json({ ...flat, id: flat._id });
+    // Map _id back to id for API response
+    res.json({ ...resource, id: resource._id });
   },
 });
 
@@ -900,10 +881,7 @@ apiRoute(ctx.app, ctx.registry, {
       resources.reverse();
     }
 
-    const data = resources.map((r) => {
-      const flat = flattenRunForResponse(r);
-      return { ...flat, id: flat._id };
-    });
+    const data = resources.map((r) => ({ ...r, id: r._id }));
 
     if (data.length === 0) {
       res.json({ data: [], limit, estimatedTotal, cursors: { next: null, prev: null } });
