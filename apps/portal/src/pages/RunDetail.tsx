@@ -22,7 +22,7 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, ChevronRight, Clock } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
@@ -231,11 +231,6 @@ export function RunDetail() {
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <StatusBadge status={activeRun?.status ?? "pending"} />
               {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
-              {hasMultipleAttempts && (
-                <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium">
-                  Attempt #{activeRun?.attemptNumber ?? "?"}
-                </span>
-              )}
               <span className="font-mono">{run.workerType}</span>
               {run.model && (
                 <>
@@ -320,6 +315,58 @@ export function RunDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+          {hasMultipleAttempts && attempts && attempts.length > 0 && (
+            <div className="relative">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 font-mono"
+                onClick={() => setShowAttempts((v) => !v)}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                Attempt {activeRun?.attemptNumber}/{attempts.length}
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAttempts ? "rotate-180" : ""}`} />
+              </Button>
+              {showAttempts && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowAttempts(false)} />
+                  <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-md border bg-popover shadow-md">
+                    <div className="max-h-60 overflow-y-auto divide-y">
+                      {attempts.map((attempt) => {
+                        const isCurrent = attempt._id === run.run?._id;
+                        const isSelected = attempt._id === activeRun?._id;
+                        const duration = attempt.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+                        return (
+                          <button
+                            key={attempt._id}
+                            className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors ${isSelected ? "bg-accent" : ""}`}
+                            onClick={() => {
+                              setShowAttempts(false);
+                              if (isCurrent) {
+                                navigate(`/runs/${id}/${tab ?? ""}`, { replace: true });
+                              } else {
+                                navigate(`/runs/${id}/${tab ?? ""}?runId=${attempt._id}`, { replace: true });
+                              }
+                            }}
+                          >
+                            <span className="font-mono font-medium w-5 text-right">#{attempt.attemptNumber}</span>
+                            <StatusBadge status={attempt.status ?? "pending"} />
+                            {attempt.status === "done" && <OutcomeBadge outcome={attempt.outcome} />}
+                            {duration ? (
+                              <span className="font-mono text-muted-foreground">{formatDuration(duration)}</span>
+                            ) : null}
+                            {isCurrent && (
+                              <span className="text-muted-foreground font-medium ml-auto">(latest)</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {activeRun?.turns && activeRun?.turns.some(t => t.snapshotUrl) && (
             <Button
               variant="outline"
@@ -360,54 +407,6 @@ export function RunDetail() {
               View latest attempt
             </button>
           </span>
-        </div>
-      )}
-
-      {/* Attempts history (collapsible) */}
-      {hasMultipleAttempts && attempts && attempts.length > 0 && (
-        <div className="rounded-md border">
-          <button
-            className="flex w-full items-center gap-2 px-4 py-2 text-sm font-medium hover:bg-accent/50 transition-colors"
-            onClick={() => setShowAttempts((v) => !v)}
-          >
-            {showAttempts ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            Attempts ({attempts.length})
-          </button>
-          {showAttempts && (
-            <div className="border-t divide-y">
-              {attempts.map((attempt) => {
-                const isCurrent = attempt._id === run.run?._id;
-                const isSelected = attempt._id === activeRun?._id;
-                const duration = attempt.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
-                return (
-                  <button
-                    key={attempt._id}
-                    className={`flex w-full items-center gap-4 px-4 py-2 text-sm hover:bg-accent/50 transition-colors ${isSelected ? "bg-accent" : ""}`}
-                    onClick={() => {
-                      if (isCurrent) {
-                        navigate(`/runs/${id}/${tab ?? ""}`, { replace: true });
-                      } else {
-                        navigate(`/runs/${id}/${tab ?? ""}?runId=${attempt._id}`, { replace: true });
-                      }
-                    }}
-                  >
-                    <span className="font-mono font-medium w-6 text-right">#{attempt.attemptNumber}</span>
-                    <StatusBadge status={attempt.status ?? "pending"} />
-                    {attempt.status === "done" && <OutcomeBadge outcome={attempt.outcome} />}
-                    {duration ? (
-                      <span className="font-mono text-xs text-muted-foreground">{formatDuration(duration)}</span>
-                    ) : null}
-                    {attempt.finishedAt && (
-                      <span className="text-xs text-muted-foreground ml-auto">{formatDate(attempt.finishedAt)}</span>
-                    )}
-                    {isCurrent && (
-                      <span className="text-xs text-muted-foreground font-medium">(latest)</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
 
