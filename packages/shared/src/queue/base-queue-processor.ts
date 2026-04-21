@@ -187,13 +187,21 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
         return;
       }
 
+      // Resolve the runId for log persistence. Prefer the runId carried in
+      // the queue message (set by the API for new attempts); fall back to
+      // the runId currently on the document, then to the documentId itself
+      // (legacy / pre-migration safety).
+      const payloadRunId = typeof payload?.runId === "string" ? payload.runId : undefined;
+      const docRunId = typeof (doc as any)?.run?._id === "string" ? (doc as any).run._id : undefined;
+      const logRunId = payloadRunId ?? docRunId ?? documentId!;
+
       // Create log function for this document
       const log = async (
         level: LogEvent["level"],
         msg: string,
         data?: Record<string, unknown>
       ): Promise<void> => {
-        await this.logPublisher.publish(documentId!, level, msg, data);
+        await this.logPublisher.publish(documentId!, logRunId, level, msg, data);
       };
 
       await this.handleRequest(doc as TDocument, message, currentPopReceipt, log, payload);
@@ -202,8 +210,12 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
 
       if (documentId) {
         try {
+          // Best-effort runId resolution for the failure log line. Same
+          // resolution order as the success path above.
+          const payloadRunId = typeof payload?.runId === "string" ? payload.runId : undefined;
           await this.logPublisher.publish(
             documentId,
+            payloadRunId ?? documentId,
             "error",
             `Processing failed: ${error instanceof Error ? error.message : String(error)}`,
             { final: true }

@@ -228,6 +228,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     extensionConfigs?: ExtensionConfig[]
   ): Promise<void> {
     const requestId = requestDoc._id;
+    // Resolve the runId for blob paths. New requests always have run._id;
+    // legacy/pre-migration docs may not, in which case we fall back to the
+    // requestId so the layout matches the legacy `{requestId}/...` scheme.
+    const runId = requestDoc.run?._id ?? requestId;
     const hasCriteria = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
     const judgeServiceUrl = process.env.JUDGE_SERVICE_URL;
 
@@ -290,7 +294,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         try {
           const setupVideoUrls: string[] = [];
           for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
-            const videoBlobName = `${requestId}/setup/video-${i}.webm`;
+            const videoBlobName = `${requestId}/runs/${runId}/setup/video-${i}.webm`;
             const videoUrl = await blobStorage.uploadFile(
               setupResult.videoFilePaths[i],
               videoBlobName,
@@ -331,6 +335,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         judgeClient,
         blobStorage,
         requestId,
+        runId,
         log,
         personaInstructions: requestDoc.personaInstructions,
         model: requestDoc.model,

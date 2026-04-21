@@ -79,6 +79,7 @@ describe("SSE log endpoints — blob replay", () => {
         _id: "run-done",
         status: "done",
         outcome: "succeeded",
+        run: { _id: "attempt-1", attemptNumber: 1, status: "done" },
       });
       (mocks.blobStorage.getLogEvents as any).mockResolvedValue(logs);
 
@@ -92,7 +93,7 @@ describe("SSE log endpoints — blob replay", () => {
         });
 
       expect(res.headers["content-type"]).toMatch("text/event-stream");
-      expect(mocks.blobStorage.getLogEvents).toHaveBeenCalledWith("run-done");
+      expect(mocks.blobStorage.getLogEvents).toHaveBeenCalledWith("run-done", "attempt-1");
 
       const events = parseSse(res.body as string);
 

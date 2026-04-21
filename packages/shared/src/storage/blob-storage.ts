@@ -89,10 +89,13 @@ export class BlobStorage {
    * Appends a single log event as a JSON line to the run's append blob.
    * Creates the blob and container on first use. Blob-level initialization is
    * cached per blobName so concurrent appends only call createIfNotExists once.
+   *
+   * Path scheme: `{requestId}/runs/{runId}/run.jsonl`. Each retry attempt writes
+   * to its own blob keyed on the run id.
    */
-  async appendLogEvent(requestId: string, logEvent: LogEvent): Promise<void> {
+  async appendLogEvent(requestId: string, runId: string, logEvent: LogEvent): Promise<void> {
     await this.ensureLogsContainer();
-    const blobName = `${requestId}/run.jsonl`;
+    const blobName = `${requestId}/runs/${runId}/run.jsonl`;
     const appendBlobClient = this.logsContainerClient.getAppendBlobClient(blobName);
     if (!this.initializedBlobs.has(blobName)) {
       this.initializedBlobs.set(
@@ -107,45 +110,59 @@ export class BlobStorage {
 
   /**
    * Downloads all persisted log events for a run.
-   * Returns an empty array if no log blob exists yet.
+   *
+   * If `runId` is provided, reads from the new per-attempt path
+   * `{requestId}/runs/{runId}/run.jsonl`. Falls back to the legacy
+   * `{requestId}/run.jsonl` path on 404 (for runs created before the
+   * runs/{runId} layout shipped) or when no runId is supplied.
+   *
+   * Returns an empty array if no log blob exists at either location.
    */
-  async getLogEvents(requestId: string): Promise<LogEvent[]> {
+  async getLogEvents(requestId: string, runId?: string): Promise<LogEvent[]> {
     await this.ensureLogsContainer();
-    const blobName = `${requestId}/run.jsonl`;
-    const appendBlobClient = this.logsContainerClient.getAppendBlobClient(blobName);
 
-    try {
-      const download = await appendBlobClient.download();
-      if (!download.readableStreamBody) return [];
-
-      const chunks: Buffer[] = [];
-      for await (const chunk of download.readableStreamBody as AsyncIterable<Buffer>) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const tryDownload = async (blobName: string): Promise<LogEvent[] | undefined> => {
+      const client = this.logsContainerClient.getAppendBlobClient(blobName);
+      try {
+        const download = await client.download();
+        if (!download.readableStreamBody) return [];
+        const chunks: Buffer[] = [];
+        for await (const chunk of download.readableStreamBody as AsyncIterable<Buffer>) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const text = Buffer.concat(chunks).toString("utf-8");
+        return text
+          .split("\n")
+          .filter((line) => line.trim().length > 0)
+          .map((line) => JSON.parse(line) as LogEvent);
+      } catch (err: any) {
+        if (err?.statusCode === 404) return undefined;
+        throw err;
       }
-      const text = Buffer.concat(chunks).toString("utf-8");
-      return text
-        .split("\n")
-        .filter((line) => line.trim().length > 0)
-        .map((line) => JSON.parse(line) as LogEvent);
-    } catch (err: any) {
-      // Blob not found — log stream hasn't started yet
-      if (err?.statusCode === 404) return [];
-      throw err;
+    };
+
+    if (runId) {
+      const fromNew = await tryDownload(`${requestId}/runs/${runId}/run.jsonl`);
+      if (fromNew !== undefined) return fromNew;
     }
+    const fromLegacy = await tryDownload(`${requestId}/run.jsonl`);
+    return fromLegacy ?? [];
   }
 
   /**
    * Uploads a workspace directory as a tar.gz snapshot to blob storage.
+   * Path: `{requestId}/runs/{runId}/iteration-{iteration}/workspace.tar.gz`.
    * Returns the blob URL.
    */
   async uploadWorkspaceSnapshot(
     workspacePath: string,
     requestId: string,
+    runId: string,
     iteration: number
   ): Promise<string> {
     await this.ensureContainer();
 
-    const blobName = `${requestId}/iteration-${iteration}/workspace.tar.gz`;
+    const blobName = `${requestId}/runs/${runId}/iteration-${iteration}/workspace.tar.gz`;
     const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
 
     // Create tar.gz in a temp directory
@@ -169,6 +186,7 @@ export class BlobStorage {
         },
         tags: {
           requestId,
+          runId,
           iteration: String(iteration),
         },
       });

@@ -378,6 +378,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       for (let i = 0; i < count; i++) {
         const requestId = uuidv4();
+        const runId = uuidv4();
         newIds.push(requestId);
 
         const requestDoc: RequestDocument = {
@@ -399,14 +400,15 @@ apiRoute(ctx.app, ctx.registry, {
           ...(profileId ? { profileId } : {}),
           ...(profileVersionId ? { profileVersionId } : {}),
           submissionId,
-          // Initial attempt: run._id reuses request _id so artifact blob
-          // paths ({runId}/iteration-N/...) remain stable across retries.
-          run: { _id: requestId, attemptNumber: 1, status: "pending" },
+          // Mint a distinct run id for the first attempt. Blob artifacts
+          // are scoped under `{requestId}/runs/{runId}/...` so retries
+          // never overwrite a previous attempt's blobs.
+          run: { _id: runId, attemptNumber: 1, status: "pending" },
           attemptCount: 1,
         };
         newDocs.push(requestDoc);
 
-        const queueMessage: QueueMessage = { requestId, runId: requestId };
+        const queueMessage: QueueMessage = { requestId, runId };
         const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
         queueMessages.push(messageContent);
       }
@@ -440,6 +442,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Single run (count === 1) - original behavior
     const requestId = uuidv4();
+    const runId = uuidv4();
 
     // Create request document
     const requestDoc: RequestDocument = {
@@ -461,9 +464,10 @@ apiRoute(ctx.app, ctx.registry, {
       ...(profileId ? { profileId } : {}),
       ...(profileVersionId ? { profileVersionId } : {}),
       submissionId,
-      // Initial attempt: run._id reuses request _id so artifact blob
-      // paths ({runId}/iteration-N/...) remain stable across retries.
-      run: { _id: requestId, attemptNumber: 1, status: "pending" },
+      // Mint a distinct run id for the first attempt. Blob artifacts
+      // are scoped under `{requestId}/runs/{runId}/...` so retries
+      // never overwrite a previous attempt's blobs.
+      run: { _id: runId, attemptNumber: 1, status: "pending" },
       attemptCount: 1,
     };
 
@@ -471,7 +475,7 @@ apiRoute(ctx.app, ctx.registry, {
     await ctx.requestCollection.insertOne(requestDoc);
 
     // Queue the request for the appropriate worker
-    const queueMessage: QueueMessage = { requestId, runId: requestId };
+    const queueMessage: QueueMessage = { requestId, runId };
     const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
     await queueClient.sendMessage(messageContent);
 
@@ -549,7 +553,11 @@ apiRoute(ctx.app, ctx.registry, {
     // If fromStart=true, replay existing logs from blob storage
     if (fromStart) {
       try {
-        const pastLogs = await ctx.blobStorage.getLogEvents(id);
+        // Pass the current run id so we read the per-attempt log blob
+        // (`{requestId}/runs/{runId}/run.jsonl`). getLogEvents falls back to
+        // the legacy `{requestId}/run.jsonl` path for runs created before
+        // the runs/{runId} layout shipped.
+        const pastLogs = await ctx.blobStorage.getLogEvents(id, resource.run?._id);
         for (const log of pastLogs) {
           res.write(`data: ${JSON.stringify(log)}\n\n`);
         }
@@ -1072,6 +1080,7 @@ apiRoute(ctx.app, ctx.registry, {
     for (const original of originalRuns) {
       for (let i = 0; i < count; i++) {
         const requestId = uuidv4();
+        const runId = uuidv4();
         newIds.push(requestId);
 
         // Determine effective profile for this run
@@ -1154,16 +1163,16 @@ apiRoute(ctx.app, ctx.registry, {
           ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
           ...(effectiveProfileVersionId ? { profileVersionId: effectiveProfileVersionId } : {}),
           submissionId,
-          // Bulk re-submit creates a brand-new request — first attempt's
-          // run._id reuses the new request _id (artifact paths are
-          // independent of the original run).
-          run: { _id: requestId, attemptNumber: 1, status: "pending" },
+          // Bulk re-submit creates a brand-new request — mint a distinct
+          // run id for the first attempt so blob artifacts live under
+          // `{requestId}/runs/{runId}/...` (independent of the original run).
+          run: { _id: runId, attemptNumber: 1, status: "pending" },
           attemptCount: 1,
         };
 
         newDocs.push(newDoc);
 
-        const queueMessage: QueueMessage = { requestId, runId: requestId };
+        const queueMessage: QueueMessage = { requestId, runId };
         const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
         queueMessages.push({ workerType: effectiveWorkerType as WorkerType, message: messageContent });
       }
