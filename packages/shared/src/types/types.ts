@@ -122,15 +122,10 @@ export interface RequestDocument {
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
   model?: string;              // Model selected for this run
-  status: "pending" | "processing" | "done";
-  outcome?: "succeeded" | "failed" | "finished";
-  result?: string;
-  error?: string;
   createdAt: Date;
   updatedAt?: Date;
   // Multi-turn fields
   maxIterations?: number;
-  turns?: ConversationTurn[];
   personaInstructions?: string;  // Resolved persona prose (from traits.yaml)
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
@@ -142,22 +137,10 @@ export interface RequestDocument {
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
   profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
-  workerVersion?: string;          // Exact build that processed this run (e.g. "copilot-0.0.415-20260318T163740Z-44d16d6")
-  os?: OsInfo;                     // Worker OS info captured at processing time
-  harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
-  videoUrls?: string[];            // Blob storage URLs to session recording videos (one-shot)
-  setupVideoUrls?: string[];       // Blob storage URLs to setup-phase videos (e.g. TOTP login recording)
-  tokenUsage?: TokenUsage;          // LLM token usage for the run (one-shot) or aggregate across turns
-  aiCallCount?: number;             // Total AI completion API calls for the run (sum across turns)
-  rawChatUrl?: string;             // Blob storage URL to the raw chat transcript export (one-shot)
-  rawChatFormat?: string;          // Format identifier for the raw chat export
+  submissionId?: string;           // FK → SubmissionDocument._id
   /**
-   * Per-attempt mutable state (run-retry-attempts feature). Optional during
-   * the additive transition; later commits will populate this on every doc
-   * and remove the legacy top-level fields above.
-   *
-   * Migration 014 nests existing per-attempt fields under this object on
-   * deploy; new submissions should populate it on insert.
+   * Per-attempt mutable state. Migration 014 nests per-attempt fields
+   * under this object; new submissions populate it on insert.
    */
   run?: RunState;
   /**

@@ -1999,9 +1999,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "agentVersion": {
             "type": "string",
           },
-          "aiCallCount": {
-            "type": "number",
-          },
           "attemptCount": {
             "minimum": 1,
             "type": "integer",
@@ -2020,17 +2017,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "null",
             ],
           },
-          "error": {
-            "type": "string",
-          },
           "extensions": {
             "items": {
               "type": "string",
             },
             "type": "array",
-          },
-          "harUrl": {
-            "type": "string",
           },
           "maxIterations": {
             "type": "number",
@@ -2042,14 +2033,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "array",
           },
           "model": {
-            "type": "string",
-          },
-          "outcome": {
-            "enum": [
-              "succeeded",
-              "failed",
-              "finished",
-            ],
             "type": "string",
           },
           "persona": {
@@ -2064,26 +2047,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "profileVersionId": {
             "type": "string",
           },
-          "rawChatFormat": {
-            "type": "string",
-          },
-          "rawChatUrl": {
-            "type": "string",
-          },
-          "result": {
-            "type": "string",
-          },
           "run": {
             "$ref": "#/components/schemas/RunState",
           },
           "scenario": {
             "$ref": "#/components/schemas/Scenario",
-          },
-          "setupVideoUrls": {
-            "items": {
-              "type": "string",
-            },
-            "type": "array",
           },
           "skillRevisions": {
             "items": {
@@ -2091,28 +2059,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
-          "status": {
-            "enum": [
-              "pending",
-              "processing",
-              "done",
-            ],
-            "type": "string",
-          },
           "submissionId": {
             "type": "string",
           },
           "taskPromptId": {
             "type": "string",
-          },
-          "tokenUsage": {
-            "$ref": "#/components/schemas/TokenUsage",
-          },
-          "turns": {
-            "items": {
-              "$ref": "#/components/schemas/ConversationTurn",
-            },
-            "type": "array",
           },
           "updatedAt": {
             "format": "date-time",
@@ -2121,16 +2072,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "null",
             ],
           },
-          "videoUrls": {
-            "items": {
-              "type": "string",
-            },
-            "type": "array",
-          },
           "workerType": {
-            "type": "string",
-          },
-          "workerVersion": {
             "type": "string",
           },
         },
@@ -2138,7 +2080,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "_id",
           "scenario",
           "workerType",
-          "status",
           "createdAt",
         ],
         "type": "object",
@@ -2200,6 +2141,25 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "logsUrl": {
             "type": "string",
+          },
+          "os": {
+            "properties": {
+              "arch": {
+                "type": "string",
+              },
+              "platform": {
+                "type": "string",
+              },
+              "release": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "platform",
+              "release",
+              "arch",
+            ],
+            "type": "object",
           },
           "outcome": {
             "enum": [

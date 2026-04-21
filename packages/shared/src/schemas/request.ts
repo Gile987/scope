@@ -100,14 +100,9 @@ export const RequestResponseSchema = z
     scenario: ScenarioSchema,
     workerType: z.string(),
     model: z.string().optional(),
-    status: RequestStatusSchema,
-    outcome: RequestOutcomeSchema.optional(),
-    result: z.string().optional(),
-    error: z.string().optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     maxIterations: z.number().optional(),
-    turns: z.array(ConversationTurnSchema).optional(),
     personaInstructions: z.string().optional(),
     persona: PersonaSchema.optional(),
     deletedAt: z.coerce.date().optional(),
@@ -116,20 +111,10 @@ export const RequestResponseSchema = z
     skillRevisions: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
-    workerVersion: z.string().optional(),
     profileId: z.string().optional(),
     profileVersionId: z.string().optional(),
-    harUrl: z.string().optional(),
-    videoUrls: z.array(z.string()).optional(),
-    setupVideoUrls: z.array(z.string()).optional(),
-    tokenUsage: TokenUsageSchema.optional(),
-    aiCallCount: z.number().optional(),
     submissionId: z.string().optional(),
-    rawChatUrl: z.string().optional(),
-    rawChatFormat: z.string().optional(),
-    // Run-retry-attempts: nested per-attempt state. Optional during the
-    // additive transition; later commits will tighten this and remove
-    // the legacy top-level fields above.
+    // Per-attempt state lives in the run sub-document.
     run: z
       .lazy(() => RunStateSchema)
       .optional(),
@@ -166,6 +151,11 @@ export const RunStateSchema = z
     finishedAt: z.coerce.date().optional(),              // When this attempt reached "done"
     turns: z.array(ConversationTurnSchema).optional(),
     workerVersion: z.string().optional(),
+    os: z.object({
+      platform: z.string(),
+      release: z.string(),
+      arch: z.string(),
+    }).optional(),
     harUrl: z.string().optional(),
     videoUrls: z.array(z.string()).optional(),
     setupVideoUrls: z.array(z.string()).optional(),

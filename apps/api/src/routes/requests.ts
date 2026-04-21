@@ -558,11 +558,9 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     // If request already done, send final event and close.
-    // Per-attempt state lives at run.* (run-retry-attempts); fall back to
-    // top-level for any in-flight legacy doc the migration hasn't reshaped.
-    const currentStatus = resource.run?.status ?? resource.status;
-    const currentOutcome = resource.run?.outcome ?? resource.outcome;
-    const currentTurns = resource.run?.turns ?? resource.turns;
+    const currentStatus = resource.run?.status;
+    const currentOutcome = resource.run?.outcome;
+    const currentTurns = resource.run?.turns;
     if (currentStatus === "done") {
       // For done multi-turn requests, send turns summary
       if (currentTurns && currentTurns.length > 0) {
@@ -639,8 +637,8 @@ apiRoute(ctx.app, ctx.registry, {
       changeStream.on("change", (change) => {
         if (change.operationType === "update" && change.fullDocument) {
           const doc = change.fullDocument;
-          const docStatus = doc.run?.status ?? doc.status;
-          const docOutcome = doc.run?.outcome ?? doc.outcome;
+          const docStatus = doc.run?.status;
+          const docOutcome = doc.run?.outcome;
           if (docStatus === "done") {
             res.write(`event: done\ndata: ${JSON.stringify({ status: docStatus, outcome: docOutcome })}\n\n`);
             client.cleanup();
@@ -1286,7 +1284,7 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    const turns = resource.run?.turns ?? resource.turns;
+    const turns = resource.run?.turns;
     const turn = turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
     if (!turn?.snapshotUrl) {
       res.status(404).json({ error: `No snapshot for iteration ${iterNum}` });
@@ -1360,7 +1358,7 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    const allTurns = resource.run?.turns ?? resource.turns;
+    const allTurns = resource.run?.turns;
     if (!allTurns || allTurns.length === 0) {
       res.status(404).json({ error: "No iterations found for this run" });
       return;
@@ -1518,14 +1516,14 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "Invalid iteration number" });
         return;
       }
-      const turns = resource.run?.turns ?? resource.turns;
+      const turns = resource.run?.turns;
       const turn = turns?.find((t: { iteration: number }) => t.iteration === iterNum);
       harUrl = turn?.harUrl;
       label = `${id}-iteration-${iterNum}`;
     } else {
-      // One-shot: harUrl on run/document root; multi-turn fallback: last turn
-      const turns = resource.run?.turns ?? resource.turns;
-      harUrl = (resource.run?.harUrl ?? resource.harUrl) || turns?.[turns.length - 1]?.harUrl;
+      // One-shot: harUrl on run; multi-turn fallback: last turn
+      const turns = resource.run?.turns;
+      harUrl = resource.run?.harUrl || turns?.[turns.length - 1]?.harUrl;
       label = id;
     }
 
@@ -1617,7 +1615,7 @@ apiRoute(ctx.app, ctx.registry, {
     let label: string;
 
     if (phaseParam === "setup") {
-      videoUrls = resource.run?.setupVideoUrls ?? resource.setupVideoUrls;
+      videoUrls = resource.run?.setupVideoUrls;
       label = `${id}-setup-video-${videoIndex}`;
     } else if (iterationParam) {
       const iterNum = parseInt(iterationParam, 10);
@@ -1625,14 +1623,14 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "Invalid iteration number" });
         return;
       }
-      const turns = resource.run?.turns ?? resource.turns;
+      const turns = resource.run?.turns;
       const turn = turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
       videoUrls = turn?.videoUrls;
       label = `${id}-iteration-${iterNum}-video-${videoIndex}`;
     } else {
-      // One-shot: videoUrls on run/document root; multi-turn fallback: last turn
-      const turns = resource.run?.turns ?? resource.turns;
-      videoUrls = (resource.run?.videoUrls ?? resource.videoUrls) ?? turns?.[turns.length - 1]?.videoUrls;
+      // One-shot: videoUrls on run; multi-turn fallback: last turn
+      const turns = resource.run?.turns;
+      videoUrls = resource.run?.videoUrls ?? turns?.[turns.length - 1]?.videoUrls;
       label = `${id}-video-${videoIndex}`;
     }
 
@@ -1826,7 +1824,7 @@ apiRoute(ctx.app, ctx.registry, {
     if (existingRun) {
       res.status(409).json({
         error: `Run with ID '${runDoc._id}' already exists`,
-        existingStatus: existingRun.run?.status ?? existingRun.status,
+        existingStatus: existingRun.run?.status,
       });
       return;
     }
@@ -1905,25 +1903,13 @@ apiRoute(ctx.app, ctx.registry, {
       _id: runDoc._id,
       scenario: runDoc.scenario,
       workerType: runDoc.workerType as WorkerType,
-      status: runDoc.status,
       createdAt: runDoc.createdAt ? new Date(runDoc.createdAt) : new Date(),
       updatedAt: runDoc.updatedAt ? new Date(runDoc.updatedAt) : undefined,
-      turns: turns.map((t: any) => ({
-        ...t,
-        timestamp: t.timestamp ? new Date(t.timestamp as string) : new Date(),
-      })),
-      ...(runDoc.result ? { result: runDoc.result } : {}),
-      ...(runDoc.error ? { error: runDoc.error } : {}),
       ...(runDoc.maxIterations ? { maxIterations: runDoc.maxIterations } : {}),
       ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
       ...(runDoc.persona ? { persona: runDoc.persona } : {}),
       ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv4() }),
-      ...(runDoc.harUrl ? { harUrl: runDoc.harUrl } : {}),
-      ...(runDoc.rawChatUrl ? { rawChatUrl: runDoc.rawChatUrl } : {}),
-      ...(runDoc.rawChatFormat ? { rawChatFormat: runDoc.rawChatFormat } : {}),
-      // Uploaded archive represents a single (already-finished) attempt.
-      // Mirror the canonical run shape so downstream code can read run.* uniformly.
-      // For imports, requestId === runId, so the blob name uses the legacy flat path.
+      // All per-attempt state lives in the run sub-document.
       run: {
         _id: runDoc._id,
         attemptNumber: 1,
