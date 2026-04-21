@@ -41,8 +41,16 @@ interface PromptResult {
   error?: string;
 }
 
+interface ToolCheck {
+  tool: string;
+  available: boolean;
+  path?: string;
+  version?: string;
+}
+
 interface TestResult {
   prompts: PromptResult[];
+  toolChecks?: ToolCheck[];
   lastStep?: string;
   logs?: string[];
 }
@@ -109,17 +117,16 @@ describe("coder-acp-copilot integration", async () => {
   const dockerAvailable = await isDockerAvailable();
   const canRun = hasCredentials && dockerAvailable;
 
-  if (!canRun) {
-    const reasons: string[] = [];
-    if (!hasCredentials) reasons.push("missing GITHUB_TOKEN");
-    if (!dockerAvailable) reasons.push("Docker unavailable");
-    log(`Skipping: ${reasons.join("; ")}`);
+  if (!dockerAvailable) {
+    log("Skipping: Docker unavailable");
+  } else if (!hasCredentials) {
+    log("No GITHUB_TOKEN — will run tool checks only");
   }
 
   const docker = new Docker();
 
   beforeAll(async () => {
-    if (!canRun) return;
+    if (!dockerAvailable) return;
 
     const versions = loadVersions();
 
@@ -146,19 +153,37 @@ describe("coder-acp-copilot integration", async () => {
   // Main e2e test: real auth + coding prompt + session reuse
   // -----------------------------------------------------------------------
 
-  it.skipIf(!canRun)(
-    "processMessage completes a coding prompt with real GitHub auth",
+  it.skipIf(!dockerAvailable)(
+    "worker image has required CLI tools and completes coding prompts",
     { timeout: 300_000 },
     async () => {
-      log("Starting e2e test: copilot CLI with real credentials");
+      const env: string[] = [];
+      if (hasCredentials) {
+        env.push(
+          `GITHUB_TOKEN=${GITHUB_TOKEN}`,
+          "TEST_PROMPT=Generate a Hello World REST API in Python using Flask.",
+          "TEST_PROMPT_2=Add a /health endpoint to the Flask app that returns 200 OK.",
+        );
+      }
 
-      const { result, exitCode } = await runTestWorker(docker, [
-        `GITHUB_TOKEN=${GITHUB_TOKEN}`,
-        "TEST_PROMPT=Generate a Hello World REST API in Python using Flask.",
-        "TEST_PROMPT_2=Add a /health endpoint to the Flask app that returns 200 OK.",
-      ]);
+      const { result, exitCode } = await runTestWorker(docker, env);
 
       log(`exit=${exitCode} lastStep=${result.lastStep}`);
+
+      // --- Tool check assertions (always run) ---
+      expect(result.toolChecks, "toolChecks missing from result").toBeDefined();
+      for (const tool of ["pwsh", "python3", "git", "uv"]) {
+        const check = result.toolChecks!.find((t) => t.tool === tool);
+        expect(check, `${tool} check missing`).toBeTruthy();
+        expect(check!.available, `${tool} should be in PATH`).toBe(true);
+      }
+
+      if (!hasCredentials) {
+        log("Credentials unavailable — skipping coding prompt assertions");
+        return;
+      }
+
+      // --- Coding prompt assertions (credentials required) ---
       log(`prompts completed: ${result.prompts.length}`);
 
       // --- First prompt assertions ---
