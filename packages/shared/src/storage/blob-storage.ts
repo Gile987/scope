@@ -111,14 +111,16 @@ export class BlobStorage {
   /**
    * Downloads all persisted log events for a run.
    *
-   * If `runId` is provided, reads from the new per-attempt path
-   * `{requestId}/runs/{runId}/run.jsonl`. Falls back to the legacy
-   * `{requestId}/run.jsonl` path on 404 (for runs created before the
-   * runs/{runId} layout shipped) or when no runId is supplied.
+   * Preferred: pass `logsBlobName` (the blob name stored on the RunState
+   * document, e.g. `{requestId}/runs/{runId}/run.jsonl`).
    *
-   * Returns an empty array if no log blob exists at either location.
+   * Legacy fallback (for runs created before `logsBlobName` was recorded):
+   * pass `requestId` + optional `runId`. Tries the per-attempt path first,
+   * then the legacy `{requestId}/run.jsonl` path on 404.
+   *
+   * Returns an empty array if no log blob exists at any location.
    */
-  async getLogEvents(requestId: string, runId?: string): Promise<LogEvent[]> {
+  async getLogEvents(logsBlobNameOrRequestId: string, runId?: string): Promise<LogEvent[]> {
     await this.ensureLogsContainer();
 
     const tryDownload = async (blobName: string): Promise<LogEvent[] | undefined> => {
@@ -141,6 +143,17 @@ export class BlobStorage {
       }
     };
 
+    // When the blob name looks like a pre-computed path (contains "/"),
+    // use it directly. This is the primary path for new runs where
+    // `logsBlobName` is stored on the RunState document.
+    if (logsBlobNameOrRequestId.includes("/")) {
+      const fromDirect = await tryDownload(logsBlobNameOrRequestId);
+      return fromDirect ?? [];
+    }
+
+    // Legacy: caller passed a requestId (+ optional runId). Try the
+    // per-attempt path first, then the old flat layout.
+    const requestId = logsBlobNameOrRequestId;
     if (runId) {
       const fromNew = await tryDownload(`${requestId}/runs/${runId}/run.jsonl`);
       if (fromNew !== undefined) return fromNew;

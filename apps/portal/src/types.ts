@@ -83,6 +83,7 @@ export interface RunState {
   outcome?: RunOutcome;
   result?: string;
   error?: string;
+  logsBlobName?: string;
   turns?: ConversationTurn[];
   workerVersion?: string;
   os?: OsInfo;

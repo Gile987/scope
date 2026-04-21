@@ -403,7 +403,7 @@ apiRoute(ctx.app, ctx.registry, {
           // Mint a distinct run id for the first attempt. Blob artifacts
           // are scoped under `{requestId}/runs/{runId}/...` so retries
           // never overwrite a previous attempt's blobs.
-          run: { _id: runId, attemptNumber: 1, status: "pending" },
+          run: { _id: runId, attemptNumber: 1, status: "pending", logsBlobName: `${requestId}/runs/${runId}/run.jsonl` },
           attemptCount: 1,
         };
         newDocs.push(requestDoc);
@@ -467,7 +467,7 @@ apiRoute(ctx.app, ctx.registry, {
       // Mint a distinct run id for the first attempt. Blob artifacts
       // are scoped under `{requestId}/runs/{runId}/...` so retries
       // never overwrite a previous attempt's blobs.
-      run: { _id: runId, attemptNumber: 1, status: "pending" },
+      run: { _id: runId, attemptNumber: 1, status: "pending", logsBlobName: `${requestId}/runs/${runId}/run.jsonl` },
       attemptCount: 1,
     };
 
@@ -553,11 +553,13 @@ apiRoute(ctx.app, ctx.registry, {
     // If fromStart=true, replay existing logs from blob storage
     if (fromStart) {
       try {
-        // Pass the current run id so we read the per-attempt log blob
-        // (`{requestId}/runs/{runId}/run.jsonl`). getLogEvents falls back to
-        // the legacy `{requestId}/run.jsonl` path for runs created before
-        // the runs/{runId} layout shipped.
-        const pastLogs = await ctx.blobStorage.getLogEvents(id, resource.run?._id);
+        // Read the log blob name from the document when available (new runs
+        // store it on run.logsBlobName at submit time). Falls back to the
+        // legacy computed path for pre-migration runs.
+        const logsBlobName = resource.run?.logsBlobName;
+        const pastLogs = logsBlobName
+          ? await ctx.blobStorage.getLogEvents(logsBlobName)
+          : await ctx.blobStorage.getLogEvents(id, resource.run?._id);
         for (const log of pastLogs) {
           res.write(`data: ${JSON.stringify(log)}\n\n`);
         }
@@ -1166,7 +1168,7 @@ apiRoute(ctx.app, ctx.registry, {
           // Bulk re-submit creates a brand-new request — mint a distinct
           // run id for the first attempt so blob artifacts live under
           // `{requestId}/runs/{runId}/...` (independent of the original run).
-          run: { _id: runId, attemptNumber: 1, status: "pending" },
+          run: { _id: runId, attemptNumber: 1, status: "pending", logsBlobName: `${requestId}/runs/${runId}/run.jsonl` },
           attemptCount: 1,
         };
 
@@ -1935,10 +1937,12 @@ apiRoute(ctx.app, ctx.registry, {
       ...(runDoc.rawChatFormat ? { rawChatFormat: runDoc.rawChatFormat } : {}),
       // Uploaded archive represents a single (already-finished) attempt.
       // Mirror the canonical run shape so downstream code can read run.* uniformly.
+      // For imports, requestId === runId, so the blob name uses the legacy flat path.
       run: {
         _id: runDoc._id,
         attemptNumber: 1,
         status: runDoc.status,
+        logsBlobName: `${runDoc._id}/runs/${runDoc._id}/run.jsonl`,
         ...(runDoc.outcome ? { outcome: runDoc.outcome } : {}),
         ...(runDoc.result ? { result: runDoc.result } : {}),
         ...(runDoc.error ? { error: runDoc.error } : {}),
@@ -2135,6 +2139,7 @@ apiRoute(ctx.app, ctx.registry, {
       _id: newRunId,
       attemptNumber: newAttemptNumber,
       status: "pending",
+      logsBlobName: `${id}/runs/${newRunId}/run.jsonl`,
     };
 
     // 1. Insert the demoted run into the history collection FIRST. If the
