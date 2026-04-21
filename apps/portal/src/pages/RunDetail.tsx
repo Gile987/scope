@@ -59,11 +59,20 @@ export function RunDetail() {
 
   // Fetch all attempts when this request has been retried
   const hasMultipleAttempts = (run?.run?.attemptNumber ?? 1) > 1;
-  const { data: attempts } = useQuery({
+  const { data: rawAttempts } = useQuery({
     queryKey: ["run-attempts", id],
     queryFn: () => api.listRunAttempts(id!),
     enabled: !!id && hasMultipleAttempts,
   });
+
+  // Merge the live run.run into the attempts list so the latest attempt
+  // always reflects the freshest polled state (status, outcome, duration, etc.)
+  const attempts = useMemo(() => {
+    if (!rawAttempts) return rawAttempts;
+    const liveRun = run?.run;
+    if (!liveRun) return rawAttempts;
+    return rawAttempts.map((a) => (a._id === liveRun._id ? liveRun : a));
+  }, [rawAttempts, run?.run]);
 
   // When viewing a historical attempt via ?runId=xxx, use that RunState
   // instead of the current one. The selected attempt may come from the
