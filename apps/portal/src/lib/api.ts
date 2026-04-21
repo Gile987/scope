@@ -88,6 +88,11 @@ export const api = {
     return request(`/requests/${id}`, { method: "DELETE" });
   },
 
+  /** Retry a request (start a new attempt) */
+  retryRun: (id: string): Promise<{ requestId: string; runId: string; attemptNumber: number }> => {
+    return request(`/requests/${id}/retry`, { method: "POST" });
+  },
+
   /** Bulk soft-delete multiple runs */
   bulkDeleteRuns: (ids: string[]): Promise<{ deleted: number; notFound: string[] }> => {
     return request(`/requests/bulk`, {

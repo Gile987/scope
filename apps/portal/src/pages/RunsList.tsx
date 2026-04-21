@@ -23,7 +23,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2 } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
@@ -278,6 +278,19 @@ export function RunsList() {
   const deleteMutation = useMutation({
     mutationFn: api.deleteRun,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: api.retryRun,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success(`Retry started — attempt #${data.attemptNumber}`);
+    },
+    onError: (error) => {
+      toast.error("Failed to retry", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
   });
 
   const bulkDeleteMutation = useMutation({
@@ -1183,6 +1196,7 @@ export function RunsList() {
                     onToggleSelect={toggleSelect}
                     reportSummaries={reportSummaries}
                     deleteMutation={deleteMutation}
+                    retryMutation={retryMutation}
                     groupBy={groupBy}
                     profileNameMap={profileNameMap}
                     workerFilter={workerFilter === "all" ? undefined : workerFilter}
@@ -1202,6 +1216,7 @@ export function RunsList() {
                   onToggleSelect={toggleSelect}
                   reportSummaries={reportSummaries}
                   deleteMutation={deleteMutation}
+                  retryMutation={retryMutation}
                   profileNameMap={profileNameMap}
                   hiddenColumns={hiddenColumns}
                 />
@@ -1246,6 +1261,7 @@ function RunRow({
   onToggleSelect,
   reportSummaries,
   deleteMutation,
+  retryMutation,
   profileNameMap,
   hiddenColumns,
 }: {
@@ -1254,6 +1270,7 @@ function RunRow({
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
+  retryMutation: { mutate: (id: string) => void; isPending: boolean };
   profileNameMap: Map<string, string>;
   hiddenColumns: Set<ColumnId>;
 }) {
@@ -1436,6 +1453,18 @@ function RunRow({
               <Download className="h-4 w-4" />
             </Button>
           )}
+          {run.run?.status === "done" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Retry"
+              onClick={() => retryMutation.mutate(run._id)}
+              disabled={retryMutation.isPending}
+            >
+              <RotateCcw className="h-4 w-4" />
+            </Button>
+          )}
           <DeleteRunButton
             runId={run._id}
             onDelete={() => deleteMutation.mutate(run._id)}
@@ -1455,6 +1484,7 @@ function GroupRows({
   onToggleSelect,
   reportSummaries,
   deleteMutation,
+  retryMutation,
   groupBy,
   profileNameMap,
   workerFilter,
@@ -1470,6 +1500,7 @@ function GroupRows({
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
+  retryMutation: { mutate: (id: string) => void; isPending: boolean };
   groupBy: GroupByKey;
   profileNameMap: Map<string, string>;
   workerFilter?: string;
@@ -1778,6 +1809,7 @@ function GroupRows({
               onToggleSelect={onToggleSelect}
               reportSummaries={mergedReportSummaries}
               deleteMutation={deleteMutation}
+              retryMutation={retryMutation}
               profileNameMap={profileNameMap}
               hiddenColumns={hiddenColumns}
             />

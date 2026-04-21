@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +22,7 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
@@ -30,6 +30,7 @@ import { toast } from "sonner";
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [copied, setCopied] = useState(false);
   const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
   const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
@@ -116,6 +117,17 @@ export function RunDetail() {
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to generate report");
+    },
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: () => api.retryRun(id!),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success(`Retry started — attempt #${data.attemptNumber}`);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to retry");
     },
   });
 
@@ -290,6 +302,18 @@ export function RunDetail() {
             >
               <Archive className="h-4 w-4" />
               Download Archive
+            </Button>
+          )}
+          {run.run?.status === "done" && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => retryMutation.mutate()}
+              disabled={retryMutation.isPending}
+            >
+              <RotateCcw className="h-4 w-4" />
+              {retryMutation.isPending ? "Retrying…" : "Retry"}
             </Button>
           )}
         </div>
