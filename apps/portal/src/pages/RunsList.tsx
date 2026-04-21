@@ -1380,7 +1380,7 @@ function RunRow({
         )}
       </TableCell>}
       {isCol("attempt") && <TableCell className="text-center font-mono text-xs">
-        {run.run?.attemptNumber != null && run.run.attemptNumber > 1 ? run.run.attemptNumber : <span className="text-muted-foreground">–</span>}
+        {run.run?.attemptNumber ?? 1}
       </TableCell>}
       {isCol("turns") && <TableCell className="text-center">
         {run.run?.turns?.length ?? "–"}
