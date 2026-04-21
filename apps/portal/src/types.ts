@@ -65,6 +65,39 @@ export interface LogEvent {
   data?: Record<string, unknown>;
 }
 
+export interface OsInfo {
+  platform: string;
+  release: string;
+  arch: string;
+}
+
+/**
+ * Per-attempt mutable state (nested under `Run.run` in API responses since
+ * migration 014). Fields here change as a single attempt progresses; fields
+ * on the parent `Run` are immutable across attempts.
+ */
+export interface RunState {
+  _id: string;
+  attemptNumber: number;
+  status: RunStatus;
+  outcome?: RunOutcome;
+  result?: string;
+  error?: string;
+  turns?: ConversationTurn[];
+  workerVersion?: string;
+  os?: OsInfo;
+  harUrl?: string;
+  videoUrls?: string[];
+  setupVideoUrls?: string[];
+  tokenUsage?: TokenUsage;
+  aiCallCount?: number;
+  rawChatUrl?: string;
+  rawChatFormat?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt?: string;
+}
+
 export interface Run {
   _id: string;
   id: string;
@@ -72,13 +105,11 @@ export interface Run {
   workerType: string;
   model?: string;
   agentVersion?: string;
-  workerVersion?: string;
-  status: RunStatus;
-  outcome?: RunOutcome;
-  result?: string;
-  error?: string;
+  /** Per-attempt mutable state for the current attempt. */
+  run?: RunState;
+  /** Total number of attempts (current + history). */
+  attemptCount?: number;
   maxIterations?: number;
-  turns?: ConversationTurn[];
   personaInstructions?: string;
   persona?: Persona;
   createdAt: string;
@@ -91,19 +122,9 @@ export interface Run {
   skills?: string[];
   skillRevisions?: string[];
   extensions?: string[];
-  os?: {
-    platform: string;
-    release: string;
-    arch: string;
-  };
-  harUrl?: string;
-  videoUrls?: string[];
-  setupVideoUrls?: string[];
   submissionId?: string;
   profileId?: string;
   profileVersionId?: string;
-  tokenUsage?: TokenUsage;
-  aiCallCount?: number;
 }
 
 export interface CursorPaginatedResponse<T> {

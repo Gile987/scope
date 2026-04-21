@@ -1300,8 +1300,8 @@ function RunRow({
         )}
       </TableCell>}
       {isCol("os") && <TableCell className="text-center">
-        {run.os ? (
-          <PlatformIcon platform={run.os.platform} className="h-4 w-4 inline-block" />
+        {run.run?.os ? (
+          <PlatformIcon platform={run.run?.os.platform} className="h-4 w-4 inline-block" />
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
@@ -1363,10 +1363,10 @@ function RunRow({
         )}
       </TableCell>}
       {isCol("status") && <TableCell>
-        <StatusBadge status={run.status} />
+        <StatusBadge status={run.run?.status ?? "pending"} />
       </TableCell>}
       {isCol("outcome") && <TableCell>
-        <OutcomeBadge outcome={run.outcome} />
+        <OutcomeBadge outcome={run.run?.outcome} />
       </TableCell>}
       {isCol("report") && <TableCell>
         {reportSummaries?.[run._id] ? (
@@ -1378,22 +1378,22 @@ function RunRow({
         )}
       </TableCell>}
       {isCol("turns") && <TableCell className="text-center">
-        {run.turns?.length ?? "–"}
+        {run.run?.turns?.length ?? "–"}
       </TableCell>}
       {isCol("llmCalls") && <TableCell className="text-center font-mono text-xs">
-        {run.aiCallCount !== undefined ? run.aiCallCount : <span className="text-muted-foreground">–</span>}
+        {run.run?.aiCallCount !== undefined ? run.run?.aiCallCount : <span className="text-muted-foreground">–</span>}
       </TableCell>}
       {isCol("duration") && <TableCell className="font-mono text-xs">
         {(() => {
-          const totalDuration = run.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+          const totalDuration = run.run?.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
           return totalDuration ? formatDuration(totalDuration) : <span className="text-muted-foreground">–</span>;
         })()}
       </TableCell>}
       {isCol("tokens") && <TableCell className="font-mono text-xs">
         {(() => {
-          const usage = run.tokenUsage
-            ?? (run.turns?.some(t => t.tokenUsage)
-              ? run.turns!.reduce(
+          const usage = run.run?.tokenUsage
+            ?? (run.run?.turns?.some(t => t.tokenUsage)
+              ? run.run?.turns!.reduce(
                   (acc, t) => {
                     if (!t.tokenUsage) return acc;
                     return {
@@ -1420,7 +1420,7 @@ function RunRow({
               <Eye className="h-4 w-4" />
             </Button>
           </Link>
-          {run.turns && run.turns.some(t => t.snapshotUrl) && (
+          {run.run?.turns && run.run?.turns.some(t => t.snapshotUrl) && (
             <Button
               variant="ghost"
               size="icon"

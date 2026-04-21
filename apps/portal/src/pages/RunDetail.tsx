@@ -39,7 +39,7 @@ export function RunDetail() {
     queryFn: () => api.getRun(id!),
     enabled: !!id,
     refetchInterval: (query) => {
-      const status = query.state.data?.status;
+      const status = query.state.data?.run?.status;
       // Stop polling once terminal (done)
       if (status === "done") return false;
       return 5_000;
@@ -52,7 +52,7 @@ export function RunDetail() {
     enabled: !!run?.profileId,
   });
 
-  const isActive = run?.status === "pending" || run?.status === "processing";
+  const isActive = run?.run?.status === "pending" || run?.run?.status === "processing";
   // Note: "done" is terminal — not active, no log streaming needed
 
   // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
@@ -150,17 +150,17 @@ export function RunDetail() {
     );
   }
 
-  const hasHarData = !!(run.harUrl || run.turns?.some(t => t.harUrl));
-  const hasVideoData = !!(run.videoUrls?.length || run.setupVideoUrls?.length || run.turns?.some(t => t.videoUrls?.length));
-  const videoCount = (run.setupVideoUrls?.length ?? 0)
-    + (run.videoUrls?.length ?? 0)
-    + (run.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
+  const hasHarData = !!(run.run?.harUrl || run.run?.turns?.some(t => t.harUrl));
+  const hasVideoData = !!(run.run?.videoUrls?.length || run.run?.setupVideoUrls?.length || run.run?.turns?.some(t => t.videoUrls?.length));
+  const videoCount = (run.run?.setupVideoUrls?.length ?? 0)
+    + (run.run?.videoUrls?.length ?? 0)
+    + (run.run?.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
 
-  // Compute aggregate token usage: for one-shot runs use run.tokenUsage,
+  // Compute aggregate token usage: for one-shot runs use run.run?.tokenUsage,
   // for multi-turn runs sum per-turn token usage
-  const totalTokenUsage = run.tokenUsage
-    ?? (run.turns?.some(t => t.tokenUsage)
-      ? run.turns!.reduce(
+  const totalTokenUsage = run.run?.tokenUsage
+    ?? (run.run?.turns?.some(t => t.tokenUsage)
+      ? run.run?.turns!.reduce(
           (acc, t) => {
             if (!t.tokenUsage) return acc;
             return {
@@ -196,8 +196,8 @@ export function RunDetail() {
               </button>
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <StatusBadge status={run.status} />
-              {run.status === "done" && <OutcomeBadge outcome={run.outcome} />}
+              <StatusBadge status={run.run?.status ?? "pending"} />
+              {run.run?.status === "done" && <OutcomeBadge outcome={run.run?.outcome} />}
               <span className="font-mono">{run.workerType}</span>
               {run.model && (
                 <>
@@ -208,7 +208,7 @@ export function RunDetail() {
               {run.agentVersion && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs cursor-default" title={run.workerVersion ? `Worker: ${run.workerVersion}` : undefined}>{run.agentVersion}</span>
+                  <span className="font-mono text-xs cursor-default" title={run.run?.workerVersion ? `Worker: ${run.run?.workerVersion}` : undefined}>{run.agentVersion}</span>
                 </>
               )}
               <Separator orientation="vertical" className="h-4" />
@@ -220,7 +220,7 @@ export function RunDetail() {
                 </>
               )}
               {(() => {
-                const totalDuration = run.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+                const totalDuration = run.run?.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
                 return totalDuration ? (
                   <>
                     <Separator orientation="vertical" className="h-4" />
@@ -238,11 +238,11 @@ export function RunDetail() {
                   </span>
                 </>
               )}
-              {run.aiCallCount !== undefined && (
+              {run.run?.aiCallCount !== undefined && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
                   <span className="font-mono text-xs" title="LLM completion calls">
-                    {run.aiCallCount} LLM calls
+                    {run.run?.aiCallCount} LLM calls
                   </span>
                 </>
               )}
@@ -281,7 +281,7 @@ export function RunDetail() {
               )}
             </div>
           </div>
-          {run.turns && run.turns.some(t => t.snapshotUrl) && (
+          {run.run?.turns && run.run?.turns.some(t => t.snapshotUrl) && (
             <Button
               variant="outline"
               size="sm"
@@ -297,14 +297,14 @@ export function RunDetail() {
 
       {/* Tabs */}
       <Tabs
-        value={tab || (run.turns && run.turns.length > 0 ? "turns" : "logs")}
+        value={tab || (run.run?.turns && run.run?.turns.length > 0 ? "turns" : "logs")}
         onValueChange={(value) => navigate(`/runs/${id}/${value}`)}
       >
         <TabsList>
           <TabsTrigger value="turns">
-            Turns {run.turns ? `(${run.turns.length})` : ""}
+            Turns {run.run?.turns ? `(${run.run?.turns.length})` : ""}
           </TabsTrigger>
-          {run.turns && run.turns.length > 0 && (
+          {run.run?.turns && run.run?.turns.length > 0 && (
             <TabsTrigger value="conversation">Conversation</TabsTrigger>
           )}
           {hasHarData && <TabsTrigger value="network">Network</TabsTrigger>}
@@ -319,13 +319,13 @@ export function RunDetail() {
 
         {/* Turns tab */}
         <TabsContent value="turns" className="mt-4">
-          <TurnTimeline turns={run.turns ?? []} runId={run._id} />
+          <TurnTimeline turns={run.run?.turns ?? []} runId={run._id} />
         </TabsContent>
 
         {/* Conversation tab — chat-style view of agent/judge exchanges */}
-        {run.turns && run.turns.length > 0 && (
+        {run.run?.turns && run.run?.turns.length > 0 && (
           <TabsContent value="conversation" className="mt-4">
-            <ConversationView turns={run.turns} task={run.scenario?.task} runId={run._id} />
+            <ConversationView turns={run.run?.turns} task={run.scenario?.task} runId={run._id} />
           </TabsContent>
         )}
 
@@ -333,8 +333,8 @@ export function RunDetail() {
         {hasHarData && (
           <TabsContent value="network" className="mt-4">
             {/* If multi-turn, show per-iteration selector; otherwise one viewer */}
-            {run.turns && run.turns.some(t => t.harUrl) ? (
-              <HarIterationTabs runId={run._id} turns={run.turns} />
+            {run.run?.turns && run.run?.turns.some(t => t.harUrl) ? (
+              <HarIterationTabs runId={run._id} turns={run.run?.turns} />
             ) : (
               <HarNetworkViewer runId={run._id} />
             )}
@@ -344,18 +344,18 @@ export function RunDetail() {
         {/* Video tab — session recording player */}
         {hasVideoData && (
           <TabsContent value="video" className="mt-4">
-            {run.turns && run.turns.some(t => t.videoUrls?.length) ? (
-              <VideoIterationTabs runId={run._id} turns={run.turns} setupVideoUrls={run.setupVideoUrls} />
+            {run.run?.turns && run.run?.turns.some(t => t.videoUrls?.length) ? (
+              <VideoIterationTabs runId={run._id} turns={run.run?.turns} setupVideoUrls={run.run?.setupVideoUrls} />
             ) : (
               <div className="space-y-4">
-                {run.setupVideoUrls && run.setupVideoUrls.length > 0 && (
-                  run.setupVideoUrls.map((_, i) => (
+                {run.run?.setupVideoUrls && run.run?.setupVideoUrls.length > 0 && (
+                  run.run?.setupVideoUrls.map((_, i) => (
                     <VideoPlayer key={`setup-${i}`} src={api.videoUrl(run._id, undefined, i, "setup")} label="Setup" />
                   ))
                 )}
-                {run.videoUrls && run.videoUrls.length > 0 && (
-                  run.videoUrls.map((_, i) => (
-                    <VideoPlayer key={i} src={api.videoUrl(run._id, undefined, i)} label={run.videoUrls!.length > 1 ? `Video ${i + 1}` : undefined} />
+                {run.run?.videoUrls && run.run?.videoUrls.length > 0 && (
+                  run.run?.videoUrls.map((_, i) => (
+                    <VideoPlayer key={i} src={api.videoUrl(run._id, undefined, i)} label={(run.run?.videoUrls?.length ?? 0) > 1 ? `Video ${i + 1}` : undefined} />
                   ))
                 )}
               </div>
@@ -611,7 +611,7 @@ export function RunDetail() {
             )}
 
             {/* Version Info card */}
-            {(run.agentVersion || run.workerVersion || run.os) && (
+            {(run.agentVersion || run.run?.workerVersion || run.run?.os) && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Version Info</CardTitle>
@@ -623,21 +623,21 @@ export function RunDetail() {
                       <span className="font-mono font-medium">{run.agentVersion}</span>
                     </div>
                   )}
-                  {run.workerVersion && (
+                  {run.run?.workerVersion && (
                     <div>
                       <span className="text-muted-foreground">Worker Version:</span>{" "}
-                      <span className="font-mono font-medium">{run.workerVersion}</span>
+                      <span className="font-mono font-medium">{run.run?.workerVersion}</span>
                     </div>
                   )}
-                  {run.os && (
+                  {run.run?.os && (
                     <div>
                       <span className="text-muted-foreground">OS:</span>{" "}
                       <span className="font-mono font-medium">
-                        {run.os.platform}
+                        {run.run?.os.platform}
                         <span className="text-muted-foreground ml-1">(release </span>
-                        {run.os.release}
+                        {run.run?.os.release}
                         <span className="text-muted-foreground"> arch </span>
-                        {run.os.arch}
+                        {run.run?.os.arch}
                         <span className="text-muted-foreground">)</span>
                       </span>
                     </div>
@@ -749,27 +749,27 @@ export function RunDetail() {
             )}
 
             {/* Error card (if failed) */}
-            {run.error && (
+            {run.run?.error && (
               <Card className="md:col-span-2 border-destructive">
                 <CardHeader>
                   <CardTitle className="text-lg text-destructive">Error</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <pre className="text-sm text-destructive whitespace-pre-wrap font-mono bg-destructive/10 rounded-md p-3">
-                    {run.error}
+                    {run.run?.error}
                   </pre>
                 </CardContent>
               </Card>
             )}
 
             {/* Result card */}
-            {run.result && (
+            {run.run?.result && (
               <Card className="md:col-span-2">
                 <CardHeader>
                   <CardTitle className="text-lg">Result</CardTitle>
                 </CardHeader>
                 <CardContent className="prose prose-sm dark:prose-invert max-w-none">
-                  <MarkdownRenderer>{run.result}</MarkdownRenderer>
+                  <MarkdownRenderer>{run.run?.result}</MarkdownRenderer>
                 </CardContent>
               </Card>
             )}
@@ -779,7 +779,7 @@ export function RunDetail() {
         {/* Tool Calls tab — HAR captures & tool calls summary */}
         {hasHarData && (
           <TabsContent value="tool-calls" className="mt-4 space-y-4">
-            <ToolCallsTab runId={run._id} turns={run.turns} harUrl={run.harUrl} />
+            <ToolCallsTab runId={run._id} turns={run.run?.turns} harUrl={run.run?.harUrl} />
           </TabsContent>
         )}
       </Tabs>
