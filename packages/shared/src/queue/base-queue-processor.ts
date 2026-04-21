@@ -16,7 +16,7 @@ import { withRetry } from "../utils/retry.js";
  * Handles: MongoDB connection, queue polling, message decoding, log publishing,
  * error handling, and message lifecycle management.
  */
-export abstract class BaseQueueProcessor<TDocument extends { _id: string; status: string } = any> {
+export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any> {
   private mongoClient: MongoClient;
   protected db!: Db;
   protected collection!: Collection<TDocument>;
