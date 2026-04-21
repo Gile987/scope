@@ -98,6 +98,14 @@ export const api = {
     return request(`/requests/${id}/runs`);
   },
 
+  /** Bulk retry multiple requests */
+  bulkRetryRuns: (ids: string[]): Promise<{ retried: number; skipped: number; results: Array<{ requestId: string; runId?: string; attemptNumber?: number; error?: string }> }> => {
+    return request(`/requests/bulk-retry`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  },
+
   /** Bulk soft-delete multiple runs */
   bulkDeleteRuns: (ids: string[]): Promise<{ deleted: number; notFound: string[] }> => {
     return request(`/requests/bulk`, {

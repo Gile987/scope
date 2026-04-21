@@ -294,22 +294,13 @@ export function RunsList() {
   });
 
   const bulkRetryMutation = useMutation({
-    mutationFn: async (ids: string[]) => {
-      // Only retry runs that are in terminal state (done)
-      const eligible = runs.filter((r) => ids.includes(r._id) && r.run?.status === "done");
-      const skipped = ids.length - eligible.length;
-      const results = await Promise.allSettled(eligible.map((r) => api.retryRun(r._id)));
-      const succeeded = results.filter((r) => r.status === "fulfilled").length;
-      const failed = results.filter((r) => r.status === "rejected").length;
-      return { succeeded, failed, skipped };
-    },
-    onSuccess: ({ succeeded, failed, skipped }) => {
+    mutationFn: (ids: string[]) => api.bulkRetryRuns(ids),
+    onSuccess: ({ retried, skipped }) => {
       queryClient.invalidateQueries({ queryKey: ["runs"] });
       const parts: string[] = [];
-      if (succeeded > 0) parts.push(`${succeeded} retried`);
-      if (skipped > 0) parts.push(`${skipped} skipped (not done)`);
-      if (failed > 0) parts.push(`${failed} failed`);
-      if (failed > 0) {
+      if (retried > 0) parts.push(`${retried} retried`);
+      if (skipped > 0) parts.push(`${skipped} skipped`);
+      if (skipped > 0 && retried === 0) {
         toast.warning(`Bulk retry: ${parts.join(", ")}`);
       } else {
         toast.success(`Bulk retry: ${parts.join(", ")}`);

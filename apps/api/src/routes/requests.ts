@@ -2032,6 +2032,102 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
+// Bulk retry terminal requests — demotes each current run to history,
+// creates fresh attempts, and re-queues. Non-terminal runs are skipped.
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/bulk-retry",
+  tags: ["Requests"],
+  summary: "Bulk retry requests (start new attempts)",
+  body: z.object({ ids: z.array(z.string()).min(1) }),
+  response: z.object({
+    retried: z.number().int(),
+    skipped: z.number().int(),
+    results: z.array(z.object({
+      requestId: z.string(),
+      runId: z.string().optional(),
+      attemptNumber: z.number().int().optional(),
+      error: z.string().optional(),
+    })),
+  }),
+  handler: async (req, res) => {
+    const { ids } = req.body;
+
+    // Fetch all requested documents
+    const requests = await ctx.requestCollection.find(
+      { _id: { $in: ids }, deletedAt: { $exists: false } },
+    ).toArray();
+    const requestMap = new Map(requests.map((r) => [r._id, r]));
+
+    const results: Array<{ requestId: string; runId?: string; attemptNumber?: number; error?: string }> = [];
+    let retried = 0;
+    let skipped = 0;
+
+    for (const id of ids) {
+      const request = requestMap.get(id);
+      if (!request) {
+        results.push({ requestId: id, error: "Not found" });
+        skipped++;
+        continue;
+      }
+
+      const currentRun: RunState | undefined = request.run;
+      if (currentRun?.status !== "done") {
+        results.push({ requestId: id, error: `Status is '${currentRun?.status ?? "unknown"}', expected 'done'` });
+        skipped++;
+        continue;
+      }
+
+      const runToDemote = currentRun;
+      const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
+      const newRunId = uuidv4();
+      const newRun: RunState = {
+        _id: newRunId,
+        attemptNumber: newAttemptNumber,
+        status: "pending",
+        logsUrl: ctx.blobStorage.getLogsBlobUrl(`${id}/runs/${newRunId}/run.jsonl`),
+      };
+
+      // 1. Demote current run to history
+      try {
+        await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote);
+      } catch (err: any) {
+        if (err?.code !== 11000) {
+          results.push({ requestId: id, error: "Failed to demote run to history" });
+          skipped++;
+          continue;
+        }
+      }
+
+      // 2. Atomically swap
+      const updateResult = await ctx.requestCollection.updateOne(
+        { _id: id, "run._id": runToDemote._id },
+        { $set: { run: newRun, updatedAt: new Date() } },
+      );
+      if (updateResult.matchedCount === 0) {
+        results.push({ requestId: id, error: "Race condition — another retry started first" });
+        skipped++;
+        continue;
+      }
+
+      // 3. Enqueue
+      const queueClient = ctx.queueClients.get(request.workerType as WorkerType);
+      if (queueClient) {
+        const message = Buffer.from(
+          JSON.stringify({ requestId: id, runId: newRunId } satisfies QueueMessage),
+        ).toString("base64");
+        await queueClient.sendMessage(message);
+      }
+
+      console.log(`Bulk retry: request ${id} → attempt ${newAttemptNumber} (runId=${newRunId})`);
+      results.push({ requestId: id, runId: newRunId, attemptNumber: newAttemptNumber });
+      retried++;
+    }
+
+    res.status(200).json({ retried, skipped, results });
+  },
+});
+
 // Retry a failed (or otherwise terminal) request — demotes the current run
 // to the history collection, creates a fresh attempt, and re-queues.
 apiRoute(ctx.app, ctx.registry, {

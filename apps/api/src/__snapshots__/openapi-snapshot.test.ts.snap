@@ -6640,6 +6640,83 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/bulk-retry": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "ids",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "results": {
+                      "items": {
+                        "properties": {
+                          "attemptNumber": {
+                            "type": "integer",
+                          },
+                          "error": {
+                            "type": "string",
+                          },
+                          "requestId": {
+                            "type": "string",
+                          },
+                          "runId": {
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "requestId",
+                        ],
+                        "type": "object",
+                      },
+                      "type": "array",
+                    },
+                    "retried": {
+                      "type": "integer",
+                    },
+                    "skipped": {
+                      "type": "integer",
+                    },
+                  },
+                  "required": [
+                    "retried",
+                    "skipped",
+                    "results",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Bulk retry requests (start new attempts)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/{id}": {
       "delete": {
         "parameters": [
