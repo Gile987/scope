@@ -24,6 +24,7 @@ import {
   PaginatedRunsResponseSchema,
   ReportResponseSchema,
   RequestResponseSchema,
+  RunStateSchema,
   decodeCursor,
   encodeCursor,
   parseExtensionSpec,
@@ -53,6 +54,10 @@ import {
 } from "../archive-har.js";
 import { subscribeClient, unsubscribeClient } from "../utils/sse.js";
 import type { SSEClient } from "../utils/sse.js";
+import { insertHistoricalRun, listHistoricalRuns, getHistoricalRun } from "../runs-repo.js";
+import type { RunState } from "shared";
+
+
 
 export function registerRequestsRoutes(ctx: RouteContext): void {
 
@@ -60,6 +65,12 @@ const upload = multer({ dest: tmpdir() });
 
 interface QueueMessage {
   requestId: string;
+  /**
+   * The run id (attempt id) this message targets. Workers must verify this
+   * matches `request.run._id` before processing — otherwise the message is
+   * stale (a retry has since started a new attempt) and should be discarded.
+   */
+  runId?: string;
 }
 
 // Submit a request
@@ -354,6 +365,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       for (let i = 0; i < count; i++) {
         const requestId = uuidv4();
+        const runId = uuidv4();
         newIds.push(requestId);
 
         const requestDoc: RequestDocument = {
@@ -361,7 +373,6 @@ apiRoute(ctx.app, ctx.registry, {
           scenario,
           workerType,
           taskPromptId,
-          status: "pending",
           createdAt: new Date(),
           ...(model ? { model } : {}),
           ...(maxIterations ? { maxIterations } : {}),
@@ -375,10 +386,14 @@ apiRoute(ctx.app, ctx.registry, {
           ...(profileId ? { profileId } : {}),
           ...(profileVersionId ? { profileVersionId } : {}),
           submissionId,
+          // Mint a distinct run id for the first attempt. Blob artifacts
+          // are scoped under `{requestId}/runs/{runId}/...` so retries
+          // never overwrite a previous attempt's blobs.
+          run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
         };
         newDocs.push(requestDoc);
 
-        const queueMessage: QueueMessage = { requestId };
+        const queueMessage: QueueMessage = { requestId, runId };
         const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
         queueMessages.push(messageContent);
       }
@@ -412,6 +427,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Single run (count === 1) - original behavior
     const requestId = uuidv4();
+    const runId = uuidv4();
 
     // Create request document
     const requestDoc: RequestDocument = {
@@ -419,7 +435,6 @@ apiRoute(ctx.app, ctx.registry, {
       scenario,
       workerType,
       taskPromptId,
-      status: "pending",
       createdAt: new Date(),
       ...(model ? { model } : {}),
       ...(maxIterations ? { maxIterations } : {}),
@@ -433,13 +448,17 @@ apiRoute(ctx.app, ctx.registry, {
       ...(profileId ? { profileId } : {}),
       ...(profileVersionId ? { profileVersionId } : {}),
       submissionId,
+      // Mint a distinct run id for the first attempt. Blob artifacts
+      // are scoped under `{requestId}/runs/{runId}/...` so retries
+      // never overwrite a previous attempt's blobs.
+      run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
     };
 
     // Store in MongoDB
     await ctx.requestCollection.insertOne(requestDoc);
 
     // Queue the request for the appropriate worker
-    const queueMessage: QueueMessage = { requestId };
+    const queueMessage: QueueMessage = { requestId, runId };
     const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
     await queueClient.sendMessage(messageContent);
 
@@ -451,7 +470,7 @@ apiRoute(ctx.app, ctx.registry, {
       workerType,
       ...(model ? { model } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
-      status: requestDoc.status,
+      status: requestDoc.run?.status ?? "pending",
       mode,
       message: "Request submitted successfully",
       scenario,
@@ -517,7 +536,13 @@ apiRoute(ctx.app, ctx.registry, {
     // If fromStart=true, replay existing logs from blob storage
     if (fromStart) {
       try {
-        const pastLogs = await ctx.blobStorage.getLogEvents(id);
+        // Read the logs URL from the document when available (new runs
+        // store it on run.logsUrl at submit time). Falls back to the
+        // legacy computed path for pre-migration runs.
+        const logsUrl = resource.run?.logsUrl;
+        const pastLogs = logsUrl
+          ? await ctx.blobStorage.getLogEvents(logsUrl)
+          : await ctx.blobStorage.getLogEvents(id, resource.run?._id);
         for (const log of pastLogs) {
           res.write(`data: ${JSON.stringify(log)}\n\n`);
         }
@@ -529,13 +554,16 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
-    // If request already done, send final event and close
-    if (resource.status === "done") {
+    // If request already done, send final event and close.
+    const currentStatus = resource.run?.status;
+    const currentOutcome = resource.run?.outcome;
+    const currentTurns = resource.run?.turns;
+    if (currentStatus === "done") {
       // For done multi-turn requests, send turns summary
-      if (resource.turns && resource.turns.length > 0) {
-        res.write(`data: ${JSON.stringify({ type: "turns_summary", turns: resource.turns.length, passed: resource.outcome === "succeeded" })}\n\n`);
+      if (currentTurns && currentTurns.length > 0) {
+        res.write(`data: ${JSON.stringify({ type: "turns_summary", turns: currentTurns.length, passed: currentOutcome === "succeeded" })}\n\n`);
       }
-      res.write(`event: done\ndata: ${JSON.stringify({ status: resource.status, outcome: resource.outcome })}\n\n`);
+      res.write(`event: done\ndata: ${JSON.stringify({ status: currentStatus, outcome: currentOutcome })}\n\n`);
       res.end();
       return;
     }
@@ -606,8 +634,10 @@ apiRoute(ctx.app, ctx.registry, {
       changeStream.on("change", (change) => {
         if (change.operationType === "update" && change.fullDocument) {
           const doc = change.fullDocument;
-          if (doc.status === "done") {
-            res.write(`event: done\ndata: ${JSON.stringify({ status: doc.status, outcome: doc.outcome })}\n\n`);
+          const docStatus = doc.run?.status;
+          const docOutcome = doc.run?.outcome;
+          if (docStatus === "done") {
+            res.write(`event: done\ndata: ${JSON.stringify({ status: docStatus, outcome: docOutcome })}\n\n`);
             client.cleanup();
           }
         }
@@ -664,10 +694,11 @@ apiRoute(ctx.app, ctx.registry, {
       filter.taskPromptId = taskPromptIdFilter;
     }
     if (statusFilter) {
-      filter.status = statusFilter;
+      // Post run-retry-attempts: per-attempt state lives at run.status.
+      filter["run.status"] = statusFilter;
     }
     if (outcomeFilter) {
-      filter.outcome = outcomeFilter;
+      filter["run.outcome"] = outcomeFilter;
     }
     if (profileIdFilter) {
       filter.profileId = profileIdFilter;
@@ -911,19 +942,18 @@ apiRoute(ctx.app, ctx.registry, {
       ? criteriaParam.split(",").map(c => c.trim()).filter(Boolean)
       : undefined;
 
-    // Fetch all done runs (exclude pending/processing, exclude deleted)
+    // Fetch all done runs (exclude pending/processing, exclude deleted).
+    // Per-attempt state lives at run.* (run-retry-attempts).
     const runs = await ctx.requestCollection
       .find({
-        status: "done",
+        "run.status": "done",
         deletedAt: { $exists: false },
       })
       .project({
         _id: 1,
         scenario: 1,
         workerType: 1,
-        status: 1,
-        outcome: 1,
-        turns: 1,
+        run: 1,
       })
       .toArray();
 
@@ -931,9 +961,9 @@ apiRoute(ctx.app, ctx.registry, {
     const analyzableRuns: AnalyzableRun[] = runs.map(r => ({
       scenario: r.scenario,
       workerType: r.workerType,
-      status: r.status,
-      outcome: r.outcome,
-      turns: r.turns,
+      status: r.run?.status ?? "done",
+      outcome: r.run?.outcome,
+      turns: r.run?.turns,
     }));
 
     const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues, selectedCriteria);
@@ -1033,6 +1063,7 @@ apiRoute(ctx.app, ctx.registry, {
     for (const original of originalRuns) {
       for (let i = 0; i < count; i++) {
         const requestId = uuidv4();
+        const runId = uuidv4();
         newIds.push(requestId);
 
         // Determine effective profile for this run
@@ -1101,7 +1132,6 @@ apiRoute(ctx.app, ctx.registry, {
           _id: requestId,
           scenario: original.scenario,
           workerType: effectiveWorkerType,
-          status: "pending",
           createdAt: new Date(),
           ...(effectiveMaxIterations ? { maxIterations: effectiveMaxIterations } : {}),
           ...(original.personaInstructions ? { personaInstructions: original.personaInstructions } : {}),
@@ -1115,11 +1145,15 @@ apiRoute(ctx.app, ctx.registry, {
           ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
           ...(effectiveProfileVersionId ? { profileVersionId: effectiveProfileVersionId } : {}),
           submissionId,
+          // Bulk re-submit creates a brand-new request — mint a distinct
+          // run id for the first attempt so blob artifacts live under
+          // `{requestId}/runs/{runId}/...` (independent of the original run).
+          run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
         };
 
         newDocs.push(newDoc);
 
-        const queueMessage: QueueMessage = { requestId };
+        const queueMessage: QueueMessage = { requestId, runId };
         const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
         queueMessages.push({ workerType: effectiveWorkerType as WorkerType, message: messageContent });
       }
@@ -1245,7 +1279,8 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    const turn = resource.turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
+    const turns = resource.run?.turns;
+    const turn = turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
     if (!turn?.snapshotUrl) {
       res.status(404).json({ error: `No snapshot for iteration ${iterNum}` });
       return;
@@ -1318,7 +1353,8 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    if (!resource.turns || resource.turns.length === 0) {
+    const allTurns = resource.run?.turns;
+    if (!allTurns || allTurns.length === 0) {
       res.status(404).json({ error: "No iterations found for this run" });
       return;
     }
@@ -1477,12 +1513,14 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "Invalid iteration number" });
         return;
       }
-      const turn = resource.turns?.find((t: { iteration: number }) => t.iteration === iterNum);
+      const turns = resource.run?.turns;
+      const turn = turns?.find((t: { iteration: number }) => t.iteration === iterNum);
       harUrl = turn?.harUrl;
       label = `${id}-iteration-${iterNum}`;
     } else {
-      // One-shot: harUrl on document root; multi-turn fallback: last turn
-      harUrl = resource.harUrl || resource.turns?.[resource.turns.length - 1]?.harUrl;
+      // One-shot: harUrl on run; multi-turn fallback: last turn
+      const turns = resource.run?.turns;
+      harUrl = resource.run?.harUrl || turns?.[turns.length - 1]?.harUrl;
       label = id;
     }
 
@@ -1574,7 +1612,7 @@ apiRoute(ctx.app, ctx.registry, {
     let label: string;
 
     if (phaseParam === "setup") {
-      videoUrls = resource.setupVideoUrls;
+      videoUrls = resource.run?.setupVideoUrls;
       label = `${id}-setup-video-${videoIndex}`;
     } else if (iterationParam) {
       const iterNum = parseInt(iterationParam, 10);
@@ -1582,12 +1620,14 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "Invalid iteration number" });
         return;
       }
-      const turn = resource.turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
+      const turns = resource.run?.turns;
+      const turn = turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
       videoUrls = turn?.videoUrls;
       label = `${id}-iteration-${iterNum}-video-${videoIndex}`;
     } else {
-      // One-shot: videoUrls on document root; multi-turn fallback: last turn
-      videoUrls = resource.videoUrls ?? resource.turns?.[resource.turns.length - 1]?.videoUrls;
+      // One-shot: videoUrls on run; multi-turn fallback: last turn
+      const turns = resource.run?.turns;
+      videoUrls = resource.run?.videoUrls ?? turns?.[turns.length - 1]?.videoUrls;
       label = `${id}-video-${videoIndex}`;
     }
 
@@ -1741,9 +1781,9 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Parse run.yaml
     const runYamlContent = await readFile(runYamlPath, "utf-8");
-    let runDoc: RequestDocument;
+    let runDoc: Record<string, any>;
     try {
-      runDoc = yamlParse(runYamlContent) as RequestDocument;
+      runDoc = yamlParse(runYamlContent) as Record<string, any>;
     } catch (parseErr) {
       res.status(400).json({ error: `Failed to parse run.yaml: ${parseErr}` });
       return;
@@ -1781,7 +1821,7 @@ apiRoute(ctx.app, ctx.registry, {
     if (existingRun) {
       res.status(409).json({
         error: `Run with ID '${runDoc._id}' already exists`,
-        existingStatus: existingRun.status,
+        existingStatus: existingRun.run?.status,
       });
       return;
     }
@@ -1860,22 +1900,29 @@ apiRoute(ctx.app, ctx.registry, {
       _id: runDoc._id,
       scenario: runDoc.scenario,
       workerType: runDoc.workerType as WorkerType,
-      status: runDoc.status,
       createdAt: runDoc.createdAt ? new Date(runDoc.createdAt) : new Date(),
       updatedAt: runDoc.updatedAt ? new Date(runDoc.updatedAt) : undefined,
-      turns: turns.map((t: any) => ({
-        ...t,
-        timestamp: t.timestamp ? new Date(t.timestamp as string) : new Date(),
-      })),
-      ...(runDoc.result ? { result: runDoc.result } : {}),
-      ...(runDoc.error ? { error: runDoc.error } : {}),
       ...(runDoc.maxIterations ? { maxIterations: runDoc.maxIterations } : {}),
       ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
       ...(runDoc.persona ? { persona: runDoc.persona } : {}),
       ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv4() }),
-      ...(runDoc.harUrl ? { harUrl: runDoc.harUrl } : {}),
-      ...(runDoc.rawChatUrl ? { rawChatUrl: runDoc.rawChatUrl } : {}),
-      ...(runDoc.rawChatFormat ? { rawChatFormat: runDoc.rawChatFormat } : {}),
+      // All per-attempt state lives in the run sub-document.
+      run: {
+        _id: runDoc._id,
+        attemptNumber: 1,
+        status: runDoc.status,
+        logsUrl: ctx.blobStorage.getLogsBlobUrl(`${runDoc._id}/runs/${runDoc._id}/run.jsonl`),
+        ...(runDoc.outcome ? { outcome: runDoc.outcome } : {}),
+        ...(runDoc.result ? { result: runDoc.result } : {}),
+        ...(runDoc.error ? { error: runDoc.error } : {}),
+        ...(runDoc.harUrl ? { harUrl: runDoc.harUrl } : {}),
+        ...(runDoc.rawChatUrl ? { rawChatUrl: runDoc.rawChatUrl } : {}),
+        ...(runDoc.rawChatFormat ? { rawChatFormat: runDoc.rawChatFormat } : {}),
+        turns: turns.map((t: any) => ({
+          ...t,
+          timestamp: t.timestamp ? new Date(t.timestamp as string) : new Date(),
+        })),
+      },
     };
 
     // Insert into MongoDB
@@ -1930,6 +1977,267 @@ apiRoute(ctx.app, ctx.registry, {
     } catch (error) {
       next(error);
     }
+  },
+});
+
+// ─── Run-retry-attempts endpoints (issue #658) ────────────────────────────
+
+// List all attempts for a request — current run (inline) + history (runs col),
+// newest first.
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/runs",
+  tags: ["Requests"],
+  summary: "List attempts for a request",
+  params: z.object({ id: z.string() }),
+  response: z.array(RunStateSchema),
+  errorResponses: { 404: { description: "Request not found" } },
+  handler: async (req, res) => {
+    const { id } = req.params;
+    const request = await ctx.requestCollection.findOne({ _id: id });
+    if (!request) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+    const history = await listHistoricalRuns({ runsCollection: ctx.runsCollection }, id);
+    const current = request.run ? [request.run] : [];
+    // Combine current + history; current is always the highest attemptNumber
+    res.json([...current, ...history]);
+  },
+});
+
+// Get a single attempt by run id — checks current run first, then history.
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/runs/:runId",
+  tags: ["Requests"],
+  summary: "Get a single attempt",
+  params: z.object({ id: z.string(), runId: z.string() }),
+  response: RunStateSchema,
+  errorResponses: { 404: { description: "Request or run not found" } },
+  handler: async (req, res) => {
+    const { id, runId } = req.params;
+    const request = await ctx.requestCollection.findOne({ _id: id });
+    if (!request) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+    if (request.run?._id === runId) {
+      res.json(request.run);
+      return;
+    }
+    const historical = await getHistoricalRun({ runsCollection: ctx.runsCollection }, runId);
+    if (!historical || historical.requestId !== id) {
+      res.status(404).json({ error: "Run not found for this request" });
+      return;
+    }
+    res.json(historical);
+  },
+});
+
+// Bulk retry terminal requests — demotes each current run to history,
+// creates fresh attempts, and re-queues. Non-terminal runs are skipped.
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/bulk-retry",
+  tags: ["Requests"],
+  summary: "Bulk retry requests (start new attempts)",
+  body: z.object({ ids: z.array(z.string()).min(1) }),
+  response: z.object({
+    retried: z.number().int(),
+    skipped: z.number().int(),
+    results: z.array(z.object({
+      requestId: z.string(),
+      runId: z.string().optional(),
+      attemptNumber: z.number().int().optional(),
+      error: z.string().optional(),
+    })),
+  }),
+  handler: async (req, res) => {
+    const { ids } = req.body;
+
+    // Fetch all requested documents
+    const requests = await ctx.requestCollection.find(
+      { _id: { $in: ids }, deletedAt: { $exists: false } },
+    ).toArray();
+    const requestMap = new Map(requests.map((r) => [r._id, r]));
+
+    const results: Array<{ requestId: string; runId?: string; attemptNumber?: number; error?: string }> = [];
+    let retried = 0;
+    let skipped = 0;
+
+    for (const id of ids) {
+      const request = requestMap.get(id);
+      if (!request) {
+        results.push({ requestId: id, error: "Not found" });
+        skipped++;
+        continue;
+      }
+
+      const currentRun: RunState | undefined = request.run;
+      if (currentRun?.status !== "done") {
+        results.push({ requestId: id, error: `Status is '${currentRun?.status ?? "unknown"}', expected 'done'` });
+        skipped++;
+        continue;
+      }
+
+      const runToDemote = currentRun;
+      const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
+      const newRunId = uuidv4();
+      const newRun: RunState = {
+        _id: newRunId,
+        attemptNumber: newAttemptNumber,
+        status: "pending",
+        logsUrl: ctx.blobStorage.getLogsBlobUrl(`${id}/runs/${newRunId}/run.jsonl`),
+      };
+
+      // 1. Demote current run to history
+      try {
+        await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote);
+      } catch (err: any) {
+        if (err?.code !== 11000) {
+          results.push({ requestId: id, error: "Failed to demote run to history" });
+          skipped++;
+          continue;
+        }
+      }
+
+      // 2. Atomically swap
+      const updateResult = await ctx.requestCollection.updateOne(
+        { _id: id, "run._id": runToDemote._id },
+        { $set: { run: newRun, updatedAt: new Date() } },
+      );
+      if (updateResult.matchedCount === 0) {
+        results.push({ requestId: id, error: "Race condition — another retry started first" });
+        skipped++;
+        continue;
+      }
+
+      // 3. Enqueue
+      const queueClient = ctx.queueClients.get(request.workerType as WorkerType);
+      if (!queueClient) {
+        results.push({ requestId: id, error: `No queue configured for worker '${request.workerType}'` });
+        skipped++;
+        continue;
+      }
+      const message = Buffer.from(
+        JSON.stringify({ requestId: id, runId: newRunId } satisfies QueueMessage),
+      ).toString("base64");
+      await queueClient.sendMessage(message);
+
+      console.log(`Bulk retry: request ${id} → attempt ${newAttemptNumber} (runId=${newRunId})`);
+      results.push({ requestId: id, runId: newRunId, attemptNumber: newAttemptNumber });
+      retried++;
+    }
+
+    res.status(201).json({ retried, skipped, results });
+  },
+});
+
+// Retry a failed (or otherwise terminal) request — demotes the current run
+// to the history collection, creates a fresh attempt, and re-queues.
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/:id/retry",
+  tags: ["Requests"],
+  summary: "Retry a request (start a new attempt)",
+  params: z.object({ id: z.string() }),
+  body: z.object({}).optional(),
+  response: z.object({
+    requestId: z.string(),
+    runId: z.string(),
+    attemptNumber: z.number().int(),
+  }),
+  errorResponses: {
+    404: { description: "Request not found" },
+    409: { description: "Conflict — request is not in a retryable state, or a concurrent retry won the race" },
+    422: { description: "Cannot retry — current run not yet terminal" },
+  },
+  handler: async (req, res) => {
+    const { id } = req.params;
+
+    const request = await ctx.requestCollection.findOne({ _id: id });
+    if (!request) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+    if (request.deletedAt) {
+      res.status(409).json({ error: "Cannot retry a deleted request" });
+      return;
+    }
+
+    // The retry contract requires that the current attempt has reached a
+    // terminal state.
+    const currentRun = request.run;
+    if (!currentRun || currentRun.status !== "done") {
+      res.status(422).json({
+        error: `Cannot retry: current run status is '${currentRun?.status ?? "unknown"}', expected 'done'`,
+      });
+      return;
+    }
+
+    const runToDemote = currentRun;
+
+    const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
+    const newRunId = uuidv4();
+    const newRun: RunState = {
+      _id: newRunId,
+      attemptNumber: newAttemptNumber,
+      status: "pending",
+      logsUrl: ctx.blobStorage.getLogsBlobUrl(`${id}/runs/${newRunId}/run.jsonl`),
+    };
+
+    // 1. Insert the demoted run into the history collection FIRST. If the
+    //    request update fails afterwards we have a duplicate-history-entry
+    //    risk on retry, but never history loss. Insert is idempotent on _id.
+    try {
+      await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote);
+    } catch (err: any) {
+      // Duplicate key (already in history) is fine — proceed.
+      if (err?.code !== 11000) throw err;
+    }
+
+    // 2. Atomically swap the current run on the request, gated on its _id
+    //    so concurrent retries fail fast with a 409.
+    const updateResult = await ctx.requestCollection.updateOne(
+      { _id: id, "run._id": runToDemote._id },
+      {
+        $set: {
+          run: newRun,
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    if (updateResult.matchedCount === 0) {
+      // Either the request vanished (deleted) or someone else retried first.
+      res.status(409).json({
+        error: "Retry race lost — another retry started a new attempt first",
+      });
+      return;
+    }
+
+    // 3. Enqueue the new attempt. Workers MUST verify runId matches the
+    //    current request.run._id before processing.
+    const queueClient = ctx.queueClients.get(request.workerType as WorkerType);
+    if (!queueClient) {
+      res.status(500).json({ error: `No queue configured for worker '${request.workerType}'` });
+      return;
+    }
+    const message = Buffer.from(
+      JSON.stringify({ requestId: id, runId: newRunId } satisfies QueueMessage),
+    ).toString("base64");
+    await queueClient.sendMessage(message);
+
+    console.log(
+      `Retried request ${id}: attempt ${newAttemptNumber} (runId=${newRunId}), demoted ${runToDemote._id} to history`,
+    );
+
+    res.status(201).json({
+      requestId: id,
+      runId: newRunId,
+      attemptNumber: newAttemptNumber,
+    });
   },
 });
 

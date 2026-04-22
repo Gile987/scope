@@ -163,6 +163,7 @@ export function createMockSkillResolver(): Record<string, any> {
 export function createMockBlobStorage(): BlobStorage {
   return {
     getLogEvents: vi.fn().mockResolvedValue([]),
+    getLogsBlobUrl: vi.fn().mockImplementation((blobName: string) => `https://mockaccount.blob.core.windows.net/logs/${blobName}`),
     appendLogEvent: vi.fn().mockResolvedValue(undefined),
     ensureContainer: vi.fn().mockResolvedValue(undefined),
     uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
@@ -178,6 +179,7 @@ export function createMockBlobStorage(): BlobStorage {
 export function createAllMockDependencies() {
   const db = createMockDb();
   const collection = createMockCollection();
+  const runsCollection = createMockCollection();
   const criteriaCollection = createMockCollection();
   const promptFeatureCollection = createMockCollection();
   const promptFeatureExtractionCollection = createMockCollection();
@@ -206,6 +208,7 @@ export function createAllMockDependencies() {
   return {
     db,
     collection,
+    runsCollection,
     criteriaCollection,
     promptFeatureCollection,
     promptFeatureExtractionCollection,
@@ -231,6 +234,7 @@ export function createAllMockDependencies() {
     // Expose typed mocks for fine-grained stubbing
     db: ReturnType<typeof createMockDb>;
     collection: Collection;
+    runsCollection: Collection;
     criteriaCollection: Collection;
     promptFeatureCollection: Collection;
     promptFeatureExtractionCollection: Collection;

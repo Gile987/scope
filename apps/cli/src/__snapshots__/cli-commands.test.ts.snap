@@ -515,6 +515,13 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
   },
   "run": {
     "subcommands": {
+      "attempts": {
+        "options": [
+          "--id",
+          "--output",
+          "--url",
+        ],
+      },
       "delete": {
         "options": [
           "--id",
@@ -567,6 +574,12 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "logs": {
         "options": [
           "--from-start",
+          "--id",
+          "--url",
+        ],
+      },
+      "retry": {
+        "options": [
           "--id",
           "--url",
         ],

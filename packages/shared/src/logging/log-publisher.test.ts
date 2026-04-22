@@ -59,7 +59,7 @@ describe("LogPublisher", () => {
   describe("publish()", () => {
     it("publishes to Redis on the correct channel", async () => {
       const publisher = makePublisher();
-      await publisher.publish("run-abc", "info", "hello");
+      await publisher.publish("run-abc", "attempt-1", "info", "hello");
 
       expect(mockRedis.publish).toHaveBeenCalledOnce();
       const [channel, payload] = mockRedis.publish.mock.calls[0];
@@ -70,22 +70,23 @@ describe("LogPublisher", () => {
       expect(parsed.source).toBe("test-worker");
     });
 
-    it("persists the log event directly via appendLogEvent (SDK handles retries)", async () => {
+    it("persists the log event via appendLogEvent under the per-attempt path", async () => {
       const publisher = makePublisher();
-      await publisher.publish("run-abc", "warn", "something happened");
+      await publisher.publish("run-abc", "attempt-1", "warn", "something happened");
 
       expect(mockAppendLogEvent).toHaveBeenCalledOnce();
-      const [requestId, event] = mockAppendLogEvent.mock.calls[0];
+      const [requestId, runId, event] = mockAppendLogEvent.mock.calls[0];
       expect(requestId).toBe("run-abc");
+      expect(runId).toBe("attempt-1");
       expect(event.message).toBe("something happened");
       expect(event.level).toBe("warn");
     });
 
     it("includes optional data in the persisted log event", async () => {
       const publisher = makePublisher();
-      await publisher.publish("run-abc", "info", "msg", { key: "value" });
+      await publisher.publish("run-abc", "attempt-1", "info", "msg", { key: "value" });
 
-      const event: LogEvent = mockAppendLogEvent.mock.calls[0][1];
+      const event: LogEvent = mockAppendLogEvent.mock.calls[0][2];
       expect(event.data).toEqual({ key: "value" });
     });
 
@@ -93,7 +94,7 @@ describe("LogPublisher", () => {
       mockRedis.publish.mockRejectedValue(new Error("Redis connection refused"));
       const publisher = makePublisher();
 
-      await expect(publisher.publish("run-abc", "info", "msg")).resolves.toBeUndefined();
+      await expect(publisher.publish("run-abc", "attempt-1", "info", "msg")).resolves.toBeUndefined();
       expect(mockAppendLogEvent).toHaveBeenCalledOnce();
     });
 
@@ -102,7 +103,7 @@ describe("LogPublisher", () => {
       mockAppendLogEvent.mockRejectedValue(err);
       const publisher = makePublisher();
 
-      await expect(publisher.publish("run-abc", "info", "msg")).resolves.toBeUndefined();
+      await expect(publisher.publish("run-abc", "attempt-1", "info", "msg")).resolves.toBeUndefined();
     });
   });
 

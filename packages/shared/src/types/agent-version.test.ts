@@ -125,21 +125,21 @@ describe("CodingAgentDocument with versions", () => {
 });
 
 describe("RequestDocument version fields", () => {
-  it("supports agentVersion and workerVersion", () => {
+  it("supports agentVersion at root and workerVersion in run", () => {
     const doc: Partial<RequestDocument> = {
       agentVersion: "copilot-0.0.415",
-      workerVersion: "copilot-0.0.415-20260318T163740Z-44d16d6",
+      run: { _id: "r1", attemptNumber: 1, status: "done", workerVersion: "copilot-0.0.415-20260318T163740Z-44d16d6" },
     };
 
     expect(doc.agentVersion).toBe("copilot-0.0.415");
-    expect(doc.workerVersion).toBe("copilot-0.0.415-20260318T163740Z-44d16d6");
+    expect(doc.run?.workerVersion).toBe("copilot-0.0.415-20260318T163740Z-44d16d6");
   });
 
   it("allows both fields to be undefined (backward compatible)", () => {
     const doc: Partial<RequestDocument> = {};
 
     expect(doc.agentVersion).toBeUndefined();
-    expect(doc.workerVersion).toBeUndefined();
+    expect(doc.run).toBeUndefined();
   });
 });
 

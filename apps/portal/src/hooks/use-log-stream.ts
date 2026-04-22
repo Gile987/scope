@@ -52,8 +52,15 @@ export function useLogStream({
 
     es.onmessage = (event) => {
       try {
-        const logEvent = JSON.parse(event.data) as LogEvent;
-        setLogs((prev) => [...prev, logEvent]);
+        const parsed = JSON.parse(event.data);
+        // The SSE stream multiplexes log events with summary payloads
+        // (e.g. { type: "turns_summary", ... }). Only treat well-formed
+        // log events with a timestamp as logs — otherwise the LogViewer
+        // would render "Invalid Date" for the summary row.
+        if (!parsed || typeof parsed.timestamp !== "string" || typeof parsed.message !== "string") {
+          return;
+        }
+        setLogs((prev) => [...prev, parsed as LogEvent]);
       } catch {
         // Non-JSON messages (heartbeats, etc.)
       }

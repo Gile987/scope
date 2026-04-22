@@ -23,7 +23,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2 } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
@@ -31,7 +31,7 @@ import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "status" | "outcome" | "report" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
@@ -47,6 +47,7 @@ const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
   { id: "report", label: "Report" },
+  { id: "attempt", label: "Attempt" },
   { id: "turns", label: "Turns" },
   { id: "llmCalls", label: "LLM Calls" },
   { id: "duration", label: "Duration" },
@@ -277,6 +278,39 @@ export function RunsList() {
   const deleteMutation = useMutation({
     mutationFn: api.deleteRun,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: api.retryRun,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success(`Retry started — attempt #${data.attemptNumber}`);
+    },
+    onError: (error) => {
+      toast.error("Failed to retry", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const bulkRetryMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkRetryRuns(ids),
+    onSuccess: ({ retried, skipped }) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      const parts: string[] = [];
+      if (retried > 0) parts.push(`${retried} retried`);
+      if (skipped > 0) parts.push(`${skipped} skipped`);
+      if (skipped > 0 && retried === 0) {
+        toast.warning(`Bulk retry: ${parts.join(", ")}`);
+      } else {
+        toast.success(`Bulk retry: ${parts.join(", ")}`);
+      }
+    },
+    onError: (error) => {
+      toast.error("Bulk retry failed", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
   });
 
   const bulkDeleteMutation = useMutation({
@@ -1088,6 +1122,16 @@ export function RunsList() {
             variant="outline"
             size="sm"
             className="gap-1.5"
+            disabled={bulkRetryMutation.isPending}
+            onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
+          >
+            <RotateCcw className="h-4 w-4" />
+            {bulkRetryMutation.isPending ? "Retrying…" : "Retry selected"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
             disabled={batchDownloadMutation.isPending}
             onClick={() => batchDownloadMutation.mutate(Array.from(selectedIds))}
           >
@@ -1159,6 +1203,7 @@ export function RunsList() {
               {isCol("status") && <TableHead className="w-[100px]">Status</TableHead>}
               {isCol("outcome") && <TableHead className="w-[100px]">Outcome</TableHead>}
               {isCol("report") && <TableHead className="w-[100px]">Report</TableHead>}
+              {isCol("attempt") && <TableHead className="w-[60px]">Attempt</TableHead>}
               {isCol("turns") && <TableHead className="w-[80px]">Turns</TableHead>}
               {isCol("llmCalls") && <TableHead className="w-[80px]">LLM Calls</TableHead>}
               {isCol("duration") && <TableHead className="w-[100px]">Duration</TableHead>}
@@ -1181,6 +1226,7 @@ export function RunsList() {
                     onToggleSelect={toggleSelect}
                     reportSummaries={reportSummaries}
                     deleteMutation={deleteMutation}
+                    retryMutation={retryMutation}
                     groupBy={groupBy}
                     profileNameMap={profileNameMap}
                     workerFilter={workerFilter === "all" ? undefined : workerFilter}
@@ -1200,6 +1246,7 @@ export function RunsList() {
                   onToggleSelect={toggleSelect}
                   reportSummaries={reportSummaries}
                   deleteMutation={deleteMutation}
+                  retryMutation={retryMutation}
                   profileNameMap={profileNameMap}
                   hiddenColumns={hiddenColumns}
                 />
@@ -1244,6 +1291,7 @@ function RunRow({
   onToggleSelect,
   reportSummaries,
   deleteMutation,
+  retryMutation,
   profileNameMap,
   hiddenColumns,
 }: {
@@ -1252,6 +1300,7 @@ function RunRow({
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
+  retryMutation: { mutate: (id: string) => void; isPending: boolean };
   profileNameMap: Map<string, string>;
   hiddenColumns: Set<ColumnId>;
 }) {
@@ -1300,8 +1349,8 @@ function RunRow({
         )}
       </TableCell>}
       {isCol("os") && <TableCell className="text-center">
-        {run.os ? (
-          <PlatformIcon platform={run.os.platform} className="h-4 w-4 inline-block" />
+        {run.run?.os ? (
+          <PlatformIcon platform={run.run?.os.platform} className="h-4 w-4 inline-block" />
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
@@ -1363,10 +1412,10 @@ function RunRow({
         )}
       </TableCell>}
       {isCol("status") && <TableCell>
-        <StatusBadge status={run.status} />
+        <StatusBadge status={run.run?.status ?? "pending"} />
       </TableCell>}
       {isCol("outcome") && <TableCell>
-        <OutcomeBadge outcome={run.outcome} />
+        <OutcomeBadge outcome={run.run?.outcome} />
       </TableCell>}
       {isCol("report") && <TableCell>
         {reportSummaries?.[run._id] ? (
@@ -1377,23 +1426,26 @@ function RunRow({
           <span className="text-xs text-muted-foreground">–</span>
         )}
       </TableCell>}
+      {isCol("attempt") && <TableCell className="text-center font-mono text-xs">
+        {run.run?.attemptNumber ?? 1}
+      </TableCell>}
       {isCol("turns") && <TableCell className="text-center">
-        {run.turns?.length ?? "–"}
+        {run.run?.turns?.length ?? "–"}
       </TableCell>}
       {isCol("llmCalls") && <TableCell className="text-center font-mono text-xs">
-        {run.aiCallCount !== undefined ? run.aiCallCount : <span className="text-muted-foreground">–</span>}
+        {run.run?.aiCallCount !== undefined ? run.run?.aiCallCount : <span className="text-muted-foreground">–</span>}
       </TableCell>}
       {isCol("duration") && <TableCell className="font-mono text-xs">
         {(() => {
-          const totalDuration = run.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+          const totalDuration = run.run?.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
           return totalDuration ? formatDuration(totalDuration) : <span className="text-muted-foreground">–</span>;
         })()}
       </TableCell>}
       {isCol("tokens") && <TableCell className="font-mono text-xs">
         {(() => {
-          const usage = run.tokenUsage
-            ?? (run.turns?.some(t => t.tokenUsage)
-              ? run.turns!.reduce(
+          const usage = run.run?.tokenUsage
+            ?? (run.run?.turns?.some(t => t.tokenUsage)
+              ? run.run?.turns!.reduce(
                   (acc, t) => {
                     if (!t.tokenUsage) return acc;
                     return {
@@ -1420,7 +1472,7 @@ function RunRow({
               <Eye className="h-4 w-4" />
             </Button>
           </Link>
-          {run.turns && run.turns.some(t => t.snapshotUrl) && (
+          {run.run?.turns && run.run?.turns.some(t => t.snapshotUrl) && (
             <Button
               variant="ghost"
               size="icon"
@@ -1429,6 +1481,18 @@ function RunRow({
               onClick={() => window.open(api.archiveUrl(run._id), "_blank")}
             >
               <Download className="h-4 w-4" />
+            </Button>
+          )}
+          {run.run?.status === "done" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Retry"
+              onClick={() => retryMutation.mutate(run._id)}
+              disabled={retryMutation.isPending}
+            >
+              <RotateCcw className="h-4 w-4" />
             </Button>
           )}
           <DeleteRunButton
@@ -1450,6 +1514,7 @@ function GroupRows({
   onToggleSelect,
   reportSummaries,
   deleteMutation,
+  retryMutation,
   groupBy,
   profileNameMap,
   workerFilter,
@@ -1465,6 +1530,7 @@ function GroupRows({
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
+  retryMutation: { mutate: (id: string) => void; isPending: boolean };
   groupBy: GroupByKey;
   profileNameMap: Map<string, string>;
   workerFilter?: string;
@@ -1734,9 +1800,10 @@ function GroupRows({
             return <ReportProgressBar summary={{ total, completed, pending, generating, failed }} />;
           })()}
         </TableCell>}
+        {/* Attempt */}
+        {isCol("attempt") && <TableCell />}
         {/* Turns */}
         {isCol("turns") && <TableCell className="text-center font-mono text-xs">
-          {formatStatRange(aggregates.turns, fmtNum)}
         </TableCell>}
         {/* LLM Calls */}
         {isCol("llmCalls") && <TableCell />}
@@ -1758,7 +1825,7 @@ function GroupRows({
       {isExpanded && (
         isExpandLoading ? (
           <TableRow>
-            <TableCell colSpan={19} className="text-center py-4">
+            <TableCell colSpan={20} className="text-center py-4">
               <RefreshCw className="h-4 w-4 animate-spin inline-block mr-2" />
               Loading runs…
             </TableCell>
@@ -1772,6 +1839,7 @@ function GroupRows({
               onToggleSelect={onToggleSelect}
               reportSummaries={mergedReportSummaries}
               deleteMutation={deleteMutation}
+              retryMutation={retryMutation}
               profileNameMap={profileNameMap}
               hiddenColumns={hiddenColumns}
             />

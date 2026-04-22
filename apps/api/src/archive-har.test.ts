@@ -4,6 +4,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   blobNameFromSnapshotsUrl,
+  blobNameFromLogsUrl,
   rewriteHarUrlsForArchive,
   detectBundledHarFiles,
   uploadBundledHarFiles,
@@ -18,56 +19,67 @@ import {
 // --- rewriteHarUrlsForArchive ---
 
 describe("rewriteHarUrlsForArchive", () => {
-  it("rewrites top-level harUrl to run.har", () => {
+  it("rewrites run.harUrl to run.har", () => {
     const resource = {
-      harUrl: "https://storage.blob.core.windows.net/snapshots/abc123/capture.har",
-      turns: [],
+      run: {
+        harUrl: "https://storage.blob.core.windows.net/snapshots/abc123/capture.har",
+        turns: [],
+      },
     };
     const result = rewriteHarUrlsForArchive(resource);
-    expect(result.harUrl).toBe("run.har");
+    expect(result.run!.harUrl).toBe("run.har");
   });
 
   it("rewrites per-turn harUrl to iteration-N.har", () => {
     const resource = {
-      turns: [
-        { iteration: 1, harUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-1/capture.har" },
-        { iteration: 2, harUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-2/capture.har" },
-      ],
+      run: {
+        turns: [
+          { iteration: 1, harUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-1/capture.har" },
+          { iteration: 2, harUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-2/capture.har" },
+        ],
+      },
     };
     const result = rewriteHarUrlsForArchive(resource);
-    expect(result.turns![0].harUrl).toBe("iteration-1.har");
-    expect(result.turns![1].harUrl).toBe("iteration-2.har");
+    expect(result.run!.turns![0].harUrl).toBe("iteration-1.har");
+    expect(result.run!.turns![1].harUrl).toBe("iteration-2.har");
   });
 
   it("leaves turns without harUrl unchanged", () => {
     const resource = {
-      turns: [
-        { iteration: 1, snapshotUrl: "https://example.com/snap", harUrl: undefined as string | undefined },
-        { iteration: 2, harUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-2/capture.har" },
-      ],
+      run: {
+        turns: [
+          { iteration: 1, snapshotUrl: "https://example.com/snap", harUrl: undefined as string | undefined },
+          { iteration: 2, harUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-2/capture.har" },
+        ],
+      },
     };
     const result = rewriteHarUrlsForArchive(resource);
-    expect(result.turns![0].harUrl).toBeUndefined();
-    expect(result.turns![1].harUrl).toBe("iteration-2.har");
+    expect(result.run!.turns![0].harUrl).toBeUndefined();
+    expect(result.run!.turns![1].harUrl).toBe("iteration-2.har");
   });
 
   it("handles resource with no harUrl at all", () => {
-    const resource: { harUrl?: string; turns: Array<{ iteration: number; harUrl?: string }> } = {
-      turns: [{ iteration: 1 }],
+    const resource: ArchivableRun = {
+      _id: "no-har",
+      run: {
+        turns: [{ iteration: 1 }],
+      },
     };
     const result = rewriteHarUrlsForArchive(resource);
-    expect(result.harUrl).toBeUndefined();
-    expect(result.turns![0].harUrl).toBeUndefined();
+    expect(result.run!.harUrl).toBeUndefined();
+    expect(result.run!.turns![0].harUrl).toBeUndefined();
   });
 
   it("does not mutate the original resource", () => {
     const resource = {
-      harUrl: "https://storage.blob.core.windows.net/snapshots/abc/capture.har",
-      turns: [{ iteration: 1, harUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-1/capture.har" }],
+      run: {
+        harUrl: "https://storage.blob.core.windows.net/snapshots/abc/capture.har",
+        turns: [{ iteration: 1, harUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-1/capture.har" }],
+      },
     };
     rewriteHarUrlsForArchive(resource);
-    expect(resource.harUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/capture.har");
-    expect(resource.turns[0].harUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/iter-1/capture.har");
+    expect(resource.run.harUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/capture.har");
+    expect(resource.run.turns[0].harUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/iter-1/capture.har");
   });
 });
 
@@ -87,6 +99,25 @@ describe("blobNameFromSnapshotsUrl", () => {
   it("returns null when URL has no snapshots container", () => {
     const url = "https://mystorageaccount.blob.core.windows.net/other-container/abc123/file.har";
     expect(blobNameFromSnapshotsUrl(url)).toBeNull();
+  });
+});
+
+// --- blobNameFromLogsUrl ---
+
+describe("blobNameFromLogsUrl", () => {
+  it("extracts blob name from Azure Blob Storage URL", () => {
+    const url = "https://mystorageaccount.blob.core.windows.net/logs/req-001/runs/attempt-1/run.jsonl";
+    expect(blobNameFromLogsUrl(url)).toBe("req-001/runs/attempt-1/run.jsonl");
+  });
+
+  it("extracts blob name from Azurite URL", () => {
+    const url = "http://127.0.0.1:10000/devstoreaccount1/logs/req-001/run.jsonl";
+    expect(blobNameFromLogsUrl(url)).toBe("req-001/run.jsonl");
+  });
+
+  it("returns null when URL has no logs container", () => {
+    const url = "https://mystorageaccount.blob.core.windows.net/snapshots/abc123/file.har";
+    expect(blobNameFromLogsUrl(url)).toBeNull();
   });
 });
 
@@ -232,54 +263,62 @@ describe("uploadBundledHarFiles", () => {
 // --- rewriteHarUrlsForArchive: rawChatUrl ---
 
 describe("rewriteHarUrlsForArchive — rawChatUrl", () => {
-  it("rewrites top-level rawChatUrl to run.chat-export.json", () => {
+  it("rewrites run.rawChatUrl to run.chat-export.json", () => {
     const resource = {
-      rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc123/chat-export.json",
-      turns: [],
+      run: {
+        rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc123/chat-export.json",
+        turns: [],
+      },
     };
     const result = rewriteHarUrlsForArchive(resource);
-    expect(result.rawChatUrl).toBe("run.chat-export.json");
+    expect(result.run!.rawChatUrl).toBe("run.chat-export.json");
   });
 
   it("rewrites per-turn rawChatUrl to iteration-N.chat-export.json", () => {
     const resource = {
-      turns: [
-        { iteration: 1, rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-1/chat-export.json" },
-        { iteration: 2, rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-2/chat-export.json" },
-      ],
+      run: {
+        turns: [
+          { iteration: 1, rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-1/chat-export.json" },
+          { iteration: 2, rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc123/iteration-2/chat-export.json" },
+        ],
+      },
     };
     const result = rewriteHarUrlsForArchive(resource);
-    expect(result.turns![0].rawChatUrl).toBe("iteration-1.chat-export.json");
-    expect(result.turns![1].rawChatUrl).toBe("iteration-2.chat-export.json");
+    expect(result.run!.turns![0].rawChatUrl).toBe("iteration-1.chat-export.json");
+    expect(result.run!.turns![1].rawChatUrl).toBe("iteration-2.chat-export.json");
   });
 
   it("rewrites both harUrl and rawChatUrl together", () => {
     const resource = {
-      harUrl: "https://storage.blob.core.windows.net/snapshots/abc/capture.har",
-      rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc/chat-export.json",
-      turns: [
-        {
-          iteration: 1,
-          harUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-1/capture.har",
-          rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-1/chat-export.json",
-        },
-      ],
+      run: {
+        harUrl: "https://storage.blob.core.windows.net/snapshots/abc/capture.har",
+        rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc/chat-export.json",
+        turns: [
+          {
+            iteration: 1,
+            harUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-1/capture.har",
+            rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-1/chat-export.json",
+          },
+        ],
+      },
     };
     const result = rewriteHarUrlsForArchive(resource);
-    expect(result.harUrl).toBe("run.har");
-    expect(result.rawChatUrl).toBe("run.chat-export.json");
-    expect(result.turns![0].harUrl).toBe("iteration-1.har");
-    expect(result.turns![0].rawChatUrl).toBe("iteration-1.chat-export.json");
+    expect(result.run!.harUrl).toBe("run.har");
+    expect(result.run!.rawChatUrl).toBe("run.chat-export.json");
+    expect(result.run!.turns![0].harUrl).toBe("iteration-1.har");
+    expect(result.run!.turns![0].rawChatUrl).toBe("iteration-1.chat-export.json");
   });
 
   it("does not mutate the original resource rawChatUrl", () => {
     const resource = {
-      rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc/chat-export.json",
-      turns: [{ iteration: 1, rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-1/chat-export.json" }],
+      run: {
+        rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc/chat-export.json",
+        turns: [{ iteration: 1, rawChatUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-1/chat-export.json" }],
+      },
     };
     rewriteHarUrlsForArchive(resource);
-    expect(resource.rawChatUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/chat-export.json");
-    expect(resource.turns[0].rawChatUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/iter-1/chat-export.json");
+    expect(resource.run.rawChatUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/chat-export.json");
+    expect(resource.run.turns[0].rawChatUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/iter-1/chat-export.json");
   });
 });
 
@@ -451,8 +490,10 @@ describe("packRunIntoTar", () => {
 
     const run: ArchivableRun = {
       _id: "run-001",
-      harUrl: "https://storage.blob.core.windows.net/snapshots/run-001/capture.har",
-      turns: [],
+      run: {
+        harUrl: "https://storage.blob.core.windows.net/snapshots/run-001/capture.har",
+        turns: [],
+      },
     };
 
     const entriesPromise = collectPackEntries(p);
@@ -478,9 +519,11 @@ describe("packRunIntoTar", () => {
 
     const run: ArchivableRun = {
       _id: "run-002",
-      turns: [
-        { iteration: 1, snapshotUrl: "https://storage.blob.core.windows.net/snapshots/run-002/iteration-1/workspace.tar.gz" },
-      ],
+      run: {
+        turns: [
+          { iteration: 1, snapshotUrl: "https://storage.blob.core.windows.net/snapshots/run-002/iteration-1/workspace.tar.gz" },
+        ],
+      },
     };
 
     const entriesPromise = collectPackEntries(p);
@@ -506,9 +549,11 @@ describe("packRunIntoTar", () => {
 
     const run: ArchivableRun = {
       _id: "run-003",
-      harUrl: "https://storage.blob.core.windows.net/snapshots/run-003/capture.har",
-      rawChatUrl: "https://storage.blob.core.windows.net/snapshots/run-003/chat-export.json",
-      turns: [],
+      run: {
+        harUrl: "https://storage.blob.core.windows.net/snapshots/run-003/capture.har",
+        rawChatUrl: "https://storage.blob.core.windows.net/snapshots/run-003/chat-export.json",
+        turns: [],
+      },
     };
 
     const entriesPromise = collectPackEntries(p);
@@ -529,9 +574,11 @@ describe("packRunIntoTar", () => {
 
     const run: ArchivableRun = {
       _id: "run-004",
-      turns: [
-        { iteration: 1, snapshotUrl: "https://storage.blob.core.windows.net/snapshots/run-004/iteration-1/workspace.tar.gz" },
-      ],
+      run: {
+        turns: [
+          { iteration: 1, snapshotUrl: "https://storage.blob.core.windows.net/snapshots/run-004/iteration-1/workspace.tar.gz" },
+        ],
+      },
     };
 
     const entriesPromise = collectPackEntries(p);
@@ -552,7 +599,9 @@ describe("packRunIntoTar", () => {
 
     const run: ArchivableRun = {
       _id: "run-005",
-      turns: [],
+      run: {
+        turns: [],
+      },
     };
 
     const entriesPromise = collectPackEntries(p);
@@ -574,7 +623,9 @@ describe("packRunIntoTar", () => {
 
     const run: ArchivableRun = {
       _id: "run-006",
-      turns: [],
+      run: {
+        turns: [],
+      },
     };
 
     const entriesPromise = collectPackEntries(p);
@@ -596,7 +647,9 @@ describe("packRunIntoTar", () => {
 
     const run: ArchivableRun = {
       _id: "run-007",
-      turns: [],
+      run: {
+        turns: [],
+      },
     };
 
     const entriesPromise = collectPackEntries(p);
@@ -606,5 +659,32 @@ describe("packRunIntoTar", () => {
     const entries = await entriesPromise;
     expect(entries).toHaveLength(1);
     expect(entries[0].name).toBe("run-007/run.yaml");
+  });
+
+  it("uses logsUrl from run sub-document for per-attempt log path", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const container = makeMockBlobContainer();
+    const logData = Buffer.from('{"level":"info","msg":"attempt-2"}\n');
+    const logsContainer = makeMockBlobContainer({
+      "run-008/runs/attempt-2/run.jsonl": { body: logData, length: logData.length },
+    });
+
+    const run: ArchivableRun = {
+      _id: "run-008",
+      run: {
+        logsUrl: "https://myaccount.blob.core.windows.net/logs/run-008/runs/attempt-2/run.jsonl",
+        turns: [],
+      },
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-008", () => true, logsContainer);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    const names = entries.map(e => e.name);
+    expect(names).toContain("run-008/logs.jsonl");
+    expect(entries.find(e => e.name === "run-008/logs.jsonl")!.data).toEqual(logData);
   });
 });

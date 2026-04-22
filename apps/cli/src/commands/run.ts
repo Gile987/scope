@@ -246,13 +246,14 @@ run
           { key: 'createdAt', label: 'Created' },
           { key: 'completedAt', label: 'Completed' },
         ];
-        console.log(formatData([request], fields, format));
+        const row = { ...request, status: request.run?.status };
+        console.log(formatData([row], fields, format));
         return;
       }
 
       console.log(`${label('ID:')} ${value(request.id)}`);
       console.log(`${label('Worker:')} ${value(request.workerType)}`);
-      console.log(`${label('Status:')} ${value(request.status)}`);
+      console.log(`${label('Status:')} ${value(request.run?.status ?? 'unknown')}`);
       if (request.mode) console.log(`${label('Mode:')} ${value(request.mode)}`);
       if (request.createdAt) console.log(`${label('Created:')} ${value(request.createdAt)}`);
       if (request.completedAt) console.log(`${label('Completed:')} ${value(request.completedAt)}`);
@@ -385,10 +386,10 @@ run
             formatter: (req: any) => req.workerType ?? 'unknown',
           },
           { key: 'status', label: 'Status',
-            formatter: (req: any) => req.status ?? 'unknown',
+            formatter: (req: any) => req.run?.status ?? 'unknown',
             tableFormatter: (req: any) => {
-              const s = req.status ?? 'unknown';
-              const o = req.outcome;
+              const s = req.run?.status ?? 'unknown';
+              const o = req.run?.outcome;
               return o === 'succeeded' ? successText(s) : o === 'failed' || o === 'finished' ? errorText(s) : value(s);
             },
           },
@@ -485,14 +486,14 @@ run
       }
       const request = await response.json();
 
-      if (!request.turns || request.turns.length === 0) {
+      if (!request.run?.turns || request.run.turns.length === 0) {
         console.error(errorText("Error: No iterations found for this run"));
         process.exit(1);
       }
 
-      console.log(`${label('Status:')} ${value(request.status)}`);
+      console.log(`${label('Status:')} ${value(request.run?.status ?? 'unknown')}`);
       console.log(`${label('Worker:')} ${value(request.workerType)}`);
-      console.log(`${label('Iterations:')} ${value(String(request.turns.length))}`);
+      console.log(`${label('Iterations:')} ${value(String(request.run.turns.length))}`);
       console.log();
 
       // Step 2: Download the full archive from the server
@@ -739,6 +740,94 @@ run
       console.log(`${label('Status:')} ${value(result.status)}`);
       console.log(`${label('Iterations:')} ${value(String(result.iterations))}`);
 
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// ─── Run-retry-attempts (issue #658) ──────────────────────────────────────
+
+run
+  .command("retry")
+  .description("Retry a request — starts a new attempt while preserving previous attempts in history")
+  .requiredOption("-i, --id <id>", "Request ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    const { id } = options;
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        if (response.status === 422) {
+          console.error(errorText(`Cannot retry: ${errorData.error}`));
+        } else if (response.status === 409) {
+          console.error(errorText(`Conflict: ${errorData.error}`));
+        } else if (response.status === 404) {
+          console.error(errorText(`Not found: ${errorData.error}`));
+        } else {
+          console.error(errorText(`Error: ${errorData.error || response.statusText}`));
+        }
+        process.exit(1);
+      }
+      const result = await response.json();
+      console.log(successText("Retry started"));
+      console.log(`${label('Request ID:')} ${value(result.requestId)}`);
+      console.log(`${label('New run ID:')} ${value(result.runId)}`);
+      console.log(`${label('Attempt:')} ${value(result.attemptNumber)}`);
+      printFollowUpCommands(result.requestId);
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+withOutputOption(
+run
+  .command("attempts")
+  .description("List all attempts for a request (current + history)")
+  .requiredOption("-i, --id <id>", "Request ID")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+)
+  .action(async (options) => {
+    const format = (options.output || 'table') as OutputFormat;
+    const { id } = options;
+    try {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}/runs`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        console.error(errorText(`Error: ${errorData.error || response.statusText}`));
+        process.exit(1);
+      }
+      const attempts = await response.json() as Array<Record<string, unknown>>;
+
+      if (isMachineReadable(format)) {
+        const fields: DisplayField[] = [
+          { key: 'attemptNumber', label: 'Attempt' },
+          { key: '_id', label: 'Run ID' },
+          { key: 'status', label: 'Status' },
+          { key: 'outcome', label: 'Outcome' },
+          { key: 'updatedAt', label: 'Updated' },
+        ];
+        console.log(formatData(attempts, fields, format));
+        return;
+      }
+
+      console.log(`${label('Request:')} ${value(id)}`);
+      console.log(`${label('Total attempts:')} ${value(String(attempts.length))}`);
+      console.log();
+      for (const a of attempts) {
+        const isCurrent = a === attempts[0];
+        const marker = isCurrent ? "* " : "  ";
+        const status = a.status as string;
+        const outcome = a.outcome as string | undefined;
+        console.log(
+          `${marker}${label(`Attempt ${a.attemptNumber}:`)} ${value(String(a._id))} ${value(status)}${outcome ? ` / ${value(outcome)}` : ''}${a.updatedAt ? ` (${a.updatedAt})` : ''}`,
+        );
+      }
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

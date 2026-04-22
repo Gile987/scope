@@ -29,6 +29,8 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   }
 
   const run = await response.json();
+  // Per-attempt state is nested under run.run (RunState).
+  const rs = run.run;
 
   // Machine-readable output
   if (isMachineReadable(format)) {
@@ -49,8 +51,11 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
     ];
     const row = {
       ...run,
-      turnsCount: run.turns?.length ?? 0,
-      passed: run.outcome === 'succeeded' ? 'yes' : run.outcome === 'failed' || run.outcome === 'finished' ? 'no' : '-',
+      status: rs?.status,
+      outcome: rs?.outcome,
+      error: rs?.error,
+      turnsCount: rs?.turns?.length ?? 0,
+      passed: rs?.outcome === 'succeeded' ? 'yes' : rs?.outcome === 'failed' || rs?.outcome === 'finished' ? 'no' : '-',
       task: run.scenario?.task ?? '',
       criteriaCount: run.scenario?.criteria?.length ?? 0,
     };
@@ -65,11 +70,11 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   if (run.profileId) console.log(`${label('Profile:')}        ${value(run.profileId)}`);
   if (run.profileVersionId) console.log(`${label('Profile Ver:')}    ${dimTimestamp(run.profileVersionId)}`);
 
-  const statusColor = run.outcome === 'succeeded' ? successText
-    : (run.outcome === 'failed' || run.outcome === 'finished') ? errorText
+  const statusColor = rs?.outcome === 'succeeded' ? successText
+    : (rs?.outcome === 'failed' || rs?.outcome === 'finished') ? errorText
     : value;
-  console.log(`${label('Status:')}         ${statusColor(run.status)}`);
-  if (run.outcome) console.log(`${label('Outcome:')}        ${statusColor(run.outcome)}`);
+  console.log(`${label('Status:')}         ${statusColor(rs?.status ?? 'unknown')}`);
+  if (rs?.outcome) console.log(`${label('Outcome:')}        ${statusColor(rs.outcome)}`);
 
   if (run.maxIterations != null) console.log(`${label('Max Iterations:')} ${value(String(run.maxIterations))}`);
   if (run.createdAt) console.log(`${label('Created:')}        ${dimTimestamp(new Date(run.createdAt).toLocaleString())}`);
@@ -91,7 +96,7 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
     if (run.scenario.criteria?.length > 0) {
       console.log(`${label('Criteria:')}       ${value(String(run.scenario.criteria.length))} criterion/criteria`);
       // Build a lookup from the last turn's criteria results
-      const lastTurn = run.turns?.length ? run.turns[run.turns.length - 1] : null;
+      const lastTurn = rs?.turns?.length ? rs.turns[rs.turns.length - 1] : null;
       const resultsMap = new Map<string, { passed: boolean; evaluated: boolean }>();
       if (lastTurn?.criteriaResults) {
         for (const cr of lastTurn.criteriaResults) {
@@ -107,9 +112,9 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   }
 
   // Turns summary
-  if (run.turns?.length > 0) {
+  if (rs?.turns?.length && rs.turns.length > 0) {
     console.log(`\n${banner('─── Turns ───')}`);
-    for (const turn of run.turns) {
+    for (const turn of rs.turns) {
       const passIcon = criterionIcon(true, turn.passed);
       const criteriaStr = turn.criteriaResults?.length
         ? ` — ${turn.criteriaResults.filter((cr: { passed: boolean }) => cr.passed).length}/${turn.criteriaResults.length} criteria passed`
@@ -119,8 +124,8 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   }
 
   // Error
-  if (run.error) {
-    console.log(`${label('Error:')}          ${errorText(run.error)}`);
+  if (rs?.error) {
+    console.log(`${label('Error:')}          ${errorText(rs.error)}`);
   }
 
   // Prompt feature extraction

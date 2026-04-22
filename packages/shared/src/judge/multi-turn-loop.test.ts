@@ -54,8 +54,8 @@ describe("runMultiTurnLoop — video upload", () => {
     } satisfies WorkerResult);
 
     const mockBlobUploadFile = vi.fn()
-      .mockResolvedValueOnce("https://blob/snapshots/req1/iteration-1/video-0.webm")
-      .mockResolvedValueOnce("https://blob/snapshots/req1/iteration-1/video-1.webm");
+      .mockResolvedValueOnce("https://blob/snapshots/req1/runs/attempt-1/iteration-1/video-0.webm")
+      .mockResolvedValueOnce("https://blob/snapshots/req1/runs/attempt-1/iteration-1/video-1.webm");
 
     const result = await runMultiTurnLoop({
       processor: mockProcessor as any,
@@ -66,6 +66,7 @@ describe("runMultiTurnLoop — video upload", () => {
       judgeClient: { evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "OK" }) } as any,
       blobStorage: { uploadFile: mockBlobUploadFile, uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot") } as any,
       requestId: "req1",
+      runId: "attempt-1",
       log: mockLog,
       onTurnComplete: mockOnTurnComplete,
     });
@@ -73,12 +74,12 @@ describe("runMultiTurnLoop — video upload", () => {
     expect(result.passed).toBe(true);
     expect(result.turns).toHaveLength(1);
     expect(result.turns[0].videoUrls).toEqual([
-      "https://blob/snapshots/req1/iteration-1/video-0.webm",
-      "https://blob/snapshots/req1/iteration-1/video-1.webm",
+      "https://blob/snapshots/req1/runs/attempt-1/iteration-1/video-0.webm",
+      "https://blob/snapshots/req1/runs/attempt-1/iteration-1/video-1.webm",
     ]);
     // Verify upload was called with correct blob names and content type
-    expect(mockBlobUploadFile).toHaveBeenCalledWith("/tmp/video-0.webm", "req1/iteration-1/video-0.webm", "video/webm");
-    expect(mockBlobUploadFile).toHaveBeenCalledWith("/tmp/video-1.webm", "req1/iteration-1/video-1.webm", "video/webm");
+    expect(mockBlobUploadFile).toHaveBeenCalledWith("/tmp/video-0.webm", "req1/runs/attempt-1/iteration-1/video-0.webm", "video/webm");
+    expect(mockBlobUploadFile).toHaveBeenCalledWith("/tmp/video-1.webm", "req1/runs/attempt-1/iteration-1/video-1.webm", "video/webm");
   });
 
   it("does not include videoUrls when worker returns no videoFilePaths", async () => {
@@ -97,6 +98,7 @@ describe("runMultiTurnLoop — video upload", () => {
       judgeClient: { evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "OK" }) } as any,
       blobStorage: { uploadFile: mockBlobUploadFile, uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot") } as any,
       requestId: "req1",
+      runId: "attempt-1",
       log: mockLog,
       onTurnComplete: mockOnTurnComplete,
     });
@@ -121,6 +123,7 @@ describe("runMultiTurnLoop — video upload", () => {
       judgeClient: { evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "OK" }) } as any,
       blobStorage: { uploadFile: mockBlobUploadFile, uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot") } as any,
       requestId: "req1",
+      runId: "attempt-1",
       log: mockLog,
       onTurnComplete: mockOnTurnComplete,
     });
@@ -150,6 +153,7 @@ describe("runMultiTurnLoop — lifecycle hooks", () => {
       judgeClient: { evaluate: vi.fn().mockResolvedValue({ passed: true, feedback: "OK" }) } as any,
       blobStorage: { uploadFile: vi.fn().mockResolvedValue("https://blob/video"), uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot") } as any,
       requestId: "req1",
+      runId: "attempt-1",
       log: mockLog,
       ...overrides,
     };
@@ -254,6 +258,7 @@ describe("runMultiTurnLoop — tool call extraction", () => {
         uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
       } as any,
       requestId: "req1",
+      runId: "attempt-1",
       log: mockLog,
       onTurnComplete: mockOnTurnComplete,
       ...overrides,
@@ -353,6 +358,7 @@ describe("runMultiTurnLoop — hadError", () => {
         uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
       } as any,
       requestId: "req1",
+      runId: "attempt-1",
       log: mockLog,
       ...overrides,
     };
@@ -407,6 +413,7 @@ describe("runMultiTurnLoop — aiCallCount", () => {
         uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
       } as any,
       requestId: "req1",
+      runId: "attempt-1",
       log: mockLog,
       onTurnComplete: mockOnTurnComplete,
       ...overrides,
@@ -497,6 +504,7 @@ describe("runMultiTurnLoop — optional criteria (issue #605)", () => {
         uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
       } as any,
       requestId: "req1",
+      runId: "attempt-1",
       log: mockLog,
       onTurnComplete: mockOnTurnComplete,
       ...overrides,

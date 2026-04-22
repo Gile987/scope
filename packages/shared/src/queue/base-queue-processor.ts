@@ -16,7 +16,7 @@ import { withRetry } from "../utils/retry.js";
  * Handles: MongoDB connection, queue polling, message decoding, log publishing,
  * error handling, and message lifecycle management.
  */
-export abstract class BaseQueueProcessor<TDocument extends { _id: string; status: string } = any> {
+export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any> {
   private mongoClient: MongoClient;
   protected db!: Db;
   protected collection!: Collection<TDocument>;
@@ -169,12 +169,14 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
 
   private async processMessage(message: DequeuedMessageItem): Promise<void> {
     let documentId: string | undefined;
+    let runId: string | undefined;
     let currentPopReceipt = message.popReceipt;
+    let payload: Record<string, unknown> | undefined;
 
     try {
       const decodedContent = Buffer.from(message.messageText, "base64").toString("utf-8");
-      const payload = JSON.parse(decodedContent);
-      documentId = this.extractDocumentId(payload);
+      payload = JSON.parse(decodedContent);
+      documentId = this.extractDocumentId(payload!);
 
       console.log(`[${this.workerName}] Processing document ${documentId}`);
 
@@ -186,39 +188,77 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
         return;
       }
 
+      // Resolve the runId for log persistence. Prefer the runId carried in
+      // the queue message (set by the API for new attempts); fall back to
+      // the runId currently on the document, then to the documentId itself
+      // (legacy / pre-migration safety).
+      const payloadRunId = typeof payload?.runId === "string" ? payload.runId : undefined;
+      const docRunId = typeof (doc as any)?.run?._id === "string" ? (doc as any).run._id : undefined;
+      const logRunId = payloadRunId ?? docRunId ?? documentId!;
+      runId = logRunId;
+
       // Create log function for this document
       const log = async (
         level: LogEvent["level"],
         msg: string,
         data?: Record<string, unknown>
       ): Promise<void> => {
-        await this.logPublisher.publish(documentId!, level, msg, data);
+        await this.logPublisher.publish(documentId!, logRunId, level, msg, data);
       };
 
-      await this.handleRequest(doc as TDocument, message, currentPopReceipt, log);
+      await this.handleRequest(doc as TDocument, message, currentPopReceipt, log, payload);
     } catch (error) {
       console.error(`[${this.workerName}] Error processing message:`, error);
 
       if (documentId) {
         try {
+          // Best-effort runId resolution for the failure log line. Same
+          // resolution order as the success path above.
+          const payloadRunId = typeof payload?.runId === "string" ? payload.runId : undefined;
           await this.logPublisher.publish(
             documentId,
+            payloadRunId ?? documentId,
             "error",
             `Processing failed: ${error instanceof Error ? error.message : String(error)}`,
             { final: true }
           );
 
-          await withRetry(() => this.collection.updateOne(
-            { _id: documentId } as any,
-            {
-              $set: {
-                status: "done",
-                outcome: "failed",
-                error: error instanceof Error ? error.message : String(error),
-                updatedAt: new Date(),
-              },
-            } as any
-          ));
+          // Try to record the failure on the current run (run.* shape).
+          // The runId in the queue message ensures we don't overwrite a run
+          // that was started by a concurrent retry.
+          const runId = (typeof payload?.runId === "string" ? payload.runId : undefined);
+          const errMsg = error instanceof Error ? error.message : String(error);
+          let updated = false;
+          if (runId) {
+            const result = await withRetry(() => this.collection.updateOne(
+              { _id: documentId, "run._id": runId } as any,
+              {
+                $set: {
+                  "run.status": "done",
+                  "run.outcome": "failed",
+                  "run.error": errMsg,
+                  "run.finishedAt": new Date(),
+                  "run.updatedAt": new Date(),
+                  updatedAt: new Date(),
+                },
+              } as any
+            ));
+            updated = (result.matchedCount ?? 0) > 0;
+          }
+          if (!updated) {
+            // Legacy fallback: top-level fields (pre-migration / no runId in message).
+            await withRetry(() => this.collection.updateOne(
+              { _id: documentId } as any,
+              {
+                $set: {
+                  status: "done",
+                  outcome: "failed",
+                  error: errMsg,
+                  updatedAt: new Date(),
+                },
+              } as any
+            ));
+          }
         } catch (updateError) {
           console.error(`[${this.workerName}] Failed to update document as failed:`, updateError);
         }
@@ -229,7 +269,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
       // Evict the per-run blob init cache entry so initializedBlobs doesn't
       // grow unbounded over the lifetime of a long-running worker process.
       if (documentId) {
-        this.logPublisher.evictRun(documentId);
+        this.logPublisher.evictRun(documentId, runId ?? documentId);
       }
     }
   }
@@ -245,12 +285,15 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string; status
 
   /**
    * Process a document fetched from MongoDB. Subclasses must implement this.
+   * The decoded payload is passed through so subclasses can extract additional
+   * routing fields (e.g. runId for the run-retry-attempts feature).
    */
   protected abstract handleRequest(
     doc: TDocument,
     message: DequeuedMessageItem,
     currentPopReceipt: string,
-    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+    payload?: Record<string, unknown>,
   ): Promise<void>;
 
   /**

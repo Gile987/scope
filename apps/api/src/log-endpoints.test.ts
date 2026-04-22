@@ -77,8 +77,7 @@ describe("SSE log endpoints — blob replay", () => {
       const logs = [makeLogEvent("step 1"), makeLogEvent("step 2")];
       (mocks.collection.findOne as any).mockResolvedValue({
         _id: "run-done",
-        status: "done",
-        outcome: "succeeded",
+        run: { _id: "attempt-1", attemptNumber: 1, status: "done", outcome: "succeeded" },
       });
       (mocks.blobStorage.getLogEvents as any).mockResolvedValue(logs);
 
@@ -92,7 +91,7 @@ describe("SSE log endpoints — blob replay", () => {
         });
 
       expect(res.headers["content-type"]).toMatch("text/event-stream");
-      expect(mocks.blobStorage.getLogEvents).toHaveBeenCalledWith("run-done");
+      expect(mocks.blobStorage.getLogEvents).toHaveBeenCalledWith("run-done", "attempt-1");
 
       const events = parseSse(res.body as string);
 
@@ -109,8 +108,7 @@ describe("SSE log endpoints — blob replay", () => {
     it("skips blob replay when fromStart is not set", async () => {
       (mocks.collection.findOne as any).mockResolvedValue({
         _id: "run-done",
-        status: "done",
-        outcome: "succeeded",
+        run: { _id: "attempt-1", attemptNumber: 1, status: "done", outcome: "succeeded" },
       });
 
       await request(app)
@@ -128,8 +126,7 @@ describe("SSE log endpoints — blob replay", () => {
     it("sends event:error and closes stream when getLogEvents throws", async () => {
       (mocks.collection.findOne as any).mockResolvedValue({
         _id: "run-done",
-        status: "done",
-        outcome: "succeeded",
+        run: { _id: "attempt-1", attemptNumber: 1, status: "done", outcome: "succeeded" },
       });
       (mocks.blobStorage.getLogEvents as any).mockRejectedValue(
         Object.assign(new Error("BlobServiceError"), { statusCode: 503 }),
@@ -154,8 +151,7 @@ describe("SSE log endpoints — blob replay", () => {
     it("sends event:done immediately (no blob data) for a done run with no logs", async () => {
       (mocks.collection.findOne as any).mockResolvedValue({
         _id: "run-empty",
-        status: "done",
-        outcome: "failed",
+        run: { _id: "attempt-1", attemptNumber: 1, status: "done", outcome: "failed" },
       });
       (mocks.blobStorage.getLogEvents as any).mockResolvedValue([]);
 
@@ -177,9 +173,7 @@ describe("SSE log endpoints — blob replay", () => {
     it("includes turns_summary event for a done multi-turn run", async () => {
       (mocks.collection.findOne as any).mockResolvedValue({
         _id: "run-mt",
-        status: "done",
-        outcome: "succeeded",
-        turns: [{ role: "user" }, { role: "assistant" }],
+        run: { _id: "attempt-1", attemptNumber: 1, status: "done", outcome: "succeeded", turns: [{ role: "user" }, { role: "assistant" }] },
       });
       (mocks.blobStorage.getLogEvents as any).mockResolvedValue([]);
 

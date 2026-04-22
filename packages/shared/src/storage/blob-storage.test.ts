@@ -67,10 +67,10 @@ describe("BlobStorage — log helpers", () => {
       const storage = makeStorage();
       const event = makeLogEvent("hello");
 
-      await storage.appendLogEvent("run-123", event);
+      await storage.appendLogEvent("run-123", "attempt-1", event);
 
       expect(mockLogsContainerClient.createIfNotExists).toHaveBeenCalledOnce();
-      expect(mockLogsContainerClient.getAppendBlobClient).toHaveBeenCalledWith("run-123/run.jsonl");
+      expect(mockLogsContainerClient.getAppendBlobClient).toHaveBeenCalledWith("run-123/runs/attempt-1/run.jsonl");
       expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledOnce();
 
       const [data, length] = mockAppendBlobClient.appendBlock.mock.calls[0];
@@ -82,9 +82,9 @@ describe("BlobStorage — log helpers", () => {
     it("only calls container createIfNotExists once across multiple appends", async () => {
       const storage = makeStorage();
 
-      await storage.appendLogEvent("run-123", makeLogEvent("first"));
-      await storage.appendLogEvent("run-123", makeLogEvent("second"));
-      await storage.appendLogEvent("run-123", makeLogEvent("third"));
+      await storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("first"));
+      await storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("second"));
+      await storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("third"));
 
       expect(mockLogsContainerClient.createIfNotExists).toHaveBeenCalledOnce();
     });
@@ -93,9 +93,9 @@ describe("BlobStorage — log helpers", () => {
       const storage = makeStorage();
 
       await Promise.all([
-        storage.appendLogEvent("run-123", makeLogEvent("a")),
-        storage.appendLogEvent("run-123", makeLogEvent("b")),
-        storage.appendLogEvent("run-123", makeLogEvent("c")),
+        storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("a")),
+        storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("b")),
+        storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("c")),
       ]);
 
       expect(mockLogsContainerClient.createIfNotExists).toHaveBeenCalledOnce();
@@ -106,9 +106,9 @@ describe("BlobStorage — log helpers", () => {
     it("only calls blob createIfNotExists once across multiple sequential appends for the same run", async () => {
       const storage = makeStorage();
 
-      await storage.appendLogEvent("run-123", makeLogEvent("first"));
-      await storage.appendLogEvent("run-123", makeLogEvent("second"));
-      await storage.appendLogEvent("run-123", makeLogEvent("third"));
+      await storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("first"));
+      await storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("second"));
+      await storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("third"));
 
       expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledOnce();
     });
@@ -117,9 +117,9 @@ describe("BlobStorage — log helpers", () => {
       const storage = makeStorage();
 
       await Promise.all([
-        storage.appendLogEvent("run-123", makeLogEvent("a")),
-        storage.appendLogEvent("run-123", makeLogEvent("b")),
-        storage.appendLogEvent("run-123", makeLogEvent("c")),
+        storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("a")),
+        storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("b")),
+        storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("c")),
       ]);
 
       expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledOnce();
@@ -128,8 +128,8 @@ describe("BlobStorage — log helpers", () => {
     it("calls blob createIfNotExists separately for different run IDs", async () => {
       const storage = makeStorage();
 
-      await storage.appendLogEvent("run-aaa", makeLogEvent("x"));
-      await storage.appendLogEvent("run-bbb", makeLogEvent("y"));
+      await storage.appendLogEvent("run-aaa", "attempt-1", makeLogEvent("x"));
+      await storage.appendLogEvent("run-bbb", "attempt-1", makeLogEvent("y"));
 
       // Two different blobs — each initialized once
       expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledTimes(2);
@@ -140,19 +140,29 @@ describe("BlobStorage — log helpers", () => {
       mockAppendBlobClient.appendBlock.mockRejectedValue(err);
 
       const storage = makeStorage();
-      await expect(storage.appendLogEvent("run-123", makeLogEvent("fail"))).rejects.toThrow("AppendBlockFailed");
+      await expect(storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("fail"))).rejects.toThrow("AppendBlockFailed");
+    });
+
+    it("writes per-attempt blob paths so retries do not overwrite prior attempts", async () => {
+      mockAppendBlobClient.appendBlock.mockResolvedValue(undefined);
+      const storage = makeStorage();
+      await storage.appendLogEvent("run-123", "attempt-1", makeLogEvent("first"));
+      await storage.appendLogEvent("run-123", "attempt-2", makeLogEvent("second"));
+
+      expect(mockLogsContainerClient.getAppendBlobClient).toHaveBeenCalledWith("run-123/runs/attempt-1/run.jsonl");
+      expect(mockLogsContainerClient.getAppendBlobClient).toHaveBeenCalledWith("run-123/runs/attempt-2/run.jsonl");
     });
 
     it("evictRun removes the cache entry so the next append re-initialises the blob", async () => {
       mockAppendBlobClient.appendBlock.mockResolvedValue(undefined);
       const storage = makeStorage();
 
-      await storage.appendLogEvent("run-abc", makeLogEvent("before"));
+      await storage.appendLogEvent("run-abc", "attempt-1", makeLogEvent("before"));
       expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledTimes(1);
 
-      storage.evictRun("run-abc");
+      storage.evictRun("run-abc", "attempt-1");
 
-      await storage.appendLogEvent("run-abc", makeLogEvent("after"));
+      await storage.appendLogEvent("run-abc", "attempt-1", makeLogEvent("after"));
       // createIfNotExists should be called a second time after eviction
       expect(mockAppendBlobClient.createIfNotExists).toHaveBeenCalledTimes(2);
     });
@@ -217,6 +227,40 @@ describe("BlobStorage — log helpers", () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].message).toBe("only");
+    });
+
+    it("reads the per-attempt path when runId is supplied", async () => {
+      const event = makeLogEvent("attempt-2-line");
+      const readable = (async function* () {
+        yield Buffer.from(JSON.stringify(event) + "\n");
+      })();
+      mockAppendBlobClient.download.mockResolvedValue({ readableStreamBody: readable });
+
+      const storage = makeStorage();
+      const result = await storage.getLogEvents("run-123", "attempt-2");
+
+      expect(mockLogsContainerClient.getAppendBlobClient).toHaveBeenCalledWith("run-123/runs/attempt-2/run.jsonl");
+      expect(result).toHaveLength(1);
+      expect(result[0].message).toBe("attempt-2-line");
+    });
+
+    it("falls back to the legacy `{requestId}/run.jsonl` path when the per-attempt blob is missing", async () => {
+      const legacyEvent = makeLogEvent("legacy");
+      const notFound = Object.assign(new Error("BlobNotFound"), { statusCode: 404 });
+      const legacyReadable = (async function* () {
+        yield Buffer.from(JSON.stringify(legacyEvent) + "\n");
+      })();
+      mockAppendBlobClient.download
+        .mockRejectedValueOnce(notFound)
+        .mockResolvedValueOnce({ readableStreamBody: legacyReadable });
+
+      const storage = makeStorage();
+      const result = await storage.getLogEvents("run-123", "attempt-1");
+
+      expect(mockLogsContainerClient.getAppendBlobClient).toHaveBeenCalledWith("run-123/runs/attempt-1/run.jsonl");
+      expect(mockLogsContainerClient.getAppendBlobClient).toHaveBeenCalledWith("run-123/run.jsonl");
+      expect(result).toHaveLength(1);
+      expect(result[0].message).toBe("legacy");
     });
   });
 });

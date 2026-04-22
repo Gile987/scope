@@ -24,13 +24,13 @@ export function buildGroupingPipeline(
     {
       $addFields: {
         _groupKey: { $ifNull: [groupField, fallbackGroupField] },
-        _turnCount: { $cond: { if: { $isArray: "$turns" }, then: { $size: "$turns" }, else: null } },
+        _turnCount: { $cond: { if: { $isArray: "$run.turns" }, then: { $size: "$run.turns" }, else: null } },
         _duration: {
           $cond: {
-            if: { $and: [{ $isArray: "$turns" }, { $gt: [{ $size: "$turns" }, 0] }] },
+            if: { $and: [{ $isArray: "$run.turns" }, { $gt: [{ $size: "$run.turns" }, 0] }] },
             then: {
               $reduce: {
-                input: "$turns",
+                input: "$run.turns",
                 initialValue: 0,
                 in: { $add: ["$$value", { $ifNull: ["$$this.durationMs", 0] }] },
               },
@@ -40,14 +40,14 @@ export function buildGroupingPipeline(
         },
         _promptTokens: {
           $cond: {
-            if: "$tokenUsage",
-            then: "$tokenUsage.promptTokens",
+            if: "$run.tokenUsage",
+            then: "$run.tokenUsage.promptTokens",
             else: {
               $cond: {
-                if: { $and: [{ $isArray: "$turns" }, { $gt: [{ $size: { $filter: { input: { $ifNull: ["$turns", []] }, cond: { $ne: ["$$this.tokenUsage", null] } } } }, 0] }] },
+                if: { $and: [{ $isArray: "$run.turns" }, { $gt: [{ $size: { $filter: { input: { $ifNull: ["$run.turns", []] }, cond: { $ne: ["$$this.tokenUsage", null] } } } }, 0] }] },
                 then: {
                   $reduce: {
-                    input: "$turns",
+                    input: "$run.turns",
                     initialValue: 0,
                     in: { $add: ["$$value", { $ifNull: ["$$this.tokenUsage.promptTokens", 0] }] },
                   },
@@ -59,14 +59,14 @@ export function buildGroupingPipeline(
         },
         _completionTokens: {
           $cond: {
-            if: "$tokenUsage",
-            then: "$tokenUsage.completionTokens",
+            if: "$run.tokenUsage",
+            then: "$run.tokenUsage.completionTokens",
             else: {
               $cond: {
-                if: { $and: [{ $isArray: "$turns" }, { $gt: [{ $size: { $filter: { input: { $ifNull: ["$turns", []] }, cond: { $ne: ["$$this.tokenUsage", null] } } } }, 0] }] },
+                if: { $and: [{ $isArray: "$run.turns" }, { $gt: [{ $size: { $filter: { input: { $ifNull: ["$run.turns", []] }, cond: { $ne: ["$$this.tokenUsage", null] } } } }, 0] }] },
                 then: {
                   $reduce: {
-                    input: "$turns",
+                    input: "$run.turns",
                     initialValue: 0,
                     in: { $add: ["$$value", { $ifNull: ["$$this.tokenUsage.completionTokens", 0] }] },
                   },
@@ -118,20 +118,20 @@ export function buildGroupingPipeline(
         _workerTypes: { $addToSet: "$workerType" },
         _models: { $addToSet: { $ifNull: ["$model", ""] } },
         _agentVersions: { $addToSet: { $ifNull: ["$agentVersion", ""] } },
-        _platforms: { $addToSet: { $ifNull: ["$os.platform", ""] } },
-        _statuses: { $addToSet: "$status" },
+        _platforms: { $addToSet: { $ifNull: ["$run.os.platform", ""] } },
+        _statuses: { $addToSet: "$run.status" },
         _submissionIds: { $addToSet: { $ifNull: ["$submissionId", ""] } },
         _tasks: { $addToSet: { $ifNull: ["$scenario.task", ""] } },
         _mcpKeys: { $addToSet: "$_mcpKey" },
         _skillKeys: { $addToSet: "$_skillKey" },
         _extensionKeys: { $addToSet: "$_extensionKey" },
         // Status/outcome distribution counts
-        _statusPending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
-        _statusProcessing: { $sum: { $cond: [{ $eq: ["$status", "processing"] }, 1, 0] } },
-        _statusDone: { $sum: { $cond: [{ $eq: ["$status", "done"] }, 1, 0] } },
-        _outcomeSucceeded: { $sum: { $cond: [{ $eq: ["$outcome", "succeeded"] }, 1, 0] } },
-        _outcomeFailed: { $sum: { $cond: [{ $eq: ["$outcome", "failed"] }, 1, 0] } },
-        _outcomeFinished: { $sum: { $cond: [{ $eq: ["$outcome", "finished"] }, 1, 0] } },
+        _statusPending: { $sum: { $cond: [{ $eq: ["$run.status", "pending"] }, 1, 0] } },
+        _statusProcessing: { $sum: { $cond: [{ $eq: ["$run.status", "processing"] }, 1, 0] } },
+        _statusDone: { $sum: { $cond: [{ $eq: ["$run.status", "done"] }, 1, 0] } },
+        _outcomeSucceeded: { $sum: { $cond: [{ $eq: ["$run.outcome", "succeeded"] }, 1, 0] } },
+        _outcomeFailed: { $sum: { $cond: [{ $eq: ["$run.outcome", "failed"] }, 1, 0] } },
+        _outcomeFinished: { $sum: { $cond: [{ $eq: ["$run.outcome", "finished"] }, 1, 0] } },
         // Keep first run's array values for uniform fields
         _firstMcpServers: { $first: "$mcpServers" },
         _firstSkillRevisions: { $first: "$skillRevisions" },
