@@ -143,8 +143,7 @@ jobs:
       (
         github.event_name == 'workflow_dispatch' ||
         needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
-        # NOTE: claude-code-acp integration test disabled — out of Claude Code budget
-        # needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
+        needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
         needs.detect-changes.outputs.shared == 'true'
       )
     runs-on: ubuntu-latest
@@ -195,23 +194,22 @@ jobs:
                 --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
                 --load \
                 .
-          # NOTE: claude-code-acp integration test disabled — out of Claude Code budget
-          # - name: claude-code-acp
-          #   dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
-          #   versions_env: apps/workers/coder-acp-claude-code/versions.env
-          #   test_pattern: apps/workers/coder-acp-claude-code
-          #   images: |
-          #     source apps/workers/coder-acp-claude-code/versions.env
-          #     docker buildx build \
-          #       -t coder-acp-claude-code-integration-test \
-          #       -f apps/workers/coder-acp-claude-code/Dockerfile \
-          #       --target dev \
-          #       --build-arg CLAUDE_CODE_ACP_VERSION=$CLAUDE_CODE_ACP_VERSION \
-          #       --build-arg CLAUDE_AGENT_SDK_VERSION=$CLAUDE_AGENT_SDK_VERSION \
-          #       --cache-from type=local,src=/tmp/.buildx-cache \
-          #       --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
-          #       --load \
-          #       .
+          - name: claude-code-acp
+            dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
+            versions_env: apps/workers/coder-acp-claude-code/versions.env
+            test_pattern: apps/workers/coder-acp-claude-code
+            images: |
+              source apps/workers/coder-acp-claude-code/versions.env
+              docker buildx build \
+                -t coder-acp-claude-code-integration-test \
+                -f apps/workers/coder-acp-claude-code/Dockerfile \
+                --target dev \
+                --build-arg CLAUDE_CODE_ACP_VERSION=$CLAUDE_CODE_ACP_VERSION \
+                --build-arg CLAUDE_AGENT_SDK_VERSION=$CLAUDE_AGENT_SDK_VERSION \
+                --cache-from type=local,src=/tmp/.buildx-cache \
+                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                --load \
+                .
 
     steps:
       - name: Checkout repository
@@ -262,8 +260,11 @@ jobs:
           GH_AUTH_PASSWORD: ${{ secrets.GH_AUTH_PASSWORD }}
           GH_AUTH_TOTP_SECRET: ${{ secrets.GH_AUTH_TOTP_SECRET }}
           GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # NOTE: Claude Code credentials disabled — out of budget.
+          # The expensive "completes coding prompts" test auto-skips when
+          # these are absent; tool-check tests still run.
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
       - name: Generate GitHub test summary from CTRF
         if: always()
