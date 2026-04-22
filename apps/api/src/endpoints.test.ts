@@ -1287,4 +1287,42 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(201);
     });
   });
+
+  describe("POST /api/v1/requests/bulk-retry", () => {
+    it("retries eligible requests and skips non-terminal ones", async () => {
+      const doc1 = {
+        _id: "req-1",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed" },
+      };
+      const doc2 = {
+        _id: "req-2",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run-2", attemptNumber: 1, status: "processing" },
+      };
+      // find().toArray() is used by bulk-retry to fetch all docs at once
+      const mockCursor = { toArray: vi.fn().mockResolvedValue([doc1, doc2]), sort: vi.fn().mockReturnThis(), skip: vi.fn().mockReturnThis(), limit: vi.fn().mockReturnThis(), filter: vi.fn().mockReturnThis(), project: vi.fn().mockReturnThis() };
+      (mocks.collection.find as any).mockReturnValue(mockCursor);
+      (mocks.runsCollection.insertOne as any).mockResolvedValue({ insertedId: "run-1" });
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-retry")
+        .send({ ids: ["req-1", "req-2"] });
+
+      expect(res.status).toBe(200);
+      expect(res.body.retried).toBe(1);
+      expect(res.body.skipped).toBe(1);
+      expect(res.body.results).toHaveLength(2);
+      expect(res.body.results.find((r: any) => r.requestId === "req-1").attemptNumber).toBe(2);
+      expect(res.body.results.find((r: any) => r.requestId === "req-2").error).toContain("processing");
+    });
+
+    it("returns 400 when ids array is empty", async () => {
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-retry")
+        .send({ ids: [] });
+      expect(res.status).toBe(400);
+    });
+  });
 });

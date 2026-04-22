@@ -246,13 +246,14 @@ run
           { key: 'createdAt', label: 'Created' },
           { key: 'completedAt', label: 'Completed' },
         ];
-        console.log(formatData([request], fields, format));
+        const row = { ...request, status: request.run?.status };
+        console.log(formatData([row], fields, format));
         return;
       }
 
       console.log(`${label('ID:')} ${value(request.id)}`);
       console.log(`${label('Worker:')} ${value(request.workerType)}`);
-      console.log(`${label('Status:')} ${value(request.status)}`);
+      console.log(`${label('Status:')} ${value(request.run?.status ?? 'unknown')}`);
       if (request.mode) console.log(`${label('Mode:')} ${value(request.mode)}`);
       if (request.createdAt) console.log(`${label('Created:')} ${value(request.createdAt)}`);
       if (request.completedAt) console.log(`${label('Completed:')} ${value(request.completedAt)}`);
@@ -385,10 +386,10 @@ run
             formatter: (req: any) => req.workerType ?? 'unknown',
           },
           { key: 'status', label: 'Status',
-            formatter: (req: any) => req.status ?? 'unknown',
+            formatter: (req: any) => req.run?.status ?? 'unknown',
             tableFormatter: (req: any) => {
-              const s = req.status ?? 'unknown';
-              const o = req.outcome;
+              const s = req.run?.status ?? 'unknown';
+              const o = req.run?.outcome;
               return o === 'succeeded' ? successText(s) : o === 'failed' || o === 'finished' ? errorText(s) : value(s);
             },
           },
@@ -485,14 +486,14 @@ run
       }
       const request = await response.json();
 
-      if (!request.turns || request.turns.length === 0) {
+      if (!request.run?.turns || request.run.turns.length === 0) {
         console.error(errorText("Error: No iterations found for this run"));
         process.exit(1);
       }
 
-      console.log(`${label('Status:')} ${value(request.status)}`);
+      console.log(`${label('Status:')} ${value(request.run?.status ?? 'unknown')}`);
       console.log(`${label('Worker:')} ${value(request.workerType)}`);
-      console.log(`${label('Iterations:')} ${value(String(request.turns.length))}`);
+      console.log(`${label('Iterations:')} ${value(String(request.run.turns.length))}`);
       console.log();
 
       // Step 2: Download the full archive from the server

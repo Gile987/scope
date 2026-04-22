@@ -4,6 +4,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   blobNameFromSnapshotsUrl,
+  blobNameFromLogsUrl,
   rewriteHarUrlsForArchive,
   detectBundledHarFiles,
   uploadBundledHarFiles,
@@ -98,6 +99,25 @@ describe("blobNameFromSnapshotsUrl", () => {
   it("returns null when URL has no snapshots container", () => {
     const url = "https://mystorageaccount.blob.core.windows.net/other-container/abc123/file.har";
     expect(blobNameFromSnapshotsUrl(url)).toBeNull();
+  });
+});
+
+// --- blobNameFromLogsUrl ---
+
+describe("blobNameFromLogsUrl", () => {
+  it("extracts blob name from Azure Blob Storage URL", () => {
+    const url = "https://mystorageaccount.blob.core.windows.net/logs/req-001/runs/attempt-1/run.jsonl";
+    expect(blobNameFromLogsUrl(url)).toBe("req-001/runs/attempt-1/run.jsonl");
+  });
+
+  it("extracts blob name from Azurite URL", () => {
+    const url = "http://127.0.0.1:10000/devstoreaccount1/logs/req-001/run.jsonl";
+    expect(blobNameFromLogsUrl(url)).toBe("req-001/run.jsonl");
+  });
+
+  it("returns null when URL has no logs container", () => {
+    const url = "https://mystorageaccount.blob.core.windows.net/snapshots/abc123/file.har";
+    expect(blobNameFromLogsUrl(url)).toBeNull();
   });
 });
 
