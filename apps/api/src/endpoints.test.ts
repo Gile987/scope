@@ -1310,7 +1310,7 @@ describe("API Endpoints", () => {
         .post("/api/v1/requests/bulk-retry")
         .send({ ids: ["req-1", "req-2"] });
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(201);
       expect(res.body.retried).toBe(1);
       expect(res.body.skipped).toBe(1);
       expect(res.body.results).toHaveLength(2);

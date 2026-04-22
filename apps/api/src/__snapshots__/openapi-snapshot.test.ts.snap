@@ -6985,7 +6985,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {},
+                  "items": {
+                    "$ref": "#/components/schemas/RunState",
+                  },
                   "type": "array",
                 },
               },
@@ -7026,7 +7028,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "200": {
             "content": {
               "application/json": {
-                "schema": {},
+                "schema": {
+                  "$ref": "#/components/schemas/RunState",
+                },
               },
             },
             "description": "Success",

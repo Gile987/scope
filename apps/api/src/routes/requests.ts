@@ -24,6 +24,7 @@ import {
   PaginatedRunsResponseSchema,
   ReportResponseSchema,
   RequestResponseSchema,
+  RunStateSchema,
   decodeCursor,
   encodeCursor,
   parseExtensionSpec,
@@ -1989,7 +1990,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Requests"],
   summary: "List attempts for a request",
   params: z.object({ id: z.string() }),
-  response: z.array(z.any()),
+  response: z.array(RunStateSchema),
   errorResponses: { 404: { description: "Request not found" } },
   handler: async (req, res) => {
     const { id } = req.params;
@@ -2012,7 +2013,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Requests"],
   summary: "Get a single attempt",
   params: z.object({ id: z.string(), runId: z.string() }),
-  response: z.any(),
+  response: RunStateSchema,
   errorResponses: { 404: { description: "Request or run not found" } },
   handler: async (req, res) => {
     const { id, runId } = req.params;
@@ -2114,19 +2115,22 @@ apiRoute(ctx.app, ctx.registry, {
 
       // 3. Enqueue
       const queueClient = ctx.queueClients.get(request.workerType as WorkerType);
-      if (queueClient) {
-        const message = Buffer.from(
-          JSON.stringify({ requestId: id, runId: newRunId } satisfies QueueMessage),
-        ).toString("base64");
-        await queueClient.sendMessage(message);
+      if (!queueClient) {
+        results.push({ requestId: id, error: `No queue configured for worker '${request.workerType}'` });
+        skipped++;
+        continue;
       }
+      const message = Buffer.from(
+        JSON.stringify({ requestId: id, runId: newRunId } satisfies QueueMessage),
+      ).toString("base64");
+      await queueClient.sendMessage(message);
 
       console.log(`Bulk retry: request ${id} → attempt ${newAttemptNumber} (runId=${newRunId})`);
       results.push({ requestId: id, runId: newRunId, attemptNumber: newAttemptNumber });
       retried++;
     }
 
-    res.status(200).json({ retried, skipped, results });
+    res.status(201).json({ retried, skipped, results });
   },
 });
 
@@ -2163,23 +2167,16 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     // The retry contract requires that the current attempt has reached a
-    // terminal state. Use the run.* shape if present; fall back to the
-    // legacy top-level shape for any unmigrated doc.
-    const currentRun: RunState | undefined = request.run;
-    const currentStatus = currentRun?.status;
-    if (currentStatus !== "done") {
+    // terminal state.
+    const currentRun = request.run;
+    if (!currentRun || currentRun.status !== "done") {
       res.status(422).json({
-        error: `Cannot retry: current run status is '${currentStatus}', expected 'done'`,
+        error: `Cannot retry: current run status is '${currentRun?.status ?? "unknown"}', expected 'done'`,
       });
       return;
     }
 
-    // Migration 014 guarantees all docs have a run sub-document.
-    if (!currentRun) {
-      res.status(422).json({ error: "Request has no run sub-document" });
-      return;
-    }
-    const runToDemote: RunState = currentRun;
+    const runToDemote = currentRun;
 
     const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
     const newRunId = uuidv4();
