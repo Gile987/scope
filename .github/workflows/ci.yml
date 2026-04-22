@@ -260,8 +260,11 @@ jobs:
           GH_AUTH_PASSWORD: ${{ secrets.GH_AUTH_PASSWORD }}
           GH_AUTH_TOTP_SECRET: ${{ secrets.GH_AUTH_TOTP_SECRET }}
           GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # NOTE: Claude Code credentials disabled — out of budget.
+          # The expensive "completes coding prompts" test auto-skips when
+          # these are absent; tool-check tests still run.
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
       - name: Generate GitHub test summary from CTRF
         if: always()
