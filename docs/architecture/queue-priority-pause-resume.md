@@ -65,18 +65,16 @@ Priority is request-scoped (survives retries). The range is unrestricted but the
 
 ### Status Lifecycle
 
-```
-              pause()
-  pending ──────────────▶ paused
-     │        pause()       │
-     │   ┌── queued ──▶ paused
-     │   │                  │
-     │   │     resume()     │
-     │   │   (→ pending)    │
-     │   └──────────────────┘
-     │
-     ▼  (scheduler)
-  queued ──▶ processing ──▶ done
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> paused : pause()
+    pending --> queued : scheduler dispatch
+    queued --> paused : pause()
+    queued --> processing : worker pickup
+    paused --> pending : resume()
+    processing --> done : complete
+    done --> [*]
 ```
 
 | Status | Meaning |
