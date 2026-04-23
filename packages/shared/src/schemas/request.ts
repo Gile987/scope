@@ -63,7 +63,9 @@ export const ConversationTurnSchema = z
 
 export const RequestStatusSchema = z.enum([
   "pending",
+  "queued",
   "processing",
+  "paused",
   "done",
 ]);
 
@@ -91,6 +93,7 @@ export const CreateRequestInputSchema = z
     skillRevisions: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
     profileId: z.string().optional(),
+    priority: z.number().int().optional(),
   })
   .openapi("CreateRequestInput");
 
@@ -114,6 +117,7 @@ export const RequestResponseSchema = z
     profileId: z.string().optional(),
     profileVersionId: z.string().optional(),
     submissionId: z.string().optional(),
+    priority: z.number().int().default(0),
     // Per-attempt state lives in the run sub-document.
     run: z
       .lazy(() => RunStateSchema)
@@ -162,6 +166,8 @@ export const RunStateSchema = z
     aiCallCount: z.number().optional(),
     rawChatUrl: z.string().optional(),
     rawChatFormat: z.string().optional(),
+    pausedAt: z.coerce.date().optional(),
+    resumedAt: z.coerce.date().optional(),
   })
   .openapi("RunState");
 
@@ -187,6 +193,7 @@ export const ListRequestsQuerySchema = z
     limit: z.coerce.number().int().min(1).max(100).optional(),
     after: z.string().optional(),
     before: z.string().optional(),
+    sortBy: z.enum(["createdAt", "priority"]).optional(),
   })
   .openapi("ListRequestsQuery");
 
