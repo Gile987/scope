@@ -1355,37 +1355,22 @@ export function RunsList() {
               Higher priority runs are dispatched first. Default is 0. Only pending and paused runs will be updated.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="py-2 space-y-3">
-            <div>
-              <Label htmlFor="bulk-priority">Priority</Label>
-              <div className="flex items-center gap-2 mt-1">
-                <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.max(-100, v - 5))}>−5</Button>
-                <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.max(-100, v - 1))}>−1</Button>
-                <Input
-                  id="bulk-priority"
-                  type="number"
-                  min={-100}
-                  max={100}
-                  value={bulkPriorityValue}
-                  onChange={(e) => setBulkPriorityValue(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
-                  className="w-20 text-center"
-                />
-                <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.min(100, v + 1))}>+1</Button>
-                <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.min(100, v + 5))}>+5</Button>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {[-10, -5, 0, 5, 10].map((p) => (
-                <Button
-                  key={p}
-                  variant={bulkPriorityValue === p ? "default" : "outline"}
-                  size="sm"
-                  className="text-xs"
-                  onClick={() => setBulkPriorityValue(p)}
-                >
-                  {p > 0 ? `+${p}` : p}{p === 0 ? " (default)" : ""}
-                </Button>
-              ))}
+          <div className="py-2">
+            <Label htmlFor="bulk-priority">Priority</Label>
+            <div className="flex items-center gap-2 mt-1">
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.max(-100, v - 5))}>−5</Button>
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.max(-100, v - 1))}>−1</Button>
+              <Input
+                id="bulk-priority"
+                type="number"
+                min={-100}
+                max={100}
+                value={bulkPriorityValue}
+                onChange={(e) => setBulkPriorityValue(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
+                className="w-20 text-center"
+              />
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.min(100, v + 1))}>+1</Button>
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.min(100, v + 5))}>+5</Button>
             </div>
           </div>
           <AlertDialogFooter>
