@@ -2109,6 +2109,9 @@ function GroupRows({
         {isCol("attempt") && <TableCell />}
         {/* Turns */}
         {isCol("turns") && <TableCell className="text-center font-mono text-xs">
+          {aggregates.turns
+            ? formatStatRange(aggregates.turns, fmtNum)
+            : <span className="text-muted-foreground">–</span>}
         </TableCell>}
         {/* LLM Calls */}
         {isCol("llmCalls") && <TableCell />}
@@ -2118,8 +2121,8 @@ function GroupRows({
         </TableCell>}
         {/* Tokens */}
         {isCol("tokens") && <TableCell className="font-mono text-xs">
-          {aggregates.promptTokens
-            ? <>{formatStatRange(aggregates.promptTokens, fmtNum)}↑</>
+          {aggregates.promptTokens || aggregates.completionTokens
+            ? <>{aggregates.promptTokens ? <>{formatStatRange(aggregates.promptTokens, fmtNum)}↑</> : null}{aggregates.promptTokens && aggregates.completionTokens ? " · " : null}{aggregates.completionTokens ? <>{formatStatRange(aggregates.completionTokens, fmtNum)}↓</> : null}</>
             : <span className="text-muted-foreground">–</span>}
         </TableCell>}
         {/* Created */}
