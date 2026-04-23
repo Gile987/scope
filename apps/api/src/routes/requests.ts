@@ -2195,11 +2195,11 @@ apiRoute(ctx.app, ctx.registry, {
     const { id } = req.params;
     const { priority } = req.body;
     const result = await ctx.requestCollection.updateOne(
-      { _id: id, deletedAt: { $exists: false } },
+      { _id: id, deletedAt: { $exists: false }, "run.status": { $in: ["pending", "paused"] } },
       { $set: { priority, updatedAt: new Date() } },
     );
     if (result.matchedCount === 0) {
-      res.status(404).json({ error: `Request not found: ${id}` });
+      res.status(404).json({ error: `Request not found or not in a state that allows priority changes: ${id}` });
       return;
     }
     res.json({ id, priority });
@@ -2220,7 +2220,7 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res) => {
     const { ids, priority } = req.body;
     const result = await ctx.requestCollection.updateMany(
-      { _id: { $in: ids }, deletedAt: { $exists: false } },
+      { _id: { $in: ids }, deletedAt: { $exists: false }, "run.status": { $in: ["pending", "paused"] } },
       { $set: { priority, updatedAt: new Date() } },
     );
     const updated = result.modifiedCount;

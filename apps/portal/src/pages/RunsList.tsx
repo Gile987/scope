@@ -464,6 +464,17 @@ export function RunsList() {
   // Filtering is now server-side via status, outcome, and taskPromptId query params
   const filteredRuns = runs;
 
+  // Compute which bulk actions are available based on selected runs' statuses
+  const selectionCaps = useMemo(() => {
+    const selected = runs.filter((r) => selectedIds.has(r._id));
+    return {
+      pausable: selected.filter((r) => r.run?.status === "pending" || r.run?.status === "queued").length,
+      resumable: selected.filter((r) => r.run?.status === "paused").length,
+      prioritizable: selected.filter((r) => r.run?.status === "pending" || r.run?.status === "paused").length,
+      retryable: selected.filter((r) => r.run?.status === "done").length,
+    };
+  }, [runs, selectedIds]);
+
   const runGroups = serverGroups;
 
   const toggleGroup = (key: string) => {
@@ -1209,33 +1220,33 @@ export function RunsList() {
             variant="outline"
             size="sm"
             className="gap-1.5"
-            disabled={bulkPauseMutation.isPending}
+            disabled={bulkPauseMutation.isPending || selectionCaps.pausable === 0}
             onClick={() => bulkPauseMutation.mutate(Array.from(selectedIds))}
           >
             <Pause className="h-4 w-4" />
-            {bulkPauseMutation.isPending ? "Pausing…" : "Pause selected"}
+            {bulkPauseMutation.isPending ? "Pausing…" : `Pause ${selectionCaps.pausable > 0 ? selectionCaps.pausable : "selected"}`}
           </Button>
           <Button
             variant="outline"
             size="sm"
             className="gap-1.5"
-            disabled={bulkResumeMutation.isPending}
+            disabled={bulkResumeMutation.isPending || selectionCaps.resumable === 0}
             onClick={() => bulkResumeMutation.mutate(Array.from(selectedIds))}
           >
             <Play className="h-4 w-4" />
-            {bulkResumeMutation.isPending ? "Resuming…" : "Resume selected"}
+            {bulkResumeMutation.isPending ? "Resuming…" : `Resume ${selectionCaps.resumable > 0 ? selectionCaps.resumable : "selected"}`}
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <ArrowUpDown className="h-4 w-4" /> Set priority
+              <Button variant="outline" size="sm" className="gap-1.5" disabled={selectionCaps.prioritizable === 0}>
+                <ArrowUpDown className="h-4 w-4" /> Set priority {selectionCaps.prioritizable > 0 ? `(${selectionCaps.prioritizable})` : ""}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Set priority for {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}</AlertDialogTitle>
+                <AlertDialogTitle>Set priority for {selectionCaps.prioritizable} run{selectionCaps.prioritizable !== 1 ? "s" : ""}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Higher priority runs are dispatched first. Default is 0.
+                  Higher priority runs are dispatched first. Default is 0. Only pending and paused runs will be updated.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <div className="py-2">
@@ -1265,11 +1276,11 @@ export function RunsList() {
             variant="outline"
             size="sm"
             className="gap-1.5"
-            disabled={bulkRetryMutation.isPending}
+            disabled={bulkRetryMutation.isPending || selectionCaps.retryable === 0}
             onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
           >
             <RotateCcw className="h-4 w-4" />
-            {bulkRetryMutation.isPending ? "Retrying…" : "Retry selected"}
+            {bulkRetryMutation.isPending ? "Retrying…" : `Retry ${selectionCaps.retryable > 0 ? selectionCaps.retryable : "selected"}`}
           </Button>
           <Button
             variant="outline"
@@ -1666,7 +1677,7 @@ function RunRow({
               <Play className="h-4 w-4" />
             </Button>
           )}
-          {run.run?.status !== "done" && (
+          {(run.run?.status === "pending" || run.run?.status === "paused") && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8" title="Set priority">
