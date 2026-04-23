@@ -196,13 +196,6 @@ Each row in the runs table has inline icon buttons for Pause (pending/queued), R
 - `paused` → warning/amber badge
 - Group rows show stacked status progress bars with all 5 states
 
-## Database Migration
-
-`015-add-priority-and-scheduler-index.ts`:
-
-1. Backfills `priority: 0` on all documents missing it
-2. Creates compound index: `{ "run.status": 1, workerType: 1, deletedAt: 1, priority: -1, createdAt: 1 }`
-
 ## Infrastructure
 
 ### Kubernetes Resources
@@ -229,7 +222,6 @@ Each row in the runs table has inline icon buttons for Pause (pending/queued), R
 | `apps/api/src/routes/requests.ts` | Pause/resume/priority endpoints (single + bulk) |
 | `packages/shared/src/types/types.ts` | `priority`, `queued`/`paused` status, `pausedAt`/`resumedAt` |
 | `packages/shared/src/queue/base-queue-processor.ts` | Worker paused-check guard |
-| `packages/db-migrations/src/migrations/015-add-priority-and-scheduler-index.ts` | Migration |
 | `apps/portal/src/pages/RunsList.tsx` | Bulk actions toolbar, per-row actions |
 | `apps/portal/src/pages/RunDetail.tsx` | Detail page schedule actions |
 | `apps/api/src/grouping.ts` | Group aggregates (includes `llmCalls`) |
