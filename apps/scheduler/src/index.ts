@@ -109,6 +109,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Ensure all queues exist (creates them in Azurite on first run)
+  for (const wt of workerTypeConfigs) {
+    await wt.queueClient.createIfNotExists();
+    console.log(`[Scheduler] Ensured queue exists for ${wt.workerType}`);
+  }
+
   // Start the scheduler
   const scheduler = new RequestScheduler(
     collection,
