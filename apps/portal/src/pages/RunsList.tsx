@@ -1735,7 +1735,9 @@ function GroupRows({
           {(() => {
             const statusColors: Record<string, string> = {
               pending: "bg-gray-500",
+              queued: "bg-purple-500",
               processing: "bg-blue-500",
+              paused: "bg-amber-500",
               done: "bg-green-500",
             };
             const total = aggregates.count;
