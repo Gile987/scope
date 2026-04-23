@@ -139,12 +139,16 @@ function makeMockCollection(docs: any[] = []) {
     filter,
     update,
   }));
+  const bulkWrite = vi.fn().mockImplementation(async (ops: any[]) => ({
+    modifiedCount: ops.length,
+  }));
   const dropIndex = vi.fn().mockResolvedValue({});
   const createIndex = vi.fn().mockResolvedValue("idx");
   const find = vi.fn().mockReturnValue(makeMockCursor(docs));
   return {
     find,
     updateOne,
+    bulkWrite,
     dropIndex,
     createIndex,
     _docs: docs,
@@ -183,8 +187,12 @@ describe("migration 014: IntroduceRunsAndRun", () => {
       const migration = new IntroduceRunsAndRun();
       await migration.up(db);
 
-      // updateOne called once per source doc
-      expect(db._requests.updateOne).toHaveBeenCalledTimes(2);
+      // bulkWrite called once (both docs fit in a single batch of 25)
+      expect(db._requests.bulkWrite).toHaveBeenCalledTimes(1);
+      const ops = db._requests.bulkWrite.mock.calls[0][0];
+      expect(ops).toHaveLength(2);
+      expect(ops[0].updateOne.filter._id).toBe("req-1");
+      expect(ops[1].updateOne.filter._id).toBe("req-2");
 
       // Drops old flat indexes and creates nested-path replacements
       expect(db._requests.dropIndex).toHaveBeenCalledWith("status_1");
@@ -206,7 +214,7 @@ describe("migration 014: IntroduceRunsAndRun", () => {
       const migration = new IntroduceRunsAndRun();
       await migration.up(db);
 
-      expect(db._requests.updateOne).not.toHaveBeenCalled();
+      expect(db._requests.bulkWrite).not.toHaveBeenCalled();
       // Indexes are still managed
       expect(db._requests.dropIndex).toHaveBeenCalled();
       expect(db._requests.createIndex).toHaveBeenCalled();
@@ -238,11 +246,13 @@ describe("migration 014: IntroduceRunsAndRun", () => {
       const migration = new IntroduceRunsAndRun();
       await migration.down(db);
 
-      expect(db._requests.updateOne).toHaveBeenCalledTimes(1);
-      const call = db._requests.updateOne.mock.calls[0];
-      expect(call[1].$unset.run).toBe("");
-      expect(call[1].$unset.attemptCount).toBe("");
-      expect(call[1].$set.status).toBe("done");
+      expect(db._requests.bulkWrite).toHaveBeenCalledTimes(1);
+      const ops = db._requests.bulkWrite.mock.calls[0][0];
+      expect(ops).toHaveLength(1);
+      const update = ops[0].updateOne.update;
+      expect(update.$unset.run).toBe("");
+      expect(update.$unset.attemptCount).toBe("");
+      expect(update.$set.status).toBe("done");
 
       expect(db._requests.dropIndex).toHaveBeenCalledWith("run.status_1");
       expect(db._requests.dropIndex).toHaveBeenCalledWith("run.outcome_1");
@@ -250,6 +260,26 @@ describe("migration 014: IntroduceRunsAndRun", () => {
       expect(db._requests.createIndex).toHaveBeenCalledWith({ outcome: 1 });
 
       expect(db.dropCollection).toHaveBeenCalledWith("runs");
+    });
+
+    it("retries on Cosmos 429 throttle errors", async () => {
+      const db = makeMockDb([
+        { _id: "req-1", status: "done", outcome: "succeeded" },
+      ]) as any;
+
+      const throttleErr: any = new Error("TooManyRequests");
+      throttleErr.code = 16500;
+      throttleErr.errorResponse = { RetryAfterMs: 1 };
+
+      // First call throws 429, second succeeds
+      db._requests.bulkWrite
+        .mockRejectedValueOnce(throttleErr)
+        .mockResolvedValueOnce({ modifiedCount: 1 });
+
+      const migration = new IntroduceRunsAndRun();
+      await migration.up(db);
+
+      expect(db._requests.bulkWrite).toHaveBeenCalledTimes(2);
     });
   });
 });

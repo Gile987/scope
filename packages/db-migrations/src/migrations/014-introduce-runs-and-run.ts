@@ -24,32 +24,88 @@
  *   - `{ requestId: 1, attemptNumber: -1 }` — ordered history
  */
 
-import type { Db, Collection, Document } from "mongodb";
+import type { Db, Collection, Document, AnyBulkWriteOperation } from "mongodb";
 import type { MigrationInterface } from "mongo-migrate-ts";
 import { RUN_FIELDS, buildRunReshapeUpdate, buildRunUnshapeUpdate } from "../014-helpers.js";
+
+/** Cosmos DB 429 (TooManyRequests) error code. */
+const COSMOS_429 = 16500;
+const BATCH_SIZE = 25;
+const INTER_BATCH_DELAY_MS = 100;
+const MAX_RETRIES = 5;
+const DEFAULT_RETRY_MS = 50;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isThrottleError(err: any): boolean {
+  return err?.code === COSMOS_429 || err?.message?.includes("TooManyRequests");
+}
+
+function getRetryAfterMs(err: any): number {
+  return err?.errorResponse?.RetryAfterMs ?? err?.retryAfterMs ?? DEFAULT_RETRY_MS;
+}
+
+async function executeBulkWithRetry(
+  col: Collection,
+  ops: AnyBulkWriteOperation[],
+  label: string,
+): Promise<number> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await col.bulkWrite(ops, { ordered: false });
+      return res.modifiedCount;
+    } catch (err: any) {
+      if (isThrottleError(err) && attempt < MAX_RETRIES) {
+        const retryMs = getRetryAfterMs(err);
+        console.log(`  ${label}: 429 throttled, retrying in ${retryMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await sleep(retryMs);
+        continue;
+      }
+      throw err;
+    }
+  }
+  return 0; // unreachable
+}
 
 async function reshapeRequestsBatched(col: Collection, label: string): Promise<number> {
   let total = 0;
   let processed = 0;
+  let batch: AnyBulkWriteOperation[] = [];
+
   const cursor = col.find(
     { run: { $exists: false } },
-    { projection: { _id: 1, ...Object.fromEntries(RUN_FIELDS.map((f) => [f, 1])) } },
+    {
+      projection: { _id: 1, ...Object.fromEntries(RUN_FIELDS.map((f) => [f, 1])) },
+      batchSize: 50,
+    },
   );
 
   for await (const doc of cursor) {
     const { $set, $unset } = buildRunReshapeUpdate(doc as Document);
-    try {
-      const res = await col.updateOne({ _id: doc._id, run: { $exists: false } }, { $set, $unset });
-      total += res.modifiedCount;
-      processed += 1;
+    batch.push({
+      updateOne: {
+        filter: { _id: doc._id, run: { $exists: false } },
+        update: { $set, $unset },
+      },
+    });
+
+    if (batch.length >= BATCH_SIZE) {
+      total += await executeBulkWithRetry(col, batch, label);
+      processed += batch.length;
+      batch = [];
       if (processed % 100 === 0) {
         console.log(`  ${label}: processed ${processed}, modified ${total}`);
       }
-    } catch (err: any) {
-      // Best-effort; let the migration framework retry the whole step on failure.
-      console.log(`  ${label}: error on _id=${String(doc._id)}: ${err?.message ?? err}`);
-      throw err;
+      await sleep(INTER_BATCH_DELAY_MS);
     }
+  }
+
+  // Flush remaining partial batch
+  if (batch.length > 0) {
+    total += await executeBulkWithRetry(col, batch, label);
+    processed += batch.length;
   }
 
   console.log(`  ${label}: done — processed ${processed}, modified ${total}`);
@@ -107,23 +163,42 @@ export class IntroduceRunsAndRun implements MigrationInterface {
 
   async down(db: Db): Promise<void> {
     const requests = db.collection("requests");
+    const label = "requests — lift run.* back to top level";
 
-    // 1. Lift `run.*` back to the top level on each request.
+    // 1. Lift `run.*` back to the top level on each request (batched with retry).
     let total = 0;
     let processed = 0;
-    const cursor = requests.find({ run: { $exists: true } });
+    let batch: AnyBulkWriteOperation[] = [];
+
+    const cursor = requests.find({ run: { $exists: true } }, { batchSize: 50 });
     for await (const doc of cursor) {
       const { $set, $unset } = buildRunUnshapeUpdate(doc as Document);
       const update: Record<string, unknown> = { $unset };
       if (Object.keys($set).length > 0) update.$set = $set;
-      const res = await requests.updateOne(
-        { _id: doc._id, run: { $exists: true } },
-        update,
-      );
-      total += res.modifiedCount;
-      processed += 1;
+      batch.push({
+        updateOne: {
+          filter: { _id: doc._id, run: { $exists: true } },
+          update,
+        },
+      });
+
+      if (batch.length >= BATCH_SIZE) {
+        total += await executeBulkWithRetry(requests, batch, label);
+        processed += batch.length;
+        batch = [];
+        if (processed % 100 === 0) {
+          console.log(`  ${label}: processed ${processed}, modified ${total}`);
+        }
+        await sleep(INTER_BATCH_DELAY_MS);
+      }
     }
-    console.log(`  requests — lift run.* back to top level: processed ${processed}, modified ${total}`);
+
+    if (batch.length > 0) {
+      total += await executeBulkWithRetry(requests, batch, label);
+      processed += batch.length;
+    }
+
+    console.log(`  ${label}: done — processed ${processed}, modified ${total}`);
 
     // 2. Restore flat-field indexes; drop nested-path replacements.
     await dropIndexIfExists(requests, "run.status_1");
