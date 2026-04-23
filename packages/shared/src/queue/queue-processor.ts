@@ -83,6 +83,16 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await this.safeDeleteMessage(message.messageId, currentPopReceipt);
       return;
     }
+    // If the request was paused while sitting in the queue, discard the
+    // message. The scheduler will re-enqueue when the user resumes.
+    if (requestDoc.run?.status === "paused") {
+      console.log(
+        `[${this.workerName}] Request ${requestDoc._id} is paused — discarding queue message`,
+      );
+      await log("info", `Request paused — discarding queue message`);
+      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      return;
+    }
     // Resolve MCP server slugs to configs via API
     let mcpServerConfigs: McpServerConfig[] | undefined;
     if (requestDoc.mcpServers && requestDoc.mcpServers.length > 0) {
