@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { RequestScheduler, WorkerTypeConfig } from "./request-scheduler.js";
-import type { RequestDocument } from "../types/types.js";
+import type { RequestDocument } from "shared";
 
 // ── Mocks ────────────────────────────────────────────────────────────
 

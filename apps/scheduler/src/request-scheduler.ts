@@ -3,7 +3,7 @@
 
 import { Collection } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
-import type { RequestDocument } from "../types/types.js";
+import type { RequestDocument } from "shared";
 
 /**
  * Configuration for a single worker type's queue.

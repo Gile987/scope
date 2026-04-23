@@ -6,7 +6,7 @@ import http from "node:http";
 import { MongoClient } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
-import { RequestScheduler, WorkerTypeConfig } from "shared";
+import { RequestScheduler, WorkerTypeConfig } from "./request-scheduler.js";
 import type { RequestDocument } from "shared";
 
 // ── Configuration ────────────────────────────────────────────────────
