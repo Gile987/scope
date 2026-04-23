@@ -470,15 +470,41 @@ export function RunsList() {
 
   // Compute which bulk actions are available based on selected runs' statuses
   const selectionCaps = useMemo(() => {
-    const selected = runs.filter((r) => selectedIds.has(r._id));
-    const status = (r: Run) => r.run?.status ?? "pending";
-    return {
-      pausable: selected.filter((r) => status(r) === "pending" || status(r) === "queued").length,
-      resumable: selected.filter((r) => status(r) === "paused").length,
-      prioritizable: selected.filter((r) => status(r) === "pending" || status(r) === "paused").length,
-      retryable: selected.filter((r) => status(r) === "done").length,
-    };
-  }, [runs, selectedIds]);
+    if (groupBy === "none") {
+      // Flat list mode — we have full run objects
+      const selected = runs.filter((r) => selectedIds.has(r._id));
+      const status = (r: Run) => r.run?.status ?? "pending";
+      return {
+        pausable: selected.filter((r) => status(r) === "pending" || status(r) === "queued").length,
+        resumable: selected.filter((r) => status(r) === "paused").length,
+        prioritizable: selected.filter((r) => status(r) === "pending" || status(r) === "paused").length,
+        retryable: selected.filter((r) => status(r) === "done").length,
+      };
+    }
+    // Grouped mode — derive caps from group-level statusCounts for groups
+    // whose runs are (partially or fully) selected
+    let pausable = 0, resumable = 0, prioritizable = 0, retryable = 0;
+    for (const group of serverGroups) {
+      const selectedInGroup = group.runIds.filter((id) => selectedIds.has(id)).length;
+      if (selectedInGroup === 0) continue;
+      const sc = group.aggregates.statusCounts;
+      const ratio = selectedInGroup / group.runIds.length;
+      if (selectedInGroup === group.runIds.length) {
+        // All runs in group selected — use exact counts
+        pausable += (sc.pending ?? 0) + (sc.queued ?? 0);
+        resumable += sc.paused ?? 0;
+        prioritizable += (sc.pending ?? 0) + (sc.paused ?? 0);
+        retryable += sc.done ?? 0;
+      } else {
+        // Partial selection — estimate proportionally (round up to be permissive)
+        pausable += Math.ceil(((sc.pending ?? 0) + (sc.queued ?? 0)) * ratio);
+        resumable += Math.ceil((sc.paused ?? 0) * ratio);
+        prioritizable += Math.ceil(((sc.pending ?? 0) + (sc.paused ?? 0)) * ratio);
+        retryable += Math.ceil((sc.done ?? 0) * ratio);
+      }
+    }
+    return { pausable, resumable, prioritizable, retryable };
+  }, [runs, selectedIds, groupBy, serverGroups]);
 
   const runGroups = serverGroups;
 
