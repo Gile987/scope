@@ -43,6 +43,7 @@ export function SubmitRun() {
   const [model, setModel] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<number>(10);
   const [occurrences, setOccurrences] = useState<number>(5);
+  const [priority, setPriority] = useState<number>(0);
 
   // MCP servers
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -256,6 +257,7 @@ export function SubmitRun() {
       worker,
       ...(model ? { model } : {}),
       maxIterations,
+      ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
@@ -402,6 +404,23 @@ export function SubmitRun() {
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Info className="h-3.5 w-3.5 shrink-0" />
                   Required when max iterations &gt; 1. Optional for single-iteration runs (no judge evaluation).
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="priority">Priority</Label>
+                <Input
+                  id="priority"
+                  type="number"
+                  min={-100}
+                  max={100}
+                  value={priority}
+                  onChange={(e) => setPriority(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
+                  className="w-24"
+                />
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  Higher priority runs are dispatched first. Default is 0.
                 </p>
               </div>
 
@@ -722,6 +741,8 @@ export function SubmitRun() {
                 )}
                 <span className="text-muted-foreground">Max iterations</span>
                 <span>{maxIterations}</span>
+                <span className="text-muted-foreground">Priority</span>
+                <span>{priority}</span>
                 <span className="text-muted-foreground">Occurrences</span>
                 <span>{occurrences}</span>
                 {pickedCriteria.length > 0 && (

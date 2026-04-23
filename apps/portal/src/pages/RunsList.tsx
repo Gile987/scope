@@ -31,7 +31,7 @@ import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
@@ -44,6 +44,7 @@ const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "skills", label: "Skills" },
   { id: "extensions", label: "Extensions" },
   { id: "profile", label: "Profile" },
+  { id: "priority", label: "Priority" },
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
   { id: "report", label: "Report" },
@@ -1200,6 +1201,7 @@ export function RunsList() {
               {isCol("skills") && <TableHead>Skills</TableHead>}
               {isCol("extensions") && <TableHead>Extensions</TableHead>}
               {isCol("profile") && <TableHead>Profile</TableHead>}
+              {isCol("priority") && <TableHead className="w-[60px]">Priority</TableHead>}
               {isCol("status") && <TableHead className="w-[100px]">Status</TableHead>}
               {isCol("outcome") && <TableHead className="w-[100px]">Outcome</TableHead>}
               {isCol("report") && <TableHead className="w-[100px]">Report</TableHead>}
@@ -1410,6 +1412,9 @@ function RunRow({
         ) : (
           <span className="text-muted-foreground">–</span>
         )}
+      </TableCell>}
+      {isCol("priority") && <TableCell className="text-center font-mono text-xs">
+        {run.priority ?? 0}
       </TableCell>}
       {isCol("status") && <TableCell>
         <StatusBadge status={run.run?.status ?? "pending"} />

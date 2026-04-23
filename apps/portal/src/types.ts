@@ -123,6 +123,7 @@ export interface Run {
   skills?: string[];
   skillRevisions?: string[];
   extensions?: string[];
+  priority?: number;
   submissionId?: string;
   profileId?: string;
   profileVersionId?: string;
