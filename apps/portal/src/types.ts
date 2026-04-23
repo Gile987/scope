@@ -899,6 +899,7 @@ export interface GroupAggregates {
   duration: AggregateStats | null;
   promptTokens: AggregateStats | null;
   completionTokens: AggregateStats | null;
+  llmCalls: AggregateStats | null;
   statusCounts: Record<string, number>;
   outcomeCounts: Record<string, number>;
 }

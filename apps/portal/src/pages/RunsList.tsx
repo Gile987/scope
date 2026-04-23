@@ -2114,7 +2114,11 @@ function GroupRows({
             : <span className="text-muted-foreground">–</span>}
         </TableCell>}
         {/* LLM Calls */}
-        {isCol("llmCalls") && <TableCell />}
+        {isCol("llmCalls") && <TableCell className="text-center font-mono text-xs">
+          {aggregates.llmCalls
+            ? formatStatRange(aggregates.llmCalls, fmtNum)
+            : <span className="text-muted-foreground">–</span>}
+        </TableCell>}
         {/* Duration */}
         {isCol("duration") && <TableCell className="font-mono text-xs">
           {formatStatRange(aggregates.duration, fmtDur)}
