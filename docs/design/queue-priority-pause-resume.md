@@ -26,7 +26,8 @@ These gaps cause operational friction. A long-running batch of 50 routine submis
       ▼                                              ▼
 ┌────────────────────────────────────────────────────────┐
 │                  MongoDB (requests)                     │
-│  status: pending → processing → done                   │
+│  Immutable config at root. Mutable run state in run.*  │
+│  run.status: pending → processing → done               │
 │  No priority field. No paused state.                   │
 └────────────────────────────────────────────────────────┘
 ```
@@ -61,9 +62,9 @@ Instead of replacing Azure Storage Queue, we **layer priority and pause/resume o
                     ┌─────────────────────────────┐
                     │       MongoDB (requests)     │
                     │                              │
-                    │  + priority: number           │
-                    │  + status: "paused" state     │
-                    │  + pausedAt / resumedAt       │
+                    │  + priority: number (root)    │
+                    │  + run.status: "paused"       │
+                    │  + pausedAt / resumedAt (root)│
                     │                              │
                     └───────────┬──────────────────┘
                                 │
@@ -71,10 +72,10 @@ Instead of replacing Azure Storage Queue, we **layer priority and pause/resume o
                     │   Scheduler / Dispatcher     │
                     │   (standalone service)       │
                     │                              │
-                    │   1. Query pending requests   │
+                    │   1. Query run.status=pending │
                     │      ORDER BY priority DESC,  │
                     │              createdAt ASC    │
-                    │   2. Skip status=paused       │
+                    │   2. Skip run.status=paused   │
                     │   3. Atomically claim via     │
                     │      findOneAndUpdate         │
                     │   4. Send to Azure Queue      │
@@ -83,7 +84,8 @@ Instead of replacing Azure Storage Queue, we **layer priority and pause/resume o
                     ┌───────────▼──────────────────┐
                     │   Azure Storage Queue        │
                     │   (notification only)         │
-                    │   Message = { requestId }     │
+                    │   Message = { requestId,      │
+                    │              runId }          │
                     └───────────┬──────────────────┘
                                 │
                     ┌───────────▼──────────────────┐
@@ -108,19 +110,20 @@ The **hybrid approach** keeps the queue for its notification/wake-up role but mo
 
 ## Data Model Changes
 
-### RequestDocument (additions)
+> **Context**: PR #665 restructured `RequestDocument`. Immutable config lives at the root; per-attempt mutable state lives under `run: RunState`. Queue messages carry `{ requestId, runId }`. Workers verify `run._id === runId` to detect stale messages. See the PR for the full field classification.
+
+### RequestDocument (additions — root level)
+
+These are request-level fields (not per-attempt), so they go at the root alongside other immutable/request-scoped config:
 
 ```typescript
 export interface RequestDocument {
-  // ... existing fields ...
+  // ... existing root fields (_id, scenario, workerType, model, etc.) ...
 
   /** Scheduling priority. Higher = processed first. Default: 0. */
   priority: number;
 
-  /** Extended status with paused state */
-  status: "pending" | "queued" | "processing" | "paused" | "done";
-
-  /** When the request was paused (if status = "paused") */
+  /** When the request was paused (if run.status = "paused") */
   pausedAt?: Date;
 
   /** When the request was last resumed from paused state */
@@ -128,8 +131,28 @@ export interface RequestDocument {
 
   /** Who paused/resumed (user ID or "system") */
   pausedBy?: string;
+
+  run: RunState;  // current attempt (mutable, per-attempt)
 }
 ```
+
+### RunState (additions)
+
+`status` gains two new values:
+
+```typescript
+export interface RunState {
+  // ... existing fields (_id, attemptNumber, outcome, result, etc.) ...
+
+  /** Extended with queued + paused */
+  status: "pending" | "queued" | "processing" | "paused" | "done";
+}
+```
+
+> **Why `priority` at root but `queued`/`paused` in `run.status`?**
+> - `priority` is request-scoped: it governs scheduling across all attempts. A retried request keeps its priority.
+> - `queued`/`paused` are per-attempt states: they describe what the current run is doing. A retry creates a fresh `RunState` with `status: "pending"`, regardless of whether the previous attempt was paused.
+> - `pausedAt`/`resumedAt`/`pausedBy` are at root because pausing is an administrative action on the request itself, not on a specific attempt.
 
 ### Status Lifecycle (updated)
 
@@ -150,7 +173,7 @@ export interface RequestDocument {
 
 Both `pending` and `queued` requests can be paused. Only `processing` requests cannot be paused — they must complete.
 
-When a `queued` request is paused, its message is still in Azure Storage Queue. The worker will dequeue it, check MongoDB, see `status: "paused"`, delete the message, and move on.
+When a `queued` request is paused, its message is still in Azure Storage Queue. The worker will dequeue it, check MongoDB, see `run.status: "paused"`, delete the message, and move on.
 
 When resumed, the status returns to `pending` (not `queued`), so the scheduler re-dispatches it in priority order on the next tick.
 
@@ -177,8 +200,8 @@ Priority is a plain integer (not an enum) for maximum flexibility. Higher is mor
 
 Pause, resume, and priority changes support bulk operations via arrays of request IDs:
 
-- **Single request**: `PATCH /api/v1/requests/:id/pause`
-- **Bulk**: `PATCH /api/v1/requests/bulk/pause` with `{ ids: [...] }`
+- **Single request**: `POST /api/v1/requests/:id/pause`
+- **Bulk**: `POST /api/v1/requests/bulk/pause` with `{ ids: [...] }`
 
 The portal can select multiple requests (e.g. all from a submission) and call the bulk endpoint.
 
@@ -317,18 +340,19 @@ export class RequestScheduler {
     for (let i = 0; i < slots; i++) {
       const claimed = await this.collection.findOneAndUpdate(
         {
-          status: "pending",
+          "run.status": "pending",
           workerType: wt.workerType,
           deletedAt: { $exists: false },
         },
-        { $set: { status: "queued", updatedAt: new Date() } },
+        { $set: { "run.status": "queued", "run.updatedAt": new Date() } },
         { sort: { priority: -1, createdAt: 1 }, returnDocument: "after" }
       );
 
       if (!claimed) break;  // no more pending work
 
+      // Queue message carries both requestId and runId (per PR #665 convention)
       const message = Buffer.from(
-        JSON.stringify({ requestId: claimed._id })
+        JSON.stringify({ requestId: claimed._id, runId: claimed.run._id })
       ).toString("base64");
       await wt.queueClient.sendMessage(message);
     }
@@ -350,21 +374,29 @@ export class RequestScheduler {
 
 Workers do not need to understand priority. They continue to poll the queue, fetch from MongoDB, and process.
 
-The only addition: when a worker fetches a document and sees `status: "paused"`, it deletes the queue message and moves on. The request stays in MongoDB as `paused` — the scheduler will re-dispatch it when resumed.
+The only addition: when a worker fetches a document and sees `run.status: "paused"`, it deletes the queue message and moves on. The request stays in MongoDB as `paused` — the scheduler will re-dispatch it when resumed.
+
+Note: workers already check `run._id === message.runId` to detect stale messages (from superseded retry attempts). The paused check is an additional guard after the stale-message check.
 
 ```typescript
 // In base-queue-processor.ts processMessage():
 
-const doc = await this.collection.findOne({ _id: documentId });
+const doc = await this.collection.findOne({ _id: requestId });
 
 if (!doc) {
   await this.safeDeleteMessage(message.messageId, currentPopReceipt);
   return;
 }
 
-// Skip paused requests — delete message, leave doc as paused
-if (doc.status === "paused") {
-  console.log(`[${this.workerName}] Request ${documentId} is paused, dropping queue message`);
+// Existing: skip stale messages from superseded attempts
+if (doc.run._id !== runId) {
+  await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+  return;
+}
+
+// New: skip paused requests — delete message, leave doc as paused
+if (doc.run.status === "paused") {
+  console.log(`[${this.workerName}] Request ${requestId} is paused, dropping queue message`);
   await this.safeDeleteMessage(message.messageId, currentPopReceipt);
   return;
 }
@@ -379,7 +411,7 @@ if (doc.status === "paused") {
 ```javascript
 // Priority scheduling query (per worker type)
 db.requests.createIndex(
-  { status: 1, workerType: 1, deletedAt: 1, priority: -1, createdAt: 1 },
+  { "run.status": 1, workerType: 1, deletedAt: 1, priority: -1, createdAt: 1 },
   { name: "idx_scheduler_dispatch" }
 );
 ```
@@ -392,9 +424,9 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 
 ### Database migration
 
-1. Add `priority` field with default `0` to all existing documents
-2. Existing `status` values are unchanged (`pending`, `processing`, `done`)
-3. New `queued` and `paused` states only appear for newly created documents
+1. Add `priority` field (root level) with default `0` to all existing documents
+2. Existing `run.status` values are unchanged (`pending`, `processing`, `done`)
+3. New `queued` and `paused` states only appear in `run.status` for newly created documents
 4. Backfill migration: `db.requests.updateMany({ priority: { $exists: false } }, { $set: { priority: 0 } })`
 
 ### Rollout plan
@@ -412,15 +444,15 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 ### Phase 1: Priority Scheduling
 
 - [ ] Add `priority: number` to `RequestDocument` type
-- [ ] Add `status: "queued"` to status union type
+- [ ] Add `"queued"` to `RunState.status` union type
 - [ ] Create database migration to add `priority` default and composite index
 - [ ] Modify `POST /api/v1/requests` to accept `priority` body param
 - [ ] Implement `RequestScheduler` class in `packages/shared/src/queue/`
 - [ ] Create scheduler service entry point (`apps/scheduler/`) with health check
 - [ ] Add Dockerfile and Kubernetes Deployment manifest for scheduler
 - [ ] Modify API submit flow: insert as `pending` (don't send to queue directly)
-- [ ] Add `PATCH /api/v1/requests/:id/priority` endpoint
-- [ ] Add `PATCH /api/v1/requests/bulk/priority` endpoint
+- [ ] Add `POST /api/v1/requests/:id/priority` endpoint
+- [ ] Add `POST /api/v1/requests/bulk/priority` endpoint
 - [ ] Update request list endpoint with `sortBy=priority` support
 - [ ] Add unit tests for scheduler dispatch ordering
 - [ ] Add unit tests for priority API endpoints
@@ -428,12 +460,12 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 
 ### Phase 2: Pause/Resume
 
-- [ ] Add `status: "paused"` to status union type
-- [ ] Add `pausedAt`, `resumedAt`, `pausedBy` fields to `RequestDocument`
-- [ ] Add `PATCH /api/v1/requests/:id/pause` endpoint
-- [ ] Add `PATCH /api/v1/requests/:id/resume` endpoint
-- [ ] Add `PATCH /api/v1/requests/bulk/pause` endpoint
-- [ ] Add `PATCH /api/v1/requests/bulk/resume` endpoint
+- [ ] Add `"paused"` to `RunState.status` union type
+- [ ] Add `pausedAt`, `resumedAt`, `pausedBy` root-level fields to `RequestDocument`
+- [ ] Add `POST /api/v1/requests/:id/pause` endpoint
+- [ ] Add `POST /api/v1/requests/:id/resume` endpoint
+- [ ] Add `POST /api/v1/requests/bulk/pause` endpoint
+- [ ] Add `POST /api/v1/requests/bulk/resume` endpoint
 - [ ] Modify scheduler to skip `paused` requests
 - [ ] Modify worker `processMessage()` to skip and delete messages for `paused` documents
 - [ ] Add unit tests for pause/resume state transitions
@@ -460,3 +492,5 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 1. **Should priority be immutable after queued?** Changing priority on a `queued` request has no effect until the message drains from the queue and the request returns to `pending` (e.g. via pause→resume). This is acceptable because the queue is kept shallow — messages spend seconds in it, not minutes. Priority changes on `pending` requests take effect immediately on the next scheduler tick.
 
 2. **Priority inheritance for resubmits**: When using `POST /api/v1/requests/bulk/resubmit`, should the new requests inherit the original priority? Proposal: yes, unless overridden in the resubmit body.
+
+3. **Retry a paused request**: `POST /api/v1/requests/:id/retry` currently requires `run.status === "done"`. Should we allow retrying from `paused`? Proposal: no — resume first, let it run, then retry if it fails. Keeps the state machine simple.
