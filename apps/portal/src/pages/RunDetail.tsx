@@ -10,6 +10,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { LogViewer } from "@/components/LogViewer";
@@ -22,7 +26,7 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
@@ -158,6 +162,39 @@ export function RunDetail() {
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to retry");
+    },
+  });
+
+  const pauseMutation = useMutation({
+    mutationFn: () => api.pauseRun(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success("Run paused");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to pause");
+    },
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: () => api.resumeRun(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success("Run resumed");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to resume");
+    },
+  });
+
+  const setPriorityMutation = useMutation({
+    mutationFn: (priority: number) => api.setPriority(id!, priority),
+    onSuccess: (_data, priority) => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success(`Priority set to ${priority}`);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to set priority");
     },
   });
 
@@ -398,6 +435,53 @@ export function RunDetail() {
               <RotateCcw className="h-4 w-4" />
               {retryMutation.isPending ? "Retrying…" : "Retry"}
             </Button>
+          )}
+          {(activeRun?.status === "pending" || activeRun?.status === "queued") && !isViewingHistorical && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => pauseMutation.mutate()}
+              disabled={pauseMutation.isPending}
+            >
+              <Pause className="h-4 w-4" />
+              {pauseMutation.isPending ? "Pausing…" : "Pause"}
+            </Button>
+          )}
+          {activeRun?.status === "paused" && !isViewingHistorical && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => resumeMutation.mutate()}
+              disabled={resumeMutation.isPending}
+            >
+              <Play className="h-4 w-4" />
+              {resumeMutation.isPending ? "Resuming…" : "Resume"}
+            </Button>
+          )}
+          {(activeRun?.status === "pending" || activeRun?.status === "paused") && !isViewingHistorical && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <ArrowUpDown className="h-4 w-4" />
+                  Priority{run.priority ? ` (${run.priority > 0 ? "+" : ""}${run.priority})` : ""}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuLabel>Set Priority</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {[10, 5, 0, -5, -10].map((p) => (
+                  <DropdownMenuCheckboxItem
+                    key={p}
+                    checked={(run.priority ?? 0) === p}
+                    onCheckedChange={() => setPriorityMutation.mutate(p)}
+                  >
+                    {p > 0 ? `+${p}` : p} {p === 0 ? "(default)" : p > 0 ? "(higher)" : "(lower)"}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           </div>
         </div>
