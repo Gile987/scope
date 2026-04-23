@@ -122,15 +122,10 @@ export interface RequestDocument {
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
   model?: string;              // Model selected for this run
-  status: "pending" | "processing" | "done";
-  outcome?: "succeeded" | "failed" | "finished";
-  result?: string;
-  error?: string;
   createdAt: Date;
   updatedAt?: Date;
   // Multi-turn fields
   maxIterations?: number;
-  turns?: ConversationTurn[];
   personaInstructions?: string;  // Resolved persona prose (from traits.yaml)
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
@@ -142,15 +137,12 @@ export interface RequestDocument {
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
   profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
-  workerVersion?: string;          // Exact build that processed this run (e.g. "copilot-0.0.415-20260318T163740Z-44d16d6")
-  os?: OsInfo;                     // Worker OS info captured at processing time
-  harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
-  videoUrls?: string[];            // Blob storage URLs to session recording videos (one-shot)
-  setupVideoUrls?: string[];       // Blob storage URLs to setup-phase videos (e.g. TOTP login recording)
-  tokenUsage?: TokenUsage;          // LLM token usage for the run (one-shot) or aggregate across turns
-  aiCallCount?: number;             // Total AI completion API calls for the run (sum across turns)
-  rawChatUrl?: string;             // Blob storage URL to the raw chat transcript export (one-shot)
-  rawChatFormat?: string;          // Format identifier for the raw chat export
+  submissionId?: string;           // FK → SubmissionDocument._id
+  /**
+   * Per-attempt mutable state. Migration 014 nests per-attempt fields
+   * under this object; new submissions populate it on insert.
+   */
+  run?: RunState;
 }
 
 // Log event for real-time streaming and persistence
@@ -165,7 +157,95 @@ export interface LogEvent {
 // Queue message payload
 export interface QueueMessagePayload {
   requestId: string;
+  /**
+   * Optional run ID that identifies a specific attempt within the request.
+   *
+   * When set (post run-retry-attempts rollout), workers should verify that
+   * the message's `runId` matches `request.run._id` before processing — if
+   * it doesn't, the message is stale (a retry has since started a new
+   * attempt) and should be acked and discarded.
+   *
+   * When omitted, treat as targeting the current `request.run`.
+   */
+  runId?: string;
 }
+
+/**
+ * RunState — represents one execution attempt of a request.
+ *
+ * Per-attempt mutable state is split out from RequestDocument so retries can
+ * preserve a history of previous attempts (in the `runs` collection) while the
+ * request itself keeps its stable identity and immutable configuration.
+ *
+ * The current (latest) attempt is embedded in the request document as
+ * `RequestDocument.run`. When a request is retried, the previous `run` is
+ * snapshotted to the `runs` collection (as a RunHistoryDocument) and a fresh
+ * RunState is created for the new attempt.
+ *
+ * `_id` is unique per attempt — when demoted to history it becomes the
+ * `runs` collection's document `_id`. Reusing the request's `_id` for the
+ * first attempt's `RunState._id` keeps existing artifact blob paths
+ * (`{runId}/iteration-N/...`) valid without rewriting blob storage.
+ */
+export interface RunState {
+  _id: string;                              // Unique per attempt
+  attemptNumber: number;                    // 1, 2, 3…
+  status: "pending" | "processing" | "done";
+  outcome?: "succeeded" | "failed" | "finished";
+  result?: string;
+  error?: string;
+  /** Full blob URL pointing to this attempt's JSONL log blob in the `logs`
+   *  container, e.g. `https://<account>.blob.core.windows.net/logs/{requestId}/runs/{runId}/run.jsonl`.
+   *  Set at submit time so the SSE replay endpoint can read it directly from
+   *  the document without recomputing storage paths — matching the pattern
+   *  used by `harUrl`, `videoUrls`, and `snapshotUrl`. */
+  logsUrl?: string;
+  updatedAt?: Date;
+  startedAt?: Date;                         // When worker picked up this attempt
+  finishedAt?: Date;                        // When this attempt reached "done"
+  turns?: ConversationTurn[];
+  workerVersion?: string;
+  os?: OsInfo;
+  harUrl?: string;
+  videoUrls?: string[];
+  setupVideoUrls?: string[];
+  tokenUsage?: TokenUsage;
+  aiCallCount?: number;
+  rawChatUrl?: string;
+  rawChatFormat?: string;
+}
+
+/**
+ * RunHistoryDocument — a previously-completed attempt stored in the `runs`
+ * collection. Same shape as RunState plus a back-reference to its request.
+ */
+export interface RunHistoryDocument extends RunState {
+  requestId: string;                        // FK → RequestDocument._id
+}
+
+/**
+ * Field names whose values move from `RequestDocument` (top-level, legacy
+ * shape) into `RequestDocument.run: RunState` (new shape introduced for
+ * the run-retry-attempts feature). Useful for migration scripts and
+ * compat code paths.
+ */
+export const RUN_STATE_FIELD_NAMES = [
+  "status",
+  "outcome",
+  "result",
+  "error",
+  "updatedAt",
+  "turns",
+  "workerVersion",
+  "os",
+  "harUrl",
+  "videoUrls",
+  "setupVideoUrls",
+  "tokenUsage",
+  "aiCallCount",
+  "rawChatUrl",
+  "rawChatFormat",
+] as const;
 
 // Options passed to worker processor
 export interface WorkerProcessorOptions {

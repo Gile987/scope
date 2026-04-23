@@ -472,7 +472,7 @@ describe("API Endpoints", () => {
 
       await request(app).get("/api/v1/requests?status=done");
       expect(mocks.collection.find).toHaveBeenCalledWith(
-        expect.objectContaining({ status: "done" }),
+        expect.objectContaining({ "run.status": "done" }),
       );
     });
 
@@ -487,7 +487,7 @@ describe("API Endpoints", () => {
 
       await request(app).get("/api/v1/requests?outcome=succeeded");
       expect(mocks.collection.find).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: "succeeded" }),
+        expect.objectContaining({ "run.outcome": "succeeded" }),
       );
     });
 
@@ -500,7 +500,7 @@ describe("API Endpoints", () => {
       const pipeline = (mocks.collection.aggregate as any).mock.calls[0][0];
       expect(pipeline[0]).toEqual(
         expect.objectContaining({
-          $match: expect.objectContaining({ status: "done", outcome: "failed" }),
+          $match: expect.objectContaining({ "run.status": "done", "run.outcome": "failed" }),
         }),
       );
     });
@@ -517,8 +517,8 @@ describe("API Endpoints", () => {
       await request(app).get("/api/v1/requests?status=processing&outcome=succeeded&worker=coder-acp-copilot");
       expect(mocks.collection.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: "processing",
-          outcome: "succeeded",
+          "run.status": "processing",
+          "run.outcome": "succeeded",
           workerType: "coder-acp-copilot",
         }),
       );
@@ -1122,6 +1122,207 @@ describe("API Endpoints", () => {
       expect(res.body.conflicts).toEqual(
         expect.arrayContaining([expect.stringContaining("model")])
       );
+    });
+  });
+
+  // ===================================================================
+  // Run-retry-attempts (issue #658)
+  // ===================================================================
+
+  describe("GET /api/v1/requests/:id/runs", () => {
+    it("returns 404 when request not found", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue(null);
+      const res = await request(app).get("/api/v1/requests/missing/runs");
+      expect(res.status).toBe(404);
+    });
+
+    it("returns current run + history newest first", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        run: { _id: "run-2", attemptNumber: 2, status: "pending" },
+      });
+      (mocks.runsCollection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([
+            { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed", requestId: "req-1" },
+          ]),
+        }),
+      });
+      const res = await request(app).get("/api/v1/requests/req-1/runs");
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(2);
+      expect(res.body[0]._id).toBe("run-2");
+      expect(res.body[1]._id).toBe("run-1");
+    });
+  });
+
+  describe("GET /api/v1/requests/:id/runs/:runId", () => {
+    it("returns the inline current run when runId matches", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        run: { _id: "run-2", attemptNumber: 2, status: "pending" },
+      });
+      const res = await request(app).get("/api/v1/requests/req-1/runs/run-2");
+      expect(res.status).toBe(200);
+      expect(res.body._id).toBe("run-2");
+    });
+
+    it("falls back to history collection for older attempts", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        run: { _id: "run-2", attemptNumber: 2, status: "pending" },
+      });
+      (mocks.runsCollection.findOne as any).mockResolvedValue({
+        _id: "run-1",
+        attemptNumber: 1,
+        status: "done",
+        outcome: "failed",
+        requestId: "req-1",
+      });
+      const res = await request(app).get("/api/v1/requests/req-1/runs/run-1");
+      expect(res.status).toBe(200);
+      expect(res.body._id).toBe("run-1");
+    });
+
+    it("returns 404 when run id doesn't belong to the request", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        run: { _id: "run-2", attemptNumber: 2, status: "pending" },
+      });
+      (mocks.runsCollection.findOne as any).mockResolvedValue({
+        _id: "run-x",
+        requestId: "other-req",
+        attemptNumber: 1,
+        status: "done",
+      });
+      const res = await request(app).get("/api/v1/requests/req-1/runs/run-x");
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("POST /api/v1/requests/:id/retry", () => {
+    it("returns 404 when request not found", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue(null);
+      const res = await request(app).post("/api/v1/requests/missing/retry");
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 422 when current run is not yet terminal", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run-1", attemptNumber: 1, status: "processing" },
+      });
+      const res = await request(app).post("/api/v1/requests/req-1/retry");
+      expect(res.status).toBe(422);
+      expect(res.body.error).toContain("expected 'done'");
+    });
+
+    it("demotes current run to history, swaps in a new attempt, queues message", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed" },
+      });
+      (mocks.runsCollection.insertOne as any).mockResolvedValue({ insertedId: "run-1" });
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+      const queueClient = mocks.queueClients.get("coder-acp-copilot")!;
+
+      const res = await request(app).post("/api/v1/requests/req-1/retry");
+
+      expect(res.status).toBe(201);
+      expect(res.body.attemptNumber).toBe(2);
+      expect(res.body.requestId).toBe("req-1");
+      expect(typeof res.body.runId).toBe("string");
+      expect(mocks.runsCollection.insertOne).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: "run-1", requestId: "req-1" }),
+      );
+      expect(mocks.collection.updateOne).toHaveBeenCalledWith(
+        { _id: "req-1", "run._id": "run-1" },
+        expect.objectContaining({
+          $set: expect.objectContaining({
+            run: expect.objectContaining({ attemptNumber: 2, status: "pending" }),
+          }),
+        }),
+      );
+      expect((queueClient.sendMessage as any)).toHaveBeenCalled();
+    });
+
+    it("returns 409 when concurrent retry wins the race", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed" },
+      });
+      (mocks.runsCollection.insertOne as any).mockResolvedValue({ insertedId: "run-1" });
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+
+      const res = await request(app).post("/api/v1/requests/req-1/retry");
+      expect(res.status).toBe(409);
+    });
+
+    it("returns 409 when request is soft-deleted", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        workerType: "coder-acp-copilot",
+        deletedAt: new Date(),
+        run: { _id: "run-1", attemptNumber: 1, status: "done" },
+      });
+      const res = await request(app).post("/api/v1/requests/req-1/retry");
+      expect(res.status).toBe(409);
+    });
+
+    it("ignores duplicate-key error on history insertion", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed" },
+      });
+      const dupErr: any = new Error("E11000 duplicate key");
+      dupErr.code = 11000;
+      (mocks.runsCollection.insertOne as any).mockRejectedValue(dupErr);
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app).post("/api/v1/requests/req-1/retry");
+      expect(res.status).toBe(201);
+    });
+  });
+
+  describe("POST /api/v1/requests/bulk-retry", () => {
+    it("retries eligible requests and skips non-terminal ones", async () => {
+      const doc1 = {
+        _id: "req-1",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed" },
+      };
+      const doc2 = {
+        _id: "req-2",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run-2", attemptNumber: 1, status: "processing" },
+      };
+      // find().toArray() is used by bulk-retry to fetch all docs at once
+      const mockCursor = { toArray: vi.fn().mockResolvedValue([doc1, doc2]), sort: vi.fn().mockReturnThis(), skip: vi.fn().mockReturnThis(), limit: vi.fn().mockReturnThis(), filter: vi.fn().mockReturnThis(), project: vi.fn().mockReturnThis() };
+      (mocks.collection.find as any).mockReturnValue(mockCursor);
+      (mocks.runsCollection.insertOne as any).mockResolvedValue({ insertedId: "run-1" });
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-retry")
+        .send({ ids: ["req-1", "req-2"] });
+
+      expect(res.status).toBe(201);
+      expect(res.body.retried).toBe(1);
+      expect(res.body.skipped).toBe(1);
+      expect(res.body.results).toHaveLength(2);
+      expect(res.body.results.find((r: any) => r.requestId === "req-1").attemptNumber).toBe(2);
+      expect(res.body.results.find((r: any) => r.requestId === "req-2").error).toContain("processing");
+    });
+
+    it("returns 400 when ids array is empty", async () => {
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-retry")
+        .send({ ids: [] });
+      expect(res.status).toBe(400);
     });
   });
 });

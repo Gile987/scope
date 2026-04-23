@@ -27,32 +27,50 @@ export function blobNameFromSnapshotsUrl(url: string): string | null {
 }
 
 /**
+ * Extract the blob name from an Azure Blob Storage URL whose container is "logs".
+ * Works with both production URLs and Azurite (local emulator) URLs.
+ *
+ * @returns The blob name (path after `/logs/`), or `null` if the URL doesn't match.
+ */
+export function blobNameFromLogsUrl(url: string): string | null {
+  const parsed = new URL(url);
+  const prefix = "/logs/";
+  const idx = parsed.pathname.indexOf(prefix);
+  return idx === -1 ? null : parsed.pathname.substring(idx + prefix.length);
+}
+
+/**
  * Deep-clone a run resource and rewrite `harUrl` and `rawChatUrl` fields to relative archive paths.
  *
- * - Top-level `harUrl`     → `"run.har"`
- * - Per-turn `harUrl`      → `"iteration-{N}.har"`
- * - Top-level `rawChatUrl` → `"run.chat-export.json"`
- * - Per-turn `rawChatUrl`  → `"iteration-{N}.chat-export.json"`
+ * - `run.harUrl`            → `"run.har"`
+ * - Per-turn `harUrl`        → `"iteration-{N}.har"`
+ * - `run.rawChatUrl`         → `"run.chat-export.json"`
+ * - Per-turn `rawChatUrl`    → `"iteration-{N}.chat-export.json"`
  */
 export function rewriteHarUrlsForArchive<T extends {
-  harUrl?: string;
-  rawChatUrl?: string;
-  turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; [key: string]: unknown }>;
+  run?: {
+    harUrl?: string;
+    rawChatUrl?: string;
+    turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; [key: string]: unknown }>;
+    [key: string]: unknown;
+  };
 }>(resource: T): T {
   const copy = JSON.parse(JSON.stringify(resource));
-  if (copy.harUrl) {
-    copy.harUrl = "run.har";
-  }
-  if (copy.rawChatUrl) {
-    copy.rawChatUrl = "run.chat-export.json";
-  }
-  if (copy.turns) {
-    for (const turn of copy.turns) {
-      if (turn.harUrl) {
-        turn.harUrl = `iteration-${turn.iteration}.har`;
-      }
-      if (turn.rawChatUrl) {
-        turn.rawChatUrl = `iteration-${turn.iteration}.chat-export.json`;
+  if (copy.run) {
+    if (copy.run.harUrl) {
+      copy.run.harUrl = "run.har";
+    }
+    if (copy.run.rawChatUrl) {
+      copy.run.rawChatUrl = "run.chat-export.json";
+    }
+    if (copy.run.turns) {
+      for (const turn of copy.run.turns) {
+        if (turn.harUrl) {
+          turn.harUrl = `iteration-${turn.iteration}.har`;
+        }
+        if (turn.rawChatUrl) {
+          turn.rawChatUrl = `iteration-${turn.iteration}.chat-export.json`;
+        }
       }
     }
   }
@@ -217,20 +235,30 @@ export interface BlobDownloader {
       contentLength?: number;
     }>;
   };
+  getBlobClient(blobName: string): {
+    download(): Promise<{
+      readableStreamBody?: NodeJS.ReadableStream;
+      contentLength?: number;
+    }>;
+  };
 }
 
 /** A run document with the fields needed for archive packing. */
 export interface ArchivableRun {
   _id: string;
-  harUrl?: string;
-  rawChatUrl?: string;
-  turns?: Array<{
-    iteration: number;
-    snapshotUrl?: string;
+  run?: {
+    logsUrl?: string;
     harUrl?: string;
     rawChatUrl?: string;
+    turns?: Array<{
+      iteration: number;
+      snapshotUrl?: string;
+      harUrl?: string;
+      rawChatUrl?: string;
+      [key: string]: unknown;
+    }>;
     [key: string]: unknown;
-  }>;
+  };
   [key: string]: unknown;
 }
 
@@ -246,6 +274,7 @@ export interface ArchivableRun {
  * @param container  - blob storage container client for downloading snapshots/HARs/chats
  * @param prefix     - directory prefix inside the tar (defaults to resource._id)
  * @param isRestError - predicate to check if an error is a blob-not-found RestError
+ * @param logsContainer - optional blob storage container client for downloading logs (logs.jsonl)
  */
 export async function packRunIntoTar(
   pack: Pack,
@@ -253,6 +282,7 @@ export async function packRunIntoTar(
   container: BlobDownloader,
   prefix?: string,
   isRestError?: (err: unknown) => boolean,
+  logsContainer?: BlobDownloader,
 ): Promise<void> {
   const id = prefix ?? resource._id;
   const isBlobNotFound = isRestError ?? (() => false);
@@ -263,8 +293,13 @@ export async function packRunIntoTar(
   const yamlBuf = Buffer.from(yamlContent, "utf-8");
   pack.entry({ name: `${id}/run.yaml`, size: yamlBuf.length }, yamlBuf);
 
+  // Read per-attempt fields from the run sub-document (migration ensures it exists)
+  const turns = resource.run?.turns ?? [];
+  const topHarUrl = resource.run?.harUrl;
+  const topRawChatUrl = resource.run?.rawChatUrl;
+
   // Entries 2..N: iteration snapshots as-is (.tar.gz blobs)
-  for (const turn of resource.turns ?? []) {
+  for (const turn of turns) {
     if (!turn.snapshotUrl) continue;
     try {
       const blobName = blobNameFromSnapshotsUrl(turn.snapshotUrl);
@@ -285,10 +320,10 @@ export async function packRunIntoTar(
 
   // Bundle HAR files into the archive
   const harEntries: Array<{ url: string; entryName: string }> = [];
-  for (const turn of resource.turns ?? []) {
+  for (const turn of turns) {
     if (turn.harUrl) harEntries.push({ url: turn.harUrl, entryName: `${id}/iteration-${turn.iteration}.har` });
   }
-  if (resource.harUrl) harEntries.push({ url: resource.harUrl, entryName: `${id}/run.har` });
+  if (topHarUrl) harEntries.push({ url: topHarUrl, entryName: `${id}/run.har` });
 
   for (const { url, entryName } of harEntries) {
     try {
@@ -307,10 +342,10 @@ export async function packRunIntoTar(
 
   // Bundle raw chat export files into the archive
   const chatEntries: Array<{ url: string; entryName: string }> = [];
-  for (const turn of resource.turns ?? []) {
+  for (const turn of turns) {
     if (turn.rawChatUrl) chatEntries.push({ url: turn.rawChatUrl, entryName: `${id}/iteration-${turn.iteration}.chat-export.json` });
   }
-  if (resource.rawChatUrl) chatEntries.push({ url: resource.rawChatUrl, entryName: `${id}/run.chat-export.json` });
+  if (topRawChatUrl) chatEntries.push({ url: topRawChatUrl, entryName: `${id}/run.chat-export.json` });
 
   for (const { url, entryName } of chatEntries) {
     try {
@@ -324,6 +359,30 @@ export async function packRunIntoTar(
     } catch (blobError) {
       if (isBlobNotFound(blobError)) continue;
       throw blobError;
+    }
+  }
+
+  // Bundle log events (logs.jsonl) from the logs container.
+  // Logs are stored as AppendBlobs, so use getBlobClient (type-agnostic) rather
+  // than getBlockBlobClient — the latter returns contentLength: undefined for
+  // append blobs, causing the entry to be silently skipped.
+  if (logsContainer) {
+    try {
+      // Prefer the per-attempt logsUrl stored on the run sub-document;
+      // fall back to legacy path for pre-migration documents.
+      const logsUrl = resource.run?.logsUrl;
+      const logBlobName = logsUrl
+        ? blobNameFromLogsUrl(logsUrl) ?? `${resource._id}/run.jsonl`
+        : `${resource._id}/run.jsonl`;
+      const blobClient = logsContainer.getBlobClient(logBlobName);
+      const downloadResponse = await blobClient.download();
+      const { readableStreamBody, contentLength } = downloadResponse;
+      if (readableStreamBody && contentLength != null && contentLength > 0) {
+        const entry = pack.entry({ name: `${id}/logs.jsonl`, size: contentLength });
+        await pipeline(readableStreamBody, entry);
+      }
+    } catch (blobError) {
+      if (!isBlobNotFound(blobError)) throw blobError;
     }
   }
 }

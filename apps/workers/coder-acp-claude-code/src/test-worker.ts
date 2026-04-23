@@ -18,6 +18,7 @@
  */
 import { runACPSession } from "./acp-client.js";
 import { createFreshWorkspace } from "shared";
+import { execSync } from "child_process";
 
 interface PromptResult {
   success: boolean;
@@ -26,9 +27,18 @@ interface PromptResult {
   error?: string;
 }
 
+interface ToolCheck {
+  tool: string;
+  available: boolean;
+  path?: string;
+  version?: string;
+}
+
 interface TestResult {
   /** Results for each prompt (1 or 2 entries) */
   prompts: PromptResult[];
+  /** CLI tool availability checks */
+  toolChecks?: ToolCheck[];
   /** Which step the worker reached before it failed/completed */
   lastStep?: string;
   logs?: string[];
@@ -43,23 +53,45 @@ function emit(msg: string): void {
   process.stderr.write(line + "\n");
 }
 
+function checkTools(tools: string[]): ToolCheck[] {
+  return tools.map((tool) => {
+    try {
+      const path = execSync(`which ${tool}`, { encoding: "utf-8" }).trim();
+      let version: string | undefined;
+      try {
+        version = execSync(`${tool} --version`, { encoding: "utf-8" }).trim().split("\n")[0];
+      } catch {}
+      return { tool, available: true, path, version };
+    } catch {
+      return { tool, available: false };
+    }
+  });
+}
+
 async function main(): Promise<void> {
   emit("test-worker starting");
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  if (!apiKey && !oauthToken) {
-    throw new Error("ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN env var is required");
+  // Check required CLI tools are available in PATH
+  const toolChecks = checkTools(["pwsh", "python3", "git", "uv"]);
+  for (const tc of toolChecks) {
+    emit(`tool ${tc.tool}: ${tc.available ? `found ${tc.path}` : "NOT FOUND"}${tc.version ? ` (${tc.version})` : ""}`);
   }
 
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
   const prompts = [process.env.TEST_PROMPT].filter(Boolean) as string[];
   if (process.env.TEST_PROMPT_2) prompts.push(process.env.TEST_PROMPT_2);
 
-  if (prompts.length === 0) {
-    throw new Error("TEST_PROMPT env var is required");
-  }
+  const result: TestResult = { prompts: [], toolChecks };
 
-  const result: TestResult = { prompts: [] };
+  // If no credentials or prompts, report tool checks only
+  if ((!apiKey && !oauthToken) || prompts.length === 0) {
+    emit("No credentials or prompts — reporting tool checks only");
+    result.logs = collectedLogs;
+    console.log("TEST_RESULT:" + JSON.stringify(result));
+    process.exit(toolChecks.every((t) => t.available) ? 0 : 1);
+    return;
+  }
   const workspacePath = createFreshWorkspace();
   emit(`Created workspace: ${workspacePath}`);
 
@@ -123,11 +155,12 @@ async function main(): Promise<void> {
   result.logs = collectedLogs;
 
   const allSucceeded = result.prompts.every((p) => p.success);
+  const allToolsOk = toolChecks.every((t) => t.available);
   emit(`last step reached: ${result.lastStep ?? "(none)"}`);
-  emit(`prompts: ${result.prompts.length}, all succeeded: ${allSucceeded}`);
+  emit(`prompts: ${result.prompts.length}, all succeeded: ${allSucceeded}, tools ok: ${allToolsOk}`);
   console.log("TEST_RESULT:" + JSON.stringify(result));
 
-  process.exit(allSucceeded ? 0 : 1);
+  process.exit(allSucceeded && allToolsOk ? 0 : 1);
 }
 
 main().catch((err) => {

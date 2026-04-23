@@ -283,7 +283,6 @@ describe("request schemas", () => {
       _id: "abc123",
       scenario: validScenario,
       workerType: "coder-acp-copilot",
-      status: "pending",
       createdAt: NOW,
     };
 
@@ -296,8 +295,7 @@ describe("request schemas", () => {
     it("optional fields can be omitted", () => {
       const result = RequestResponseSchema.parse(minimal);
       expect(result.model).toBeUndefined();
-      expect(result.turns).toBeUndefined();
-      expect(result.tokenUsage).toBeUndefined();
+      expect(result.run).toBeUndefined();
     });
 
     it("rejects missing _id", () => {
@@ -305,9 +303,12 @@ describe("request schemas", () => {
       expect(() => RequestResponseSchema.parse(rest)).toThrow();
     });
 
-    it("rejects invalid status", () => {
+    it("rejects invalid run status", () => {
       expect(() =>
-        RequestResponseSchema.parse({ ...minimal, status: "unknown" }),
+        RequestResponseSchema.parse({
+          ...minimal,
+          run: { status: "unknown" },
+        }),
       ).toThrow();
     });
   });

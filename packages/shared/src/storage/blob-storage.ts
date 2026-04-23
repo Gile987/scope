@@ -42,7 +42,6 @@ export interface BlobStorageConfig {
 export class BlobStorage {
   private containerClient: ContainerClient;
   private logsContainerClient: ContainerClient;
-  private blobServiceClient: BlobServiceClient;
   private logsContainerReady: Promise<void> | null = null;
   /** Tracks per-blob createIfNotExists — keyed by blobName, value is the settled promise. */
   private initializedBlobs = new Map<string, Promise<void>>();
@@ -62,7 +61,6 @@ export class BlobStorage {
       );
     }
 
-    this.blobServiceClient = blobServiceClient;
     this.containerClient = blobServiceClient.getContainerClient(SNAPSHOTS_CONTAINER);
     this.logsContainerClient = blobServiceClient.getContainerClient(LOGS_CONTAINER);
   }
@@ -89,10 +87,13 @@ export class BlobStorage {
    * Appends a single log event as a JSON line to the run's append blob.
    * Creates the blob and container on first use. Blob-level initialization is
    * cached per blobName so concurrent appends only call createIfNotExists once.
+   *
+   * Path scheme: `{requestId}/runs/{runId}/run.jsonl`. Each retry attempt writes
+   * to its own blob keyed on the run id.
    */
-  async appendLogEvent(requestId: string, logEvent: LogEvent): Promise<void> {
+  async appendLogEvent(requestId: string, runId: string, logEvent: LogEvent): Promise<void> {
     await this.ensureLogsContainer();
-    const blobName = `${requestId}/run.jsonl`;
+    const blobName = `${requestId}/runs/${runId}/run.jsonl`;
     const appendBlobClient = this.logsContainerClient.getAppendBlobClient(blobName);
     if (!this.initializedBlobs.has(blobName)) {
       this.initializedBlobs.set(
@@ -106,46 +107,102 @@ export class BlobStorage {
   }
 
   /**
-   * Downloads all persisted log events for a run.
-   * Returns an empty array if no log blob exists yet.
+   * Removes the initialisation cache entry for a run once it is complete.
+   * Prevents the long-lived BlobStorage instance from accumulating one entry
+   * per run over the worker lifetime.
    */
-  async getLogEvents(requestId: string): Promise<LogEvent[]> {
+  evictRun(requestId: string, runId: string): void {
+    this.initializedBlobs.delete(`${requestId}/runs/${runId}/run.jsonl`);
+  }
+
+  /**
+   * Returns the full blob URL for a log blob name in the `logs` container.
+   * Use at submit time to store `logsUrl` on the RunState document.
+   */
+  getLogsBlobUrl(blobName: string): string {
+    return this.logsContainerClient.getAppendBlobClient(blobName).url;
+  }
+
+  /**
+   * Downloads all persisted log events for a run.
+   *
+   * Preferred: pass `logsUrl` (the full blob URL stored on RunState, e.g.
+   * `https://<account>.blob.core.windows.net/logs/{requestId}/runs/{runId}/run.jsonl`).
+   * The URL is parsed to extract the blob name, matching the pattern used by
+   * `downloadAndExtractSnapshot` for snapshot URLs.
+   *
+   * Legacy fallback (for runs created before `logsUrl` was recorded):
+   * pass `requestId` + optional `runId`. Tries the per-attempt path first,
+   * then the legacy `{requestId}/run.jsonl` path on 404.
+   *
+   * Returns an empty array if no log blob exists at any location.
+   */
+  async getLogEvents(logsUrlOrRequestId: string, runId?: string): Promise<LogEvent[]> {
     await this.ensureLogsContainer();
-    const blobName = `${requestId}/run.jsonl`;
-    const appendBlobClient = this.logsContainerClient.getAppendBlobClient(blobName);
 
-    try {
-      const download = await appendBlobClient.download();
-      if (!download.readableStreamBody) return [];
-
-      const chunks: Buffer[] = [];
-      for await (const chunk of download.readableStreamBody as AsyncIterable<Buffer>) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const tryDownload = async (blobName: string): Promise<LogEvent[] | undefined> => {
+      const client = this.logsContainerClient.getAppendBlobClient(blobName);
+      try {
+        const download = await client.download();
+        if (!download.readableStreamBody) return [];
+        const chunks: Buffer[] = [];
+        for await (const chunk of download.readableStreamBody as AsyncIterable<Buffer>) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const text = Buffer.concat(chunks).toString("utf-8");
+        return text
+          .split("\n")
+          .filter((line) => line.trim().length > 0)
+          .map((line) => JSON.parse(line) as LogEvent);
+      } catch (err: any) {
+        if (err?.statusCode === 404) return undefined;
+        throw err;
       }
-      const text = Buffer.concat(chunks).toString("utf-8");
-      return text
-        .split("\n")
-        .filter((line) => line.trim().length > 0)
-        .map((line) => JSON.parse(line) as LogEvent);
-    } catch (err: any) {
-      // Blob not found — log stream hasn't started yet
-      if (err?.statusCode === 404) return [];
-      throw err;
+    };
+
+    // When the first argument looks like a URL, parse it to extract the
+    // blob name — same approach as downloadAndExtractSnapshot for snapshot URLs.
+    if (logsUrlOrRequestId.startsWith("http://") || logsUrlOrRequestId.startsWith("https://")) {
+      const url = new URL(logsUrlOrRequestId);
+      const containerPrefix = `/${LOGS_CONTAINER}/`;
+      const containerIndex = url.pathname.indexOf(containerPrefix);
+      if (containerIndex === -1) {
+        throw new Error(
+          `Logs URL does not contain container '${LOGS_CONTAINER}': ${logsUrlOrRequestId}`
+        );
+      }
+      const blobName = decodeURIComponent(
+        url.pathname.substring(containerIndex + containerPrefix.length)
+      );
+      const fromDirect = await tryDownload(blobName);
+      return fromDirect ?? [];
     }
+
+    // Legacy: caller passed a requestId (+ optional runId). Try the
+    // per-attempt path first, then the old flat layout.
+    const requestId = logsUrlOrRequestId;
+    if (runId) {
+      const fromNew = await tryDownload(`${requestId}/runs/${runId}/run.jsonl`);
+      if (fromNew !== undefined) return fromNew;
+    }
+    const fromLegacy = await tryDownload(`${requestId}/run.jsonl`);
+    return fromLegacy ?? [];
   }
 
   /**
    * Uploads a workspace directory as a tar.gz snapshot to blob storage.
+   * Path: `{requestId}/runs/{runId}/iteration-{iteration}/workspace.tar.gz`.
    * Returns the blob URL.
    */
   async uploadWorkspaceSnapshot(
     workspacePath: string,
     requestId: string,
+    runId: string,
     iteration: number
   ): Promise<string> {
     await this.ensureContainer();
 
-    const blobName = `${requestId}/iteration-${iteration}/workspace.tar.gz`;
+    const blobName = `${requestId}/runs/${runId}/iteration-${iteration}/workspace.tar.gz`;
     const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
 
     // Create tar.gz in a temp directory
@@ -169,6 +226,7 @@ export class BlobStorage {
         },
         tags: {
           requestId,
+          runId,
           iteration: String(iteration),
         },
       });

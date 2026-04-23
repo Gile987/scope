@@ -1,8 +1,33 @@
 ARG COPILOT_CLI_VERSION
 
-FROM node:24-slim AS builder
+# --- Base stage: runtime tools shared by dev and production ---
+FROM node:24-slim AS base
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
+
+# Install system tools for coding agents: Python, uv, git, PowerShell
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    curl \
+    git \
+    libicu72 \
+    && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
+    && ARCH=$(dpkg --print-architecture) \
+    && case "$ARCH" in amd64) PS_ARCH=x64;; arm64) PS_ARCH=arm64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
+    && curl -fsSL -o /tmp/powershell.tar.gz \
+      "https://github.com/PowerShell/PowerShell/releases/download/v7.4.14/powershell-7.4.14-linux-${PS_ARCH}.tar.gz" \
+    && mkdir -p /opt/microsoft/powershell/7 \
+    && tar -xzf /tmp/powershell.tar.gz -C /opt/microsoft/powershell/7 \
+    && rm /tmp/powershell.tar.gz \
+    && chmod +x /opt/microsoft/powershell/7/pwsh \
+    && ln -s /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/root/.local/bin:$PATH"
+
+# --- Builder stage: compile TypeScript ---
+FROM base AS builder
 
 WORKDIR /app
 
@@ -22,15 +47,6 @@ RUN pnpm --filter shared build && pnpm --filter coder-acp-copilot build
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
-# Install system tools needed at runtime
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    curl \
-    git \
-    && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
-    && rm -rf /var/lib/apt/lists/*
-ENV PATH="/root/.local/bin:$PATH"
 ARG COPILOT_CLI_VERSION
 RUN npm install -g @github/copilot@${COPILOT_CLI_VERSION}
 
@@ -49,21 +65,7 @@ USER node
 CMD ["/app/scripts/dev-entrypoint.sh"]
 
 # --- Production stage ---
-FROM node:24-slim
-
-RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
-
-# Install Python and uv for Python-based MCP servers
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    curl \
-    git \
-    && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
-    && rm -rf /var/lib/apt/lists/*
-
-# Add uv to PATH
-ENV PATH="/root/.local/bin:$PATH"
+FROM base
 
 # Install GitHub Copilot CLI globally
 ARG COPILOT_CLI_VERSION

@@ -33,8 +33,12 @@ export interface MultiTurnConfig {
   judgeClient?: JudgeClient;
   /** Blob storage client for workspace snapshots */
   blobStorage: BlobStorage;
-  /** Request ID (for snapshot naming) */
+  /** Request ID (top-level prefix for blob paths) */
   requestId: string;
+  /** Run ID for the current attempt. Blobs are stored under
+   *  `{requestId}/runs/{runId}/...` so each retry attempt gets its own
+   *  isolated path and never overwrites a previous attempt's artifacts. */
+  runId: string;
   /** Logging function */
   log: (
     level: LogEvent["level"],
@@ -86,6 +90,7 @@ export async function runMultiTurnLoop(
     judgeClient,
     blobStorage,
     requestId,
+    runId,
     log,
     onTurnComplete,
     personaInstructions,
@@ -163,7 +168,7 @@ export async function runMultiTurnLoop(
       if (workerResult.harFilePath) {
         try {
           const sanitizedHar = await sanitizeHarFile(workerResult.harFilePath, workerResult.harFilePath);
-          const harBlobName = `${requestId}/iteration-${iteration}/devproxy.har`;
+          const harBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/devproxy.har`;
           turnHarUrl = await blobStorage.uploadFile(
             workerResult.harFilePath,
             harBlobName,
@@ -191,7 +196,7 @@ export async function runMultiTurnLoop(
       if (workerResult.videoFilePaths && workerResult.videoFilePaths.length > 0) {
         try {
           for (let i = 0; i < workerResult.videoFilePaths.length; i++) {
-            const videoBlobName = `${requestId}/iteration-${iteration}/video-${i}.webm`;
+            const videoBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/video-${i}.webm`;
             const videoUrl = await blobStorage.uploadFile(
               workerResult.videoFilePaths[i],
               videoBlobName,
@@ -209,7 +214,7 @@ export async function runMultiTurnLoop(
       // Upload raw chat transcript to blob storage if available
       if (workerResult.rawChatFilePath) {
         try {
-          const chatBlobName = `${requestId}/iteration-${iteration}/chat-export.json`;
+          const chatBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/chat-export.json`;
           turnRawChatUrl = await blobStorage.uploadFile(
             workerResult.rawChatFilePath,
             chatBlobName,
@@ -232,7 +237,7 @@ export async function runMultiTurnLoop(
       if (errorHarFilePath) {
         try {
           await sanitizeHarFile(errorHarFilePath, errorHarFilePath);
-          const harBlobName = `${requestId}/iteration-${iteration}/devproxy.har`;
+          const harBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/devproxy.har`;
           errorHarUrl = await blobStorage.uploadFile(
             errorHarFilePath,
             harBlobName,
@@ -254,7 +259,7 @@ export async function runMultiTurnLoop(
       if (errorVideoPaths.length > 0) {
         try {
           for (let i = 0; i < errorVideoPaths.length; i++) {
-            const videoBlobName = `${requestId}/iteration-${iteration}/video-${i}.webm`;
+            const videoBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/video-${i}.webm`;
             const videoUrl = await blobStorage.uploadFile(
               errorVideoPaths[i],
               videoBlobName,
@@ -307,6 +312,7 @@ export async function runMultiTurnLoop(
       snapshotUrl = await blobStorage.uploadWorkspaceSnapshot(
         workspacePath,
         requestId,
+        runId,
         iteration
       );
     } catch (error) {

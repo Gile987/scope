@@ -70,6 +70,7 @@ export class LogPublisher {
 
   async publish(
     requestId: string,
+    runId: string,
     level: LogEvent["level"],
     message: string,
     data?: Record<string, unknown>
@@ -82,7 +83,9 @@ export class LogPublisher {
       data,
     };
 
-    // Publish to Redis for real-time streaming (with circuit breaker)
+    // Publish to Redis for real-time streaming (with circuit breaker).
+    // The Redis channel is keyed on requestId so SSE listeners receive logs
+    // for whichever attempt is currently running.
     const channel = `logs:${requestId}`;
     try {
       await this.redisBreaker.execute(() =>
@@ -93,10 +96,11 @@ export class LogPublisher {
     }
 
     // Append to blob storage for persistence (avoids CosmosDB RU pressure).
+    // Per-attempt path: {requestId}/runs/{runId}/run.jsonl
     // The Azure SDK's built-in StorageRetryPolicy handles transient failures
     // (429, 500, 503, network errors) with exponential backoff — default: 3 attempts.
     try {
-      await this.blobStorage.appendLogEvent(requestId, logEvent);
+      await this.blobStorage.appendLogEvent(requestId, runId, logEvent);
     } catch (error) {
       console.error(`Failed to persist log to blob storage: ${error}`);
     }
@@ -104,6 +108,14 @@ export class LogPublisher {
 
   async close(): Promise<void> {
     await this.redis.quit();
+  }
+
+  /**
+   * Clears the per-run blob initialisation cache entry once a run is complete.
+   * Prevents the map from growing unbounded in long-lived worker processes.
+   */
+  evictRun(requestId: string, runId: string): void {
+    this.blobStorage.evictRun(requestId, runId);
   }
 }
 
