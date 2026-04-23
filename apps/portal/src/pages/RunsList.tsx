@@ -795,7 +795,13 @@ export function RunsList() {
                 size="sm"
                 className="gap-1.5"
                 disabled={selectionCaps.prioritizable === 0}
-                onClick={() => setPriorityDialogOpen(true)}
+                onClick={() => {
+                  // Pre-fill with the common priority of selected prioritizable runs
+                  const prioritizable = runs.filter((r) => selectedIds.has(r._id) && ((r.run?.status ?? "pending") === "pending" || r.run?.status === "paused"));
+                  const priorities = new Set(prioritizable.map((r) => r.priority ?? 0));
+                  setBulkPriorityValue(priorities.size === 1 ? [...priorities][0] : 0);
+                  setPriorityDialogOpen(true);
+                }}
               >
                 <ArrowUpDown className="h-4 w-4" />
                 <span className="hidden lg:inline">{`Priority${selectionCaps.prioritizable > 0 ? ` (${selectionCaps.prioritizable})` : ""}`}</span>
