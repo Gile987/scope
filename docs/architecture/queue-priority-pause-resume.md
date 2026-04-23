@@ -63,6 +63,8 @@ The scheduling system decouples request ordering from message delivery. MongoDB 
 
 Priority is request-scoped (survives retries). The range is unrestricted but the portal offers −10 to +10 via the bulk dialog, with ±1/±5 increment buttons.
 
+Priority can only be changed on `pending` and `paused` requests — the API endpoints enforce this server-side. Changing priority on a `queued` request is not allowed because the message is already in the Azure queue where ordering cannot be changed. `processing` and `done` requests are immutable.
+
 ### Status Lifecycle
 
 ```mermaid
