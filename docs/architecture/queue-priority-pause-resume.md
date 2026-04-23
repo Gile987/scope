@@ -1,7 +1,5 @@
 # Queue Priority, Pause & Resume
 
-> **PR**: #689 (`feat/queue-priority-pause-resume`)
-
 ## Overview
 
 The scheduling system decouples request ordering from message delivery. MongoDB is the scheduling brain — it stores priority, enforces pause/resume state, and determines dispatch order. Azure Storage Queues remain the notification channel that wakes workers, but are kept deliberately shallow so scheduling decisions in MongoDB take effect within seconds.
@@ -125,6 +123,14 @@ Once a message is in Azure Storage Queue, it cannot be reordered or removed. By 
 - **Priority takes effect immediately**: high-priority requests get dispatched on the next tick
 - **Pause takes effect immediately**: paused requests are never dispatched
 - **Priority changes are respected**: pending requests re-sort on the next tick
+
+### Back Pressure
+
+The scheduler provides natural back pressure. When workers are busy, messages sit in the queue and `approximateMessagesCount` stays at or above `targetQueueDepth`. The scheduler sees zero available slots and stops dispatching — pending requests accumulate in MongoDB where they remain re-prioritizable and pausable.
+
+When workers finish and drain messages, slots open up and the scheduler fills them on the next tick (≤2s). This creates a pull-based flow: workers pull work at their own pace, and the scheduler never overwhelms them regardless of how many requests are pending in MongoDB.
+
+If worker replicas scale up, increase `SCHEDULER_QUEUE_DEPTH_<TYPE>` to match. The target depth should roughly equal the number of worker replicas so each has a message ready when it finishes its current job.
 
 ## Worker Behavior
 
