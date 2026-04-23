@@ -761,28 +761,74 @@ export function RunsList() {
             <TooltipContent>Clear selection</TooltipContent>
           </Tooltip>
           <div className="flex-1" />
+          {/* Primary actions — shown directly when applicable */}
+          {selectionCaps.pausable > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={bulkPauseMutation.isPending}
+                  onClick={() => bulkPauseMutation.mutate(Array.from(selectedIds))}
+                >
+                  <Pause className="h-4 w-4" />
+                  {bulkPauseMutation.isPending ? "…" : selectionCaps.pausable}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Pause {selectionCaps.pausable} run{selectionCaps.pausable !== 1 ? "s" : ""}</TooltipContent>
+            </Tooltip>
+          )}
+          {selectionCaps.resumable > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={bulkResumeMutation.isPending}
+                  onClick={() => bulkResumeMutation.mutate(Array.from(selectedIds))}
+                >
+                  <Play className="h-4 w-4" />
+                  {bulkResumeMutation.isPending ? "…" : selectionCaps.resumable}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Resume {selectionCaps.resumable} run{selectionCaps.resumable !== 1 ? "s" : ""}</TooltipContent>
+            </Tooltip>
+          )}
+          {selectionCaps.retryable > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={bulkRetryMutation.isPending}
+                  onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {bulkRetryMutation.isPending ? "…" : selectionCaps.retryable}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Retry {selectionCaps.retryable} run{selectionCaps.retryable !== 1 ? "s" : ""}</TooltipContent>
+            </Tooltip>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setResubmitDialogOpen(true)}>
+                <Repeat className="h-4 w-4" /> Re-submit
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Re-submit selected runs with optional overrides</TooltipContent>
+          </Tooltip>
+          {/* Overflow menu for less frequent actions */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <MoreHorizontal className="h-4 w-4" /> Actions <ChevronDown className="h-3 w-3 opacity-50" />
+              <Button variant="outline" size="icon" className="h-8 w-8">
+                <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>Scheduling</DropdownMenuLabel>
-              <DropdownMenuItem
-                disabled={bulkPauseMutation.isPending || selectionCaps.pausable === 0}
-                onClick={() => bulkPauseMutation.mutate(Array.from(selectedIds))}
-              >
-                <Pause className="h-4 w-4" />
-                {bulkPauseMutation.isPending ? "Pausing…" : `Pause${selectionCaps.pausable > 0 ? ` (${selectionCaps.pausable})` : ""}`}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={bulkResumeMutation.isPending || selectionCaps.resumable === 0}
-                onClick={() => bulkResumeMutation.mutate(Array.from(selectedIds))}
-              >
-                <Play className="h-4 w-4" />
-                {bulkResumeMutation.isPending ? "Resuming…" : `Resume${selectionCaps.resumable > 0 ? ` (${selectionCaps.resumable})` : ""}`}
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuItem
                 disabled={selectionCaps.prioritizable === 0}
                 onClick={() => setPriorityDialogOpen(true)}
@@ -791,20 +837,6 @@ export function RunsList() {
                 Set priority{selectionCaps.prioritizable > 0 ? ` (${selectionCaps.prioritizable})` : ""}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel>Runs</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => setResubmitDialogOpen(true)}>
-                <Repeat className="h-4 w-4" />
-                Re-submit
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={bulkRetryMutation.isPending || selectionCaps.retryable === 0}
-                onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
-              >
-                <RotateCcw className="h-4 w-4" />
-                {bulkRetryMutation.isPending ? "Retrying…" : `Retry${selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}`}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel>Export</DropdownMenuLabel>
               <DropdownMenuItem onClick={() => setReportDialogOpen(true)}>
                 <FileText className="h-4 w-4" />
                 Generate reports
