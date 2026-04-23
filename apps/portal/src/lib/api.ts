@@ -93,6 +93,24 @@ export const api = {
     return request(`/requests/${id}/retry`, { method: "POST" });
   },
 
+  /** Pause a request */
+  pauseRun: (id: string): Promise<{ id: string; status: string }> => {
+    return request(`/requests/${id}/pause`, { method: "POST" });
+  },
+
+  /** Resume a paused request */
+  resumeRun: (id: string): Promise<{ id: string; status: string }> => {
+    return request(`/requests/${id}/resume`, { method: "POST" });
+  },
+
+  /** Set priority for a request */
+  setPriority: (id: string, priority: number): Promise<{ id: string; priority: number }> => {
+    return request(`/requests/${id}/priority`, {
+      method: "POST",
+      body: JSON.stringify({ priority }),
+    });
+  },
+
   /** List all attempts for a request (current + historical) */
   listRunAttempts: (id: string): Promise<RunState[]> => {
     return request(`/requests/${id}/runs`);
@@ -103,6 +121,30 @@ export const api = {
     return request(`/requests/bulk-retry`, {
       method: "POST",
       body: JSON.stringify({ ids }),
+    });
+  },
+
+  /** Bulk pause multiple requests */
+  bulkPauseRuns: (ids: string[]): Promise<{ paused: number; skipped: number }> => {
+    return request(`/requests/bulk-pause`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  },
+
+  /** Bulk resume multiple requests */
+  bulkResumeRuns: (ids: string[]): Promise<{ resumed: number; skipped: number }> => {
+    return request(`/requests/bulk-resume`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  },
+
+  /** Bulk set priority for multiple requests */
+  bulkSetPriority: (ids: string[], priority: number): Promise<{ updated: number }> => {
+    return request(`/requests/bulk-priority`, {
+      method: "POST",
+      body: JSON.stringify({ ids, priority }),
     });
   },
 

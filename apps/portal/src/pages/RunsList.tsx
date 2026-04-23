@@ -23,7 +23,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
@@ -294,6 +294,45 @@ export function RunsList() {
     },
   });
 
+  const pauseMutation = useMutation({
+    mutationFn: api.pauseRun,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success("Run paused");
+    },
+    onError: (error) => {
+      toast.error("Failed to pause", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: api.resumeRun,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success("Run resumed");
+    },
+    onError: (error) => {
+      toast.error("Failed to resume", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const setPriorityMutation = useMutation({
+    mutationFn: ({ id, priority }: { id: string; priority: number }) => api.setPriority(id, priority),
+    onSuccess: (_data, { priority }) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success(`Priority set to ${priority}`);
+    },
+    onError: (error) => {
+      toast.error("Failed to set priority", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
   const bulkRetryMutation = useMutation({
     mutationFn: (ids: string[]) => api.bulkRetryRuns(ids),
     onSuccess: ({ retried, skipped }) => {
@@ -323,6 +362,53 @@ export function RunsList() {
     },
     onError: (error) => {
       toast.error("Failed to delete runs", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const bulkPauseMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkPauseRuns(ids),
+    onSuccess: ({ paused, skipped }) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      const parts: string[] = [];
+      if (paused > 0) parts.push(`${paused} paused`);
+      if (skipped > 0) parts.push(`${skipped} skipped`);
+      toast.success(`Bulk pause: ${parts.join(", ")}`);
+    },
+    onError: (error) => {
+      toast.error("Bulk pause failed", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const bulkResumeMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkResumeRuns(ids),
+    onSuccess: ({ resumed, skipped }) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      const parts: string[] = [];
+      if (resumed > 0) parts.push(`${resumed} resumed`);
+      if (skipped > 0) parts.push(`${skipped} skipped`);
+      toast.success(`Bulk resume: ${parts.join(", ")}`);
+    },
+    onError: (error) => {
+      toast.error("Bulk resume failed", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const [bulkPriorityValue, setBulkPriorityValue] = useState<number>(0);
+
+  const bulkSetPriorityMutation = useMutation({
+    mutationFn: ({ ids, priority }: { ids: string[]; priority: number }) => api.bulkSetPriority(ids, priority),
+    onSuccess: ({ updated }) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success(`Priority updated for ${updated} run${updated !== 1 ? "s" : ""}`);
+    },
+    onError: (error) => {
+      toast.error("Bulk priority update failed", {
         description: error instanceof Error ? error.message : "Unknown error",
       });
     },
@@ -1123,6 +1209,62 @@ export function RunsList() {
             variant="outline"
             size="sm"
             className="gap-1.5"
+            disabled={bulkPauseMutation.isPending}
+            onClick={() => bulkPauseMutation.mutate(Array.from(selectedIds))}
+          >
+            <Pause className="h-4 w-4" />
+            {bulkPauseMutation.isPending ? "Pausing…" : "Pause selected"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={bulkResumeMutation.isPending}
+            onClick={() => bulkResumeMutation.mutate(Array.from(selectedIds))}
+          >
+            <Play className="h-4 w-4" />
+            {bulkResumeMutation.isPending ? "Resuming…" : "Resume selected"}
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <ArrowUpDown className="h-4 w-4" /> Set priority
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Set priority for {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Higher priority runs are dispatched first. Default is 0.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="py-2">
+                <Label htmlFor="bulk-priority">Priority</Label>
+                <Input
+                  id="bulk-priority"
+                  type="number"
+                  min={-100}
+                  max={100}
+                  value={bulkPriorityValue}
+                  onChange={(e) => setBulkPriorityValue(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
+                  className="w-24 mt-1"
+                />
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => bulkSetPriorityMutation.mutate({ ids: Array.from(selectedIds), priority: bulkPriorityValue })}
+                  disabled={bulkSetPriorityMutation.isPending}
+                >
+                  {bulkSetPriorityMutation.isPending ? "Updating…" : "Set priority"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
             disabled={bulkRetryMutation.isPending}
             onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
           >
@@ -1229,6 +1371,9 @@ export function RunsList() {
                     reportSummaries={reportSummaries}
                     deleteMutation={deleteMutation}
                     retryMutation={retryMutation}
+                    pauseMutation={pauseMutation}
+                    resumeMutation={resumeMutation}
+                    setPriorityMutation={setPriorityMutation}
                     groupBy={groupBy}
                     profileNameMap={profileNameMap}
                     workerFilter={workerFilter === "all" ? undefined : workerFilter}
@@ -1249,6 +1394,9 @@ export function RunsList() {
                   reportSummaries={reportSummaries}
                   deleteMutation={deleteMutation}
                   retryMutation={retryMutation}
+                  pauseMutation={pauseMutation}
+                  resumeMutation={resumeMutation}
+                  setPriorityMutation={setPriorityMutation}
                   profileNameMap={profileNameMap}
                   hiddenColumns={hiddenColumns}
                 />
@@ -1294,6 +1442,9 @@ function RunRow({
   reportSummaries,
   deleteMutation,
   retryMutation,
+  pauseMutation,
+  resumeMutation,
+  setPriorityMutation,
   profileNameMap,
   hiddenColumns,
 }: {
@@ -1303,6 +1454,9 @@ function RunRow({
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   retryMutation: { mutate: (id: string) => void; isPending: boolean };
+  pauseMutation: { mutate: (id: string) => void; isPending: boolean };
+  resumeMutation: { mutate: (id: string) => void; isPending: boolean };
+  setPriorityMutation: { mutate: (args: { id: string; priority: number }) => void; isPending: boolean };
   profileNameMap: Map<string, string>;
   hiddenColumns: Set<ColumnId>;
 }) {
@@ -1488,6 +1642,52 @@ function RunRow({
               <Download className="h-4 w-4" />
             </Button>
           )}
+          {(run.run?.status === "pending" || run.run?.status === "queued") && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Pause"
+              onClick={() => pauseMutation.mutate(run._id)}
+              disabled={pauseMutation.isPending}
+            >
+              <Pause className="h-4 w-4" />
+            </Button>
+          )}
+          {run.run?.status === "paused" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Resume"
+              onClick={() => resumeMutation.mutate(run._id)}
+              disabled={resumeMutation.isPending}
+            >
+              <Play className="h-4 w-4" />
+            </Button>
+          )}
+          {run.run?.status !== "done" && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Set priority">
+                  <ArrowUpDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuLabel>Set Priority</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {[10, 5, 0, -5, -10].map((p) => (
+                  <DropdownMenuCheckboxItem
+                    key={p}
+                    checked={(run.priority ?? 0) === p}
+                    onCheckedChange={() => setPriorityMutation.mutate({ id: run._id, priority: p })}
+                  >
+                    {p > 0 ? `+${p}` : p} {p === 0 ? "(default)" : p > 0 ? "(higher)" : "(lower)"}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           {run.run?.status === "done" && (
             <Button
               variant="ghost"
@@ -1520,6 +1720,9 @@ function GroupRows({
   reportSummaries,
   deleteMutation,
   retryMutation,
+  pauseMutation,
+  resumeMutation,
+  setPriorityMutation,
   groupBy,
   profileNameMap,
   workerFilter,
@@ -1536,6 +1739,9 @@ function GroupRows({
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   retryMutation: { mutate: (id: string) => void; isPending: boolean };
+  pauseMutation: { mutate: (id: string) => void; isPending: boolean };
+  resumeMutation: { mutate: (id: string) => void; isPending: boolean };
+  setPriorityMutation: { mutate: (args: { id: string; priority: number }) => void; isPending: boolean };
   groupBy: GroupByKey;
   profileNameMap: Map<string, string>;
   workerFilter?: string;
@@ -1847,6 +2053,9 @@ function GroupRows({
               reportSummaries={mergedReportSummaries}
               deleteMutation={deleteMutation}
               retryMutation={retryMutation}
+              pauseMutation={pauseMutation}
+              resumeMutation={resumeMutation}
+              setPriorityMutation={setPriorityMutation}
               profileNameMap={profileNameMap}
               hiddenColumns={hiddenColumns}
             />
