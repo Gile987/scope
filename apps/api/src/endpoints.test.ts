@@ -1325,4 +1325,156 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(400);
     });
   });
+
+  // ===================================================================
+  // Priority endpoints
+  // ===================================================================
+
+  describe("POST /api/v1/requests/:id/priority", () => {
+    it("sets priority on a single request", async () => {
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app)
+        .post("/api/v1/requests/r1/priority")
+        .send({ priority: 5 });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ id: "r1", priority: 5 });
+    });
+
+    it("returns 404 when request not found", async () => {
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+
+      const res = await request(app)
+        .post("/api/v1/requests/missing/priority")
+        .send({ priority: 3 });
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 400 when priority is not an integer", async () => {
+      const res = await request(app)
+        .post("/api/v1/requests/r1/priority")
+        .send({ priority: 1.5 });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("POST /api/v1/requests/bulk/priority", () => {
+    it("sets priority on multiple requests", async () => {
+      (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 2, modifiedCount: 2 });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk/priority")
+        .send({ ids: ["r1", "r2"], priority: 10 });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ updated: 2, skipped: 0 });
+    });
+
+    it("returns skipped count for non-existent ids", async () => {
+      (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk/priority")
+        .send({ ids: ["r1", "missing"], priority: 5 });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ updated: 1, skipped: 1 });
+    });
+  });
+
+  // ===================================================================
+  // Pause / Resume endpoints
+  // ===================================================================
+
+  describe("POST /api/v1/requests/:id/pause", () => {
+    it("pauses a pending request", async () => {
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app).post("/api/v1/requests/r1/pause");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ id: "r1", status: "paused" });
+    });
+
+    it("returns 404 when request not found", async () => {
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+      (mocks.collection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app).post("/api/v1/requests/missing/pause");
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 409 when request is processing", async () => {
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "r1",
+        run: { _id: "run1", status: "processing" },
+      });
+
+      const res = await request(app).post("/api/v1/requests/r1/pause");
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain("processing");
+    });
+  });
+
+  describe("POST /api/v1/requests/:id/resume", () => {
+    it("resumes a paused request", async () => {
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app).post("/api/v1/requests/r1/resume");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ id: "r1", status: "pending" });
+    });
+
+    it("returns 404 when request not found", async () => {
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+      (mocks.collection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app).post("/api/v1/requests/missing/resume");
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 409 when request is not paused", async () => {
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "r1",
+        run: { _id: "run1", status: "pending" },
+      });
+
+      const res = await request(app).post("/api/v1/requests/r1/resume");
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain("pending");
+    });
+  });
+
+  describe("POST /api/v1/requests/bulk/pause", () => {
+    it("pauses multiple requests", async () => {
+      (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 2, modifiedCount: 2 });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk/pause")
+        .send({ ids: ["r1", "r2"] });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ updated: 2, skipped: 0 });
+    });
+
+    it("returns skipped count for non-pausable requests", async () => {
+      (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk/pause")
+        .send({ ids: ["r1", "r2", "r3"] });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ updated: 1, skipped: 2 });
+    });
+  });
+
+  describe("POST /api/v1/requests/bulk/resume", () => {
+    it("resumes multiple paused requests", async () => {
+      (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 2, modifiedCount: 2 });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk/resume")
+        .send({ ids: ["r1", "r2"] });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ updated: 2, skipped: 0 });
+    });
+  });
 });
