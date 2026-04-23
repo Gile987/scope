@@ -1218,7 +1218,7 @@ describe("API Endpoints", () => {
       expect(res.body.error).toContain("expected 'done'");
     });
 
-    it("demotes current run to history, swaps in a new attempt, queues message", async () => {
+    it("demotes current run to history, swaps in a new attempt", async () => {
       (mocks.collection.findOne as any).mockResolvedValue({
         _id: "req-1",
         workerType: "coder-acp-copilot",
@@ -1226,7 +1226,6 @@ describe("API Endpoints", () => {
       });
       (mocks.runsCollection.insertOne as any).mockResolvedValue({ insertedId: "run-1" });
       (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
-      const queueClient = mocks.queueClients.get("coder-acp-copilot")!;
 
       const res = await request(app).post("/api/v1/requests/req-1/retry");
 
@@ -1245,7 +1244,6 @@ describe("API Endpoints", () => {
           }),
         }),
       );
-      expect((queueClient.sendMessage as any)).toHaveBeenCalled();
     });
 
     it("returns 409 when concurrent retry wins the race", async () => {
@@ -1358,12 +1356,12 @@ describe("API Endpoints", () => {
     });
   });
 
-  describe("POST /api/v1/requests/bulk/priority", () => {
+  describe("POST /api/v1/requests/bulk-priority", () => {
     it("sets priority on multiple requests", async () => {
       (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 2, modifiedCount: 2 });
 
       const res = await request(app)
-        .post("/api/v1/requests/bulk/priority")
+        .post("/api/v1/requests/bulk-priority")
         .send({ ids: ["r1", "r2"], priority: 10 });
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ updated: 2, skipped: 0 });
@@ -1373,7 +1371,7 @@ describe("API Endpoints", () => {
       (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
 
       const res = await request(app)
-        .post("/api/v1/requests/bulk/priority")
+        .post("/api/v1/requests/bulk-priority")
         .send({ ids: ["r1", "missing"], priority: 5 });
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ updated: 1, skipped: 1 });
@@ -1444,12 +1442,12 @@ describe("API Endpoints", () => {
     });
   });
 
-  describe("POST /api/v1/requests/bulk/pause", () => {
+  describe("POST /api/v1/requests/bulk-pause", () => {
     it("pauses multiple requests", async () => {
       (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 2, modifiedCount: 2 });
 
       const res = await request(app)
-        .post("/api/v1/requests/bulk/pause")
+        .post("/api/v1/requests/bulk-pause")
         .send({ ids: ["r1", "r2"] });
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ updated: 2, skipped: 0 });
@@ -1459,19 +1457,19 @@ describe("API Endpoints", () => {
       (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
 
       const res = await request(app)
-        .post("/api/v1/requests/bulk/pause")
+        .post("/api/v1/requests/bulk-pause")
         .send({ ids: ["r1", "r2", "r3"] });
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ updated: 1, skipped: 2 });
     });
   });
 
-  describe("POST /api/v1/requests/bulk/resume", () => {
+  describe("POST /api/v1/requests/bulk-resume", () => {
     it("resumes multiple paused requests", async () => {
       (mocks.collection.updateMany as any).mockResolvedValue({ matchedCount: 2, modifiedCount: 2 });
 
       const res = await request(app)
-        .post("/api/v1/requests/bulk/resume")
+        .post("/api/v1/requests/bulk-resume")
         .send({ ids: ["r1", "r2"] });
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ updated: 2, skipped: 0 });

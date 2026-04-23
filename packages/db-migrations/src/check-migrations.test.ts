@@ -45,11 +45,12 @@ describe("checkMigrations", () => {
       "012-add-profile-name-index.ts",
       "013-remove-logs-from-docs.ts",
       "014-introduce-runs-and-run.ts",
+      "015-add-priority-and-scheduler-index.ts",
     ]);
     const result = await checkMigrations(db);
     expect(result.ready).toBe(true);
     expect(result.pending).toEqual([]);
-    expect(result.totalApplied).toBe(14);
+    expect(result.totalApplied).toBe(15);
     expect(result.applied).toEqual([
       "001-backfill-task-prompts.ts",
       "002-create-indexes.ts",
@@ -65,6 +66,7 @@ describe("checkMigrations", () => {
       "012-add-profile-name-index.ts",
       "013-remove-logs-from-docs.ts",
       "014-introduce-runs-and-run.ts",
+      "015-add-priority-and-scheduler-index.ts",
     ]);
   });
 
@@ -72,7 +74,7 @@ describe("checkMigrations", () => {
     const db = makeMockDb(["001-backfill-task-prompts.ts"]);
     const result = await checkMigrations(db);
     expect(result.ready).toBe(false);
-    expect(result.pending).toEqual(["002-create-indexes.ts", "003-create-skill-indexes.ts", "004-add-submission-id-index.ts", "005-backfill-iteration-durations.ts", "006-split-status-outcome.ts", "007-rename-exhausted-to-finished.ts", "008-backfill-ai-call-count.ts", "009-add-requests-filter-indexes.ts", "010-add-requests-pagination-index.ts", "011-add-profile-indexes.ts", "012-add-profile-name-index.ts", "013-remove-logs-from-docs.ts", "014-introduce-runs-and-run.ts"]);
+    expect(result.pending).toEqual(["002-create-indexes.ts", "003-create-skill-indexes.ts", "004-add-submission-id-index.ts", "005-backfill-iteration-durations.ts", "006-split-status-outcome.ts", "007-rename-exhausted-to-finished.ts", "008-backfill-ai-call-count.ts", "009-add-requests-filter-indexes.ts", "010-add-requests-pagination-index.ts", "011-add-profile-indexes.ts", "012-add-profile-name-index.ts", "013-remove-logs-from-docs.ts", "014-introduce-runs-and-run.ts", "015-add-priority-and-scheduler-index.ts"]);
     expect(result.applied).toEqual(["001-backfill-task-prompts.ts"]);
     expect(result.totalApplied).toBe(1);
   });
@@ -96,6 +98,7 @@ describe("checkMigrations", () => {
       "012-add-profile-name-index.ts",
       "013-remove-logs-from-docs.ts",
       "014-introduce-runs-and-run.ts",
+      "015-add-priority-and-scheduler-index.ts",
     ]);
     expect(result.applied).toEqual([]);
     expect(result.totalApplied).toBe(0);
@@ -117,12 +120,13 @@ describe("checkMigrations", () => {
       "012-add-profile-name-index.ts",
       "013-remove-logs-from-docs.ts",
       "014-introduce-runs-and-run.ts",
+      "015-add-priority-and-scheduler-index.ts",
       "999-future-migration.ts",
     ]);
     const result = await checkMigrations(db);
     expect(result.ready).toBe(true);
     expect(result.pending).toEqual([]);
-    expect(result.totalApplied).toBe(15);
+    expect(result.totalApplied).toBe(16);
   });
 
   it("caches results within TTL", async () => {

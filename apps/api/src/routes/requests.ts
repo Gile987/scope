@@ -2208,7 +2208,7 @@ apiRoute(ctx.app, ctx.registry, {
 // Set priority on multiple requests
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
-  path: "/api/v1/requests/bulk/priority",
+  path: "/api/v1/requests/bulk-priority",
   tags: ["Requests"],
   summary: "Set priority on multiple requests",
   body: z.object({
@@ -2311,7 +2311,7 @@ apiRoute(ctx.app, ctx.registry, {
 // Bulk pause
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
-  path: "/api/v1/requests/bulk/pause",
+  path: "/api/v1/requests/bulk-pause",
   tags: ["Requests"],
   summary: "Pause multiple requests",
   body: z.object({ ids: z.array(z.string()).min(1).max(100) }),
@@ -2341,7 +2341,7 @@ apiRoute(ctx.app, ctx.registry, {
 // Bulk resume
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
-  path: "/api/v1/requests/bulk/resume",
+  path: "/api/v1/requests/bulk-resume",
   tags: ["Requests"],
   summary: "Resume multiple paused requests",
   body: z.object({ ids: z.array(z.string()).min(1).max(100) }),
