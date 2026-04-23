@@ -4,6 +4,7 @@ packages:
   - "apps/cli"
   - "apps/judge"
   - "apps/portal"
+  - "apps/scheduler"
   - "apps/token-manager"
   - "apps/workers/*"
   - "apps/model-scanners/*"
