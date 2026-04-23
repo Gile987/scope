@@ -166,13 +166,13 @@ apiRoute(ctx.app, ctx.registry, {
     const sinceDate = req.query.since ? new Date(req.query.since) : undefined;
 
     const mdpFilter: Record<string, unknown> = {
-      status: "done",
+      "run.status": "done",
       deletedAt: { $exists: false },
     };
     if (req.query.worker) mdpFilter.workerType = req.query.worker;
     if (req.query.taskPromptId) mdpFilter.taskPromptId = req.query.taskPromptId;
     if (sinceDate && !isNaN(sinceDate.getTime())) {
-      mdpFilter.updatedAt = { $gt: sinceDate };
+      mdpFilter["run.updatedAt"] = { $gt: sinceDate };
     }
 
     const runs = await ctx.requestCollection
@@ -180,9 +180,9 @@ apiRoute(ctx.app, ctx.registry, {
       .project({
         _id: 1,
         scenario: 1,
-        status: 1,
-        turns: 1,
-        updatedAt: 1,
+        "run.status": 1,
+        "run.turns": 1,
+        "run.updatedAt": 1,
         taskPromptId: 1,
       })
       .toArray();
@@ -209,9 +209,9 @@ apiRoute(ctx.app, ctx.registry, {
 
     const mdpRuns: MdpAnalyzableRun[] = runs.map((r) => ({
       scenario: r.scenario,
-      status: r.status,
-      turns: r.turns,
-      updatedAt: r.updatedAt,
+      status: r.run?.status,
+      turns: r.run?.turns,
+      updatedAt: r.run?.updatedAt,
       promptFeatures: r.taskPromptId
         ? taskPromptFeatures.get(r.taskPromptId)
         : undefined,
