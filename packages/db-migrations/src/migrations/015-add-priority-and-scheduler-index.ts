@@ -45,10 +45,10 @@ export class AddPriorityAndSchedulerIndex implements MigrationInterface {
       { projection: { _id: 1 } },
     );
 
-    let batch: string[] = [];
+    let batch: any[] = [];
 
     for await (const doc of cursor) {
-      batch.push(doc._id as string);
+      batch.push(doc._id);
 
       if (batch.length >= BATCH_SIZE) {
         batchNum++;
@@ -58,7 +58,7 @@ export class AddPriorityAndSchedulerIndex implements MigrationInterface {
         for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
           try {
             const result = await requests.updateMany(
-              { _id: { $in: ids } },
+              { _id: { $in: ids } as any },
               { $set: { priority: 0 } },
             );
             totalUpdated += result.modifiedCount;
@@ -86,7 +86,7 @@ export class AddPriorityAndSchedulerIndex implements MigrationInterface {
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
           const result = await requests.updateMany(
-            { _id: { $in: batch } },
+            { _id: { $in: batch } as any },
             { $set: { priority: 0 } },
           );
           totalUpdated += result.modifiedCount;
@@ -141,10 +141,10 @@ export class AddPriorityAndSchedulerIndex implements MigrationInterface {
       { projection: { _id: 1 } },
     );
 
-    let batch: string[] = [];
+    let batch: any[] = [];
 
     for await (const doc of cursor) {
-      batch.push(doc._id as string);
+      batch.push(doc._id);
 
       if (batch.length >= BATCH_SIZE) {
         batchNum++;
@@ -154,7 +154,7 @@ export class AddPriorityAndSchedulerIndex implements MigrationInterface {
         for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
           try {
             const result = await requests.updateMany(
-              { _id: { $in: ids } },
+              { _id: { $in: ids } as any },
               { $unset: { priority: "" } },
             );
             totalUpdated += result.modifiedCount;
@@ -175,7 +175,7 @@ export class AddPriorityAndSchedulerIndex implements MigrationInterface {
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
           const result = await requests.updateMany(
-            { _id: { $in: batch } },
+            { _id: { $in: batch } as any },
             { $unset: { priority: "" } },
           );
           totalUpdated += result.modifiedCount;
