@@ -64,7 +64,7 @@ Instead of replacing Azure Storage Queue, we **layer priority and pause/resume o
                     │                              │
                     │  + priority: number (root)    │
                     │  + run.status: "paused"       │
-                    │  + pausedAt / resumedAt (root)│
+                    │  + run.pausedAt/resumedAt     │
                     │                              │
                     └───────────┬──────────────────┘
                                 │
@@ -114,8 +114,6 @@ The **hybrid approach** keeps the queue for its notification/wake-up role but mo
 
 ### RequestDocument (additions — root level)
 
-These are request-level fields (not per-attempt), so they go at the root alongside other immutable/request-scoped config:
-
 ```typescript
 export interface RequestDocument {
   // ... existing root fields (_id, scenario, workerType, model, etc.) ...
@@ -123,22 +121,13 @@ export interface RequestDocument {
   /** Scheduling priority. Higher = processed first. Default: 0. */
   priority: number;
 
-  /** When the request was paused (if run.status = "paused") */
-  pausedAt?: Date;
-
-  /** When the request was last resumed from paused state */
-  resumedAt?: Date;
-
-  /** Who paused/resumed (user ID or "system") */
-  pausedBy?: string;
-
   run: RunState;  // current attempt (mutable, per-attempt)
 }
 ```
 
 ### RunState (additions)
 
-`status` gains two new values:
+`status` gains two new values, plus pause/resume timestamps:
 
 ```typescript
 export interface RunState {
@@ -146,13 +135,19 @@ export interface RunState {
 
   /** Extended with queued + paused */
   status: "pending" | "queued" | "processing" | "paused" | "done";
+
+  /** When this run was paused (if status = "paused") */
+  pausedAt?: Date;
+
+  /** When this run was last resumed from paused state */
+  resumedAt?: Date;
 }
 ```
 
-> **Why `priority` at root but `queued`/`paused` in `run.status`?**
+> **Why `priority` at root but `queued`/`paused` in `run`?**
 > - `priority` is request-scoped: it governs scheduling across all attempts. A retried request keeps its priority.
 > - `queued`/`paused` are per-attempt states: they describe what the current run is doing. A retry creates a fresh `RunState` with `status: "pending"`, regardless of whether the previous attempt was paused.
-> - `pausedAt`/`resumedAt`/`pausedBy` are at root because pausing is an administrative action on the request itself, not on a specific attempt.
+> - `pausedAt`/`resumedAt` are in `run` for the same reason — they're per-attempt metadata that describes the current run's pause/resume history. On retry, they reset with the new `RunState`.
 
 ### Status Lifecycle (updated)
 
@@ -461,7 +456,7 @@ For CosmosDB: these map to composite indexes in the indexing policy.
 ### Phase 2: Pause/Resume
 
 - [ ] Add `"paused"` to `RunState.status` union type
-- [ ] Add `pausedAt`, `resumedAt`, `pausedBy` root-level fields to `RequestDocument`
+- [ ] Add `pausedAt`, `resumedAt` fields to `RunState`
 - [ ] Add `POST /api/v1/requests/:id/pause` endpoint
 - [ ] Add `POST /api/v1/requests/:id/resume` endpoint
 - [ ] Add `POST /api/v1/requests/bulk/pause` endpoint
