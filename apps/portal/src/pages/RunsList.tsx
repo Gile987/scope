@@ -465,9 +465,6 @@ export function RunsList() {
     },
   });
 
-  // Filtering is now server-side via status, outcome, and taskPromptId query params
-  const filteredRuns = runs;
-
   // Compute which bulk actions are available based on selected runs' statuses
   const selectionCaps = useMemo(() => {
     if (groupBy === "none") {
@@ -506,8 +503,6 @@ export function RunsList() {
     return { pausable, resumable, prioritizable, retryable };
   }, [runs, selectedIds, groupBy, serverGroups]);
 
-  const runGroups = serverGroups;
-
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -517,14 +512,14 @@ export function RunsList() {
     });
   };
 
-  const allSelected = filteredRuns.length > 0 && filteredRuns.every((r) => selectedIds.has(r._id));
-  const someSelected = filteredRuns.some((r) => selectedIds.has(r._id));
+  const allSelected = runs.length > 0 && runs.every((r) => selectedIds.has(r._id));
+  const someSelected = runs.some((r) => selectedIds.has(r._id));
 
   const toggleSelectAll = () => {
     if (allSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filteredRuns.map((r) => r._id)));
+      setSelectedIds(new Set(runs.map((r) => r._id)));
     }
   };
 
@@ -654,8 +649,8 @@ export function RunsList() {
         {(isRefetching || isGroupsRefetching) && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
         <span className="text-sm text-muted-foreground">
           {groupBy !== "none"
-            ? `${runGroups.length} group${runGroups.length !== 1 ? "s" : ""}`
-            : `${filteredRuns.length} run${filteredRuns.length !== 1 ? "s" : ""}`}
+            ? `${serverGroups.length} group${serverGroups.length !== 1 ? "s" : ""}`
+            : `${runs.length} run${runs.length !== 1 ? "s" : ""}`}
           {estimatedTotal != null && ` (~${estimatedTotal.toLocaleString()} total runs)`}
         </span>
       </div>
@@ -1412,7 +1407,7 @@ export function RunsList() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
-      ) : (groupBy === "none" && filteredRuns.length === 0) || (groupBy !== "none" && runGroups.length === 0) ? (
+      ) : (groupBy === "none" && runs.length === 0) || (groupBy !== "none" && serverGroups.length === 0) ? (
         <div className="text-center py-12 text-muted-foreground">
           No runs found. <Link to="/runs/new" className="text-primary underline">Submit one?</Link>
         </div>
@@ -1454,7 +1449,7 @@ export function RunsList() {
           </TableHeader>
           <TableBody>
             {groupBy !== "none" ? (
-              runGroups.map((group) => {
+              serverGroups.map((group) => {
                 const isExpanded = expandedGroups.has(group.key);
                 return (
                   <GroupRows
@@ -1481,7 +1476,7 @@ export function RunsList() {
                 );
               })
             ) : (
-              filteredRuns.map((run: Run) => (
+              runs.map((run: Run) => (
                 <RunRow
                   key={run._id}
                   run={run}
@@ -2032,6 +2027,7 @@ function GroupRows({
             ) : <span className="font-medium text-muted-foreground">{group.label}</span>
           ) : null}
         </TableCell>}
+        {isCol("priority") && <TableCell />}
         {/* Status */}
         {isCol("status") && <TableCell>
           {(() => {
