@@ -1860,6 +1860,7 @@ apiRoute(ctx.app, ctx.registry, {
       scenario: runDoc.scenario,
       workerType: runDoc.workerType as WorkerType,
       createdAt: runDoc.createdAt ? new Date(runDoc.createdAt) : new Date(),
+      priority: runDoc.priority ?? 0,
       updatedAt: runDoc.updatedAt ? new Date(runDoc.updatedAt) : undefined,
       ...(runDoc.maxIterations ? { maxIterations: runDoc.maxIterations } : {}),
       ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
