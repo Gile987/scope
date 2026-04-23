@@ -18,13 +18,13 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown, MoreHorizontal } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
@@ -748,7 +748,7 @@ export function RunsList() {
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <TooltipProvider delayDuration={300}>
-        <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-4 py-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border bg-muted/50 px-4 py-2">
           <span className="text-sm font-medium whitespace-nowrap">
             {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""} selected
           </span>
@@ -761,58 +761,55 @@ export function RunsList() {
             <TooltipContent>Clear selection</TooltipContent>
           </Tooltip>
           <div className="flex-1" />
-          {/* Primary actions — shown directly when applicable */}
-          {selectionCaps.pausable > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  disabled={bulkPauseMutation.isPending}
-                  onClick={() => bulkPauseMutation.mutate(Array.from(selectedIds))}
-                >
-                  <Pause className="h-4 w-4" />
-                  {bulkPauseMutation.isPending ? "…" : selectionCaps.pausable}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Pause {selectionCaps.pausable} run{selectionCaps.pausable !== 1 ? "s" : ""}</TooltipContent>
-            </Tooltip>
-          )}
-          {selectionCaps.resumable > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  disabled={bulkResumeMutation.isPending}
-                  onClick={() => bulkResumeMutation.mutate(Array.from(selectedIds))}
-                >
-                  <Play className="h-4 w-4" />
-                  {bulkResumeMutation.isPending ? "…" : selectionCaps.resumable}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Resume {selectionCaps.resumable} run{selectionCaps.resumable !== 1 ? "s" : ""}</TooltipContent>
-            </Tooltip>
-          )}
-          {selectionCaps.retryable > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  disabled={bulkRetryMutation.isPending}
-                  onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  {bulkRetryMutation.isPending ? "…" : selectionCaps.retryable}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Retry {selectionCaps.retryable} run{selectionCaps.retryable !== 1 ? "s" : ""}</TooltipContent>
-            </Tooltip>
-          )}
+          {/* Scheduling */}
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Scheduling</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={bulkPauseMutation.isPending || selectionCaps.pausable === 0}
+                onClick={() => bulkPauseMutation.mutate(Array.from(selectedIds))}
+              >
+                <Pause className="h-4 w-4" />
+                {bulkPauseMutation.isPending ? "…" : `Pause${selectionCaps.pausable > 0 ? ` (${selectionCaps.pausable})` : ""}`}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Pause pending/queued runs</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={bulkResumeMutation.isPending || selectionCaps.resumable === 0}
+                onClick={() => bulkResumeMutation.mutate(Array.from(selectedIds))}
+              >
+                <Play className="h-4 w-4" />
+                {bulkResumeMutation.isPending ? "…" : `Resume${selectionCaps.resumable > 0 ? ` (${selectionCaps.resumable})` : ""}`}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Resume paused runs</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={selectionCaps.prioritizable === 0}
+                onClick={() => setPriorityDialogOpen(true)}
+              >
+                <ArrowUpDown className="h-4 w-4" />
+                {`Priority${selectionCaps.prioritizable > 0 ? ` (${selectionCaps.prioritizable})` : ""}`}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Set priority on pending/paused runs</TooltipContent>
+          </Tooltip>
+          {/* Runs */}
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide ml-2">Runs</span>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setResubmitDialogOpen(true)}>
@@ -821,38 +818,50 @@ export function RunsList() {
             </TooltipTrigger>
             <TooltipContent>Re-submit selected runs with optional overrides</TooltipContent>
           </Tooltip>
-          {/* Overflow menu for less frequent actions */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon" className="h-8 w-8">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem
-                disabled={selectionCaps.prioritizable === 0}
-                onClick={() => setPriorityDialogOpen(true)}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={bulkRetryMutation.isPending || selectionCaps.retryable === 0}
+                onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
               >
-                <ArrowUpDown className="h-4 w-4" />
-                Set priority{selectionCaps.prioritizable > 0 ? ` (${selectionCaps.prioritizable})` : ""}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setReportDialogOpen(true)}>
-                <FileText className="h-4 w-4" />
-                Generate reports
-              </DropdownMenuItem>
-              <DropdownMenuItem
+                <RotateCcw className="h-4 w-4" />
+                {bulkRetryMutation.isPending ? "…" : `Retry${selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}`}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Retry completed runs (new attempt)</TooltipContent>
+          </Tooltip>
+          {/* Export */}
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide ml-2">Export</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setReportDialogOpen(true)}>
+                <FileText className="h-4 w-4" /> Reports
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Generate reports for selected runs</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
                 disabled={batchDownloadMutation.isPending}
                 onClick={() => batchDownloadMutation.mutate(Array.from(selectedIds))}
               >
                 <Archive className="h-4 w-4" />
-                {batchDownloadMutation.isPending ? "Downloading…" : "Download"}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                {batchDownloadMutation.isPending ? "…" : "Download"}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Download selected runs as archive</TooltipContent>
+          </Tooltip>
+          {/* Delete */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="destructive" size="icon" className="h-8 w-8" onClick={() => setDeleteDialogOpen(true)}>
+              <Button variant="destructive" size="icon" className="h-8 w-8 ml-2" onClick={() => setDeleteDialogOpen(true)}>
                 <Trash2 className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
