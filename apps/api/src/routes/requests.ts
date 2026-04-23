@@ -89,7 +89,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId, priority: requestedPriority } = req.body;
     let worker = req.query.worker as string;
 
     // --- Profile resolution: if profileId is provided, resolve the version and use its values ---
@@ -361,7 +361,6 @@ apiRoute(ctx.app, ctx.registry, {
     if (count > 1) {
       const newIds: string[] = [];
       const newDocs: RequestDocument[] = [];
-      const queueMessages: string[] = [];
 
       for (let i = 0; i < count; i++) {
         const requestId = uuidv4();
@@ -374,6 +373,7 @@ apiRoute(ctx.app, ctx.registry, {
           workerType,
           taskPromptId,
           createdAt: new Date(),
+          priority: requestedPriority ?? 0,
           ...(model ? { model } : {}),
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
@@ -392,21 +392,12 @@ apiRoute(ctx.app, ctx.registry, {
           run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
         };
         newDocs.push(requestDoc);
-
-        const queueMessage: QueueMessage = { requestId, runId };
-        const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
-        queueMessages.push(messageContent);
       }
 
-      // Bulk insert all documents
+      // Bulk insert all documents — scheduler will dispatch to queues
       await ctx.requestCollection.insertMany(newDocs);
 
-      // Queue all messages
-      for (const message of queueMessages) {
-        await queueClient.sendMessage(message);
-      }
-
-      console.log(`Created ${count} ${mode} requests for ${workerType} and queued for processing`);
+      console.log(`Created ${count} ${mode} requests for ${workerType} (priority: ${requestedPriority ?? 0})`);
 
       res.status(201).json({
         ids: newIds,
@@ -436,6 +427,7 @@ apiRoute(ctx.app, ctx.registry, {
       workerType,
       taskPromptId,
       createdAt: new Date(),
+      priority: requestedPriority ?? 0,
       ...(model ? { model } : {}),
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
@@ -454,15 +446,10 @@ apiRoute(ctx.app, ctx.registry, {
       run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
     };
 
-    // Store in MongoDB
+    // Store in MongoDB — scheduler will dispatch to queue
     await ctx.requestCollection.insertOne(requestDoc);
 
-    // Queue the request for the appropriate worker
-    const queueMessage: QueueMessage = { requestId, runId };
-    const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
-    await queueClient.sendMessage(messageContent);
-
-    console.log(`Created ${mode} request ${requestId} for ${workerType} and queued for processing`);
+    console.log(`Created ${mode} request ${requestId} for ${workerType} (priority: ${requestedPriority ?? 0})`);
 
     res.status(201).json({
       id: requestId,
