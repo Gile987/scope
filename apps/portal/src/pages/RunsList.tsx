@@ -471,11 +471,12 @@ export function RunsList() {
   // Compute which bulk actions are available based on selected runs' statuses
   const selectionCaps = useMemo(() => {
     const selected = runs.filter((r) => selectedIds.has(r._id));
+    const status = (r: Run) => r.run?.status ?? "pending";
     return {
-      pausable: selected.filter((r) => r.run?.status === "pending" || r.run?.status === "queued").length,
-      resumable: selected.filter((r) => r.run?.status === "paused").length,
-      prioritizable: selected.filter((r) => r.run?.status === "pending" || r.run?.status === "paused").length,
-      retryable: selected.filter((r) => r.run?.status === "done").length,
+      pausable: selected.filter((r) => status(r) === "pending" || status(r) === "queued").length,
+      resumable: selected.filter((r) => status(r) === "paused").length,
+      prioritizable: selected.filter((r) => status(r) === "pending" || status(r) === "paused").length,
+      retryable: selected.filter((r) => status(r) === "done").length,
     };
   }, [runs, selectedIds]);
 
@@ -1670,7 +1671,7 @@ function RunRow({
               <Download className="h-4 w-4" />
             </Button>
           )}
-          {(run.run?.status === "pending" || run.run?.status === "queued") && (
+          {((run.run?.status ?? "pending") === "pending" || run.run?.status === "queued") && (
             <Button
               variant="ghost"
               size="icon"
@@ -1694,7 +1695,7 @@ function RunRow({
               <Play className="h-4 w-4" />
             </Button>
           )}
-          {(run.run?.status === "pending" || run.run?.status === "paused") && (
+          {((run.run?.status ?? "pending") === "pending" || run.run?.status === "paused") && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8" title="Set priority">
