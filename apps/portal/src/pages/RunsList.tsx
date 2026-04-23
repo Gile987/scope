@@ -748,9 +748,9 @@ export function RunsList() {
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <TooltipProvider delayDuration={300}>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border bg-muted/50 px-4 py-2">
+        <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-4 py-2">
           <span className="text-sm font-medium whitespace-nowrap">
-            {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""} selected
+            {selectedIds.size} <span className="hidden sm:inline">run{selectedIds.size !== 1 ? "s" : ""} selected</span>
           </span>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -762,7 +762,7 @@ export function RunsList() {
           </Tooltip>
           <div className="flex-1" />
           {/* Scheduling */}
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Scheduling</span>
+          <span className="hidden xl:inline text-xs font-semibold text-muted-foreground uppercase tracking-wide">Scheduling</span>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -773,10 +773,10 @@ export function RunsList() {
                 onClick={() => bulkPauseMutation.mutate(Array.from(selectedIds))}
               >
                 <Pause className="h-4 w-4" />
-                {bulkPauseMutation.isPending ? "…" : `Pause${selectionCaps.pausable > 0 ? ` (${selectionCaps.pausable})` : ""}`}
+                <span className="hidden lg:inline">{bulkPauseMutation.isPending ? "…" : `Pause${selectionCaps.pausable > 0 ? ` (${selectionCaps.pausable})` : ""}`}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Pause pending/queued runs</TooltipContent>
+            <TooltipContent>Pause pending/queued runs{selectionCaps.pausable > 0 ? ` (${selectionCaps.pausable})` : ""}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -788,10 +788,10 @@ export function RunsList() {
                 onClick={() => bulkResumeMutation.mutate(Array.from(selectedIds))}
               >
                 <Play className="h-4 w-4" />
-                {bulkResumeMutation.isPending ? "…" : `Resume${selectionCaps.resumable > 0 ? ` (${selectionCaps.resumable})` : ""}`}
+                <span className="hidden lg:inline">{bulkResumeMutation.isPending ? "…" : `Resume${selectionCaps.resumable > 0 ? ` (${selectionCaps.resumable})` : ""}`}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Resume paused runs</TooltipContent>
+            <TooltipContent>Resume paused runs{selectionCaps.resumable > 0 ? ` (${selectionCaps.resumable})` : ""}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -803,17 +803,17 @@ export function RunsList() {
                 onClick={() => setPriorityDialogOpen(true)}
               >
                 <ArrowUpDown className="h-4 w-4" />
-                {`Priority${selectionCaps.prioritizable > 0 ? ` (${selectionCaps.prioritizable})` : ""}`}
+                <span className="hidden lg:inline">{`Priority${selectionCaps.prioritizable > 0 ? ` (${selectionCaps.prioritizable})` : ""}`}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Set priority on pending/paused runs</TooltipContent>
+            <TooltipContent>Set priority on pending/paused runs{selectionCaps.prioritizable > 0 ? ` (${selectionCaps.prioritizable})` : ""}</TooltipContent>
           </Tooltip>
           {/* Runs */}
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide ml-2">Runs</span>
+          <span className="hidden xl:inline text-xs font-semibold text-muted-foreground uppercase tracking-wide ml-2">Runs</span>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setResubmitDialogOpen(true)}>
-                <Repeat className="h-4 w-4" /> Re-submit
+                <Repeat className="h-4 w-4" /> <span className="hidden lg:inline">Re-submit</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>Re-submit selected runs with optional overrides</TooltipContent>
@@ -828,17 +828,17 @@ export function RunsList() {
                 onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
               >
                 <RotateCcw className="h-4 w-4" />
-                {bulkRetryMutation.isPending ? "…" : `Retry${selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}`}
+                <span className="hidden lg:inline">{bulkRetryMutation.isPending ? "…" : `Retry${selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}`}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Retry completed runs (new attempt)</TooltipContent>
+            <TooltipContent>Retry completed runs{selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}</TooltipContent>
           </Tooltip>
           {/* Export */}
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide ml-2">Export</span>
+          <span className="hidden xl:inline text-xs font-semibold text-muted-foreground uppercase tracking-wide ml-2">Export</span>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setReportDialogOpen(true)}>
-                <FileText className="h-4 w-4" /> Reports
+                <FileText className="h-4 w-4" /> <span className="hidden lg:inline">Reports</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>Generate reports for selected runs</TooltipContent>
@@ -853,7 +853,7 @@ export function RunsList() {
                 onClick={() => batchDownloadMutation.mutate(Array.from(selectedIds))}
               >
                 <Archive className="h-4 w-4" />
-                {batchDownloadMutation.isPending ? "…" : "Download"}
+                <span className="hidden lg:inline">{batchDownloadMutation.isPending ? "…" : "Download"}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>Download selected runs as archive</TooltipContent>
