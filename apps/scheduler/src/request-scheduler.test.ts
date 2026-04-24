@@ -18,6 +18,10 @@ function makeMockCollection(docs: RequestDocument[] = []) {
   // Return docs one at a time in order, then null
   let index = 0;
   return {
+    findOne: vi.fn().mockImplementation(async () => {
+      if (index < docs.length) return docs[index];
+      return null;
+    }),
     findOneAndUpdate: vi.fn().mockImplementation(async () => {
       if (index < docs.length) return docs[index++];
       return null;
@@ -56,8 +60,9 @@ describe("RequestScheduler", () => {
     // Manually trigger one dispatch cycle (not using start/interval)
     await (scheduler as any).dispatch();
 
-    // Should have called findOneAndUpdate twice (got 2 docs, then null)
-    expect(collection.findOneAndUpdate).toHaveBeenCalledTimes(3); // 2 found + 1 null
+    // Should have called findOne 3 times (2 found + 1 null) and findOneAndUpdate twice
+    expect(collection.findOne).toHaveBeenCalledTimes(3);
+    expect(collection.findOneAndUpdate).toHaveBeenCalledTimes(2);
     expect(queueClient.sendMessage).toHaveBeenCalledTimes(2);
 
     // Verify message payloads
@@ -81,6 +86,7 @@ describe("RequestScheduler", () => {
     await (scheduler as any).dispatch();
 
     // Only 1 slot available (5 - 4 = 1)
+    expect(collection.findOne).toHaveBeenCalledTimes(1);
     expect(collection.findOneAndUpdate).toHaveBeenCalledTimes(1);
     expect(queueClient.sendMessage).toHaveBeenCalledTimes(1);
   });
@@ -96,6 +102,7 @@ describe("RequestScheduler", () => {
 
     await (scheduler as any).dispatch();
 
+    expect(collection.findOne).not.toHaveBeenCalled();
     expect(collection.findOneAndUpdate).not.toHaveBeenCalled();
     expect(queueClient.sendMessage).not.toHaveBeenCalled();
   });
@@ -111,11 +118,39 @@ describe("RequestScheduler", () => {
 
     await (scheduler as any).dispatch();
 
-    expect(collection.findOneAndUpdate).toHaveBeenCalledWith(
+    // findOne carries the filter + sort
+    expect(collection.findOne).toHaveBeenCalledWith(
       {
         "run.status": "pending",
         workerType: "coder-acp-copilot",
         deletedAt: { $exists: false },
+      },
+      {
+        sort: { priority: -1, createdAt: 1 },
+      },
+    );
+
+    // findOneAndUpdate is NOT called (findOne returned null)
+    expect(collection.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("claims by _id with status guard (no compound sort)", async () => {
+    const doc = makeDoc({ _id: "r1", priority: 10 });
+    const collection = makeMockCollection([doc]);
+    const queueClient = makeMockQueueClient(0);
+
+    const scheduler = new RequestScheduler(
+      collection,
+      [{ workerType: "coder-acp-copilot", queueClient, targetQueueDepth: 2 }],
+    );
+
+    await (scheduler as any).dispatch();
+
+    // findOneAndUpdate uses _id + status guard — no sort
+    expect(collection.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: "r1",
+        "run.status": "pending",
       },
       {
         $set: {
@@ -124,7 +159,6 @@ describe("RequestScheduler", () => {
         },
       },
       {
-        sort: { priority: -1, createdAt: 1 },
         returnDocument: "after",
       },
     );
@@ -134,13 +168,16 @@ describe("RequestScheduler", () => {
     const doc1 = makeDoc({ _id: "r1", priority: 0, workerType: "coder-acp-copilot" });
     const doc2 = makeDoc({ _id: "r2", priority: 0, workerType: "coder-acp-claude-code" });
 
-    // Each collection mock returns one doc then null
+    // Each findOne/findOneAndUpdate mock returns docs in sequence
     const collection = {
-      findOneAndUpdate: vi.fn()
+      findOne: vi.fn()
         .mockResolvedValueOnce(doc1)
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(doc2)
         .mockResolvedValueOnce(null),
+      findOneAndUpdate: vi.fn()
+        .mockResolvedValueOnce(doc1)
+        .mockResolvedValueOnce(doc2),
     } as any;
 
     const queue1 = makeMockQueueClient(0);
@@ -163,10 +200,12 @@ describe("RequestScheduler", () => {
   it("skips a worker type if dispatch throws and continues to next", async () => {
     const doc2 = makeDoc({ _id: "r2", priority: 0 });
     const collection = {
-      findOneAndUpdate: vi.fn()
+      findOne: vi.fn()
         .mockRejectedValueOnce(new Error("DB error"))
         .mockResolvedValueOnce(doc2)
         .mockResolvedValueOnce(null),
+      findOneAndUpdate: vi.fn()
+        .mockResolvedValueOnce(doc2),
     } as any;
 
     const queue1 = makeMockQueueClient(0);
@@ -207,5 +246,7 @@ describe("RequestScheduler", () => {
 
     // Should have called getProperties multiple times (at least 2-3 ticks)
     expect(queueClient.getProperties.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // findOne should be called at least twice (one per dispatch cycle with available slots)
+    expect(collection.findOne.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });

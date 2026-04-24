@@ -89,6 +89,17 @@ export class RequestScheduler {
   /**
    * Fill available queue slots for a single worker type by claiming
    * the highest-priority pending requests from MongoDB.
+   *
+   * Uses a two-step find → claim pattern instead of `findOneAndUpdate`
+   * with compound sort. Cosmos DB for MongoDB (RU-based) silently
+   * drops 5-field compound indexes, so the compound sort inside
+   * `findOneAndUpdate` fails with "composite index" errors. Splitting
+   * into `find().sort().limit(1)` (served by a 2-field sort index) +
+   * `findOneAndUpdate` by `_id` (no sort) avoids the issue.
+   *
+   * The `_id` + `run.status` guard in the claim step ensures atomicity:
+   * if a concurrent process claimed the same doc, the update returns
+   * null and we retry with the next candidate.
    */
   private async dispatchForWorkerType(wt: WorkerTypeConfig): Promise<void> {
     // Read the actual Azure queue depth — cheap metadata call, not a message read
@@ -99,11 +110,25 @@ export class RequestScheduler {
     if (slots <= 0) return;
 
     for (let i = 0; i < slots; i++) {
-      const claimed = await this.collection.findOneAndUpdate(
+      // Step 1: Find the highest-priority pending request
+      const candidate = await this.collection.findOne(
         {
           "run.status": "pending",
           workerType: wt.workerType,
           deletedAt: { $exists: false },
+        } as any,
+        {
+          sort: { priority: -1, createdAt: 1 },
+        },
+      );
+
+      if (!candidate) break;
+
+      // Step 2: Atomically claim by _id + status guard
+      const claimed = await this.collection.findOneAndUpdate(
+        {
+          _id: candidate._id,
+          "run.status": "pending",
         } as any,
         {
           $set: {
@@ -112,12 +137,12 @@ export class RequestScheduler {
           },
         } as any,
         {
-          sort: { priority: -1, createdAt: 1 },
           returnDocument: "after",
         },
       );
 
-      if (!claimed) break;
+      // Another process claimed it — skip and try next
+      if (!claimed) continue;
 
       console.log(`[Scheduler] ${wt.workerType}: dispatched ${claimed._id} (priority=${claimed.priority}, depth=${currentDepth + i + 1}/${wt.targetQueueDepth})`);
 
