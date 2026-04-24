@@ -337,8 +337,8 @@ services:
     environment:
       <<: *common-env
       SCHEDULER_WORKER_TYPES: coder-acp-claude-code,coder-acp-copilot
-      SCHEDULER_QUEUE_DEPTH_CODER_ACP_CLAUDE_CODE: "5"
-      SCHEDULER_QUEUE_DEPTH_CODER_ACP_COPILOT: "5"
+      SCHEDULER_QUEUE_DEPTH_CODER_ACP_CLAUDE_CODE: "2"
+      SCHEDULER_QUEUE_DEPTH_CODER_ACP_COPILOT: "2"
       SCHEDULER_POLL_INTERVAL_MS: "2000"
       PORT: "8080"
     depends_on:

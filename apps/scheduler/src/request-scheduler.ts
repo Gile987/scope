@@ -117,7 +117,9 @@ export class RequestScheduler {
         },
       );
 
-      if (!claimed) break; // no more pending work for this worker type
+      if (!claimed) break;
+
+      console.log(`[Scheduler] ${wt.workerType}: dispatched ${claimed._id} (priority=${claimed.priority}, depth=${currentDepth + i + 1}/${wt.targetQueueDepth})`);
 
       // Queue message carries requestId + runId (per PR #665 convention)
       const message = Buffer.from(
