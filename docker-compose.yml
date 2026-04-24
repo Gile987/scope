@@ -328,6 +328,27 @@ services:
       lowkey-vault:
         condition: service_healthy
 
+  # Scheduler - polls MongoDB for pending requests and dispatches to queues
+  scheduler:
+    build:
+      context: .
+      dockerfile: apps/scheduler/Dockerfile
+    restart: on-failure:5
+    environment:
+      <<: *common-env
+      SCHEDULER_WORKER_TYPES: coder-acp-claude-code,coder-acp-copilot
+      SCHEDULER_QUEUE_DEPTH_CODER_ACP_CLAUDE_CODE: "2"
+      SCHEDULER_QUEUE_DEPTH_CODER_ACP_COPILOT: "2"
+      SCHEDULER_POLL_INTERVAL_MS: "2000"
+      PORT: "8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+
   # ===========================================================================
   # Worker services (opt-in via profiles)
   # ===========================================================================

@@ -648,6 +648,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "personaInstructions": {
             "type": "string",
           },
+          "priority": {
+            "type": "integer",
+          },
           "profileId": {
             "type": "string",
           },
@@ -1051,7 +1054,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "status": {
             "enum": [
               "pending",
+              "queued",
               "processing",
+              "paused",
               "done",
             ],
             "type": "string",
@@ -2037,6 +2042,10 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "personaInstructions": {
             "type": "string",
           },
+          "priority": {
+            "default": 0,
+            "type": "integer",
+          },
           "profileId": {
             "type": "string",
           },
@@ -2165,6 +2174,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             ],
             "type": "string",
           },
+          "pausedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
           "rawChatFormat": {
             "type": "string",
           },
@@ -2173,6 +2189,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "result": {
             "type": "string",
+          },
+          "resumedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
           },
           "setupVideoUrls": {
             "items": {
@@ -2190,7 +2213,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "status": {
             "enum": [
               "pending",
+              "queued",
               "processing",
+              "paused",
               "done",
             ],
             "type": "string",
@@ -6370,7 +6395,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "schema": {
               "enum": [
                 "pending",
+                "queued",
                 "processing",
+                "paused",
                 "done",
               ],
               "type": "string",
@@ -6425,6 +6452,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "before",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "required": false,
+            "schema": {
+              "enum": [
+                "createdAt",
+                "priority",
+              ],
               "type": "string",
             },
           },
@@ -6608,6 +6647,118 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/bulk-pause": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "ids",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "skipped": {
+                      "type": "number",
+                    },
+                    "updated": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "updated",
+                    "skipped",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Pause multiple requests",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/bulk-priority": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                  "priority": {
+                    "type": "integer",
+                  },
+                },
+                "required": [
+                  "ids",
+                  "priority",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "skipped": {
+                      "type": "number",
+                    },
+                    "updated": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "updated",
+                    "skipped",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Set priority on multiple requests",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/bulk-resubmit": {
       "post": {
         "requestBody": {
@@ -6635,6 +6786,60 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Bulk resubmit requests",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/bulk-resume": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "ids",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "skipped": {
+                      "type": "number",
+                    },
+                    "updated": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "updated",
+                    "skipped",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Resume multiple paused requests",
         "tags": [
           "Requests",
         ],
@@ -6867,6 +7072,87 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/{id}/pause": {
+      "post": {
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                    },
+                    "status": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "status",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Pause a single request",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/priority": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "priority": {
+                    "type": "integer",
+                  },
+                },
+                "required": [
+                  "priority",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                    },
+                    "priority": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "priority",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Set priority on a single request",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/{id}/reports": {
       "get": {
         "parameters": [
@@ -6900,6 +7186,38 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "summary": "Get reports for request",
         "tags": [
           "Reports",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/resume": {
+      "post": {
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                    },
+                    "status": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "status",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Resume a paused request",
+        "tags": [
+          "Requests",
         ],
       },
     },

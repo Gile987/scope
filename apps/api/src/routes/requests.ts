@@ -63,16 +63,6 @@ export function registerRequestsRoutes(ctx: RouteContext): void {
 
 const upload = multer({ dest: tmpdir() });
 
-interface QueueMessage {
-  requestId: string;
-  /**
-   * The run id (attempt id) this message targets. Workers must verify this
-   * matches `request.run._id` before processing — otherwise the message is
-   * stale (a retry has since started a new attempt) and should be discarded.
-   */
-  runId?: string;
-}
-
 // Submit a request
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
@@ -89,7 +79,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId, priority: requestedPriority } = req.body;
     let worker = req.query.worker as string;
 
     // --- Profile resolution: if profileId is provided, resolve the version and use its values ---
@@ -242,7 +232,6 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Resolve agent version: explicit selection or latest active
     let resolvedAgentVersion: string | undefined;
-    let versionQueueName: string | undefined;
     if (agentDoc) {
       const versionResult = resolveAgentVersion(agentDoc.versions, requestedAgentVersion);
       if ("error" in versionResult) {
@@ -253,7 +242,6 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       resolvedAgentVersion = versionResult.agentVersion;
-      versionQueueName = versionResult.queueName;
     }
 
     // Validate MCP server slugs if provided
@@ -345,10 +333,6 @@ apiRoute(ctx.app, ctx.registry, {
     };
 
     const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
-    // Use version-specific queue if resolved, otherwise fall back to static worker queue
-    const queueClient = versionQueueName
-      ? ctx.getOrCreateQueueClient(versionQueueName)
-      : ctx.queueClients.get(workerType)!;
 
     // Ensure a TaskPrompt entity exists for this task text (idempotent)
     const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
@@ -361,7 +345,6 @@ apiRoute(ctx.app, ctx.registry, {
     if (count > 1) {
       const newIds: string[] = [];
       const newDocs: RequestDocument[] = [];
-      const queueMessages: string[] = [];
 
       for (let i = 0; i < count; i++) {
         const requestId = uuidv4();
@@ -374,6 +357,7 @@ apiRoute(ctx.app, ctx.registry, {
           workerType,
           taskPromptId,
           createdAt: new Date(),
+          priority: requestedPriority ?? 0,
           ...(model ? { model } : {}),
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
@@ -392,21 +376,12 @@ apiRoute(ctx.app, ctx.registry, {
           run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
         };
         newDocs.push(requestDoc);
-
-        const queueMessage: QueueMessage = { requestId, runId };
-        const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
-        queueMessages.push(messageContent);
       }
 
-      // Bulk insert all documents
+      // Bulk insert all documents — scheduler will dispatch to queues
       await ctx.requestCollection.insertMany(newDocs);
 
-      // Queue all messages
-      for (const message of queueMessages) {
-        await queueClient.sendMessage(message);
-      }
-
-      console.log(`Created ${count} ${mode} requests for ${workerType} and queued for processing`);
+      console.log(`Created ${count} ${mode} requests for ${workerType} (priority: ${requestedPriority ?? 0})`);
 
       res.status(201).json({
         ids: newIds,
@@ -436,6 +411,7 @@ apiRoute(ctx.app, ctx.registry, {
       workerType,
       taskPromptId,
       createdAt: new Date(),
+      priority: requestedPriority ?? 0,
       ...(model ? { model } : {}),
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
@@ -454,15 +430,10 @@ apiRoute(ctx.app, ctx.registry, {
       run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
     };
 
-    // Store in MongoDB
+    // Store in MongoDB — scheduler will dispatch to queue
     await ctx.requestCollection.insertOne(requestDoc);
 
-    // Queue the request for the appropriate worker
-    const queueMessage: QueueMessage = { requestId, runId };
-    const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
-    await queueClient.sendMessage(messageContent);
-
-    console.log(`Created ${mode} request ${requestId} for ${workerType} and queued for processing`);
+    console.log(`Created ${mode} request ${requestId} for ${workerType} (priority: ${requestedPriority ?? 0})`);
 
     res.status(201).json({
       id: requestId,
@@ -1058,7 +1029,6 @@ apiRoute(ctx.app, ctx.registry, {
     const submissionId = uuidv4();
     const newIds: string[] = [];
     const newDocs: RequestDocument[] = [];
-    const queueMessages: Array<{ workerType: WorkerType; message: string }> = [];
 
     for (const original of originalRuns) {
       for (let i = 0; i < count; i++) {
@@ -1133,6 +1103,7 @@ apiRoute(ctx.app, ctx.registry, {
           scenario: original.scenario,
           workerType: effectiveWorkerType,
           createdAt: new Date(),
+          priority: original.priority ?? 0,
           ...(effectiveMaxIterations ? { maxIterations: effectiveMaxIterations } : {}),
           ...(original.personaInstructions ? { personaInstructions: original.personaInstructions } : {}),
           ...(original.persona ? { persona: original.persona } : {}),
@@ -1152,24 +1123,12 @@ apiRoute(ctx.app, ctx.registry, {
         };
 
         newDocs.push(newDoc);
-
-        const queueMessage: QueueMessage = { requestId, runId };
-        const messageContent = Buffer.from(JSON.stringify(queueMessage)).toString("base64");
-        queueMessages.push({ workerType: effectiveWorkerType as WorkerType, message: messageContent });
       }
     }
 
-    // Insert all new documents
+    // Insert all new documents — scheduler will dispatch to queues
     if (newDocs.length > 0) {
       await ctx.requestCollection.insertMany(newDocs);
-    }
-
-    // Queue all messages
-    for (const { workerType, message } of queueMessages) {
-      const queueClient = ctx.queueClients.get(workerType);
-      if (queueClient) {
-        await queueClient.sendMessage(message);
-      }
     }
 
     console.log(`Bulk re-submitted ${newIds.length} runs from ${originalRuns.length} originals (count=${count})`);
@@ -1901,6 +1860,7 @@ apiRoute(ctx.app, ctx.registry, {
       scenario: runDoc.scenario,
       workerType: runDoc.workerType as WorkerType,
       createdAt: runDoc.createdAt ? new Date(runDoc.createdAt) : new Date(),
+      priority: runDoc.priority ?? 0,
       updatedAt: runDoc.updatedAt ? new Date(runDoc.updatedAt) : undefined,
       ...(runDoc.maxIterations ? { maxIterations: runDoc.maxIterations } : {}),
       ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
@@ -2113,17 +2073,7 @@ apiRoute(ctx.app, ctx.registry, {
         continue;
       }
 
-      // 3. Enqueue
-      const queueClient = ctx.queueClients.get(request.workerType as WorkerType);
-      if (!queueClient) {
-        results.push({ requestId: id, error: `No queue configured for worker '${request.workerType}'` });
-        skipped++;
-        continue;
-      }
-      const message = Buffer.from(
-        JSON.stringify({ requestId: id, runId: newRunId } satisfies QueueMessage),
-      ).toString("base64");
-      await queueClient.sendMessage(message);
+      // Scheduler will pick up the new run (status="pending") and dispatch.
 
       console.log(`Bulk retry: request ${id} → attempt ${newAttemptNumber} (runId=${newRunId})`);
       results.push({ requestId: id, runId: newRunId, attemptNumber: newAttemptNumber });
@@ -2217,17 +2167,7 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    // 3. Enqueue the new attempt. Workers MUST verify runId matches the
-    //    current request.run._id before processing.
-    const queueClient = ctx.queueClients.get(request.workerType as WorkerType);
-    if (!queueClient) {
-      res.status(500).json({ error: `No queue configured for worker '${request.workerType}'` });
-      return;
-    }
-    const message = Buffer.from(
-      JSON.stringify({ requestId: id, runId: newRunId } satisfies QueueMessage),
-    ).toString("base64");
-    await queueClient.sendMessage(message);
+    // Scheduler will pick up the new run (status="pending") and dispatch.
 
     console.log(
       `Retried request ${id}: attempt ${newAttemptNumber} (runId=${newRunId}), demoted ${runToDemote._id} to history`,
@@ -2238,6 +2178,194 @@ apiRoute(ctx.app, ctx.registry, {
       runId: newRunId,
       attemptNumber: newAttemptNumber,
     });
+  },
+});
+
+// ── Priority ────────────────────────────────────────────────────────
+
+// Set priority on a single request
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/:id/priority",
+  tags: ["Requests"],
+  summary: "Set priority on a single request",
+  body: z.object({ priority: z.number().int() }),
+  response: z.object({ id: z.string(), priority: z.number() }),
+  handler: async (req, res) => {
+    const { id } = req.params;
+    const { priority } = req.body;
+    const result = await ctx.requestCollection.updateOne(
+      { _id: id, deletedAt: { $exists: false }, "run.status": { $in: ["pending", "paused"] } },
+      { $set: { priority, updatedAt: new Date() } },
+    );
+    if (result.matchedCount === 0) {
+      res.status(404).json({ error: `Request not found or not in a state that allows priority changes: ${id}` });
+      return;
+    }
+    res.json({ id, priority });
+  },
+});
+
+// Set priority on multiple requests
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/bulk-priority",
+  tags: ["Requests"],
+  summary: "Set priority on multiple requests",
+  body: z.object({
+    ids: z.array(z.string()).min(1).max(100),
+    priority: z.number().int(),
+  }),
+  response: z.object({ updated: z.number(), skipped: z.number() }),
+  handler: async (req, res) => {
+    const { ids, priority } = req.body;
+    const result = await ctx.requestCollection.updateMany(
+      { _id: { $in: ids }, deletedAt: { $exists: false }, "run.status": { $in: ["pending", "paused"] } },
+      { $set: { priority, updatedAt: new Date() } },
+    );
+    const updated = result.modifiedCount;
+    res.json({ updated, skipped: ids.length - updated });
+  },
+});
+
+// ── Pause / Resume ──────────────────────────────────────────────────
+
+// Pause a single request
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/:id/pause",
+  tags: ["Requests"],
+  summary: "Pause a single request",
+  response: z.object({ id: z.string(), status: z.string() }),
+  handler: async (req, res) => {
+    const { id } = req.params;
+    const result = await ctx.requestCollection.updateOne(
+      {
+        _id: id,
+        "run.status": { $in: ["pending", "queued"] },
+        deletedAt: { $exists: false },
+      },
+      {
+        $set: {
+          "run.status": "paused",
+          "run.pausedAt": new Date(),
+          "run.updatedAt": new Date(),
+          updatedAt: new Date(),
+        },
+      },
+    );
+    if (result.matchedCount === 0) {
+      // Check if exists at all
+      const doc = await ctx.requestCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!doc) {
+        res.status(404).json({ error: `Request not found: ${id}` });
+        return;
+      }
+      res.status(409).json({
+        error: `Cannot pause request in status "${doc.run?.status}". Only pending or queued requests can be paused.`,
+      });
+      return;
+    }
+    res.json({ id, status: "paused" });
+  },
+});
+
+// Resume a single request
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/:id/resume",
+  tags: ["Requests"],
+  summary: "Resume a paused request",
+  response: z.object({ id: z.string(), status: z.string() }),
+  handler: async (req, res) => {
+    const { id } = req.params;
+    const result = await ctx.requestCollection.updateOne(
+      {
+        _id: id,
+        "run.status": "paused",
+        deletedAt: { $exists: false },
+      },
+      {
+        $set: {
+          "run.status": "pending",
+          "run.resumedAt": new Date(),
+          "run.updatedAt": new Date(),
+          updatedAt: new Date(),
+        },
+      },
+    );
+    if (result.matchedCount === 0) {
+      const doc = await ctx.requestCollection.findOne({ _id: id, deletedAt: { $exists: false } });
+      if (!doc) {
+        res.status(404).json({ error: `Request not found: ${id}` });
+        return;
+      }
+      res.status(409).json({
+        error: `Cannot resume request in status "${doc.run?.status}". Only paused requests can be resumed.`,
+      });
+      return;
+    }
+    res.json({ id, status: "pending" });
+  },
+});
+
+// Bulk pause
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/bulk-pause",
+  tags: ["Requests"],
+  summary: "Pause multiple requests",
+  body: z.object({ ids: z.array(z.string()).min(1).max(100) }),
+  response: z.object({ updated: z.number(), skipped: z.number() }),
+  handler: async (req, res) => {
+    const { ids } = req.body;
+    const result = await ctx.requestCollection.updateMany(
+      {
+        _id: { $in: ids },
+        "run.status": { $in: ["pending", "queued"] },
+        deletedAt: { $exists: false },
+      },
+      {
+        $set: {
+          "run.status": "paused",
+          "run.pausedAt": new Date(),
+          "run.updatedAt": new Date(),
+          updatedAt: new Date(),
+        },
+      },
+    );
+    const updated = result.modifiedCount;
+    res.json({ updated, skipped: ids.length - updated });
+  },
+});
+
+// Bulk resume
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/requests/bulk-resume",
+  tags: ["Requests"],
+  summary: "Resume multiple paused requests",
+  body: z.object({ ids: z.array(z.string()).min(1).max(100) }),
+  response: z.object({ updated: z.number(), skipped: z.number() }),
+  handler: async (req, res) => {
+    const { ids } = req.body;
+    const result = await ctx.requestCollection.updateMany(
+      {
+        _id: { $in: ids },
+        "run.status": "paused",
+        deletedAt: { $exists: false },
+      },
+      {
+        $set: {
+          "run.status": "pending",
+          "run.resumedAt": new Date(),
+          "run.updatedAt": new Date(),
+          updatedAt: new Date(),
+        },
+      },
+    );
+    const updated = result.modifiedCount;
+    res.json({ updated, skipped: ids.length - updated });
   },
 });
 

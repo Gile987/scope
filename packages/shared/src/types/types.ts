@@ -138,6 +138,8 @@ export interface RequestDocument {
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
   profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
   submissionId?: string;           // FK → SubmissionDocument._id
+  /** Scheduling priority. Higher = processed first. Default: 0. */
+  priority: number;
   /**
    * Per-attempt mutable state. Migration 014 nests per-attempt fields
    * under this object; new submissions populate it on insert.
@@ -190,7 +192,7 @@ export interface QueueMessagePayload {
 export interface RunState {
   _id: string;                              // Unique per attempt
   attemptNumber: number;                    // 1, 2, 3…
-  status: "pending" | "processing" | "done";
+  status: "pending" | "queued" | "processing" | "paused" | "done";
   outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;
@@ -203,6 +205,10 @@ export interface RunState {
   updatedAt?: Date;
   startedAt?: Date;                         // When worker picked up this attempt
   finishedAt?: Date;                        // When this attempt reached "done"
+  /** When this run was paused (if status = "paused") */
+  pausedAt?: Date;
+  /** When this run was last resumed from paused state */
+  resumedAt?: Date;
   turns?: ConversationTurn[];
   workerVersion?: string;
   os?: OsInfo;
@@ -353,6 +359,7 @@ export interface GroupAggregates {
   duration: AggregateStats | null;
   promptTokens: AggregateStats | null;
   completionTokens: AggregateStats | null;
+  llmCalls: AggregateStats | null;
   statusCounts: Record<string, number>;
   outcomeCounts: Record<string, number>;
 }

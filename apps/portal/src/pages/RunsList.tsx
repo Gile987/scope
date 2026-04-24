@@ -20,10 +20,11 @@ import {
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
@@ -31,7 +32,7 @@ import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
@@ -44,6 +45,7 @@ const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "skills", label: "Skills" },
   { id: "extensions", label: "Extensions" },
   { id: "profile", label: "Profile" },
+  { id: "priority", label: "Priority" },
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
   { id: "report", label: "Report" },
@@ -89,6 +91,9 @@ export function RunsList() {
   const [resubmitCount, setResubmitCount] = useState(1);
   const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
   const [resubmitOverrides, setResubmitOverrides] = useState<BulkResubmitOverrides>({});
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [priorityDialogOpen, setPriorityDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [cursorDirection, setCursorDirection] = useState<"after" | "before" | undefined>(undefined);
   const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(loadHiddenColumns);
@@ -293,6 +298,45 @@ export function RunsList() {
     },
   });
 
+  const pauseMutation = useMutation({
+    mutationFn: api.pauseRun,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success("Run paused");
+    },
+    onError: (error) => {
+      toast.error("Failed to pause", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: api.resumeRun,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success("Run resumed");
+    },
+    onError: (error) => {
+      toast.error("Failed to resume", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const setPriorityMutation = useMutation({
+    mutationFn: ({ id, priority }: { id: string; priority: number }) => api.setPriority(id, priority),
+    onSuccess: (_data, { priority }) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success(`Priority set to ${priority}`);
+    },
+    onError: (error) => {
+      toast.error("Failed to set priority", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
   const bulkRetryMutation = useMutation({
     mutationFn: (ids: string[]) => api.bulkRetryRuns(ids),
     onSuccess: ({ retried, skipped }) => {
@@ -322,6 +366,53 @@ export function RunsList() {
     },
     onError: (error) => {
       toast.error("Failed to delete runs", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const bulkPauseMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkPauseRuns(ids),
+    onSuccess: ({ paused, skipped }) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      const parts: string[] = [];
+      if (paused > 0) parts.push(`${paused} paused`);
+      if (skipped > 0) parts.push(`${skipped} skipped`);
+      toast.success(`Bulk pause: ${parts.join(", ")}`);
+    },
+    onError: (error) => {
+      toast.error("Bulk pause failed", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const bulkResumeMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkResumeRuns(ids),
+    onSuccess: ({ resumed, skipped }) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      const parts: string[] = [];
+      if (resumed > 0) parts.push(`${resumed} resumed`);
+      if (skipped > 0) parts.push(`${skipped} skipped`);
+      toast.success(`Bulk resume: ${parts.join(", ")}`);
+    },
+    onError: (error) => {
+      toast.error("Bulk resume failed", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const [bulkPriorityValue, setBulkPriorityValue] = useState<number>(0);
+
+  const bulkSetPriorityMutation = useMutation({
+    mutationFn: ({ ids, priority }: { ids: string[]; priority: number }) => api.bulkSetPriority(ids, priority),
+    onSuccess: ({ updated }) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success(`Priority updated for ${updated} run${updated !== 1 ? "s" : ""}`);
+    },
+    onError: (error) => {
+      toast.error("Bulk priority update failed", {
         description: error instanceof Error ? error.message : "Unknown error",
       });
     },
@@ -374,10 +465,43 @@ export function RunsList() {
     },
   });
 
-  // Filtering is now server-side via status, outcome, and taskPromptId query params
-  const filteredRuns = runs;
-
-  const runGroups = serverGroups;
+  // Compute which bulk actions are available based on selected runs' statuses
+  const selectionCaps = useMemo(() => {
+    if (groupBy === "none") {
+      // Flat list mode — we have full run objects
+      const selected = runs.filter((r) => selectedIds.has(r._id));
+      const status = (r: Run) => r.run?.status ?? "pending";
+      return {
+        pausable: selected.filter((r) => status(r) === "pending" || status(r) === "queued").length,
+        resumable: selected.filter((r) => status(r) === "paused").length,
+        prioritizable: selected.filter((r) => status(r) === "pending" || status(r) === "paused").length,
+        retryable: selected.filter((r) => status(r) === "done").length,
+      };
+    }
+    // Grouped mode — derive caps from group-level statusCounts for groups
+    // whose runs are (partially or fully) selected
+    let pausable = 0, resumable = 0, prioritizable = 0, retryable = 0;
+    for (const group of serverGroups) {
+      const selectedInGroup = group.runIds.filter((id) => selectedIds.has(id)).length;
+      if (selectedInGroup === 0) continue;
+      const sc = group.aggregates.statusCounts;
+      const ratio = selectedInGroup / group.runIds.length;
+      if (selectedInGroup === group.runIds.length) {
+        // All runs in group selected — use exact counts
+        pausable += (sc.pending ?? 0) + (sc.queued ?? 0);
+        resumable += sc.paused ?? 0;
+        prioritizable += (sc.pending ?? 0) + (sc.paused ?? 0);
+        retryable += sc.done ?? 0;
+      } else {
+        // Partial selection — estimate proportionally (round up to be permissive)
+        pausable += Math.ceil(((sc.pending ?? 0) + (sc.queued ?? 0)) * ratio);
+        resumable += Math.ceil((sc.paused ?? 0) * ratio);
+        prioritizable += Math.ceil(((sc.pending ?? 0) + (sc.paused ?? 0)) * ratio);
+        retryable += Math.ceil((sc.done ?? 0) * ratio);
+      }
+    }
+    return { pausable, resumable, prioritizable, retryable };
+  }, [runs, selectedIds, groupBy, serverGroups]);
 
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
@@ -388,14 +512,14 @@ export function RunsList() {
     });
   };
 
-  const allSelected = filteredRuns.length > 0 && filteredRuns.every((r) => selectedIds.has(r._id));
-  const someSelected = filteredRuns.some((r) => selectedIds.has(r._id));
+  const allSelected = runs.length > 0 && runs.every((r) => selectedIds.has(r._id));
+  const someSelected = runs.some((r) => selectedIds.has(r._id));
 
   const toggleSelectAll = () => {
     if (allSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filteredRuns.map((r) => r._id)));
+      setSelectedIds(new Set(runs.map((r) => r._id)));
     }
   };
 
@@ -525,8 +649,8 @@ export function RunsList() {
         {(isRefetching || isGroupsRefetching) && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
         <span className="text-sm text-muted-foreground">
           {groupBy !== "none"
-            ? `${runGroups.length} group${runGroups.length !== 1 ? "s" : ""}`
-            : `${filteredRuns.length} run${filteredRuns.length !== 1 ? "s" : ""}`}
+            ? `${serverGroups.length} group${serverGroups.length !== 1 ? "s" : ""}`
+            : `${runs.length} run${runs.length !== 1 ? "s" : ""}`}
           {estimatedTotal != null && ` (~${estimatedTotal.toLocaleString()} total runs)`}
         </span>
       </div>
@@ -618,553 +742,675 @@ export function RunsList() {
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-4 rounded-md border bg-muted/50 px-4 py-2">
-          <span className="text-sm font-medium">
-            {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""} selected
+        <TooltipProvider delayDuration={300}>
+        <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-4 py-2">
+          <span className="text-sm font-medium whitespace-nowrap">
+            {selectedIds.size} <span className="hidden sm:inline">run{selectedIds.size !== 1 ? "s" : ""} selected</span>
           </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedIds(new Set())}>
+                <X className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Clear selection</TooltipContent>
+          </Tooltip>
           <div className="flex-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setSelectedIds(new Set())}
-          >
-            Clear selection
-          </Button>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <FileText className="h-4 w-4" /> Generate reports
+          {/* Scheduling */}
+          <span className="hidden 2xl:inline text-xs font-semibold text-muted-foreground uppercase tracking-wide">Scheduling</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={bulkPauseMutation.isPending || selectionCaps.pausable === 0}
+                onClick={() => bulkPauseMutation.mutate(Array.from(selectedIds))}
+              >
+                <Pause className="h-4 w-4" />
+                <span className="hidden md:inline">{bulkPauseMutation.isPending ? "…" : `Pause${selectionCaps.pausable > 0 ? ` (${selectionCaps.pausable})` : ""}`}</span>
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Generate reports for {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will queue report generation for each selected run. Runs that already have a report will get a new one.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => bulkReportMutation.mutate(Array.from(selectedIds))}
-                  disabled={bulkReportMutation.isPending}
+            </TooltipTrigger>
+            <TooltipContent>Pause pending/queued runs{selectionCaps.pausable > 0 ? ` (${selectionCaps.pausable})` : ""}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={bulkResumeMutation.isPending || selectionCaps.resumable === 0}
+                onClick={() => bulkResumeMutation.mutate(Array.from(selectedIds))}
+              >
+                <Play className="h-4 w-4" />
+                <span className="hidden md:inline">{bulkResumeMutation.isPending ? "…" : `Resume${selectionCaps.resumable > 0 ? ` (${selectionCaps.resumable})` : ""}`}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Resume paused runs{selectionCaps.resumable > 0 ? ` (${selectionCaps.resumable})` : ""}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={selectionCaps.prioritizable === 0}
+                onClick={() => {
+                  // Pre-fill with the common priority of selected prioritizable runs
+                  const prioritizable = runs.filter((r) => selectedIds.has(r._id) && ((r.run?.status ?? "pending") === "pending" || r.run?.status === "paused"));
+                  const priorities = new Set(prioritizable.map((r) => r.priority ?? 0));
+                  setBulkPriorityValue(priorities.size === 1 ? [...priorities][0] : 0);
+                  setPriorityDialogOpen(true);
+                }}
+              >
+                <ArrowUpDown className="h-4 w-4" />
+                <span className="hidden lg:inline">{`Priority${selectionCaps.prioritizable > 0 ? ` (${selectionCaps.prioritizable})` : ""}`}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Set priority on pending/paused runs{selectionCaps.prioritizable > 0 ? ` (${selectionCaps.prioritizable})` : ""}</TooltipContent>
+          </Tooltip>
+          {/* Runs */}
+          <span className="hidden 2xl:inline text-xs font-semibold text-muted-foreground uppercase tracking-wide ml-2">Runs</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setResubmitDialogOpen(true)}>
+                <Repeat className="h-4 w-4" /> <span className="hidden lg:inline">Re-submit</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Re-submit selected runs with optional overrides</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={bulkRetryMutation.isPending || selectionCaps.retryable === 0}
+                onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
+              >
+                <RotateCcw className="h-4 w-4" />
+                <span className="hidden md:inline">{bulkRetryMutation.isPending ? "…" : `Retry${selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}`}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Retry completed runs{selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}</TooltipContent>
+          </Tooltip>
+          {/* Export */}
+          <span className="hidden 2xl:inline text-xs font-semibold text-muted-foreground uppercase tracking-wide ml-2">Export</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setReportDialogOpen(true)}>
+                <FileText className="h-4 w-4" /> <span className="hidden xl:inline">Reports</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Generate reports for selected runs</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={batchDownloadMutation.isPending}
+                onClick={() => batchDownloadMutation.mutate(Array.from(selectedIds))}
+              >
+                <Archive className="h-4 w-4" />
+                <span className="hidden xl:inline">{batchDownloadMutation.isPending ? "…" : "Download"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Download selected runs as archive</TooltipContent>
+          </Tooltip>
+          {/* Delete */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="destructive" size="icon" className="h-8 w-8 ml-2" onClick={() => setDeleteDialogOpen(true)}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Delete selected</TooltipContent>
+          </Tooltip>
+        </div>
+        </TooltipProvider>
+      )}
+
+      {/* Bulk action dialogs (controlled, opened from dropdown menu) */}
+      <AlertDialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Generate reports for {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will queue report generation for each selected run. Runs that already have a report will get a new one.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => bulkReportMutation.mutate(Array.from(selectedIds))}
+              disabled={bulkReportMutation.isPending}
+            >
+              {bulkReportMutation.isPending ? "Generating…" : "Generate"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={resubmitDialogOpen} onOpenChange={setResubmitDialogOpen}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Re-submit {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              New runs copy the original scenario and settings. Use overrides below to change specific fields.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-4 py-2">
+            {/* Copies per run */}
+            <div className="flex items-center gap-4">
+              <Label htmlFor="resubmit-count" className="text-sm font-medium w-32 shrink-0">Copies per run</Label>
+              <Input
+                id="resubmit-count"
+                type="number"
+                min={1}
+                max={10}
+                value={resubmitCount}
+                onChange={(e) => setResubmitCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                className="w-24"
+              />
+              <span className="text-xs text-muted-foreground">
+                = {selectedIds.size * resubmitCount} new run{selectedIds.size * resubmitCount !== 1 ? "s" : ""}
+              </span>
+            </div>
+
+            <div className="border-t pt-4">
+              <p className="text-sm font-medium mb-3">Overrides <span className="text-muted-foreground font-normal">(leave unchanged to copy from source)</span></p>
+
+              {/* Profile override */}
+              <div className="flex items-center gap-4 mb-3">
+                <Label className="text-sm w-32 shrink-0">Profile</Label>
+                <Select
+                  value={resubmitOverrides.profileId === null ? "__none__" : resubmitOverrides.profileId ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") {
+                      delete next.profileId;
+                    } else if (v === "__none__") {
+                      next.profileId = null;
+                    } else {
+                      next.profileId = v;
+                    }
+                    // Clear individual overrides for profile-controlled fields when
+                    // switching profiles — profile values take precedence
+                    delete next.workerType;
+                    delete next.model;
+                    delete next.mcpServers;
+                    delete next.skillRevisions;
+                    delete next.extensions;
+                    return next;
+                  })}
                 >
-                  {bulkReportMutation.isPending ? "Generating…" : "Generate"}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-          <AlertDialog open={resubmitDialogOpen} onOpenChange={setResubmitDialogOpen}>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <Repeat className="h-4 w-4" /> Re-submit selected
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent className="max-w-lg">
-              <AlertDialogHeader>
-                <AlertDialogTitle>Re-submit {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  New runs copy the original scenario and settings. Use overrides below to change specific fields.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <div className="space-y-4 py-2">
-                {/* Copies per run */}
-                <div className="flex items-center gap-4">
-                  <Label htmlFor="resubmit-count" className="text-sm font-medium w-32 shrink-0">Copies per run</Label>
-                  <Input
-                    id="resubmit-count"
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={resubmitCount}
-                    onChange={(e) => setResubmitCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
-                    className="w-24"
-                  />
-                  <span className="text-xs text-muted-foreground">
-                    = {selectedIds.size * resubmitCount} new run{selectedIds.size * resubmitCount !== 1 ? "s" : ""}
-                  </span>
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">
+                      {selectedRunsSummary.profileId
+                        ? <>
+                            {profileNameMap.get(selectedRunsSummary.profileId) ?? formatId(selectedRunsSummary.profileId)}
+                            {selectedRunsSummary.profileVersion && <span className="text-muted-foreground"> v{selectedRunsSummary.profileVersion}</span>}
+                          </>
+                        : selectedRunsSummary.isMultiProfile ? "Mixed (keep each)" : "None"}
+                    </SelectItem>
+                    <SelectItem value="__none__">None (detach profile)</SelectItem>
+                    {profiles.map((p) => (
+                      <SelectItem key={p._id} value={p._id}>
+                        {p.name} <span className="text-muted-foreground">v{p.latestVersion}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {activeProfile && (
+                <div className="flex items-center gap-2 mb-3 px-1 py-1.5 text-xs text-muted-foreground bg-muted/50 rounded">
+                  <Lock className="h-3 w-3 shrink-0" />
+                  Worker, model, MCP servers, skills, and extensions are controlled by the profile
                 </div>
+              )}
 
-                <div className="border-t pt-4">
-                  <p className="text-sm font-medium mb-3">Overrides <span className="text-muted-foreground font-normal">(leave unchanged to copy from source)</span></p>
+              {/* Worker type override */}
+              <div className="flex items-center gap-4 mb-3" title={activeProfile ? "Controlled by profile" : undefined}>
+                <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
+                  {activeProfile && <Lock className="h-3 w-3 text-muted-foreground" />}
+                  Worker
+                </Label>
+                {activeProfile ? (
+                  <span className="text-sm text-muted-foreground">{activeProfile.version.workerType}</span>
+                ) : (
+                <Select
+                  value={resubmitOverrides.workerType ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") { delete next.workerType; } else { next.workerType = v; }
+                    // Reset model override when worker changes (supported models differ per worker)
+                    delete next.model;
+                    // Manage extensions: clear for non-vscode workers, restore for vscode workers
+                    const effectiveWorkerType = v === "__keep__" ? selectedRunsSummary.worker : v;
+                    if (effectiveWorkerType && !effectiveWorkerType.includes("vscode")) {
+                      next.extensions = null;
+                    } else {
+                      delete next.extensions;
+                    }
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">
+                      {selectedRunsSummary.worker
+                        ? selectedRunsSummary.worker
+                        : selectedRunsSummary.isMultiWorker ? "Mixed (keep each)" : "—"}
+                    </SelectItem>
+                    {WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
+                      <SelectItem key={w} value={w}>{w}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                )}
+              </div>
 
-                  {/* Profile override */}
-                  <div className="flex items-center gap-4 mb-3">
-                    <Label className="text-sm w-32 shrink-0">Profile</Label>
-                    <Select
-                      value={resubmitOverrides.profileId === null ? "__none__" : resubmitOverrides.profileId ?? "__keep__"}
-                      onValueChange={(v) => setResubmitOverrides((prev) => {
-                        const next = { ...prev };
-                        if (v === "__keep__") {
-                          delete next.profileId;
-                        } else if (v === "__none__") {
-                          next.profileId = null;
-                        } else {
-                          next.profileId = v;
-                        }
-                        // Clear individual overrides for profile-controlled fields when
-                        // switching profiles — profile values take precedence
-                        delete next.workerType;
-                        delete next.model;
-                        delete next.mcpServers;
-                        delete next.skillRevisions;
-                        delete next.extensions;
-                        return next;
-                      })}
-                    >
-                      <SelectTrigger className="w-56">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__keep__">
-                          {selectedRunsSummary.profileId
-                            ? <>
-                                {profileNameMap.get(selectedRunsSummary.profileId) ?? formatId(selectedRunsSummary.profileId)}
-                                {selectedRunsSummary.profileVersion && <span className="text-muted-foreground"> v{selectedRunsSummary.profileVersion}</span>}
-                              </>
-                            : selectedRunsSummary.isMultiProfile ? "Mixed (keep each)" : "None"}
-                        </SelectItem>
-                        <SelectItem value="__none__">None (detach profile)</SelectItem>
-                        {profiles.map((p) => (
-                          <SelectItem key={p._id} value={p._id}>
-                            {p.name} <span className="text-muted-foreground">v{p.latestVersion}</span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {activeProfile && (
-                    <div className="flex items-center gap-2 mb-3 px-1 py-1.5 text-xs text-muted-foreground bg-muted/50 rounded">
-                      <Lock className="h-3 w-3 shrink-0" />
-                      Worker, model, MCP servers, skills, and extensions are controlled by the profile
-                    </div>
-                  )}
-
-                  {/* Worker type override */}
-                  <div className="flex items-center gap-4 mb-3" title={activeProfile ? "Controlled by profile" : undefined}>
-                    <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
-                      {activeProfile && <Lock className="h-3 w-3 text-muted-foreground" />}
-                      Worker
-                    </Label>
-                    {activeProfile ? (
-                      <span className="text-sm text-muted-foreground">{activeProfile.version.workerType}</span>
-                    ) : (
-                    <Select
-                      value={resubmitOverrides.workerType ?? "__keep__"}
-                      onValueChange={(v) => setResubmitOverrides((prev) => {
-                        const next = { ...prev };
-                        if (v === "__keep__") { delete next.workerType; } else { next.workerType = v; }
-                        // Reset model override when worker changes (supported models differ per worker)
-                        delete next.model;
-                        // Manage extensions: clear for non-vscode workers, restore for vscode workers
-                        const effectiveWorkerType = v === "__keep__" ? selectedRunsSummary.worker : v;
-                        if (effectiveWorkerType && !effectiveWorkerType.includes("vscode")) {
-                          next.extensions = null;
-                        } else {
-                          delete next.extensions;
-                        }
-                        return next;
-                      })}
-                    >
-                      <SelectTrigger className="w-56">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__keep__">
-                          {selectedRunsSummary.worker
-                            ? selectedRunsSummary.worker
-                            : selectedRunsSummary.isMultiWorker ? "Mixed (keep each)" : "—"}
-                        </SelectItem>
-                        {WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
-                          <SelectItem key={w} value={w}>{w}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              {/* Model override */}
+              <div className="flex items-center gap-4 mb-3" title={activeProfile ? "Controlled by profile" : undefined}>
+                <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
+                  {activeProfile && <Lock className="h-3 w-3 text-muted-foreground" />}
+                  Model
+                </Label>
+                {activeProfile ? (
+                  <span className="text-sm text-muted-foreground">{activeProfile.version.model}</span>
+                ) : (
+                <Select
+                  value={resubmitOverrides.model === null ? "__clear__" : resubmitOverrides.model ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") { delete next.model; }
+                    else if (v === "__clear__") { next.model = null; }
+                    else { next.model = v; }
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">
+                      {selectedRunsSummary.model
+                        ? selectedRunsSummary.model
+                        : selectedRunsSummary.isMultiModel ? "Mixed (keep each)" : "Default"}
+                    </SelectItem>
+                    <SelectItem value="__clear__">Clear (use default)</SelectItem>
+                    {availableModels.filter((m) => m !== selectedRunsSummary.model).map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}{m === effectiveAgent?.defaultModel ? " (default)" : ""}
+                      </SelectItem>
+                    ))}
+                    {!effectiveWorker && (
+                      <SelectItem value="__hint__" disabled>
+                        Select a worker to see models
+                      </SelectItem>
                     )}
-                  </div>
+                  </SelectContent>
+                </Select>
+                )}
+              </div>
 
-                  {/* Model override */}
-                  <div className="flex items-center gap-4 mb-3" title={activeProfile ? "Controlled by profile" : undefined}>
-                    <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
-                      {activeProfile && <Lock className="h-3 w-3 text-muted-foreground" />}
-                      Model
-                    </Label>
-                    {activeProfile ? (
-                      <span className="text-sm text-muted-foreground">{activeProfile.version.model}</span>
-                    ) : (
-                    <Select
-                      value={resubmitOverrides.model === null ? "__clear__" : resubmitOverrides.model ?? "__keep__"}
-                      onValueChange={(v) => setResubmitOverrides((prev) => {
-                        const next = { ...prev };
-                        if (v === "__keep__") { delete next.model; }
-                        else if (v === "__clear__") { next.model = null; }
-                        else { next.model = v; }
-                        return next;
-                      })}
-                    >
-                      <SelectTrigger className="w-56">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__keep__">
-                          {selectedRunsSummary.model
-                            ? selectedRunsSummary.model
-                            : selectedRunsSummary.isMultiModel ? "Mixed (keep each)" : "Default"}
-                        </SelectItem>
-                        <SelectItem value="__clear__">Clear (use default)</SelectItem>
-                        {availableModels.filter((m) => m !== selectedRunsSummary.model).map((m) => (
-                          <SelectItem key={m} value={m}>
-                            {m}{m === effectiveAgent?.defaultModel ? " (default)" : ""}
-                          </SelectItem>
-                        ))}
-                        {!effectiveWorker && (
-                          <SelectItem value="__hint__" disabled>
-                            Select a worker to see models
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    )}
-                  </div>
+              {/* Max iterations override */}
+              <div className="flex items-center gap-4 mb-3">
+                <Label className="text-sm w-32 shrink-0">Max iterations</Label>
+                <Select
+                  value={resubmitOverrides.maxIterations === null ? "__clear__" : resubmitOverrides.maxIterations?.toString() ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") { delete next.maxIterations; }
+                    else if (v === "__clear__") { next.maxIterations = null; }
+                    else { next.maxIterations = parseInt(v); }
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">
+                      {selectedRunsSummary.maxIterations
+                        ? String(selectedRunsSummary.maxIterations)
+                        : selectedRunsSummary.isMultiIterations ? "Mixed (keep each)" : "Default"}
+                    </SelectItem>
+                    <SelectItem value="__clear__">Clear (use default)</SelectItem>
+                    {[1, 2, 3, 5, 10, 15, 20].filter((n) => n !== selectedRunsSummary.maxIterations).map((n) => (
+                      <SelectItem key={n} value={n.toString()}>{n}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-                  {/* Max iterations override */}
-                  <div className="flex items-center gap-4 mb-3">
-                    <Label className="text-sm w-32 shrink-0">Max iterations</Label>
-                    <Select
-                      value={resubmitOverrides.maxIterations === null ? "__clear__" : resubmitOverrides.maxIterations?.toString() ?? "__keep__"}
-                      onValueChange={(v) => setResubmitOverrides((prev) => {
-                        const next = { ...prev };
-                        if (v === "__keep__") { delete next.maxIterations; }
-                        else if (v === "__clear__") { next.maxIterations = null; }
-                        else { next.maxIterations = parseInt(v); }
-                        return next;
-                      })}
-                    >
-                      <SelectTrigger className="w-56">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__keep__">
-                          {selectedRunsSummary.maxIterations
-                            ? String(selectedRunsSummary.maxIterations)
-                            : selectedRunsSummary.isMultiIterations ? "Mixed (keep each)" : "Default"}
-                        </SelectItem>
-                        <SelectItem value="__clear__">Clear (use default)</SelectItem>
-                        {[1, 2, 3, 5, 10, 15, 20].filter((n) => n !== selectedRunsSummary.maxIterations).map((n) => (
-                          <SelectItem key={n} value={n.toString()}>{n}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* MCP servers override */}
-                  {activeProfile ? (
-                  <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
-                    <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
-                      <Lock className="h-3 w-3 text-muted-foreground" />MCP Servers
-                    </Label>
-                    <span className="text-sm text-muted-foreground">
-                      {activeProfile.version.mcpServers?.join(", ") || "None"}
-                    </span>
-                  </div>
-                  ) : (
-                  <div className="flex items-start gap-4">
-                    <Label className="text-sm w-32 shrink-0 pt-2">MCP Servers</Label>
-                    <div className="flex-1 space-y-1.5">
-                      <Select
-                        value={resubmitOverrides.mcpServers === null ? "__clear__" : resubmitOverrides.mcpServers !== undefined ? "__custom__" : "__keep__"}
-                        onValueChange={(v) => setResubmitOverrides((prev) => {
-                          const next = { ...prev };
-                          if (v === "__keep__") { delete next.mcpServers; }
-                          else if (v === "__clear__") { next.mcpServers = null; }
-                          else { next.mcpServers = []; }
-                          return next;
-                        })}
-                      >
-                        <SelectTrigger className="w-56">
-                          <SelectValue>
-                            {resubmitOverrides.mcpServers === null
-                              ? "Clear (no MCP servers)"
-                              : resubmitOverrides.mcpServers !== undefined
-                                ? "Choose servers…"
-                                : selectedRunsSummary.mcpServers && selectedRunsSummary.mcpServers.length > 0
-                                  ? selectedRunsSummary.mcpServers.join(", ")
-                                  : selectedRunsSummary.isMultiMcp ? "Mixed (keep each)" : "None"
-                            }
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__keep__">
-                            {selectedRunsSummary.mcpServers && selectedRunsSummary.mcpServers.length > 0
+              {/* MCP servers override */}
+              {activeProfile ? (
+              <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                  <Lock className="h-3 w-3 text-muted-foreground" />MCP Servers
+                </Label>
+                <span className="text-sm text-muted-foreground">
+                  {activeProfile.version.mcpServers?.join(", ") || "None"}
+                </span>
+              </div>
+              ) : (
+              <div className="flex items-start gap-4">
+                <Label className="text-sm w-32 shrink-0 pt-2">MCP Servers</Label>
+                <div className="flex-1 space-y-1.5">
+                  <Select
+                    value={resubmitOverrides.mcpServers === null ? "__clear__" : resubmitOverrides.mcpServers !== undefined ? "__custom__" : "__keep__"}
+                    onValueChange={(v) => setResubmitOverrides((prev) => {
+                      const next = { ...prev };
+                      if (v === "__keep__") { delete next.mcpServers; }
+                      else if (v === "__clear__") { next.mcpServers = null; }
+                      else { next.mcpServers = []; }
+                      return next;
+                    })}
+                  >
+                    <SelectTrigger className="w-56">
+                      <SelectValue>
+                        {resubmitOverrides.mcpServers === null
+                          ? "Clear (no MCP servers)"
+                          : resubmitOverrides.mcpServers !== undefined
+                            ? "Choose servers…"
+                            : selectedRunsSummary.mcpServers && selectedRunsSummary.mcpServers.length > 0
                               ? selectedRunsSummary.mcpServers.join(", ")
-                              : selectedRunsSummary.isMultiMcp ? "Mixed (keep each)" : "None"}
-                          </SelectItem>
-                          <SelectItem value="__clear__">Clear (no MCP servers)</SelectItem>
-                          <SelectItem value="__custom__">Choose servers…</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {resubmitOverrides.mcpServers !== undefined && resubmitOverrides.mcpServers !== null && (
-                        <div className="flex flex-wrap gap-1.5 pt-1">
-                          {mcpServers.map((s) => {
-                            const selected = resubmitOverrides.mcpServers?.includes(s._id) ?? false;
-                            return (
-                              <Button
-                                key={s._id}
-                                type="button"
-                                variant={selected ? "default" : "outline"}
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => setResubmitOverrides((prev) => {
-                                  const current = prev.mcpServers ?? [];
-                                  const next = selected ? current.filter((id) => id !== s._id) : [...current, s._id];
-                                  return { ...prev, mcpServers: next };
-                                })}
-                              >
-                                {s.name}
-                              </Button>
-                            );
-                          })}
-                          {mcpServers.length === 0 && (
-                            <span className="text-xs text-muted-foreground italic">No MCP servers configured</span>
-                          )}
-                        </div>
+                              : selectedRunsSummary.isMultiMcp ? "Mixed (keep each)" : "None"
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__keep__">
+                        {selectedRunsSummary.mcpServers && selectedRunsSummary.mcpServers.length > 0
+                          ? selectedRunsSummary.mcpServers.join(", ")
+                          : selectedRunsSummary.isMultiMcp ? "Mixed (keep each)" : "None"}
+                      </SelectItem>
+                      <SelectItem value="__clear__">Clear (no MCP servers)</SelectItem>
+                      <SelectItem value="__custom__">Choose servers…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {resubmitOverrides.mcpServers !== undefined && resubmitOverrides.mcpServers !== null && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {mcpServers.map((s) => {
+                        const selected = resubmitOverrides.mcpServers?.includes(s._id) ?? false;
+                        return (
+                          <Button
+                            key={s._id}
+                            type="button"
+                            variant={selected ? "default" : "outline"}
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => setResubmitOverrides((prev) => {
+                              const current = prev.mcpServers ?? [];
+                              const next = selected ? current.filter((id) => id !== s._id) : [...current, s._id];
+                              return { ...prev, mcpServers: next };
+                            })}
+                          >
+                            {s.name}
+                          </Button>
+                        );
+                      })}
+                      {mcpServers.length === 0 && (
+                        <span className="text-xs text-muted-foreground italic">No MCP servers configured</span>
                       )}
                     </div>
-                  </div>
                   )}
-
-                  {/* Skills override */}
-                  {activeProfile ? (
-                  <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
-                    <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
-                      <Lock className="h-3 w-3 text-muted-foreground" />Skills
-                    </Label>
-                    <span className="text-sm text-muted-foreground">
-                      {activeProfile.version.skillRevisions?.map((r) => r.split("@")[0].split("/").pop()).join(", ") || "None"}
-                    </span>
-                  </div>
-                  ) : (
-                  <div className="flex items-start gap-4">
-                    <Label className="text-sm w-32 shrink-0 pt-2">Skills</Label>
-                    <div className="flex-1 space-y-1.5">
-                      <Select
-                        value={resubmitOverrides.skillRevisions === null ? "__clear__" : resubmitOverrides.skillRevisions !== undefined ? "__custom__" : "__keep__"}
-                        onValueChange={(v) => setResubmitOverrides((prev) => {
-                          const next = { ...prev };
-                          if (v === "__keep__") { delete next.skillRevisions; }
-                          else if (v === "__clear__") { next.skillRevisions = null; }
-                          else { next.skillRevisions = []; }
-                          return next;
-                        })}
-                      >
-                        <SelectTrigger className="w-56">
-                          <SelectValue>
-                            {resubmitOverrides.skillRevisions === null
-                              ? "Clear (no skills)"
-                              : resubmitOverrides.skillRevisions !== undefined
-                                ? "Choose skills…"
-                                : selectedRunsSummary.skillRevisions && selectedRunsSummary.skillRevisions.length > 0
-                                  ? selectedRunsSummary.skillRevisions.map((r) => r.split("@")[0].split("/").pop()).join(", ")
-                                  : selectedRunsSummary.isMultiSkills ? "Mixed (keep each)" : "None"
-                            }
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__keep__">
-                            {selectedRunsSummary.skillRevisions && selectedRunsSummary.skillRevisions.length > 0
-                              ? selectedRunsSummary.skillRevisions.map((r) => r.split("@")[0].split("/").pop()).join(", ")
-                              : selectedRunsSummary.isMultiSkills ? "Mixed (keep each)" : "None"}
-                          </SelectItem>
-                          <SelectItem value="__clear__">Clear (no skills)</SelectItem>
-                          <SelectItem value="__custom__">Choose skills…</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {resubmitOverrides.skillRevisions !== undefined && resubmitOverrides.skillRevisions !== null && (() => {
-                        // Collect all unique skill revision refs from selected runs
-                        const allRefs = [...new Set(
-                          runs
-                            .filter((r) => selectedIds.has(r._id))
-                            .flatMap((r) => r.skillRevisions ?? [])
-                        )];
-                        return (
-                          <div className="flex flex-wrap gap-1.5 pt-1">
-                            {allRefs.map((ref) => {
-                              const selected = resubmitOverrides.skillRevisions?.includes(ref) ?? false;
-                              const skillName = ref.split("@")[0].split("/").pop() ?? ref;
-                              return (
-                                <Button
-                                  key={ref}
-                                  type="button"
-                                  variant={selected ? "default" : "outline"}
-                                  size="sm"
-                                  className="h-7 text-xs"
-                                  title={ref}
-                                  onClick={() => setResubmitOverrides((prev) => {
-                                    const current = prev.skillRevisions ?? [];
-                                    const next = selected ? current.filter((r) => r !== ref) : [...current, ref];
-                                    return { ...prev, skillRevisions: next };
-                                  })}
-                                >
-                                  {skillName}
-                                </Button>
-                              );
-                            })}
-                            {allRefs.length === 0 && (
-                              <span className="text-xs text-muted-foreground italic">No skills in selected runs</span>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                  )}
-
-                  {/* Extensions override — only for VS Code workers */}
-                  {activeProfile ? (
-                    effectiveWorker?.includes("vscode") && (
-                    <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
-                      <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
-                        <Lock className="h-3 w-3 text-muted-foreground" />Extensions
-                      </Label>
-                      <span className="text-sm text-muted-foreground">
-                        {activeProfile.version.extensions?.join(", ") || "None"}
-                      </span>
-                    </div>
-                    )
-                  ) : (
-                  effectiveWorker?.includes("vscode") && (
-                  <div className="flex items-start gap-4">
-                    <Label className="text-sm w-32 shrink-0 pt-2">Extensions</Label>
-                    <div className="flex-1 space-y-1.5">
-                      <Select
-                        value={resubmitOverrides.extensions === null ? "__clear__" : resubmitOverrides.extensions !== undefined ? "__custom__" : "__keep__"}
-                        onValueChange={(v) => setResubmitOverrides((prev) => {
-                          const next = { ...prev };
-                          if (v === "__keep__") { delete next.extensions; }
-                          else if (v === "__clear__") { next.extensions = null; }
-                          else { next.extensions = []; }
-                          return next;
-                        })}
-                      >
-                        <SelectTrigger className="w-56">
-                          <SelectValue>
-                            {resubmitOverrides.extensions === null
-                              ? "Clear (no extensions)"
-                              : resubmitOverrides.extensions !== undefined
-                                ? "Choose extensions…"
-                                : selectedRunsSummary.extensions && selectedRunsSummary.extensions.length > 0
-                                  ? selectedRunsSummary.extensions.join(", ")
-                                  : selectedRunsSummary.isMultiExtensions ? "Mixed (keep each)" : "None"
-                            }
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__keep__">
-                            {selectedRunsSummary.extensions && selectedRunsSummary.extensions.length > 0
-                              ? selectedRunsSummary.extensions.join(", ")
-                              : selectedRunsSummary.isMultiExtensions ? "Mixed (keep each)" : "None"}
-                          </SelectItem>
-                          <SelectItem value="__clear__">Clear (no extensions)</SelectItem>
-                          <SelectItem value="__custom__">Choose extensions…</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {resubmitOverrides.extensions !== undefined && resubmitOverrides.extensions !== null && (() => {
-                        const allExts = [...new Set(
-                          runs
-                            .filter((r) => selectedIds.has(r._id))
-                            .flatMap((r) => r.extensions ?? [])
-                        )];
-                        return (
-                          <div className="flex flex-wrap gap-1.5 pt-1">
-                            {allExts.map((ext) => {
-                              const selected = resubmitOverrides.extensions?.includes(ext) ?? false;
-                              return (
-                                <Button
-                                  key={ext}
-                                  type="button"
-                                  variant={selected ? "default" : "outline"}
-                                  size="sm"
-                                  className="h-7 text-xs"
-                                  onClick={() => setResubmitOverrides((prev) => {
-                                    const current = prev.extensions ?? [];
-                                    const next = selected ? current.filter((e) => e !== ext) : [...current, ext];
-                                    return { ...prev, extensions: next };
-                                  })}
-                                >
-                                  {ext}
-                                </Button>
-                              );
-                            })}
-                            {allExts.length === 0 && (
-                              <span className="text-xs text-muted-foreground italic">No extensions in selected runs</span>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                  ))}
                 </div>
               </div>
-              <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => { setResubmitCount(1); setResubmitOverrides({}); }}>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => bulkResubmitMutation.mutate({ ids: Array.from(selectedIds), count: resubmitCount, overrides: resubmitOverrides })}
-                  disabled={bulkResubmitMutation.isPending}
-                >
-                  {bulkResubmitMutation.isPending ? "Re-submitting…" : "Re-submit"}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={bulkRetryMutation.isPending}
-            onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
-          >
-            <RotateCcw className="h-4 w-4" />
-            {bulkRetryMutation.isPending ? "Retrying…" : "Retry selected"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={batchDownloadMutation.isPending}
-            onClick={() => batchDownloadMutation.mutate(Array.from(selectedIds))}
-          >
-            <Archive className="h-4 w-4" />
-            {batchDownloadMutation.isPending ? "Downloading…" : "Download selected"}
-          </Button>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive" size="sm" className="gap-1.5">
-                <Trash2 className="h-4 w-4" /> Delete selected
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will soft-delete the selected runs. They can be recovered later if needed.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => bulkDeleteMutation.mutate(Array.from(selectedIds))}
-                  disabled={bulkDeleteMutation.isPending}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                >
-                  {bulkDeleteMutation.isPending ? "Deleting…" : "Delete"}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-      )}
+              )}
+
+              {/* Skills override */}
+              {activeProfile ? (
+              <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                  <Lock className="h-3 w-3 text-muted-foreground" />Skills
+                </Label>
+                <span className="text-sm text-muted-foreground">
+                  {activeProfile.version.skillRevisions?.map((r) => r.split("@")[0].split("/").pop()).join(", ") || "None"}
+                </span>
+              </div>
+              ) : (
+              <div className="flex items-start gap-4">
+                <Label className="text-sm w-32 shrink-0 pt-2">Skills</Label>
+                <div className="flex-1 space-y-1.5">
+                  <Select
+                    value={resubmitOverrides.skillRevisions === null ? "__clear__" : resubmitOverrides.skillRevisions !== undefined ? "__custom__" : "__keep__"}
+                    onValueChange={(v) => setResubmitOverrides((prev) => {
+                      const next = { ...prev };
+                      if (v === "__keep__") { delete next.skillRevisions; }
+                      else if (v === "__clear__") { next.skillRevisions = null; }
+                      else { next.skillRevisions = []; }
+                      return next;
+                    })}
+                  >
+                    <SelectTrigger className="w-56">
+                      <SelectValue>
+                        {resubmitOverrides.skillRevisions === null
+                          ? "Clear (no skills)"
+                          : resubmitOverrides.skillRevisions !== undefined
+                            ? "Choose skills…"
+                            : selectedRunsSummary.skillRevisions && selectedRunsSummary.skillRevisions.length > 0
+                              ? selectedRunsSummary.skillRevisions.map((r) => r.split("@")[0].split("/").pop()).join(", ")
+                              : selectedRunsSummary.isMultiSkills ? "Mixed (keep each)" : "None"
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__keep__">
+                        {selectedRunsSummary.skillRevisions && selectedRunsSummary.skillRevisions.length > 0
+                          ? selectedRunsSummary.skillRevisions.map((r) => r.split("@")[0].split("/").pop()).join(", ")
+                          : selectedRunsSummary.isMultiSkills ? "Mixed (keep each)" : "None"}
+                      </SelectItem>
+                      <SelectItem value="__clear__">Clear (no skills)</SelectItem>
+                      <SelectItem value="__custom__">Choose skills…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {resubmitOverrides.skillRevisions !== undefined && resubmitOverrides.skillRevisions !== null && (() => {
+                    // Collect all unique skill revision refs from selected runs
+                    const allRefs = [...new Set(
+                      runs
+                        .filter((r) => selectedIds.has(r._id))
+                        .flatMap((r) => r.skillRevisions ?? [])
+                    )];
+                    return (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {allRefs.map((ref) => {
+                          const selected = resubmitOverrides.skillRevisions?.includes(ref) ?? false;
+                          const skillName = ref.split("@")[0].split("/").pop() ?? ref;
+                          return (
+                            <Button
+                              key={ref}
+                              type="button"
+                              variant={selected ? "default" : "outline"}
+                              size="sm"
+                              className="h-7 text-xs"
+                              title={ref}
+                              onClick={() => setResubmitOverrides((prev) => {
+                                const current = prev.skillRevisions ?? [];
+                                const next = selected ? current.filter((r) => r !== ref) : [...current, ref];
+                                return { ...prev, skillRevisions: next };
+                              })}
+                            >
+                              {skillName}
+                            </Button>
+                          );
+                        })}
+                        {allRefs.length === 0 && (
+                          <span className="text-xs text-muted-foreground italic">No skills in selected runs</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+              )}
+
+              {/* Extensions override — only for VS Code workers */}
+              {activeProfile ? (
+                effectiveWorker?.includes("vscode") && (
+                <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                  <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                    <Lock className="h-3 w-3 text-muted-foreground" />Extensions
+                  </Label>
+                  <span className="text-sm text-muted-foreground">
+                    {activeProfile.version.extensions?.join(", ") || "None"}
+                  </span>
+                </div>
+                )
+              ) : (
+              effectiveWorker?.includes("vscode") && (
+              <div className="flex items-start gap-4">
+                <Label className="text-sm w-32 shrink-0 pt-2">Extensions</Label>
+                <div className="flex-1 space-y-1.5">
+                  <Select
+                    value={resubmitOverrides.extensions === null ? "__clear__" : resubmitOverrides.extensions !== undefined ? "__custom__" : "__keep__"}
+                    onValueChange={(v) => setResubmitOverrides((prev) => {
+                      const next = { ...prev };
+                      if (v === "__keep__") { delete next.extensions; }
+                      else if (v === "__clear__") { next.extensions = null; }
+                      else { next.extensions = []; }
+                      return next;
+                    })}
+                  >
+                    <SelectTrigger className="w-56">
+                      <SelectValue>
+                        {resubmitOverrides.extensions === null
+                          ? "Clear (no extensions)"
+                          : resubmitOverrides.extensions !== undefined
+                            ? "Choose extensions…"
+                            : selectedRunsSummary.extensions && selectedRunsSummary.extensions.length > 0
+                              ? selectedRunsSummary.extensions.join(", ")
+                              : selectedRunsSummary.isMultiExtensions ? "Mixed (keep each)" : "None"
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__keep__">
+                        {selectedRunsSummary.extensions && selectedRunsSummary.extensions.length > 0
+                          ? selectedRunsSummary.extensions.join(", ")
+                          : selectedRunsSummary.isMultiExtensions ? "Mixed (keep each)" : "None"}
+                      </SelectItem>
+                      <SelectItem value="__clear__">Clear (no extensions)</SelectItem>
+                      <SelectItem value="__custom__">Choose extensions…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {resubmitOverrides.extensions !== undefined && resubmitOverrides.extensions !== null && (() => {
+                    const allExts = [...new Set(
+                      runs
+                        .filter((r) => selectedIds.has(r._id))
+                        .flatMap((r) => r.extensions ?? [])
+                    )];
+                    return (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {allExts.map((ext) => {
+                          const selected = resubmitOverrides.extensions?.includes(ext) ?? false;
+                          return (
+                            <Button
+                              key={ext}
+                              type="button"
+                              variant={selected ? "default" : "outline"}
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => setResubmitOverrides((prev) => {
+                                const current = prev.extensions ?? [];
+                                const next = selected ? current.filter((e) => e !== ext) : [...current, ext];
+                                return { ...prev, extensions: next };
+                              })}
+                            >
+                              {ext}
+                            </Button>
+                          );
+                        })}
+                        {allExts.length === 0 && (
+                          <span className="text-xs text-muted-foreground italic">No extensions in selected runs</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+              ))}
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setResubmitCount(1); setResubmitOverrides({}); }}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => bulkResubmitMutation.mutate({ ids: Array.from(selectedIds), count: resubmitCount, overrides: resubmitOverrides })}
+              disabled={bulkResubmitMutation.isPending}
+            >
+              {bulkResubmitMutation.isPending ? "Re-submitting…" : "Re-submit"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={priorityDialogOpen} onOpenChange={setPriorityDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Set priority for {selectionCaps.prioritizable} run{selectionCaps.prioritizable !== 1 ? "s" : ""}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Higher priority runs are dispatched first. Default is 0. Only pending and paused runs will be updated.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-2">
+            <Label htmlFor="bulk-priority">Priority</Label>
+            <div className="flex items-center gap-2 mt-1">
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.max(-100, v - 5))}>−5</Button>
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.max(-100, v - 1))}>−1</Button>
+              <Input
+                id="bulk-priority"
+                type="number"
+                min={-100}
+                max={100}
+                value={bulkPriorityValue}
+                onChange={(e) => setBulkPriorityValue(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
+                className="w-20 text-center"
+              />
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.min(100, v + 1))}>+1</Button>
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => setBulkPriorityValue((v) => Math.min(100, v + 5))}>+5</Button>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => bulkSetPriorityMutation.mutate({ ids: Array.from(selectedIds), priority: bulkPriorityValue })}
+              disabled={bulkSetPriorityMutation.isPending}
+            >
+              {bulkSetPriorityMutation.isPending ? "Updating…" : "Set priority"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will soft-delete the selected runs. They can be recovered later if needed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => bulkDeleteMutation.mutate(Array.from(selectedIds))}
+              disabled={bulkDeleteMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {bulkDeleteMutation.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Table */}
       {(groupBy === "none" ? isLoading : isGroupsLoading) ? (
@@ -1173,7 +1419,7 @@ export function RunsList() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
-      ) : (groupBy === "none" && filteredRuns.length === 0) || (groupBy !== "none" && runGroups.length === 0) ? (
+      ) : (groupBy === "none" && runs.length === 0) || (groupBy !== "none" && serverGroups.length === 0) ? (
         <div className="text-center py-12 text-muted-foreground">
           No runs found. <Link to="/runs/new" className="text-primary underline">Submit one?</Link>
         </div>
@@ -1200,6 +1446,7 @@ export function RunsList() {
               {isCol("skills") && <TableHead>Skills</TableHead>}
               {isCol("extensions") && <TableHead>Extensions</TableHead>}
               {isCol("profile") && <TableHead>Profile</TableHead>}
+              {isCol("priority") && <TableHead className="w-[60px]">Priority</TableHead>}
               {isCol("status") && <TableHead className="w-[100px]">Status</TableHead>}
               {isCol("outcome") && <TableHead className="w-[100px]">Outcome</TableHead>}
               {isCol("report") && <TableHead className="w-[100px]">Report</TableHead>}
@@ -1214,7 +1461,7 @@ export function RunsList() {
           </TableHeader>
           <TableBody>
             {groupBy !== "none" ? (
-              runGroups.map((group) => {
+              serverGroups.map((group) => {
                 const isExpanded = expandedGroups.has(group.key);
                 return (
                   <GroupRows
@@ -1227,6 +1474,9 @@ export function RunsList() {
                     reportSummaries={reportSummaries}
                     deleteMutation={deleteMutation}
                     retryMutation={retryMutation}
+                    pauseMutation={pauseMutation}
+                    resumeMutation={resumeMutation}
+                    setPriorityMutation={setPriorityMutation}
                     groupBy={groupBy}
                     profileNameMap={profileNameMap}
                     workerFilter={workerFilter === "all" ? undefined : workerFilter}
@@ -1238,7 +1488,7 @@ export function RunsList() {
                 );
               })
             ) : (
-              filteredRuns.map((run: Run) => (
+              runs.map((run: Run) => (
                 <RunRow
                   key={run._id}
                   run={run}
@@ -1247,6 +1497,9 @@ export function RunsList() {
                   reportSummaries={reportSummaries}
                   deleteMutation={deleteMutation}
                   retryMutation={retryMutation}
+                  pauseMutation={pauseMutation}
+                  resumeMutation={resumeMutation}
+                  setPriorityMutation={setPriorityMutation}
                   profileNameMap={profileNameMap}
                   hiddenColumns={hiddenColumns}
                 />
@@ -1292,6 +1545,9 @@ function RunRow({
   reportSummaries,
   deleteMutation,
   retryMutation,
+  pauseMutation,
+  resumeMutation,
+  setPriorityMutation,
   profileNameMap,
   hiddenColumns,
 }: {
@@ -1301,6 +1557,9 @@ function RunRow({
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   retryMutation: { mutate: (id: string) => void; isPending: boolean };
+  pauseMutation: { mutate: (id: string) => void; isPending: boolean };
+  resumeMutation: { mutate: (id: string) => void; isPending: boolean };
+  setPriorityMutation: { mutate: (args: { id: string; priority: number }) => void; isPending: boolean };
   profileNameMap: Map<string, string>;
   hiddenColumns: Set<ColumnId>;
 }) {
@@ -1411,6 +1670,9 @@ function RunRow({
           <span className="text-muted-foreground">–</span>
         )}
       </TableCell>}
+      {isCol("priority") && <TableCell className="text-center font-mono text-xs">
+        {run.priority ?? 0}
+      </TableCell>}
       {isCol("status") && <TableCell>
         <StatusBadge status={run.run?.status ?? "pending"} />
       </TableCell>}
@@ -1483,6 +1745,52 @@ function RunRow({
               <Download className="h-4 w-4" />
             </Button>
           )}
+          {((run.run?.status ?? "pending") === "pending" || run.run?.status === "queued") && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Pause"
+              onClick={() => pauseMutation.mutate(run._id)}
+              disabled={pauseMutation.isPending}
+            >
+              <Pause className="h-4 w-4" />
+            </Button>
+          )}
+          {run.run?.status === "paused" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Resume"
+              onClick={() => resumeMutation.mutate(run._id)}
+              disabled={resumeMutation.isPending}
+            >
+              <Play className="h-4 w-4" />
+            </Button>
+          )}
+          {((run.run?.status ?? "pending") === "pending" || run.run?.status === "paused") && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Set priority">
+                  <ArrowUpDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuLabel>Set Priority</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {[10, 5, 0, -5, -10].map((p) => (
+                  <DropdownMenuCheckboxItem
+                    key={p}
+                    checked={(run.priority ?? 0) === p}
+                    onCheckedChange={() => setPriorityMutation.mutate({ id: run._id, priority: p })}
+                  >
+                    {p > 0 ? `+${p}` : p} {p === 0 ? "(default)" : p > 0 ? "(higher)" : "(lower)"}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           {run.run?.status === "done" && (
             <Button
               variant="ghost"
@@ -1515,6 +1823,9 @@ function GroupRows({
   reportSummaries,
   deleteMutation,
   retryMutation,
+  pauseMutation,
+  resumeMutation,
+  setPriorityMutation,
   groupBy,
   profileNameMap,
   workerFilter,
@@ -1531,6 +1842,9 @@ function GroupRows({
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   retryMutation: { mutate: (id: string) => void; isPending: boolean };
+  pauseMutation: { mutate: (id: string) => void; isPending: boolean };
+  resumeMutation: { mutate: (id: string) => void; isPending: boolean };
+  setPriorityMutation: { mutate: (args: { id: string; priority: number }) => void; isPending: boolean };
   groupBy: GroupByKey;
   profileNameMap: Map<string, string>;
   workerFilter?: string;
@@ -1725,12 +2039,15 @@ function GroupRows({
             ) : <span className="font-medium text-muted-foreground">{group.label}</span>
           ) : null}
         </TableCell>}
+        {isCol("priority") && <TableCell />}
         {/* Status */}
         {isCol("status") && <TableCell>
           {(() => {
             const statusColors: Record<string, string> = {
               pending: "bg-gray-500",
+              queued: "bg-purple-500",
               processing: "bg-blue-500",
+              paused: "bg-amber-500",
               done: "bg-green-500",
             };
             const total = aggregates.count;
@@ -1804,17 +2121,24 @@ function GroupRows({
         {isCol("attempt") && <TableCell />}
         {/* Turns */}
         {isCol("turns") && <TableCell className="text-center font-mono text-xs">
+          {aggregates.turns
+            ? formatStatRange(aggregates.turns, fmtNum)
+            : <span className="text-muted-foreground">–</span>}
         </TableCell>}
         {/* LLM Calls */}
-        {isCol("llmCalls") && <TableCell />}
+        {isCol("llmCalls") && <TableCell className="text-center font-mono text-xs">
+          {aggregates.llmCalls
+            ? formatStatRange(aggregates.llmCalls, fmtNum)
+            : <span className="text-muted-foreground">–</span>}
+        </TableCell>}
         {/* Duration */}
         {isCol("duration") && <TableCell className="font-mono text-xs">
           {formatStatRange(aggregates.duration, fmtDur)}
         </TableCell>}
         {/* Tokens */}
         {isCol("tokens") && <TableCell className="font-mono text-xs">
-          {aggregates.promptTokens
-            ? <>{formatStatRange(aggregates.promptTokens, fmtNum)}↑</>
+          {aggregates.promptTokens || aggregates.completionTokens
+            ? <>{aggregates.promptTokens ? <>{formatStatRange(aggregates.promptTokens, fmtNum)}↑</> : null}{aggregates.promptTokens && aggregates.completionTokens ? " · " : null}{aggregates.completionTokens ? <>{formatStatRange(aggregates.completionTokens, fmtNum)}↓</> : null}</>
             : <span className="text-muted-foreground">–</span>}
         </TableCell>}
         {/* Created */}
@@ -1840,6 +2164,9 @@ function GroupRows({
               reportSummaries={mergedReportSummaries}
               deleteMutation={deleteMutation}
               retryMutation={retryMutation}
+              pauseMutation={pauseMutation}
+              resumeMutation={resumeMutation}
+              setPriorityMutation={setPriorityMutation}
               profileNameMap={profileNameMap}
               hiddenColumns={hiddenColumns}
             />

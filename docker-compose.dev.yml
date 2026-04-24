@@ -77,6 +77,22 @@ services:
         - action: rebuild
           path: ./pnpm-lock.yaml
 
+  scheduler:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/scheduler/src
+          target: /app/apps/scheduler/src
+        - action: sync
+          path: ./packages/shared/src
+          target: /app/packages/shared/src
+        - action: rebuild
+          path: ./apps/scheduler/package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+
   # ===========================================================================
   # Portal (Vite HMR)
   # ===========================================================================

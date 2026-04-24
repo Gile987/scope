@@ -76,6 +76,7 @@ export function buildGroupingPipeline(
             },
           },
         },
+        _llmCallCount: { $cond: { if: { $isNumber: "$run.aiCallCount" }, then: "$run.aiCallCount", else: null } },
         // Sorted-joined array keys for uniform comparison
         _mcpKey: {
           $reduce: {
@@ -114,6 +115,7 @@ export function buildGroupingPipeline(
         _durations: { $push: "$_duration" },
         _promptTokensList: { $push: "$_promptTokens" },
         _completionTokensList: { $push: "$_completionTokens" },
+        _llmCallCounts: { $push: "$_llmCallCount" },
         // Uniform detection: collect distinct values
         _workerTypes: { $addToSet: "$workerType" },
         _models: { $addToSet: { $ifNull: ["$model", ""] } },
@@ -127,7 +129,9 @@ export function buildGroupingPipeline(
         _extensionKeys: { $addToSet: "$_extensionKey" },
         // Status/outcome distribution counts
         _statusPending: { $sum: { $cond: [{ $eq: ["$run.status", "pending"] }, 1, 0] } },
+        _statusQueued: { $sum: { $cond: [{ $eq: ["$run.status", "queued"] }, 1, 0] } },
         _statusProcessing: { $sum: { $cond: [{ $eq: ["$run.status", "processing"] }, 1, 0] } },
+        _statusPaused: { $sum: { $cond: [{ $eq: ["$run.status", "paused"] }, 1, 0] } },
         _statusDone: { $sum: { $cond: [{ $eq: ["$run.status", "done"] }, 1, 0] } },
         _outcomeSucceeded: { $sum: { $cond: [{ $eq: ["$run.outcome", "succeeded"] }, 1, 0] } },
         _outcomeFailed: { $sum: { $cond: [{ $eq: ["$run.outcome", "failed"] }, 1, 0] } },
@@ -159,7 +163,8 @@ export function buildGroupingPipeline(
           duration: { $let: { vars: { vals: { $filter: { input: "$_durations", cond: { $and: [{ $ne: ["$$this", null] }, { $gt: ["$$this", 0] }] } } } }, in: { $cond: { if: { $eq: [{ $size: "$$vals" }, 0] }, then: null, else: { min: { $min: "$$vals" }, max: { $max: "$$vals" }, mean: { $avg: "$$vals" }, stdDev: { $cond: { if: { $lte: [{ $size: "$$vals" }, 1] }, then: 0, else: { $sqrt: { $avg: { $map: { input: "$$vals", in: { $pow: [{ $subtract: ["$$this", { $avg: "$$vals" }] }, 2] } } } } } } } } } } } },
           promptTokens: { $let: { vars: { vals: { $filter: { input: "$_promptTokensList", cond: { $ne: ["$$this", null] } } } }, in: { $cond: { if: { $eq: [{ $size: "$$vals" }, 0] }, then: null, else: { min: { $min: "$$vals" }, max: { $max: "$$vals" }, mean: { $avg: "$$vals" }, stdDev: { $cond: { if: { $lte: [{ $size: "$$vals" }, 1] }, then: 0, else: { $sqrt: { $avg: { $map: { input: "$$vals", in: { $pow: [{ $subtract: ["$$this", { $avg: "$$vals" }] }, 2] } } } } } } } } } } } },
           completionTokens: { $let: { vars: { vals: { $filter: { input: "$_completionTokensList", cond: { $ne: ["$$this", null] } } } }, in: { $cond: { if: { $eq: [{ $size: "$$vals" }, 0] }, then: null, else: { min: { $min: "$$vals" }, max: { $max: "$$vals" }, mean: { $avg: "$$vals" }, stdDev: { $cond: { if: { $lte: [{ $size: "$$vals" }, 1] }, then: 0, else: { $sqrt: { $avg: { $map: { input: "$$vals", in: { $pow: [{ $subtract: ["$$this", { $avg: "$$vals" }] }, 2] } } } } } } } } } } } },
-          statusCounts: { pending: "$_statusPending", processing: "$_statusProcessing", done: "$_statusDone" },
+          llmCalls: { $let: { vars: { vals: { $filter: { input: "$_llmCallCounts", cond: { $ne: ["$$this", null] } } } }, in: { $cond: { if: { $eq: [{ $size: "$$vals" }, 0] }, then: null, else: { min: { $min: "$$vals" }, max: { $max: "$$vals" }, mean: { $avg: "$$vals" }, stdDev: { $cond: { if: { $lte: [{ $size: "$$vals" }, 1] }, then: 0, else: { $sqrt: { $avg: { $map: { input: "$$vals", in: { $pow: [{ $subtract: ["$$this", { $avg: "$$vals" }] }, 2] } } } } } } } } } } } },
+          statusCounts: { pending: "$_statusPending", queued: "$_statusQueued", processing: "$_statusProcessing", paused: "$_statusPaused", done: "$_statusDone" },
           outcomeCounts: { succeeded: "$_outcomeSucceeded", failed: "$_outcomeFailed", finished: "$_outcomeFinished" },
         },
         uniform: {

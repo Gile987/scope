@@ -99,7 +99,7 @@ describe("buildGroupingPipeline", () => {
     const pipeline = buildGroupingPipeline("task");
     const project = pipeline[2].$project as Record<string, unknown>;
     const aggregates = project.aggregates as Record<string, unknown>;
-    expect(aggregates.statusCounts).toEqual({ pending: "$_statusPending", processing: "$_statusProcessing", done: "$_statusDone" });
+    expect(aggregates.statusCounts).toEqual({ pending: "$_statusPending", queued: "$_statusQueued", processing: "$_statusProcessing", paused: "$_statusPaused", done: "$_statusDone" });
     expect(aggregates.outcomeCounts).toEqual({ succeeded: "$_outcomeSucceeded", failed: "$_outcomeFailed", finished: "$_outcomeFinished" });
   });
 });

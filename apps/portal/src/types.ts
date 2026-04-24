@@ -3,7 +3,7 @@
 
 // Types mirroring the API response shapes (from shared/src/types.ts)
 
-export type RunStatus = "pending" | "processing" | "done";
+export type RunStatus = "pending" | "queued" | "processing" | "paused" | "done";
 export type RunOutcome = "succeeded" | "failed" | "finished";
 
 export interface TokenUsage {
@@ -97,6 +97,8 @@ export interface RunState {
   startedAt?: string;
   finishedAt?: string;
   updatedAt?: string;
+  pausedAt?: string;
+  resumedAt?: string;
 }
 
 export interface Run {
@@ -121,6 +123,7 @@ export interface Run {
   skills?: string[];
   skillRevisions?: string[];
   extensions?: string[];
+  priority?: number;
   submissionId?: string;
   profileId?: string;
   profileVersionId?: string;
@@ -145,7 +148,9 @@ export type WorkerType = (typeof WORKER_TYPES)[number];
 
 export const STATUS_LIST: RunStatus[] = [
   "pending",
+  "queued",
   "processing",
+  "paused",
   "done",
 ];
 
@@ -894,6 +899,7 @@ export interface GroupAggregates {
   duration: AggregateStats | null;
   promptTokens: AggregateStats | null;
   completionTokens: AggregateStats | null;
+  llmCalls: AggregateStats | null;
   statusCounts: Record<string, number>;
   outcomeCounts: Record<string, number>;
 }
