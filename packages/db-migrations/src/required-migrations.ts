@@ -28,4 +28,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "013-remove-logs-from-docs.ts",
   "014-introduce-runs-and-run.ts",
   "015-add-priority-and-scheduler-index.ts",
+  "016-fix-scheduler-sort-index.ts",
 ];
