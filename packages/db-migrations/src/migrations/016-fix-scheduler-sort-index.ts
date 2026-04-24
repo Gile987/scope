@@ -16,8 +16,6 @@
  * 009). For the ORDER BY, a dedicated 2-field compound index on the sort
  * fields works reliably (same pattern as migration 010's pagination indexes).
  *
- * Also creates the reversed variant so the index can serve both sort
- * directions if needed in the future.
  */
 
 import type { Db } from "mongodb";
@@ -38,20 +36,13 @@ export class FixSchedulerSortIndex implements MigrationInterface {
     }
 
     // Create 2-field sort index: priority DESC, createdAt ASC
-    const indexes = [
-      { key: { priority: -1 as const, createdAt: 1 as const }, name: "priority_-1_createdAt_1" },
-      { key: { priority: 1 as const, createdAt: -1 as const }, name: "priority_1_createdAt_-1" },
-    ];
-
-    for (const { key, name } of indexes) {
-      try {
-        await requests.createIndex(key);
-        console.log(`[016] Created index ${name} on requests`);
-      } catch (err: any) {
-        console.log(
-          `[016] Index ${name} already exists or couldn't be created: ${err.message ?? err}`,
-        );
-      }
+    try {
+      await requests.createIndex({ priority: -1 as const, createdAt: 1 as const });
+      console.log("[016] Created index priority_-1_createdAt_1 on requests");
+    } catch (err: any) {
+      console.log(
+        `[016] Index priority_-1_createdAt_1 already exists or couldn't be created: ${err.message ?? err}`,
+      );
     }
   }
 
