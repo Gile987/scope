@@ -14,6 +14,7 @@
  *   GITHUB_TOKEN  — GitHub PAT for Copilot auth (required)
  *   TEST_PROMPT   — First prompt to send (required)
  *   TEST_PROMPT_2 — Optional second prompt (tests session reuse)
+ *   TEST_MODEL    — Model to select via ACP set_model (e.g. "claude-opus-4.6")
  */
 import { runACPSession } from "./acp-client.js";
 import { createFreshWorkspace } from "shared";
@@ -24,6 +25,8 @@ interface PromptResult {
   response?: string;
   stopReason?: string;
   error?: string;
+  /** Model confirmed active by ACP set_model, or undefined if not requested/unavailable. */
+  confirmedModel?: string;
 }
 
 interface ToolCheck {
@@ -71,7 +74,7 @@ async function main(): Promise<void> {
   emit("test-worker starting");
 
   // Check required CLI tools are available in PATH
-  const toolChecks = checkTools(["pwsh", "python3", "git", "uv"]);
+  const toolChecks = checkTools(["pwsh", "python3", "git", "uv", "node"]);
   for (const tc of toolChecks) {
     emit(`tool ${tc.tool}: ${tc.available ? `found ${tc.path}` : "NOT FOUND"}${tc.version ? ` (${tc.version})` : ""}`);
   }
@@ -79,6 +82,8 @@ async function main(): Promise<void> {
   const githubToken = process.env.GITHUB_TOKEN;
   const prompts = [process.env.TEST_PROMPT].filter(Boolean) as string[];
   if (process.env.TEST_PROMPT_2) prompts.push(process.env.TEST_PROMPT_2);
+
+  const testModel = process.env.TEST_MODEL;
 
   const result: TestResult = { prompts: [], toolChecks };
 
@@ -114,11 +119,13 @@ async function main(): Promise<void> {
         },
         cwd: workspacePath,
         onLog: (msg) => emit(`[acp] ${msg}`),
+        model: testModel,
       });
       emit(`runACPSession (${label}) completed — stopReason=${acpResult.stopReason}`);
       promptResult.success = true;
       promptResult.response = acpResult.response;
       promptResult.stopReason = acpResult.stopReason;
+      promptResult.confirmedModel = acpResult.confirmedModel;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       emit(`runACPSession (${label}) failed: ${msg}`);

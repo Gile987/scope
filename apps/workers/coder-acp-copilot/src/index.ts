@@ -165,6 +165,7 @@ class CopilotProcessor implements WorkerProcessor {
           await log("debug", msg);
         },
         mcpServers: [],
+        model: options?.model,
       });
 
       await log("info", "Copilot processing complete", { 
