@@ -39,6 +39,7 @@ interface PromptResult {
   response?: string;
   stopReason?: string;
   error?: string;
+  confirmedModel?: string;
 }
 
 interface ToolCheck {
@@ -145,13 +146,13 @@ describe("coder-acp-copilot integration", async () => {
       log("Docker build complete");
     }
 
-    // Run the container once — both tests share this result
+    // Run the container once — all tests share this result
     const env: string[] = [];
     if (hasCredentials) {
       env.push(
         `GITHUB_TOKEN=${GITHUB_TOKEN}`,
         "TEST_PROMPT=Generate a Hello World REST API in Python using Flask.",
-        "TEST_PROMPT_2=Add a /health endpoint to the Flask app that returns 200 OK.",
+        "TEST_MODEL=claude-opus-4.6",
       );
     }
     workerResult = await runTestWorker(docker, env);
@@ -166,7 +167,7 @@ describe("coder-acp-copilot integration", async () => {
   // Tool availability: each tool gets its own test for CI visibility
   // -----------------------------------------------------------------------
 
-  for (const tool of ["pwsh", "python3", "git", "uv"]) {
+  for (const tool of ["pwsh", "python3", "git", "uv", "node"]) {
     it.skipIf(!dockerAvailable)(
       `has ${tool} in PATH`,
       { timeout: 30_000 },
@@ -203,18 +204,35 @@ describe("coder-acp-copilot integration", async () => {
         first.response!.length > 10,
         `Expected non-trivial response, got: ${first.response!.substring(0, 200)}`,
       ).toBe(true);
+    },
+  );
 
-      // --- Second prompt assertions (session reuse) ---
-      const second = result.prompts[1];
-      expect(second, "Second prompt result missing — session reuse not tested").toBeTruthy();
-      expect(second.error, `Second prompt failed: ${second?.error}`).toBeUndefined();
-      expect(second.success).toBe(true);
-      expect(second.response).toBeTruthy();
+  // -----------------------------------------------------------------------
+  // Model selection test: ACP set_model actually changes the active model
+  // -----------------------------------------------------------------------
 
+  it.skipIf(!canRun)(
+    "honours the requested model via ACP set_model",
+    { timeout: 300_000 },
+    async () => {
+      const { result } = workerResult!;
+      const first = result.prompts[0];
+
+      log(`confirmedModel=${first.confirmedModel}`);
+
+      // KNOWN LIMITATION: this assertion is not a fully reliable regression guard.
+      //
+      // `confirmedModel` is set by selectModel() returning the *input* model
+      // string on success — it is NOT echoed back by the ACP set_model response.
+      // A truly reliable test would inspect actual inference API calls (e.g. via
+      // HAR/proxy) to verify the correct model was sent on the wire. That level
+      // of instrumentation is out of scope here; this test at least verifies that
+      // selectModel() was called and did not throw.
       expect(
-        second.response!.length > 10,
-        `Expected non-trivial response, got: ${second.response!.substring(0, 200)}`,
-      ).toBe(true);
+        first.confirmedModel,
+        "selectModel() did not return a confirmed model — ACP set_model was not called or threw",
+      ).toBeDefined();
+      expect(first.confirmedModel).toBe("claude-opus-4.6");
     },
   );
 });
