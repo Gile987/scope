@@ -318,7 +318,8 @@ The HAR plugin is the first (and initially only) built-in plugin. It uses **disk
 **`GET /proxy/har` semantics** (registered by HAR plugin, served at `/proxy/har`):
 - Returns `200 application/json` with the finalized HAR file contents after recording is stopped
 - Returns `404` if no HAR is available (no recording happened, or already retrieved)
-- Deletes the finalized HAR file after successful retrieval (one-shot)
+- Idempotent — the finalized HAR file remains on disk and can be retrieved multiple times (safe for client retries)
+- The HAR file is deleted during **session cleanup** (idle reap or next `on_recording_start`), not on retrieval
 
 #### Future Plugin: MetricsPlugin (Phase 3)
 
