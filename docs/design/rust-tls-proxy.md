@@ -131,6 +131,7 @@ apps/
       main.rs                     # Entry point, CLI args, signal handling
       config.rs                   # Configuration (ports, URL filters, cert paths)
       session.rs                  # Source-IP session manager (HashMap<IpAddr, Session>)
+      plugin.rs                   # Plugin trait + plugin registry
       proxy/
         mod.rs
         handler.rs                # HTTP CONNECT + plain HTTP forwarding
@@ -140,10 +141,13 @@ apps/
         mod.rs
         server.rs                 # Axum REST API on :18897
         routes.rs                 # /proxy, /proxy/rootCertificate, /proxy/har
-      har/
-        mod.rs
-        writer.rs                 # HAR 1.2 JSON serializer
-        types.rs                  # HAR data model (serde)
+      plugins/
+        mod.rs                    # Re-exports built-in plugins
+        har/
+          mod.rs
+          plugin.rs               # HarPlugin: impl ProxyPlugin
+          writer.rs               # HAR 1.2 JSON serializer
+          types.rs                # HAR data model (serde)
       ca/
         mod.rs
         generator.rs              # CA key pair generation + leaf cert signing
@@ -155,6 +159,7 @@ apps/
         proxy_test.rs             # End-to-end: proxy → upstream → HAR
         api_test.rs               # Control API + session isolation tests
         tls_test.rs               # Certificate generation + validation
+        plugin_test.rs            # Plugin lifecycle + custom plugin tests
     config/
       default.json                # Default config (mirrors devproxy-config.json schema)
 ```
@@ -232,30 +237,99 @@ flowchart LR
   4. Cache the cert (bounded LRU, ~1000 entries)
 - The CA cert is served at `GET /proxy/rootCertificate?format=crt`
 
-### 5. HAR Recording
+### 5. Plugin Architecture
+
+The proxy core knows nothing about HAR, metrics, or any specific recording format. All traffic observation is handled by **plugins** — Rust trait objects registered at startup.
+
+#### Plugin Trait
+
+```rust
+/// Called by the proxy core for every intercepted request/response pair.
+#[async_trait]
+pub trait ProxyPlugin: Send + Sync {
+    /// Unique name (used in config and API routes).
+    fn name(&self) -> &str;
+
+    /// Called when recording starts for a session.
+    fn on_recording_start(&self, session_id: &SessionId);
+
+    /// Called for each intercepted request/response pair.
+    fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange);
+
+    /// Called when recording stops. Plugin should finalize any buffered data.
+    fn on_recording_stop(&self, session_id: &SessionId);
+
+    /// Called when a session is reaped (idle timeout or explicit clear).
+    fn on_session_clear(&self, session_id: &SessionId);
+
+    /// Optional: register additional API routes (e.g., GET /proxy/har).
+    /// Returns an Axum Router that will be nested under `/proxy/plugins/{name}/`.
+    fn api_routes(&self) -> Option<axum::Router> {
+        None
+    }
+}
+```
+
+`HttpExchange` contains the full request (method, URL, headers, body) and response (status, headers, body) — bodies are `Bytes` so plugins can inspect or copy as needed.
+
+#### Plugin Registry
+
+```rust
+pub struct PluginRegistry {
+    plugins: Vec<Arc<dyn ProxyPlugin>>,
+}
+
+impl PluginRegistry {
+    /// Broadcast to all plugins (non-blocking, parallel via tokio::spawn).
+    pub async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange);
+    pub fn on_recording_start(&self, session_id: &SessionId);
+    pub fn on_recording_stop(&self, session_id: &SessionId);
+    pub fn on_session_clear(&self, session_id: &SessionId);
+}
+```
+
+Plugins are registered in `main.rs` at startup. The proxy core calls `registry.on_exchange()` after each intercepted request/response — plugins receive a shared reference and buffer internally.
+
+#### Built-in: HAR Plugin (`plugins/har/`)
+
+The HAR plugin is the first (and initially only) built-in plugin:
+
+- **Implements** `ProxyPlugin` trait
+- **`on_recording_start`** — creates a new `Vec<HarEntry>` buffer for the session
+- **`on_exchange`** — appends an `HarEntry` (request + response + timings) to the session buffer
+- **`on_recording_stop`** — finalizes the HAR (sets `log.pages`, computes timings), holds serialized JSON
+- **`on_session_clear`** — drops the session buffer
+- **`api_routes`** — registers `GET /proxy/har` (returns finalized HAR for the caller's session)
 
 **HAR 1.2 spec** (http://www.softwareishard.com/blog/har-12-spec/):
-
-- Maintain an in-memory `Vec<HarEntry>` **per session** (keyed by source IP)
-- Each intercepted request/response pair → one `HarEntry`, routed to the session matching the connection's source IP
-- On `POST /proxy {recording: false}`:
-  1. Finalize the session's HAR (set `log.pages`, compute timings)
-  2. Hold the serialized HAR in memory for retrieval
-- On `GET /proxy/har`:
-  1. Return the finalized HAR as `application/json`
-  2. Clear the session buffer (one-shot retrieval)
 
 **Response body handling:**
 - Buffer full response bodies (for HAR `content.text`)
 - For large responses (>1 MB), store as base64 with `content.encoding: "base64"`
 - SSE streams: accumulate full body (needed for token extraction from streaming responses)
 
-**Session lifecycle:**
+**`GET /proxy/har` semantics** (registered by HAR plugin, served at `/proxy/har`):
+- Returns `200 application/json` with the HAR body after recording is stopped
+- Returns `404` if no HAR is available (no recording happened, or already retrieved)
+- Clears the session's HAR buffer after successful retrieval (one-shot)
+
+#### Future Plugins (Phase 3+)
+
+| Plugin | Purpose |
+|--------|---------|
+| `TokenCounterPlugin` | Real-time token usage counting without HAR parsing |
+| `MetricsPlugin` | Prometheus `/metrics` endpoint — per-session and aggregate counters |
+| `FaultInjectionPlugin` | Simulate errors, latency, rate limiting for chaos testing |
+| `WebSocketStreamPlugin` | Real-time request/response streaming to connected WebSocket clients |
+
+### 6. Session Lifecycle
+
 - Sessions are created lazily on first request from a new source IP
 - Sessions are reaped after HAR retrieval + a configurable idle timeout (default: 5 min)
 - Max concurrent sessions capped at 100 (safety valve)
+- On session create/clear, all plugins are notified via the registry
 
-### 6. URL Filtering
+### 7. URL Filtering
 
 Match the DevProxy `urlsToWatch` config format:
 
@@ -272,7 +346,7 @@ Match the DevProxy `urlsToWatch` config format:
 - Non-matching URLs: tunnel passthrough (no MITM, no HAR recording)
 - Matching URLs: full interception + recording
 
-### 7. Configuration
+### 8. Configuration
 
 Support both CLI flags and a JSON config file (DevProxy-compatible schema):
 
@@ -295,7 +369,7 @@ scope-proxy --config /config/proxy.json
 scope-proxy --port 18000 --api-port 18897 --har-dir /har-output
 ```
 
-### 8. Docker Image
+### 9. Docker Image
 
 ```dockerfile
 # Build stage
@@ -317,7 +391,7 @@ ENTRYPOINT ["/scope-proxy"]
 
 No init container needed — the binary runs as any UID (no .NET runtime, no home directory requirements).
 
-### 8b. Build Integration (pnpm + CI)
+### 9b. Build Integration (pnpm + CI)
 
 #### pnpm script aliases
 
@@ -374,7 +448,7 @@ docker push ${ACR_LOGIN_SERVER}/scoped/scope-proxy:${TAG}
 
 FluxCD image automation scans the ACR tag and auto-updates integration manifests (same pattern as existing workers).
 
-### 9. Docker Compose Integration
+### 10. Docker Compose Integration
 
 Replace per-worker DevProxy sidecars with a single shared `scope-proxy` service:
 
@@ -428,7 +502,7 @@ coder-acp-copilot:
 
 **Savings:** For 3 workers with DevProxy, this eliminates **6 containers** (3 DevProxy + 3 init) → **1 shared container**.
 
-### 10. Kubernetes Deployment Manifests
+### 11. Kubernetes Deployment Manifests
 
 #### Deployment + Service
 
@@ -596,7 +670,7 @@ FluxCD image automation in `deploy/overlays/integration/images.yaml`:
   newTag: "latest"  # Overwritten by image automation
 ```
 
-### 11. Unit Testing Strategy
+### 12. Unit Testing Strategy
 
 #### Rust Unit Tests (`#[cfg(test)]` modules)
 
@@ -606,8 +680,10 @@ Each source module includes co-located unit tests:
 |--------|------------|
 | `session.rs` | Create session by IP, create by `X-Session-Id`, retrieve by IP, session idle reaping, max session cap, concurrent session access |
 | `config.rs` | Parse JSON config, CLI flag overrides, default values, invalid config errors |
-| `har/types.rs` | Serialize HAR entry, serialize full HAR log, base64 encoding for large bodies, timestamp formatting |
-| `har/writer.rs` | Build HAR from entries, empty HAR, truncation at size limit |
+| `plugin.rs` | Register plugin, broadcast on_exchange to all plugins, plugin API route mounting |
+| `plugins/har/types.rs` | Serialize HAR entry, serialize full HAR log, base64 encoding for large bodies, timestamp formatting |
+| `plugins/har/writer.rs` | Build HAR from entries, empty HAR, truncation at size limit |
+| `plugins/har/plugin.rs` | on_recording_start creates buffer, on_exchange appends entry, on_recording_stop finalizes, on_session_clear drops buffer |
 | `ca/generator.rs` | Generate CA key pair, sign leaf cert for domain, leaf cert has correct SAN, leaf cert validates against CA, LRU cache eviction |
 | `filters/url_matcher.rs` | Glob-to-regex conversion, match `https://api.github.com/foo`, reject `https://other.com/bar`, wildcard `*` semantics, edge cases (empty pattern, trailing slash) |
 | `proxy/handler.rs` | Parse CONNECT request, extract host:port, reject malformed CONNECT, plain HTTP forwarding |
@@ -632,6 +708,9 @@ These test the full proxy stack end-to-end:
 | `tls_test::cert_generation_and_trust` | Generate CA → generate leaf for `example.com` → verify leaf validates against CA with `webpki` |
 | `tls_test::sni_based_cert_selection` | Two CONNECT requests to different domains → verify different leaf certs |
 | `tls_test::cert_cache_reuse` | Two CONNECT requests to same domain → verify same leaf cert returned |
+| `plugin_test::har_plugin_lifecycle` | Register HAR plugin → start recording → proxy traffic → stop → GET /proxy/har → verify HAR |
+| `plugin_test::custom_plugin` | Register a test plugin implementing `ProxyPlugin` → verify `on_exchange` called for each request |
+| `plugin_test::multiple_plugins` | Register HAR + test plugin → verify both receive all exchanges independently |
 
 Run with `cargo test --test '*'` (uses `wiremock` for mock upstream, `reqwest` as HTTP client).
 
@@ -657,21 +736,22 @@ Update existing tests in `packages/shared/src/devproxy/devproxy-client.test.ts`:
 | 1.2 | Add pnpm script aliases (`build:proxy`, `test:proxy`, `lint:proxy`, `fmt:proxy`) to root `package.json` |
 | 1.3 | Add Rust CI job (fmt + clippy + test + build) with path filter to GitHub Actions workflow |
 | 1.4 | Add `scope-proxy` Docker image build to `build-acr.sh` / image CI pipeline |
-| 1.5 | Implement source-IP session manager (`session.rs`) with idle reaping |
-| 1.6 | Implement HTTP CONNECT tunnel handler (hyper) with session-aware routing |
-| 1.7 | Implement TLS interception with dynamic cert generation (rcgen + rustls) |
-| 1.8 | Implement HAR 1.2 writer with per-session request/response recording |
-| 1.9 | Implement control API (axum): `/proxy` GET/POST, `/proxy/rootCertificate`, `/proxy/har` |
-| 1.10 | Implement `X-Session-Id` header override for localhost dev |
-| 1.11 | Implement URL glob filtering (`urlsToWatch`) |
-| 1.12 | JSON config file loading (DevProxy-compatible subset) |
-| 1.13 | Unit tests for all modules (see [Unit Testing Strategy](#11-unit-testing-strategy)) |
-| 1.14 | Integration tests (proxy + TLS + HAR + API + multi-session isolation) |
-| 1.15 | Dockerfile (multi-stage, static musl binary) |
-| 1.16 | Docker Compose: add shared `scope-proxy` service (feature-flagged alongside DevProxy) |
-| 1.17 | K8S manifests: `scope-proxy.yaml` Deployment + Service, `scope-proxy-config.yaml` ConfigMap |
-| 1.18 | Update `DevProxyClient`: add `downloadHar()` method using `GET /proxy/har`, add `X-Session-Id` header support |
-| 1.19 | End-to-end test: run a worker with `scope-proxy` instead of DevProxy |
+| 1.5 | Implement `ProxyPlugin` trait and `PluginRegistry` (`plugin.rs`) |
+| 1.6 | Implement source-IP session manager (`session.rs`) with idle reaping + plugin lifecycle hooks |
+| 1.7 | Implement HTTP CONNECT tunnel handler (hyper) with session-aware routing + plugin `on_exchange` broadcast |
+| 1.8 | Implement TLS interception with dynamic cert generation (rcgen + rustls) |
+| 1.9 | Implement HAR plugin (`plugins/har/`) — first built-in plugin, registers `GET /proxy/har` |
+| 1.10 | Implement control API (axum): `/proxy` GET/POST, `/proxy/rootCertificate` + plugin route mounting |
+| 1.11 | Implement `X-Session-Id` header override for localhost dev |
+| 1.12 | Implement URL glob filtering (`urlsToWatch`) |
+| 1.13 | JSON config file loading (DevProxy-compatible subset) |
+| 1.14 | Unit tests for all modules (see [Unit Testing Strategy](#12-unit-testing-strategy)) |
+| 1.15 | Integration tests (proxy + TLS + HAR + API + multi-session isolation + plugin lifecycle) |
+| 1.16 | Dockerfile (multi-stage, static musl binary) |
+| 1.17 | Docker Compose: add shared `scope-proxy` service (feature-flagged alongside DevProxy) |
+| 1.18 | K8S manifests: `scope-proxy.yaml` Deployment + Service, `scope-proxy-config.yaml` ConfigMap |
+| 1.19 | Update `DevProxyClient`: add `downloadHar()` method using `GET /proxy/har`, add `X-Session-Id` header support |
+| 1.20 | End-to-end test: run a worker with `scope-proxy` instead of DevProxy |
 
 **Done when:** All workers can run with the shared `scope-proxy` service and produce identical HAR output via `GET /proxy/har`.
 
@@ -688,16 +768,17 @@ Update existing tests in `packages/shared/src/devproxy/devproxy-client.test.ts`:
 | 2.5 | K8S: add `NET_ADMIN` capability to scope-proxy container security context |
 | 2.6 | Unit + integration tests for transparent mode |
 
-### Phase 3: Real-Time Hooks & Observability
+### Phase 3: Additional Plugins & Observability
 
-**Goal:** Enable plugins for live traffic inspection.
+**Goal:** Ship more built-in plugins using the plugin architecture from Phase 1.
 
 | Task | Description |
 |------|-------------|
-| 3.1 | WebSocket endpoint for real-time request/response streaming |
-| 3.2 | Plugin trait (`RequestInterceptor`) for custom logic (rate limiting, fault injection) |
-| 3.3 | Built-in token counter plugin (real-time token usage without HAR parsing) |
-| 3.4 | Prometheus metrics endpoint (`/metrics`) — per-session and aggregate counters |
+| 3.1 | `TokenCounterPlugin` — real-time token usage counting (OpenAI + Anthropic formats) |
+| 3.2 | `MetricsPlugin` — Prometheus `/metrics` endpoint, per-session and aggregate counters |
+| 3.3 | `WebSocketStreamPlugin` — real-time request/response streaming to connected clients |
+| 3.4 | `FaultInjectionPlugin` — simulate errors, latency, rate limiting for chaos testing |
+| 3.5 | Plugin enable/disable via config (`"plugins": ["har", "metrics"]`) |
 
 ### Phase 4: Retire DevProxy
 
