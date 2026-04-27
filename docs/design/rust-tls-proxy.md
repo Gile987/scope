@@ -296,7 +296,7 @@ The HAR plugin is the first (and initially only) built-in plugin:
 
 - **Implements** `ProxyPlugin` trait
 - **`on_recording_start`** — creates a new `Vec<HarEntry>` buffer for the session
-- **`on_exchange`** — appends an `HarEntry` (request + response + timings) to the session buffer
+- **`on_exchange`** — appends an `HarEntry` (request + response + timings) to the session buffer. **Redacts sensitive headers** (`authorization`, `x-github-token`, `x-api-key`, `cookie`, `set-cookie`) at write time when `includeSensitiveInformation` is `false` (default). Secrets never persist in memory.
 - **`on_recording_stop`** — finalizes the HAR (sets `log.pages`, computes timings), holds serialized JSON
 - **`on_session_clear`** — drops the session buffer
 - **`api_routes`** — registers `GET /proxy/har` (returns finalized HAR for the caller's session)
@@ -313,14 +313,11 @@ The HAR plugin is the first (and initially only) built-in plugin:
 - Returns `404` if no HAR is available (no recording happened, or already retrieved)
 - Clears the session's HAR buffer after successful retrieval (one-shot)
 
-#### Future Plugins (Phase 3+)
+#### Future Plugin: MetricsPlugin (Phase 3)
 
 | Plugin | Purpose |
 |--------|---------|
-| `TokenCounterPlugin` | Real-time token usage counting without HAR parsing |
-| `MetricsPlugin` | Prometheus `/metrics` endpoint — per-session and aggregate counters |
-| `FaultInjectionPlugin` | Simulate errors, latency, rate limiting for chaos testing |
-| `WebSocketStreamPlugin` | Real-time request/response streaming to connected WebSocket clients |
+| `MetricsPlugin` | Prometheus `/metrics` endpoint — request count, latency histograms, bytes transferred, error rates, per-session and aggregate counters |
 
 ### 6. Session Lifecycle
 
@@ -768,17 +765,15 @@ Update existing tests in `packages/shared/src/devproxy/devproxy-client.test.ts`:
 | 2.5 | K8S: add `NET_ADMIN` capability to scope-proxy container security context |
 | 2.6 | Unit + integration tests for transparent mode |
 
-### Phase 3: Additional Plugins & Observability
+### Phase 3: Metrics Plugin & Observability
 
-**Goal:** Ship more built-in plugins using the plugin architecture from Phase 1.
+**Goal:** Ship the MetricsPlugin using the plugin architecture from Phase 1.
 
 | Task | Description |
 |------|-------------|
-| 3.1 | `TokenCounterPlugin` — real-time token usage counting (OpenAI + Anthropic formats) |
-| 3.2 | `MetricsPlugin` — Prometheus `/metrics` endpoint, per-session and aggregate counters |
-| 3.3 | `WebSocketStreamPlugin` — real-time request/response streaming to connected clients |
-| 3.4 | `FaultInjectionPlugin` — simulate errors, latency, rate limiting for chaos testing |
-| 3.5 | Plugin enable/disable via config (`"plugins": ["har", "metrics"]`) |
+| 3.1 | `MetricsPlugin` — Prometheus `/metrics` endpoint, per-session and aggregate counters (request count, latency histograms, bytes transferred, error rates) |
+| 3.2 | Plugin enable/disable via config (`"plugins": ["har", "metrics"]`) |
+| 3.3 | Unit + integration tests for MetricsPlugin |
 
 ### Phase 4: Retire DevProxy
 
