@@ -292,26 +292,33 @@ Plugins are registered in `main.rs` at startup. The proxy core calls `registry.o
 
 #### Built-in: HAR Plugin (`plugins/har/`)
 
-The HAR plugin is the first (and initially only) built-in plugin:
+The HAR plugin is the first (and initially only) built-in plugin. It uses **disk-based buffering** to avoid memory pressure from large sessions.
 
 - **Implements** `ProxyPlugin` trait
-- **`on_recording_start`** — creates a new `Vec<HarEntry>` buffer for the session
-- **`on_exchange`** — appends an `HarEntry` (request + response + timings) to the session buffer. **Redacts sensitive headers** (`authorization`, `x-github-token`, `x-api-key`, `cookie`, `set-cookie`) at write time when `includeSensitiveInformation` is `false` (default). Secrets never persist in memory.
-- **`on_recording_stop`** — finalizes the HAR (sets `log.pages`, computes timings), holds serialized JSON
-- **`on_session_clear`** — drops the session buffer
-- **`api_routes`** — registers `GET /proxy/har` (returns finalized HAR for the caller's session)
+- **`on_recording_start`** — creates a temp file (`{har_dir}/.session-{session_id}.jsonl`) for the session
+- **`on_exchange`** — serializes the `HarEntry` as a single JSON line and appends it to the session's temp file. **Redacts sensitive headers** (`authorization`, `x-github-token`, `x-api-key`, `cookie`, `set-cookie`) at write time when `includeSensitiveInformation` is `false` (default). Secrets never touch disk.
+- **`on_recording_stop`** — reads back all JSON lines from the temp file, wraps them in a HAR 1.2 envelope (`log.entries[]`, `log.pages`, timings), and writes the final `scope-proxy-{session_id}-{timestamp}.har` file. Deletes the temp file.
+- **`on_session_clear`** — deletes the temp file and finalized HAR file (if not yet retrieved)
+- **`api_routes`** — registers `GET /proxy/har` (streams the finalized HAR file for the caller's session)
+
+**Disk layout** (`har_dir` defaults to `/har-output`):
+```
+/har-output/
+  .session-172.18.0.5.jsonl           # Active recording (append-only, one JSON line per exchange)
+  scope-proxy-172.18.0.5-2026-04-27T12:00:00.har   # Finalized HAR (ready for retrieval)
+```
 
 **HAR 1.2 spec** (http://www.softwareishard.com/blog/har-12-spec/):
 
 **Response body handling:**
-- Buffer full response bodies (for HAR `content.text`)
+- Each response body is serialized inline in the JSONL entry
 - For large responses (>1 MB), store as base64 with `content.encoding: "base64"`
-- SSE streams: accumulate full body (needed for token extraction from streaming responses)
+- SSE streams: accumulate full body before writing the entry (needed for token extraction from streaming responses)
 
 **`GET /proxy/har` semantics** (registered by HAR plugin, served at `/proxy/har`):
-- Returns `200 application/json` with the HAR body after recording is stopped
+- Returns `200 application/json` with the finalized HAR file contents after recording is stopped
 - Returns `404` if no HAR is available (no recording happened, or already retrieved)
-- Clears the session's HAR buffer after successful retrieval (one-shot)
+- Deletes the finalized HAR file after successful retrieval (one-shot)
 
 #### Future Plugin: MetricsPlugin (Phase 3)
 
@@ -680,7 +687,7 @@ Each source module includes co-located unit tests:
 | `plugin.rs` | Register plugin, broadcast on_exchange to all plugins, plugin API route mounting |
 | `plugins/har/types.rs` | Serialize HAR entry, serialize full HAR log, base64 encoding for large bodies, timestamp formatting |
 | `plugins/har/writer.rs` | Build HAR from entries, empty HAR, truncation at size limit |
-| `plugins/har/plugin.rs` | on_recording_start creates buffer, on_exchange appends entry, on_recording_stop finalizes, on_session_clear drops buffer |
+| `plugins/har/plugin.rs` | on_recording_start creates temp JSONL file, on_exchange appends entry to disk, on_recording_stop finalizes HAR from JSONL, on_session_clear deletes temp files, sensitive header redaction |
 | `ca/generator.rs` | Generate CA key pair, sign leaf cert for domain, leaf cert has correct SAN, leaf cert validates against CA, LRU cache eviction |
 | `filters/url_matcher.rs` | Glob-to-regex conversion, match `https://api.github.com/foo`, reject `https://other.com/bar`, wildcard `*` semantics, edge cases (empty pattern, trailing slash) |
 | `proxy/handler.rs` | Parse CONNECT request, extract host:port, reject malformed CONNECT, plain HTTP forwarding |
@@ -823,10 +830,10 @@ Changes to `DevProxyClient` in `packages/shared/src/devproxy/devproxy-client.ts`
 | SSE streaming body accumulation mismatches | Replicate DevProxy's exact buffering behavior; compare HAR output byte-for-byte in integration tests |
 | Certificate compatibility with Node.js / native CLIs | Test with `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE`; validate cert chain with OpenSSL |
 | HTTP/2 support gaps | Start with HTTP/1.1 only (DevProxy also uses HTTP/1.1); add HTTP/2 in Phase 3 |
-| Large response bodies causing OOM | Cap per-response buffer at 50 MB; truncate with marker in HAR. Cap per-session buffer at 200 MB total. |
+| Large response bodies causing OOM | HAR plugin uses disk-based buffering (JSONL append per exchange). Only the single response body being proxied is in memory at a time. Per-response body cap at 50 MB with truncation marker. |
 | `TPROXY` requires `NET_ADMIN` | Phase 2 only; explicit proxy mode (Phase 1) needs no special capabilities |
 | Single point of failure (shared proxy) | Liveness probe auto-restarts. Workers degrade gracefully (continue without HAR if proxy is down — already handled by `DevProxyClient`). Phase 3 adds `/metrics` for alerting. |
-| Session memory leaks (workers crash without stopping recording) | Idle session reaping with configurable timeout (default: 5 min). Max session cap (100). |
+| Session memory leaks (workers crash without stopping recording) | Idle session reaping with configurable timeout (default: 5 min). Max session cap (100). Temp JSONL files cleaned up on reap. |
 | Localhost dev: all traffic from 127.0.0.1 | `X-Session-Id` header override keyed by `WORKER_NAME` env var |
 
 ## Open Questions
