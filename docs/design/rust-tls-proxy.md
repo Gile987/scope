@@ -317,6 +317,63 @@ ENTRYPOINT ["/scope-proxy"]
 
 No init container needed — the binary runs as any UID (no .NET runtime, no home directory requirements).
 
+### 8b. Build Integration (pnpm + CI)
+
+#### pnpm script aliases
+
+Add to root `package.json`:
+
+```json
+{
+  "scripts": {
+    "build:proxy": "cd apps/scope-proxy && cargo build --release",
+    "test:proxy": "cd apps/scope-proxy && cargo test",
+    "lint:proxy": "cd apps/scope-proxy && cargo clippy -- -D warnings",
+    "fmt:proxy": "cd apps/scope-proxy && cargo fmt --check"
+  }
+}
+```
+
+Local dev: `pnpm build:proxy`, `pnpm test:proxy`. Requires Rust toolchain installed locally (via `rustup`).
+
+#### CI pipeline (GitHub Actions)
+
+Add a dedicated Rust job to the existing CI workflow (runs in parallel with the TypeScript jobs):
+
+```yaml
+rust-proxy:
+  runs-on: ubuntu-latest
+  defaults:
+    run:
+      working-directory: apps/scope-proxy
+  steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: apps/scope-proxy
+    - run: cargo fmt --check
+    - run: cargo clippy -- -D warnings
+    - run: cargo test
+    - run: cargo build --release --target x86_64-unknown-linux-musl
+```
+
+**Path filter:** Only trigger on changes to `apps/scope-proxy/**` to avoid rebuilding Rust on TypeScript-only PRs.
+
+#### Docker image CI
+
+Extend the existing `build-acr.sh` / image build workflow to include `scope-proxy`:
+
+```bash
+# In build-acr.sh or equivalent
+docker build -t ${ACR_LOGIN_SERVER}/scoped/scope-proxy:${TAG} apps/scope-proxy/
+docker push ${ACR_LOGIN_SERVER}/scoped/scope-proxy:${TAG}
+```
+
+FluxCD image automation scans the ACR tag and auto-updates integration manifests (same pattern as existing workers).
+
 ### 9. Docker Compose Integration
 
 Replace per-worker DevProxy sidecars with a single shared `scope-proxy` service:
@@ -597,21 +654,24 @@ Update existing tests in `packages/shared/src/devproxy/devproxy-client.test.ts`:
 | Task | Description |
 |------|-------------|
 | 1.1 | Scaffold Rust crate (`apps/scope-proxy/`) with Cargo.toml, CI integration |
-| 1.2 | Implement source-IP session manager (`session.rs`) with idle reaping |
-| 1.3 | Implement HTTP CONNECT tunnel handler (hyper) with session-aware routing |
-| 1.4 | Implement TLS interception with dynamic cert generation (rcgen + rustls) |
-| 1.5 | Implement HAR 1.2 writer with per-session request/response recording |
-| 1.6 | Implement control API (axum): `/proxy` GET/POST, `/proxy/rootCertificate`, `/proxy/har` |
-| 1.7 | Implement `X-Session-Id` header override for localhost dev |
-| 1.8 | Implement URL glob filtering (`urlsToWatch`) |
-| 1.9 | JSON config file loading (DevProxy-compatible subset) |
-| 1.10 | Unit tests for all modules (see [Unit Testing Strategy](#11-unit-testing-strategy)) |
-| 1.11 | Integration tests (proxy + TLS + HAR + API + multi-session isolation) |
-| 1.12 | Dockerfile (multi-stage, static musl binary) |
-| 1.13 | Docker Compose: add shared `scope-proxy` service (feature-flagged alongside DevProxy) |
-| 1.14 | K8S manifests: `scope-proxy.yaml` Deployment + Service, `scope-proxy-config.yaml` ConfigMap |
-| 1.15 | Update `DevProxyClient`: add `downloadHar()` method using `GET /proxy/har`, add `X-Session-Id` header support |
-| 1.16 | End-to-end test: run a worker with `scope-proxy` instead of DevProxy |
+| 1.2 | Add pnpm script aliases (`build:proxy`, `test:proxy`, `lint:proxy`, `fmt:proxy`) to root `package.json` |
+| 1.3 | Add Rust CI job (fmt + clippy + test + build) with path filter to GitHub Actions workflow |
+| 1.4 | Add `scope-proxy` Docker image build to `build-acr.sh` / image CI pipeline |
+| 1.5 | Implement source-IP session manager (`session.rs`) with idle reaping |
+| 1.6 | Implement HTTP CONNECT tunnel handler (hyper) with session-aware routing |
+| 1.7 | Implement TLS interception with dynamic cert generation (rcgen + rustls) |
+| 1.8 | Implement HAR 1.2 writer with per-session request/response recording |
+| 1.9 | Implement control API (axum): `/proxy` GET/POST, `/proxy/rootCertificate`, `/proxy/har` |
+| 1.10 | Implement `X-Session-Id` header override for localhost dev |
+| 1.11 | Implement URL glob filtering (`urlsToWatch`) |
+| 1.12 | JSON config file loading (DevProxy-compatible subset) |
+| 1.13 | Unit tests for all modules (see [Unit Testing Strategy](#11-unit-testing-strategy)) |
+| 1.14 | Integration tests (proxy + TLS + HAR + API + multi-session isolation) |
+| 1.15 | Dockerfile (multi-stage, static musl binary) |
+| 1.16 | Docker Compose: add shared `scope-proxy` service (feature-flagged alongside DevProxy) |
+| 1.17 | K8S manifests: `scope-proxy.yaml` Deployment + Service, `scope-proxy-config.yaml` ConfigMap |
+| 1.18 | Update `DevProxyClient`: add `downloadHar()` method using `GET /proxy/har`, add `X-Session-Id` header support |
+| 1.19 | End-to-end test: run a worker with `scope-proxy` instead of DevProxy |
 
 **Done when:** All workers can run with the shared `scope-proxy` service and produce identical HAR output via `GET /proxy/har`.
 
