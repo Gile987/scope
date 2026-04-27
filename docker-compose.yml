@@ -16,6 +16,11 @@
 #   2. Copy .env.example to .env and fill in API keys
 #   3. Run any service natively: pnpm --filter api dev (uses localhost from .env)
 #
+# Windows workers (copilot-windows profile):
+#   Requires Docker Desktop on Windows switched to Windows containers mode.
+#   Windows containers cannot run on macOS or Linux hosts.
+#   docker compose --profile copilot-windows up
+#
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -241,6 +246,12 @@ services:
 
         # Register dev version: coder-acp-copilot
         post "/api/v1/agents/coder-acp-copilot/versions" '{"agentVersion":"copilot-dev","workerVersion":"copilot-dev-local-dev","components":{"COPILOT_CLI_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-copilot"}'
+
+        # Upsert agent: coder-acp-copilot-windows
+        post "/api/v1/agents" '{"_id":"coder-acp-copilot-windows","name":"Copilot (ACP, Windows)","description":"GitHub Copilot coding agent via ACP protocol on Windows containers","modelProvider":"github-copilot"}'
+
+        # Register dev version: coder-acp-copilot-windows
+        post "/api/v1/agents/coder-acp-copilot-windows/versions" '{"agentVersion":"copilot-windows-dev","workerVersion":"copilot-windows-dev-local-dev","components":{"COPILOT_CLI_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-copilot-windows"}'
 
         # Upsert agent: coder-acp-claude-code
         post "/api/v1/agents" '{"_id":"coder-acp-claude-code","name":"Claude Code (ACP)","description":"Anthropic Claude Code coding agent via ACP protocol","modelProvider":"anthropic"}'
@@ -543,6 +554,26 @@ services:
       devproxy-copilot-init:
         condition: service_completed_successfully
 
+  # GitHub Copilot worker — Windows container variant
+  # NOTE: Only runs on Windows Docker Desktop hosts switched to Windows containers mode.
+  # This service will fail to start on macOS/Linux due to platform: windows/amd64.
+  coder-acp-copilot-windows:
+    platform: windows/amd64
+    build:
+      context: .
+      dockerfile: apps/workers/coder-acp-copilot/Dockerfile.windows
+      args:
+        COPILOT_CLI_VERSION: ${COPILOT_CLI_VERSION}
+    profiles: [copilot-windows]
+    environment:
+      <<: *worker-env
+      WORKER_NAME: coder-acp-copilot-windows
+      QUEUE_NAME: queue-coder-acp-copilot-windows
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    volumes:
+      - copilot_windows_workspace:C:\workspace
+    depends_on: *worker-deps
+
   # DevProxy sidecar for Copilot worker (HAR capture)
   devproxy-copilot:
     image: ghcr.io/dotnet/dev-proxy:2.1.0
@@ -633,6 +664,7 @@ volumes:
   copilot_har_output:
   copilot_devproxy_cert:
   copilot_workspace:
+  copilot_windows_workspace:
   claude_har_output:
   claude_devproxy_cert:
   claude_workspace:
