@@ -16,6 +16,7 @@ flowchart TB
         subgraph Workers["Coding Agent Workers"]
             Claude["coder-acp-claude-code"]
             Copilot["coder-acp-copilot"]
+            CopilotWin["coder-acp-copilot-windows"]
         end
     end
 
@@ -70,6 +71,7 @@ flowchart TB
 | `shared` | Shared types and utilities |
 | `workers/coder-acp-claude-code` | Claude Code agent via Agent Client Protocol (ACP) |
 | `workers/coder-acp-copilot` | GitHub Copilot agent via Agent Client Protocol (ACP) |
+| `workers/coder-acp-copilot-windows` | GitHub Copilot agent via ACP — Windows container variant (`Dockerfile.windows`). Runs on Windows K8s node pool; use `--profile copilot-windows` locally on a Windows Docker host. |
 
 ## Data Flow
 

@@ -137,6 +137,21 @@ pnpm dev:<worker-name>            # Individual worker (native)
 pnpm open:portal                  # Open portal in browser
 ```
 
+### Windows Worker (local dev)
+
+The `coder-acp-copilot-windows` worker uses Windows containers and **cannot run on macOS or Linux**.
+To develop locally on a Windows machine:
+
+1. Switch Docker Desktop to **Windows containers** mode (right-click tray icon → "Switch to Windows containers").
+2. Start infra: `docker compose up mongodb redis azurite`
+3. Start the Windows worker: `docker compose --profile copilot-windows up coder-acp-copilot-windows`
+
+For hot reload, use the `docker-compose.dev.yml` overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile copilot-windows up coder-acp-copilot-windows
+```
+
 ## Testing
 
 Co-locate tests next to source as `<filename>.test.ts`. Framework: Vitest.
