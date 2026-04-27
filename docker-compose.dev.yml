@@ -161,6 +161,25 @@ services:
         - action: rebuild
           path: ./pnpm-lock.yaml
 
+  coder-acp-copilot-windows:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/workers/coder-acp-copilot/src
+          target: C:\app\apps\workers\coder-acp-copilot\src
+        - action: sync
+          path: ./packages/shared/src
+          target: C:\app\packages\shared\src
+        - action: sync
+          path: ./config
+          target: C:\app\config
+        - action: rebuild
+          path: ./apps/workers/coder-acp-copilot/package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+
   report-generator:
     build:
       target: dev
