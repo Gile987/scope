@@ -297,16 +297,17 @@ The HAR plugin is the first (and initially only) built-in plugin. It uses **disk
 - **Implements** `ProxyPlugin` trait
 - **`on_recording_start`** — creates a temp file (`{har_dir}/.session-{session_id}.jsonl`) for the session
 - **`on_exchange`** — serializes the `HarEntry` as a single JSON line and appends it to the session's temp file. **Redacts sensitive headers** (`authorization`, `x-github-token`, `x-api-key`, `cookie`, `set-cookie`) at write time when `includeSensitiveInformation` is `false` (default). Secrets never touch disk.
-- **`on_recording_stop`** — reads back all JSON lines from the temp file, wraps them in a HAR 1.2 envelope (`log.entries[]`, `log.pages`, timings), and writes the final `scope-proxy-{session_id}-{timestamp}.har` file. Deletes the temp file.
-- **`on_session_clear`** — deletes the temp file and finalized HAR file (if not yet retrieved)
-- **`api_routes`** — registers `GET /proxy/har` (streams the finalized HAR file for the caller's session)
+- **`on_recording_stop`** — marks the session as finalized (no more entries accepted). The JSONL temp file remains on disk.
+- **`on_session_clear`** — deletes the temp JSONL file
+- **`api_routes`** — registers `GET /proxy/har` (builds the HAR on the fly from the JSONL file for the caller's session)
 
 **Disk layout** (`har_dir` defaults to `/har-output`):
 ```
 /har-output/
-  .session-172.18.0.5.jsonl           # Active recording (append-only, one JSON line per exchange)
-  scope-proxy-172.18.0.5-2026-04-27T12:00:00.har   # Finalized HAR (ready for retrieval)
+  .session-172.18.0.5.jsonl           # Active/finalized recording (append-only, one JSON line per exchange)
 ```
+
+No separate `.har` file is written. The HAR envelope is assembled on the fly when `GET /proxy/har` is called by reading the JSONL entries and wrapping them in the HAR 1.2 structure.
 
 **HAR 1.2 spec** (http://www.softwareishard.com/blog/har-12-spec/):
 
@@ -316,10 +317,10 @@ The HAR plugin is the first (and initially only) built-in plugin. It uses **disk
 - SSE streams: accumulate full body before writing the entry (needed for token extraction from streaming responses)
 
 **`GET /proxy/har` semantics** (registered by HAR plugin, served at `/proxy/har`):
-- Returns `200 application/json` with the finalized HAR file contents after recording is stopped
-- Returns `404` if no HAR is available (no recording happened, or already retrieved)
-- Idempotent — the finalized HAR file remains on disk and can be retrieved multiple times (safe for client retries)
-- The HAR file is deleted during **session cleanup** (idle reap or next `on_recording_start`), not on retrieval
+- Reads the JSONL temp file, wraps entries in a HAR 1.2 envelope, and returns `200 application/json`
+- Returns `404` if no recording exists or the session is still actively recording
+- Idempotent — the JSONL file remains on disk and can be read multiple times (safe for client retries)
+- The JSONL file is deleted during **session cleanup** (idle reap or next `on_recording_start`)
 
 #### Future Plugin: MetricsPlugin (Phase 3)
 
@@ -688,7 +689,7 @@ Each source module includes co-located unit tests:
 | `plugin.rs` | Register plugin, broadcast on_exchange to all plugins, plugin API route mounting |
 | `plugins/har/types.rs` | Serialize HAR entry, serialize full HAR log, base64 encoding for large bodies, timestamp formatting |
 | `plugins/har/writer.rs` | Build HAR from entries, empty HAR, truncation at size limit |
-| `plugins/har/plugin.rs` | on_recording_start creates temp JSONL file, on_exchange appends entry to disk, on_recording_stop finalizes HAR from JSONL, on_session_clear deletes temp files, sensitive header redaction |
+| `plugins/har/plugin.rs` | on_recording_start creates temp JSONL file, on_exchange appends entry to disk, on_recording_stop marks finalized, GET /proxy/har builds HAR from JSONL on the fly, on_session_clear deletes JSONL, sensitive header redaction |
 | `ca/generator.rs` | Generate CA key pair, sign leaf cert for domain, leaf cert has correct SAN, leaf cert validates against CA, LRU cache eviction |
 | `filters/url_matcher.rs` | Glob-to-regex conversion, match `https://api.github.com/foo`, reject `https://other.com/bar`, wildcard `*` semantics, edge cases (empty pattern, trailing slash) |
 | `proxy/handler.rs` | Parse CONNECT request, extract host:port, reject malformed CONNECT, plain HTTP forwarding |
