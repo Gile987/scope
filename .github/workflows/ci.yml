@@ -376,6 +376,7 @@ jobs:
       judge: ${{ steps.changes.outputs.judge }}
       portal: ${{ steps.changes.outputs.portal }}
       coder-acp-copilot: ${{ steps.changes.outputs.coder-acp-copilot }}
+      coder-acp-copilot-windows: ${{ steps.changes.outputs.coder-acp-copilot-windows }}
       coder-acp-claude-code: ${{ steps.changes.outputs.coder-acp-claude-code }}
       token-manager: ${{ steps.changes.outputs.token-manager }}
       model-scanner-copilot: ${{ steps.changes.outputs.model-scanner-copilot }}
@@ -409,6 +410,11 @@ jobs:
               - 'apps/portal/**'
             coder-acp-copilot:
               - 'apps/workers/coder-acp-copilot/**'
+            coder-acp-copilot-windows:
+              - 'apps/workers/coder-acp-copilot/Dockerfile.windows'
+              - 'apps/workers/coder-acp-copilot/src/**'
+              - 'apps/workers/coder-acp-copilot/package.json'
+              - 'scripts/dev-entrypoint.ps1'
             coder-acp-claude-code:
               - 'apps/workers/coder-acp-claude-code/**'
               - 'packages/copilot-driver-ext/**'
@@ -444,6 +450,7 @@ jobs:
           needs.detect-changes.outputs.judge == 'true' ||
           needs.detect-changes.outputs.portal == 'true' ||
           needs.detect-changes.outputs.coder-acp-copilot == 'true' ||
+          needs.detect-changes.outputs.coder-acp-copilot-windows == 'true' ||
           needs.detect-changes.outputs.coder-acp-claude-code == 'true' ||
           needs.detect-changes.outputs.token-manager == 'true' ||
           needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
@@ -474,6 +481,10 @@ jobs:
           - name: coder-acp-copilot
             dockerfile: apps/workers/coder-acp-copilot/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.coder-acp-copilot == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: coder-acp-copilot-windows
+            dockerfile: apps/workers/coder-acp-copilot/Dockerfile.windows
+            platform: windows/amd64
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.coder-acp-copilot-windows == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: coder-acp-claude-code
             dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.coder-acp-claude-code == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
@@ -544,6 +555,8 @@ jobs:
           case "${{ matrix.image.name }}" in
             coder-acp-copilot)
               VERSION_PREFIX="copilot-${COPILOT_CLI_VERSION}" ;;
+            coder-acp-copilot-windows)
+              VERSION_PREFIX="copilot-windows-${COPILOT_CLI_VERSION}" ;;
             coder-acp-claude-code)
               VERSION_PREFIX="claude-agent-acp-${CLAUDE_CODE_ACP_VERSION}-sdk-${CLAUDE_AGENT_SDK_VERSION}" ;;
               VERSION_PREFIX="vscode-${VSCODE_VERSION}-copilot-${COPILOT_CHAT_VERSION}" ;;
@@ -587,6 +600,10 @@ jobs:
       - name: Build and push to ACR
         if: steps.check.outputs.skip != 'true'
         run: |
+          PLATFORM_ARG=""
+          if [ -n "${{ matrix.image.platform }}" ]; then
+            PLATFORM_ARG="--platform ${{ matrix.image.platform }}"
+          fi
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
@@ -595,6 +612,7 @@ jobs:
             --build-arg BUILD_TIME=${{ steps.tags.outputs.build_time }} \
             ${{ steps.versions.outputs.extra_args }} \
             --file "${{ matrix.image.dockerfile }}" \
+            $PLATFORM_ARG \
             .
 
   # ---------------------------------------------------------------------------
