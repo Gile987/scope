@@ -159,7 +159,7 @@ apps/
         tls_test.rs               # Certificate generation + validation
         plugin_test.rs            # Plugin lifecycle + custom plugin tests
     config/
-      default.json                # Default config (mirrors devproxy-config.json schema)
+      default.yaml                # Default config
 ```
 
 ### 2. Rust Crate Dependencies
@@ -176,6 +176,7 @@ rcgen = "0.13"                     # Dynamic certificate generation
 webpki-roots = "0.26"             # Mozilla CA bundle for upstream TLS
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"                  # Config file parsing
 chrono = "0.4"                     # HAR timestamps
 glob = "0.3"                       # URL pattern matching
 tracing = "0.1"
@@ -372,29 +373,26 @@ Match the DevProxy `urlsToWatch` config format:
 
 ### 8. Configuration
 
-Support both CLI flags and a JSON config file:
+Support both CLI flags and a YAML config file:
 
-```json
-{
-  "urlsToWatch": ["https://api.githubcopilot.com/*"],
-  "port": 18000,
-  "apiPort": 18897,
-  "harOutputDir": "/har-output",
-  "certDir": "/certs",
-  "logLevel": "info",
-  "defaultPluginSettings": {
-    "har": {
-      "includeSensitiveInformation": false
-    }
-  }
-}
+```yaml
+urlsToWatch:
+  - "https://api.githubcopilot.com/*"
+port: 18000
+apiPort: 18897
+harOutputDir: /har-output
+certDir: /certs
+logLevel: info
+defaultPluginSettings:
+  har:
+    includeSensitiveInformation: false
 ```
 
 `defaultPluginSettings` provides defaults for each plugin. These can be overridden per-session in `POST /session/start`.
 
 CLI:
 ```bash
-scope-proxy --config /config/proxy.json
+scope-proxy --config /config/proxy.yaml
 scope-proxy --port 18000 --api-port 18897 --har-dir /har-output
 ```
 
@@ -501,9 +499,9 @@ scope-proxy:
   build:
     context: ./apps/scope-proxy
     dockerfile: Dockerfile
-  command: ["--config", "/config/proxy.json"]
+  command: ["--config", "/config/proxy.yaml"]
   volumes:
-    - ./apps/scope-proxy/config/default.json:/config/proxy.json:ro
+    - ./apps/scope-proxy/config/default.yaml:/config/proxy.yaml:ro
     - scope_proxy_cert:/certs
   ports:
     - "${SCOPE_PROXY_API_PORT:-18800}:18897"
@@ -562,7 +560,7 @@ spec:
       containers:
         - name: scope-proxy
           image: ${ACR_LOGIN_SERVER}/scoped/scope-proxy  # {"$imagepolicy": "flux-system:scope-proxy"}
-          args: ["--config", "/config/proxy.json"]
+          args: ["--config", "/config/proxy.yaml"]
           ports:
             - containerPort: 18000
               name: proxy
@@ -630,25 +628,20 @@ metadata:
   name: scope-proxy-config
   namespace: scoped
 data:
-  proxy.json: |
-    {
-      "urlsToWatch": [
-        "https://api.enterprise.githubcopilot.com/*",
-        "https://api.github.com/*",
-        "https://api.githubcopilot.com/*",
-        "https://*.githubcopilot.com/*",
-        "https://api.anthropic.com/*"
-      ],
-      "port": 18000,
-      "apiPort": 18897,
-      "certDir": "/certs",
-      "logLevel": "info",
-      "defaultPluginSettings": {
-        "har": {
-          "includeSensitiveInformation": false
-        }
-      }
-    }
+  proxy.yaml: |
+    urlsToWatch:
+      - "https://api.enterprise.githubcopilot.com/*"
+      - "https://api.github.com/*"
+      - "https://api.githubcopilot.com/*"
+      - "https://*.githubcopilot.com/*"
+      - "https://api.anthropic.com/*"
+    port: 18000
+    apiPort: 18897
+    certDir: /certs
+    logLevel: info
+    defaultPluginSettings:
+      har:
+        includeSensitiveInformation: false
 ```
 
 #### Worker Deployment Changes
@@ -711,7 +704,7 @@ Each source module includes co-located unit tests:
 | Module | Unit Tests |
 |--------|------------|
 | `session.rs` | Create session by IP, create by `X-Session-Id`, retrieve by IP, session idle reaping, max session cap, concurrent session access |
-| `config.rs` | Parse JSON config, CLI flag overrides, default values, invalid config errors |
+| `config.rs` | Parse YAML config, CLI flag overrides, default values, invalid config errors |
 | `plugin.rs` | Register plugin, broadcast on_exchange to all plugins, on_session_start dispatches per-plugin settings, plugin API route mounting |
 | `plugins/har/types.rs` | Serialize HAR entry, serialize full HAR log, base64 encoding for large bodies, timestamp formatting |
 | `plugins/har/writer.rs` | Build HAR from entries, empty HAR, truncation at size limit |
@@ -778,7 +771,7 @@ Update existing tests in `packages/shared/src/devproxy/devproxy-client.test.ts`:
 | 1.10 | Implement control API (axum): `GET /proxy`, `POST /session/start`, `POST /session/stop`, `GET /proxy/rootCertificate` + plugin route mounting |
 | 1.11 | Implement `X-Session-Id` header override for localhost dev |
 | 1.12 | Implement URL glob filtering (`urlsToWatch`) |
-| 1.13 | JSON config file loading (DevProxy-compatible subset) |
+| 1.13 | YAML config file loading |
 | 1.14 | Unit tests for all modules (see [Unit Testing Strategy](#12-unit-testing-strategy)) |
 | 1.15 | Integration tests (proxy + TLS + HAR + API + multi-session isolation + plugin lifecycle) |
 | 1.16 | Dockerfile (multi-stage, static musl binary) |
