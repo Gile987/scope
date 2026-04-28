@@ -231,14 +231,16 @@ This eliminates the need for shared volumes between proxy and workers for HAR fi
 
 ```mermaid
 flowchart LR
-    A[Client CONNECT] --> B{URL matches filter?}
-    B -->|Yes| C[Accept CONNECT]
-    B -->|No| D[Tunnel passthrough<br/>no interception]
-    C --> E[Extract SNI from ClientHello]
-    E --> F[Generate leaf cert<br/>for SNI domain]
-    F --> G[TLS handshake with client<br/>using forged cert]
-    G --> H[TLS handshake with upstream<br/>using real cert]
-    H --> I[Bidirectional relay<br/>+ HAR recording]
+    A[Client CONNECT] --> B{Active session<br/>recording?}
+    B -->|No| C[Tunnel passthrough<br/>no interception]
+    B -->|Yes| D{URL matches filter?}
+    D -->|No| C
+    D -->|Yes| E[Accept CONNECT]
+    E --> F[Extract SNI from ClientHello]
+    F --> G[Generate leaf cert<br/>for SNI domain]
+    G --> H[TLS handshake with client<br/>using forged cert]
+    H --> I[TLS handshake with upstream<br/>using real cert]
+    I --> J[Bidirectional relay<br/>+ plugin on_exchange]
 ```
 
 **Certificate generation strategy:**
@@ -346,8 +348,8 @@ No separate `.har` file is written. The HAR envelope is assembled on the fly whe
 
 ### 6. Session Lifecycle
 
-- Sessions are created lazily on first request from a new source IP
-- `POST /session/start` begins recording; `POST /session/stop` finalizes it
+- Sessions are created by `POST /session/start`; `POST /session/stop` finalizes recording
+- **No session = passthrough.** Proxy traffic from an IP with no active recording session is forwarded directly to the upstream without TLS interception or plugin notification. This keeps the proxy transparent to workers that haven't started a session yet (or whose session was already reaped).
 - Sessions are reaped after a configurable idle timeout (default: 5 min)
 - Max concurrent sessions capped at 100 (safety valve)
 - On session start/stop/clear, all plugins are notified via the registry with per-plugin settings
@@ -717,7 +719,7 @@ Each source module includes co-located unit tests:
 | `plugins/har/plugin.rs` | on_session_start creates temp JSONL file with per-session settings, on_exchange appends entry to disk, on_session_stop marks finalized, GET /proxy/har builds HAR from JSONL on the fly, on_session_clear deletes JSONL, sensitive header redaction controlled by start settings |
 | `ca/generator.rs` | Generate CA key pair, sign leaf cert for domain, leaf cert has correct SAN, leaf cert validates against CA, LRU cache eviction |
 | `filters/url_matcher.rs` | Glob-to-regex conversion, match `https://api.github.com/foo`, reject `https://other.com/bar`, wildcard `*` semantics, edge cases (empty pattern, trailing slash) |
-| `proxy/handler.rs` | Parse CONNECT request, extract host:port, reject malformed CONNECT, plain HTTP forwarding |
+| `proxy/handler.rs` | Parse CONNECT request, extract host:port, reject malformed CONNECT, plain HTTP forwarding, passthrough when no active session |
 | `proxy/tls.rs` | SNI extraction from ClientHello bytes, cert selection from cache, cache miss triggers generation |
 | `api/routes.rs` | GET /proxy returns session state, POST /session/start starts recording with plugin settings, POST /session/stop finalizes recording, GET /proxy/rootCertificate returns PEM, GET /proxy/har returns HAR body, GET /proxy/har returns 404 when empty, session isolation (two IPs see independent state) |
 
@@ -730,6 +732,7 @@ These test the full proxy stack end-to-end:
 | Test | Description |
 |------|-------------|
 | `proxy_test::connect_and_record` | Start proxy → CONNECT to mock upstream → verify HAR contains request + response |
+| `proxy_test::no_session_passthrough` | CONNECT before POST /session/start → verify traffic tunneled without interception, no HAR entry |
 | `proxy_test::url_filter_passthrough` | CONNECT to non-matching URL → verify no HAR entry, traffic tunneled |
 | `proxy_test::sse_streaming_body` | Upstream sends SSE stream → verify full body accumulated in HAR |
 | `proxy_test::large_response_base64` | Response >1 MB → verify base64 encoding in HAR |
