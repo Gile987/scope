@@ -22,10 +22,6 @@ pub struct Cli {
     #[arg(long, name = "api-port")]
     pub api_port: Option<u16>,
 
-    /// HAR output directory
-    #[arg(long, name = "har-dir")]
-    pub har_dir: Option<PathBuf>,
-
     /// Certificate directory
     #[arg(long, name = "cert-dir")]
     pub cert_dir: Option<PathBuf>,
@@ -46,9 +42,6 @@ pub struct Config {
 
     #[serde(default = "default_api_port")]
     pub api_port: u16,
-
-    #[serde(default = "default_har_output_dir")]
-    pub har_output_dir: PathBuf,
 
     #[serde(default = "default_cert_dir")]
     pub cert_dir: PathBuf,
@@ -72,10 +65,6 @@ fn default_api_port() -> u16 {
     18897
 }
 
-fn default_har_output_dir() -> PathBuf {
-    PathBuf::from("/har-output")
-}
-
 fn default_cert_dir() -> PathBuf {
     PathBuf::from("/certs")
 }
@@ -90,7 +79,6 @@ impl Default for Config {
             urls_to_watch: default_urls_to_watch(),
             port: default_port(),
             api_port: default_api_port(),
-            har_output_dir: default_har_output_dir(),
             cert_dir: default_cert_dir(),
             log_level: default_log_level(),
             default_plugin_settings: HashMap::new(),
@@ -117,9 +105,6 @@ impl Config {
         if let Some(api_port) = cli.api_port {
             config.api_port = api_port;
         }
-        if let Some(har_dir) = &cli.har_dir {
-            config.har_output_dir = har_dir.clone();
-        }
         if let Some(cert_dir) = &cli.cert_dir {
             config.cert_dir = cert_dir.clone();
         }
@@ -128,6 +113,17 @@ impl Config {
         }
 
         Ok(config)
+    }
+
+    /// Get HAR output directory from `defaultPluginSettings.har.harOutputDir`.
+    /// Falls back to `/har-output` if not configured.
+    pub fn har_output_dir(&self) -> PathBuf {
+        self.default_plugin_settings
+            .get("har")
+            .and_then(|v| v.get("harOutputDir"))
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/har-output"))
     }
 }
 
@@ -152,18 +148,18 @@ urlsToWatch:
   - "https://api.anthropic.com/*"
 port: 9000
 apiPort: 9001
-harOutputDir: /tmp/har
 certDir: /tmp/certs
 logLevel: debug
 defaultPluginSettings:
   har:
+    harOutputDir: /tmp/har
     includeSensitiveInformation: true
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.port, 9000);
         assert_eq!(config.api_port, 9001);
         assert_eq!(config.urls_to_watch.len(), 2);
-        assert_eq!(config.har_output_dir, PathBuf::from("/tmp/har"));
+        assert_eq!(config.har_output_dir(), PathBuf::from("/tmp/har"));
         assert_eq!(config.cert_dir, PathBuf::from("/tmp/certs"));
         assert_eq!(config.log_level, "debug");
         assert_eq!(
@@ -178,14 +174,13 @@ defaultPluginSettings:
             config: None,
             port: Some(7777),
             api_port: Some(7778),
-            har_dir: Some(PathBuf::from("/custom/har")),
             cert_dir: None,
             log_level: Some("debug".to_string()),
         };
         let config = Config::load(&cli).unwrap();
         assert_eq!(config.port, 7777);
         assert_eq!(config.api_port, 7778);
-        assert_eq!(config.har_output_dir, PathBuf::from("/custom/har"));
+        assert_eq!(config.har_output_dir(), PathBuf::from("/har-output")); // default
         assert_eq!(config.cert_dir, default_cert_dir()); // not overridden
         assert_eq!(config.log_level, "debug");
     }
@@ -205,7 +200,6 @@ defaultPluginSettings:
             config: Some(PathBuf::from("/nonexistent/config.yaml")),
             port: None,
             api_port: None,
-            har_dir: None,
             cert_dir: None,
             log_level: None,
         };

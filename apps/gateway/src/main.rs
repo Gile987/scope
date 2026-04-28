@@ -42,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
     let url_filter = Arc::new(UrlFilter::new(&config.urls_to_watch)?);
 
     // Plugins
-    let har_plugin = Arc::new(HarPlugin::new(config.har_output_dir.clone()));
+    let har_plugin = Arc::new(HarPlugin::new(config.har_output_dir()));
     let registry = Arc::new(PluginRegistry::new(vec![har_plugin.clone()]));
 
     // Session manager
