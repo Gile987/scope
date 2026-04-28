@@ -8,7 +8,7 @@ use crate::plugin::HttpExchange;
 
 use super::types::*;
 
-/// Headers to redact when includeSensitiveInformation is false.
+/// Headers to redact when redactSensitiveHeaders is true.
 const SENSITIVE_HEADERS: &[&str] = &[
     "authorization",
     "x-github-token",

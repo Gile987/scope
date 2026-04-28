@@ -211,7 +211,7 @@ The REST API on port 18897 provides session management, certificate download, an
 {
   "plugins": {
     "har": {
-      "includeSensitiveInformation": false
+      "redactSensitiveHeaders": true
     }
   }
 }
@@ -269,7 +269,7 @@ pub trait ProxyPlugin: Send + Sync {
 
     /// Called when a session starts.
     /// `settings` is the plugin-specific JSON from the POST /session/start body
-    /// (e.g., `{"includeSensitiveInformation": false}` for the HAR plugin).
+    /// (e.g., `{"redactSensitiveHeaders": true}` for the HAR plugin).
     fn on_session_start(&self, session_id: &SessionId, settings: &serde_json::Value);
 
     /// Called for each intercepted request/response pair.
@@ -314,8 +314,8 @@ Plugins are registered in `main.rs` at startup. The proxy core calls `registry.o
 The HAR plugin is the first (and initially only) built-in plugin. It uses **disk-based buffering** to avoid memory pressure from large sessions.
 
 - **Implements** `ProxyPlugin` trait
-- **`on_session_start(settings)`** — reads `settings["includeSensitiveInformation"]` (default `false`) and stores it for the session. Creates a temp file (`{har_dir}/.session-{session_id}.jsonl`).
-- **`on_exchange`** — serializes the `HarEntry` as a single JSON line and appends it to the session's temp file. **Redacts sensitive headers** (`authorization`, `x-github-token`, `x-api-key`, `cookie`, `set-cookie`) at write time when `includeSensitiveInformation` is `false`. Secrets never touch disk.
+- **`on_session_start(settings)`** — reads `settings["redactSensitiveHeaders"]` (default `true`) and stores it for the session. Creates a temp file (`{har_dir}/.session-{session_id}.jsonl`).
+- **`on_exchange`** — serializes the `HarEntry` as a single JSON line and appends it to the session's temp file. **Redacts sensitive headers** (`authorization`, `x-github-token`, `x-api-key`, `cookie`, `set-cookie`) at write time when `redactSensitiveHeaders` is `true`. Secrets never touch disk.
 - **`on_session_stop`** — marks the session's JSONL as finalized (no more entries accepted). The JSONL temp file remains on disk.
 - **`on_session_clear`** — deletes the temp JSONL file
 - **`api_routes`** — registers `GET /proxy/har` (builds the HAR on the fly from the JSONL file for the caller's session)
@@ -386,7 +386,7 @@ certDir: /certs
 logLevel: info
 defaultPluginSettings:
   har:
-    includeSensitiveInformation: false
+    redactSensitiveHeaders: true
 ```
 
 `defaultPluginSettings` provides defaults for each plugin. These can be overridden per-session in `POST /session/start`.
@@ -642,7 +642,7 @@ data:
     logLevel: info
     defaultPluginSettings:
       har:
-        includeSensitiveInformation: false
+        redactSensitiveHeaders: true
 ```
 
 #### Worker Deployment Changes
@@ -842,7 +842,7 @@ This allows gradual rollout per worker without breaking existing deployments.
 
 Changes to `DevProxyClient` in `packages/shared/src/devproxy/devproxy-client.ts`:
 
-1. **New `startSession(pluginSettings)` method** — `POST /session/start` with per-plugin settings (e.g., `{ har: { includeSensitiveInformation: false } }`). Replaces `startRecording()`.
+1. **New `startSession(pluginSettings)` method** — `POST /session/start` with per-plugin settings (e.g., `{ har: { redactSensitiveHeaders: true } }`). Replaces `startRecording()`.
 2. **New `stopSession()` method** — `POST /session/stop`. Replaces `stopRecording()`.
 3. **New `downloadHar()` method** — `GET /proxy/har` → returns parsed HAR object. Used by `stopAndCollectHar()` as the primary HAR retrieval path.
 4. **Fallback to filesystem** — if `GET /proxy/har` returns 404 (running against DevProxy, not gateway), fall back to `getLatestHarFile()` for backward compatibility during migration.

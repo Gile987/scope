@@ -74,7 +74,7 @@ POST /api/v1/sessions
 {
   "plugins": {
     "har": {
-      "includeSensitiveInformation": false
+      "redactSensitiveHeaders": true
     }
   }
 }
@@ -177,7 +177,7 @@ sequenceDiagram
 **Key behaviors:**
 
 - **Disk-based buffering**: Each session writes to a JSONL file (`/har-output/.session-{ip}.jsonl`), one JSON line per HTTP exchange. No in-memory accumulation.
-- **Sensitive header redaction**: When `includeSensitiveInformation` is `false` (default), headers like `authorization`, `x-github-token`, `x-api-key`, `cookie`, and `set-cookie` are redacted at write time. Secrets never touch disk.
+- **Sensitive header redaction**: When `redactSensitiveHeaders` is `true` (default), headers like `authorization`, `x-github-token`, `x-api-key`, `cookie`, and `set-cookie` are redacted at write time. Secrets never touch disk.
 - **On-the-fly HAR assembly**: `GET /proxy/har` reads the JSONL file and wraps the entries in a HAR 1.2 envelope. No separate `.har` file is stored.
 - **Idempotent reads**: The JSONL file can be read multiple times (safe for retries). It is deleted on session cleanup (next `on_session_start` or idle reap).
 
@@ -259,7 +259,7 @@ certDir: /certs
 logLevel: info
 defaultPluginSettings:
   har:
-    includeSensitiveInformation: false
+    redactSensitiveHeaders: true
 ```
 
 ## Docker Compose

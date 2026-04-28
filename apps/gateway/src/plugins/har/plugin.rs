@@ -78,10 +78,10 @@ impl ProxyPlugin for HarPlugin {
     }
 
     fn on_session_start(&self, session_id: &SessionId, settings: &serde_json::Value) {
-        let redact = !settings
-            .get("includeSensitiveInformation")
+        let redact = settings
+            .get("redactSensitiveHeaders")
             .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+            .unwrap_or(true);
 
         let jsonl_path = self.jsonl_path(session_id);
 
@@ -304,7 +304,7 @@ mod tests {
         let sid = "10.0.0.1".to_string();
         plugin.on_session_start(
             &sid,
-            &serde_json::json!({"includeSensitiveInformation": true}),
+            &serde_json::json!({"redactSensitiveHeaders": false}),
         );
 
         let mut req_headers = HeaderMap::new();

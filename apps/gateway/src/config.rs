@@ -153,7 +153,7 @@ logLevel: debug
 defaultPluginSettings:
   har:
     outputDir: /tmp/har
-    includeSensitiveInformation: true
+    redactSensitiveHeaders: false
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.port, 9000);
@@ -163,8 +163,8 @@ defaultPluginSettings:
         assert_eq!(config.cert_dir, PathBuf::from("/tmp/certs"));
         assert_eq!(config.log_level, "debug");
         assert_eq!(
-            config.default_plugin_settings["har"]["includeSensitiveInformation"],
-            true
+            config.default_plugin_settings["har"]["redactSensitiveHeaders"],
+            false
         );
     }
 
