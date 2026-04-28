@@ -82,11 +82,10 @@ pub async fn handle_client(
     peer_addr: std::net::SocketAddr,
     state: Arc<ProxyState>,
 ) -> anyhow::Result<()> {
-    let session_id = peer_addr.ip().to_string();
+    let client_ip = peer_addr.ip();
 
     let io = TokioIo::new(stream);
     let state_clone = state.clone();
-    let session_id_clone = session_id.clone();
 
     hyper::server::conn::http1::Builder::new()
         .preserve_header_case(true)
@@ -95,8 +94,9 @@ pub async fn handle_client(
             io,
             service_fn(move |req| {
                 let state = state_clone.clone();
-                let sid = session_id_clone.clone();
-                async move { handle_request(req, sid, state).await }
+                // Resolve IP → session ID on each request (session may start/stop between requests)
+                let session_id = state.session_manager.session_id_for_ip(&client_ip);
+                async move { handle_request(req, session_id, state).await }
             }),
         )
         .with_upgrades()
@@ -107,7 +107,7 @@ pub async fn handle_client(
 
 async fn handle_request(
     req: hyper::Request<Incoming>,
-    session_id: SessionId,
+    session_id: Option<SessionId>,
     state: Arc<ProxyState>,
 ) -> Result<hyper::Response<ProxyBody>, hyper::Error> {
     if req.method() == Method::CONNECT {
@@ -137,7 +137,7 @@ async fn handle_request(
 
 async fn handle_connect(
     req: hyper::Request<Incoming>,
-    session_id: SessionId,
+    session_id: Option<SessionId>,
     state: Arc<ProxyState>,
 ) -> anyhow::Result<hyper::Response<ProxyBody>> {
     let host = req
@@ -146,11 +146,11 @@ async fn handle_connect(
         .map(|a| a.to_string())
         .unwrap_or_default();
 
-    debug!("CONNECT {} from {}", host, session_id);
+    debug!("CONNECT {} from session {:?}", host, session_id);
 
     // Decide: intercept or passthrough
-    let should_intercept =
-        state.session_manager.is_active(&session_id) && state.url_filter.matches_host(&host);
+    let should_intercept = session_id.is_some() && state.url_filter.matches_host(&host);
+    let sid_for_intercept = session_id.unwrap_or_default();
 
     // We need to upgrade the connection
     let resp = hyper::Response::builder()
@@ -165,7 +165,7 @@ async fn handle_connect(
                 let io = TokioIo::new(upgraded);
                 if should_intercept {
                     if let Err(e) =
-                        super::tls::intercept_tls(io, &host, &session_id, &state).await
+                        super::tls::intercept_tls(io, &host, &sid_for_intercept, &state).await
                     {
                         warn!("TLS interception error for {}: {}", host, e);
                     }
@@ -207,17 +207,17 @@ where
 /// Plain HTTP forwarding with streaming response (non-CONNECT requests).
 async fn handle_plain_http(
     req: hyper::Request<Incoming>,
-    session_id: SessionId,
+    session_id: Option<SessionId>,
     state: Arc<ProxyState>,
 ) -> anyhow::Result<hyper::Response<ProxyBody>> {
     let uri = req.uri().clone();
     let method = req.method().clone();
     let host = uri.host().unwrap_or("unknown").to_string();
 
-    debug!("HTTP {} {} from {}", method, uri, session_id);
+    debug!("HTTP {} {} from session {:?}", method, uri, session_id);
 
-    let should_record =
-        state.session_manager.is_active(&session_id) && state.url_filter.matches_host(&host);
+    let should_record = session_id.is_some() && state.url_filter.matches_host(&host);
+    let sid_for_record = session_id.unwrap_or_default();
 
     // Capture request metadata before consuming
     let req_method = method.clone();
@@ -297,7 +297,7 @@ async fn handle_plain_http(
                 wait_ms,
                 elapsed_ms,
             };
-            state.registry.on_exchange(&session_id, &exchange);
+            state.registry.on_exchange(&sid_for_record, &exchange);
         }
     });
 

@@ -13,7 +13,7 @@ use gateway::ca::CertificateAuthority;
 use gateway::config::{Cli, Config};
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
-use gateway::plugins::har::plugin::{HarPlugin, har_api_router};
+use gateway::plugins::har::plugin::{HarPlugin, har_session_router};
 use gateway::proxy::handler::{ProxyState, handle_client};
 use gateway::session::SessionManager;
 
@@ -66,8 +66,8 @@ async fn main() -> anyhow::Result<()> {
         ca: ca.clone(),
     });
 
-    // Plugin API routes
-    let har_router = har_api_router(har_plugin);
+    // Plugin API routes (session-scoped, mounted under /api/v1/sessions/:id/)
+    let har_router = har_session_router(har_plugin);
 
     // Idle reaper task
     let reaper_session_mgr = session_manager.clone();
@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
     // Start API server
     let api_port = config.api_port;
     let api_handle = tokio::spawn(async move {
-        if let Err(e) = gateway::api::server::run_api_server(api_state, api_port, vec![("", har_router)]).await {
+        if let Err(e) = gateway::api::server::run_api_server(api_state, api_port, vec![har_router]).await {
             error!("API server error: {}", e);
         }
     });

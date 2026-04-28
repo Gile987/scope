@@ -45,7 +45,7 @@ impl ProxyPlugin for CounterPlugin {
     }
 }
 
-/// HAR plugin lifecycle: start → stop → GET /proxy/har returns valid HAR.
+/// HAR plugin lifecycle: create → stop → GET .../har returns valid HAR.
 #[tokio::test]
 async fn har_plugin_lifecycle() {
     let tmp = TempDir::new().unwrap();
@@ -53,25 +53,31 @@ async fn har_plugin_lifecycle() {
 
     let client = reqwest::Client::new();
 
-    // Start session with HAR settings
+    // Create session with HAR settings
     let resp = client
-        .post(gw.api_url("/session/start"))
+        .post(gw.api_url("/api/v1/sessions"))
         .json(&serde_json::json!({"plugins": {"har": {"includeSensitiveInformation": false}}}))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let session_id = body["id"].as_str().unwrap().to_string();
 
     // Stop session
     let resp = client
-        .post(gw.api_url("/session/stop"))
+        .post(gw.api_url(&format!("/api/v1/sessions/{}/stop", session_id)))
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
 
     // Get HAR
-    let resp = client.get(gw.api_url("/proxy/har")).send().await.unwrap();
+    let resp = client
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let har: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(har["log"]["version"], "1.2");

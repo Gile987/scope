@@ -4,7 +4,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use tracing::info;
 
@@ -14,29 +14,31 @@ use super::routes::{self, ApiState};
 pub async fn run_api_server(
     state: Arc<ApiState>,
     port: u16,
-    plugin_routes: Vec<(&str, Router)>,
+    plugin_session_routes: Vec<Router>,
 ) -> anyhow::Result<()> {
-    let app = Router::new()
-        .route("/proxy", get(routes::get_proxy_status))
-        .route(
-            "/proxy/rootCertificate",
-            get(routes::get_root_certificate),
-        )
-        .route("/session/start", post(routes::post_session_start))
-        .route("/session/stop", post(routes::post_session_stop))
-        .with_state(state);
+    // Session sub-routes: /api/v1/sessions/:id/*
+    // Start with the core session routes that need ApiState
+    let session_routes = Router::new()
+        .route("/", get(routes::get_session))
+        .route("/stop", post(routes::post_stop_session))
+        .route("/", delete(routes::delete_session))
+        .with_state(state.clone());
 
-    // Mount plugin routes (e.g., GET /proxy/har from HAR plugin)
-    // These already have their own state, so merge after with_state
-    let app = plugin_routes
+    // Merge plugin session-scoped routes (already have their own state applied)
+    let session_routes = plugin_session_routes
         .into_iter()
-        .fold(app, |app, (prefix, router)| {
-            if prefix.is_empty() {
-                app.merge(router)
-            } else {
-                app.nest(prefix, router)
-            }
-        });
+        .fold(session_routes, |r, plugin_r| r.merge(plugin_r));
+
+    let api_v1 = Router::new()
+        .route("/cacert", get(routes::get_cacert))
+        .route("/sessions", post(routes::post_create_session))
+        .route("/sessions", get(routes::get_list_sessions))
+        .with_state(state)
+        .nest("/sessions/{id}", session_routes);
+
+    let app = Router::new()
+        .route("/healthz", get(routes::get_health))
+        .nest("/api/v1", api_v1);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("API server listening on {}", addr);

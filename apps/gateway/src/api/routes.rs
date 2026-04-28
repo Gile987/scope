@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -21,55 +21,73 @@ pub struct ApiState {
     pub ca: Arc<CertificateAuthority>,
 }
 
-/// GET /proxy — session status
-pub async fn get_proxy_status(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<Arc<ApiState>>,
-) -> impl IntoResponse {
-    let session_id = addr.ip().to_string();
-    let active = state.session_manager.get_status(&session_id).unwrap_or(false);
-
-    Json(ProxyStatus { active })
+/// GET /healthz — liveness / readiness check
+pub async fn get_health() -> impl IntoResponse {
+    Json(HealthResponse { status: "ok" })
 }
 
 #[derive(Serialize)]
-pub struct ProxyStatus {
-    pub active: bool,
+pub struct HealthResponse {
+    pub status: &'static str,
 }
 
-/// POST /session/start — start a session with per-plugin settings
-pub async fn post_session_start(
+/// POST /api/v1/sessions — create a new session
+pub async fn post_create_session(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<ApiState>>,
-    Json(body): Json<SessionStartRequest>,
+    Json(body): Json<SessionCreateRequest>,
 ) -> impl IntoResponse {
-    let session_id = addr.ip().to_string();
+    let client_ip = addr.ip();
     let plugin_settings = body.plugins.unwrap_or_default();
 
-    info!("Starting session for {}", session_id);
+    info!("Creating session for {}", client_ip);
 
     match state
         .session_manager
-        .start_session(session_id, plugin_settings)
+        .create_session(client_ip, plugin_settings)
     {
-        Ok(()) => StatusCode::OK.into_response(),
+        Ok(session_id) => {
+            (StatusCode::CREATED, Json(SessionCreatedResponse { id: session_id })).into_response()
+        }
         Err(e) => (StatusCode::SERVICE_UNAVAILABLE, e.to_string()).into_response(),
     }
 }
 
 #[derive(Deserialize)]
-pub struct SessionStartRequest {
+pub struct SessionCreateRequest {
     pub plugins: Option<HashMap<String, serde_json::Value>>,
 }
 
-/// POST /session/stop — stop a session
-pub async fn post_session_stop(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+#[derive(Serialize)]
+pub struct SessionCreatedResponse {
+    pub id: String,
+}
+
+/// GET /api/v1/sessions — list all sessions
+pub async fn get_list_sessions(
     State(state): State<Arc<ApiState>>,
 ) -> impl IntoResponse {
-    let session_id = addr.ip().to_string();
+    let sessions = state.session_manager.list_sessions();
+    Json(sessions)
+}
 
-    info!("Stopping session for {}", session_id);
+/// GET /api/v1/sessions/:id — session status
+pub async fn get_session(
+    Path(session_id): Path<String>,
+    State(state): State<Arc<ApiState>>,
+) -> impl IntoResponse {
+    match state.session_manager.get_session(&session_id) {
+        Some(info) => Json(info).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// POST /api/v1/sessions/:id/stop — stop a session
+pub async fn post_stop_session(
+    Path(session_id): Path<String>,
+    State(state): State<Arc<ApiState>>,
+) -> impl IntoResponse {
+    info!("Stopping session {}", session_id);
 
     match state.session_manager.stop_session(&session_id) {
         Ok(()) => StatusCode::OK.into_response(),
@@ -83,12 +101,26 @@ pub async fn post_session_stop(
     }
 }
 
-/// GET /proxy/rootCertificate — CA certificate in PEM format
-pub async fn get_root_certificate(
+/// DELETE /api/v1/sessions/:id — delete a session and clean up
+pub async fn delete_session(
+    Path(session_id): Path<String>,
     State(state): State<Arc<ApiState>>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let _format = params.get("format").map(|s| s.as_str()).unwrap_or("crt");
+    info!("Deleting session {}", session_id);
+
+    match state.session_manager.delete_session(&session_id) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(crate::session::SessionError::NotFound) => {
+            (StatusCode::NOT_FOUND, "No session found").into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// GET /api/v1/cacert — CA certificate in PEM format
+pub async fn get_cacert(
+    State(state): State<Arc<ApiState>>,
+) -> impl IntoResponse {
     let pem = state.ca.ca_cert_pem();
 
     (

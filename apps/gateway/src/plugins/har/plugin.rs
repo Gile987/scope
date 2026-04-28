@@ -3,12 +3,11 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -172,24 +171,23 @@ pub struct HarApiState {
     pub plugin: Arc<HarPlugin>,
 }
 
-/// GET /proxy/har — build and return HAR from JSONL on the fly.
+/// GET /api/v1/sessions/:id/har — build and return HAR from JSONL on the fly.
 pub async fn get_har(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    AxumPath(session_id): AxumPath<String>,
     State(state): State<Arc<HarApiState>>,
 ) -> impl IntoResponse {
-    let session_id = addr.ip().to_string();
-
     match state.plugin.build_har_for_session(&session_id) {
         Some(har) => Json(har).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
-/// Build an Axum router for the HAR plugin API.
-pub fn har_api_router(plugin: Arc<HarPlugin>) -> axum::Router {
+/// Build an Axum router for the HAR plugin's session-scoped routes.
+/// This is merged into /api/v1/sessions/:id/
+pub fn har_session_router(plugin: Arc<HarPlugin>) -> axum::Router {
     let state = Arc::new(HarApiState { plugin });
     axum::Router::new()
-        .route("/proxy/har", get(get_har))
+        .route("/har", get(get_har))
         .with_state(state)
 }
 

@@ -4,7 +4,7 @@
 use super::helpers::TestGateway;
 use tempfile::TempDir;
 
-/// POST /session/start → POST /session/stop → GET /proxy/har lifecycle.
+/// POST /api/v1/sessions → POST .../stop → GET .../har lifecycle.
 #[tokio::test]
 async fn session_lifecycle() {
     let tmp = TempDir::new().unwrap();
@@ -12,50 +12,88 @@ async fn session_lifecycle() {
 
     let client = reqwest::Client::new();
 
-    // GET /proxy — no active session
-    let resp = client.get(gw.api_url("/proxy")).send().await.unwrap();
+    // GET /healthz
+    let resp = client.get(gw.api_url("/healthz")).send().await.unwrap();
     assert_eq!(resp.status(), 200);
 
-    // POST /session/start
+    // POST /api/v1/sessions — create session
     let resp = client
-        .post(gw.api_url("/session/start"))
+        .post(gw.api_url("/api/v1/sessions"))
         .json(&serde_json::json!({"plugins": {"har": {"includeSensitiveInformation": false}}}))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let session_id = body["id"].as_str().unwrap().to_string();
+    assert!(!session_id.is_empty());
 
-    // GET /proxy — session active
-    let resp = client.get(gw.api_url("/proxy")).send().await.unwrap();
+    // GET /api/v1/sessions/:id — session status
+    let resp = client
+        .get(gw.api_url(&format!("/api/v1/sessions/{}", session_id)))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["active"], true);
+    assert_eq!(body["id"], session_id);
 
-    // POST /session/stop
+    // GET /api/v1/sessions — list sessions
     let resp = client
-        .post(gw.api_url("/session/stop"))
+        .get(gw.api_url("/api/v1/sessions"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    // POST /api/v1/sessions/:id/stop
+    let resp = client
+        .post(gw.api_url(&format!("/api/v1/sessions/{}/stop", session_id)))
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
 
-    // GET /proxy/har — should return empty HAR (no traffic intercepted)
-    let resp = client.get(gw.api_url("/proxy/har")).send().await.unwrap();
+    // GET /api/v1/sessions/:id/har — should return empty HAR (no traffic intercepted)
+    let resp = client
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let har: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(har["log"]["version"], "1.2");
     assert_eq!(har["log"]["entries"].as_array().unwrap().len(), 0);
+
+    // DELETE /api/v1/sessions/:id
+    let resp = client
+        .delete(gw.api_url(&format!("/api/v1/sessions/{}", session_id)))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 204);
+
+    // Verify session is gone
+    let resp = client
+        .get(gw.api_url(&format!("/api/v1/sessions/{}", session_id)))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
 }
 
-/// GET /proxy/rootCertificate returns valid PEM.
+/// GET /api/v1/cacert returns valid PEM.
 #[tokio::test]
-async fn root_certificate_endpoint() {
+async fn cacert_endpoint() {
     let tmp = TempDir::new().unwrap();
     let gw = TestGateway::start(tmp.path().to_path_buf(), &[]).await;
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(gw.api_url("/proxy/rootCertificate"))
+        .get(gw.api_url("/api/v1/cacert"))
         .send()
         .await
         .unwrap();
@@ -65,18 +103,22 @@ async fn root_certificate_endpoint() {
     assert!(pem.contains("END CERTIFICATE"));
 }
 
-/// GET /proxy/har returns 404 when no session exists.
+/// GET /api/v1/sessions/:id/har returns 404 when no session exists.
 #[tokio::test]
 async fn har_returns_404_without_session() {
     let tmp = TempDir::new().unwrap();
     let gw = TestGateway::start(tmp.path().to_path_buf(), &[]).await;
 
     let client = reqwest::Client::new();
-    let resp = client.get(gw.api_url("/proxy/har")).send().await.unwrap();
+    let resp = client
+        .get(gw.api_url("/api/v1/sessions/nonexistent/har"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 404);
 }
 
-/// GET /proxy/har returns empty HAR when session is active (no exchanges yet).
+/// GET /api/v1/sessions/:id/har returns empty HAR when session is active (no exchanges yet).
 #[tokio::test]
 async fn har_returns_empty_har_while_session_active() {
     let tmp = TempDir::new().unwrap();
@@ -84,21 +126,27 @@ async fn har_returns_empty_har_while_session_active() {
 
     let client = reqwest::Client::new();
 
-    // Start session but don't stop
-    client
-        .post(gw.api_url("/session/start"))
+    // Create session
+    let resp = client
+        .post(gw.api_url("/api/v1/sessions"))
         .json(&serde_json::json!({}))
         .send()
         .await
         .unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let session_id = body["id"].as_str().unwrap();
 
-    let resp = client.get(gw.api_url("/proxy/har")).send().await.unwrap();
+    let resp = client
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["log"]["entries"].as_array().unwrap().len(), 0);
 }
 
-/// POST /session/stop without start returns error.
+/// POST /api/v1/sessions/:id/stop without a valid session returns 404.
 #[tokio::test]
 async fn stop_without_start_returns_error() {
     let tmp = TempDir::new().unwrap();
@@ -106,10 +154,9 @@ async fn stop_without_start_returns_error() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(gw.api_url("/session/stop"))
+        .post(gw.api_url("/api/v1/sessions/nonexistent/stop"))
         .send()
         .await
         .unwrap();
-    // Should return a non-200 status
-    assert_ne!(resp.status(), 200);
+    assert_eq!(resp.status(), 404);
 }

@@ -19,7 +19,7 @@ async fn connect_without_session_passthrough() {
         .unwrap();
 
     // Plain HTTP request through the proxy — should get 501 (not implemented)
-    let resp = client
+    let _resp = client
         .get(format!("http://127.0.0.1:{}/anything", gw.proxy_addr.port()))
         .send()
         .await;
@@ -30,7 +30,11 @@ async fn connect_without_session_passthrough() {
     let api_client = reqwest::Client::new();
 
     // Verify no HAR data (no session was ever started)
-    let resp = api_client.get(gw.api_url("/proxy/har")).send().await.unwrap();
+    let resp = api_client
+        .get(gw.api_url("/api/v1/sessions/nonexistent/har"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 404);
 }
 
@@ -43,23 +47,29 @@ async fn nonmatching_url_passthrough() {
 
     let api_client = reqwest::Client::new();
 
-    // Start a session
-    api_client
-        .post(gw.api_url("/session/start"))
+    // Create a session
+    let resp = api_client
+        .post(gw.api_url("/api/v1/sessions"))
         .json(&serde_json::json!({}))
         .send()
         .await
         .unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let session_id = body["id"].as_str().unwrap().to_string();
 
     // Stop session
     api_client
-        .post(gw.api_url("/session/stop"))
+        .post(gw.api_url(&format!("/api/v1/sessions/{}/stop", session_id)))
         .send()
         .await
         .unwrap();
 
     // HAR should be empty — no matching URLs were intercepted
-    let resp = api_client.get(gw.api_url("/proxy/har")).send().await.unwrap();
+    let resp = api_client
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let har: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(har["log"]["entries"].as_array().unwrap().len(), 0);

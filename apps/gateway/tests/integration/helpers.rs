@@ -7,10 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gateway::ca::CertificateAuthority;
-use gateway::config::Config;
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
-use gateway::plugins::har::plugin::{HarPlugin, har_api_router};
+use gateway::plugins::har::plugin::{HarPlugin, har_session_router};
 use gateway::proxy::handler::{ProxyState, handle_client};
 use gateway::session::SessionManager;
 
@@ -78,25 +77,32 @@ impl TestGateway {
             ca: ca.clone(),
         });
 
-        let har_router = har_api_router(har_plugin.clone());
+        let har_router = har_session_router(har_plugin.clone());
 
         let api_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api_addr = api_listener.local_addr().unwrap();
 
         tokio::spawn(async move {
-            use axum::routing::{get, post};
+            use axum::routing::{delete, get, post};
             use axum::Router;
 
-            let app = Router::new()
-                .route("/proxy", get(gateway::api::routes::get_proxy_status))
-                .route(
-                    "/proxy/rootCertificate",
-                    get(gateway::api::routes::get_root_certificate),
-                )
-                .route("/session/start", post(gateway::api::routes::post_session_start))
-                .route("/session/stop", post(gateway::api::routes::post_session_stop))
-                .with_state(api_state)
+            let session_routes = Router::new()
+                .route("/", get(gateway::api::routes::get_session))
+                .route("/stop", post(gateway::api::routes::post_stop_session))
+                .route("/", delete(gateway::api::routes::delete_session))
+                .with_state(api_state.clone())
                 .merge(har_router);
+
+            let api_v1 = Router::new()
+                .route("/cacert", get(gateway::api::routes::get_cacert))
+                .route("/sessions", post(gateway::api::routes::post_create_session))
+                .route("/sessions", get(gateway::api::routes::get_list_sessions))
+                .with_state(api_state)
+                .nest("/sessions/{id}", session_routes);
+
+            let app = Router::new()
+                .route("/healthz", get(gateway::api::routes::get_health))
+                .nest("/api/v1", api_v1);
 
             axum::serve(
                 api_listener,
