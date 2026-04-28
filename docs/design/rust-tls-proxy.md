@@ -1,8 +1,9 @@
 # Design: Rust TLS Intercepting HTTP Proxy (`gateway`)
 
-> **Status:** Draft  
+> **Status:** Implemented (Phase 1.a — HAR plugin + VS Code Electron worker integration)  
 > **Date:** 2026-04-27  
-> **Branch:** `feat/rust-tls-proxy`
+> **Branch:** `feat/rust-tls-proxy`  
+> **PR:** [#702](https://github.com/growth-ecosystems/scope-core/pull/702)
 
 ## Problem
 
@@ -75,7 +76,7 @@ graph LR
 
 **Session isolation:** Every request — both proxy traffic (`:18000`) and control API calls (`:18897`) — is keyed by the caller's source IP. Workers don't need to know about sessions; the API behaves identically to DevProxy from their perspective.
 
-**Localhost fallback:** When running outside Docker (all traffic from `127.0.0.1`), an optional `X-Session-Id` header overrides source-IP detection. Workers set it from their `WORKER_NAME` env var.
+**Localhost fallback:** When running outside Docker (all traffic from `127.0.0.1`), sessions all map to the same IP. For local development, use Docker Compose which assigns per-container IPs. A future enhancement could add an optional header-based session override if needed.
 
 ### Traffic Flow
 

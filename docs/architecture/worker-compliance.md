@@ -12,7 +12,7 @@ This document tracks which [coding worker requirements](worker-requirements.md) 
 | 2 | Consume messages via `processMessage` | ✅ | ✅ | ✅ | ✅ |
 | 3 | Return `WorkerResult` | ✅ | ✅ | ✅ | ✅ |
 | 4 | Publish structured logs | ✅ | ✅ | ✅ | ✅ |
-| 6 | Capture HAR files | ✅ DevProxy sidecar | ✅ DevProxy sidecar | ❌ Not implemented | ✅ DevProxy sidecar |
+| 6 | Capture HAR files | ✅ DevProxy sidecar | ✅ DevProxy sidecar | ❌ Not implemented | ✅ AI Gateway (HAR plugin) |
 | 7 | Capture video recordings | N/A (CLI, headless) | N/A (CLI, headless) | ✅ Playwright recording (setup + session) | ✅ ffmpeg X11 capture (`video-recorder.ts`) |
 | 8 | Implement lifecycle hooks (`setup`/`teardown`) | — Not needed (stateless) | — Not needed (stateless) | ✅ VS Code process + browser lifecycle | ✅ Electron process + driver extension lifecycle |
 | 9 | Report agent & component versions | ✅ `COPILOT_CLI_VERSION` | ✅ `CLAUDE_CODE_ACP_VERSION`, `CLAUDE_AGENT_SDK_VERSION` | ✅ `VSCODE_VERSION`, `COPILOT_CHAT_VERSION` | ✅ `VSCODE_VERSION`, `COPILOT_CHAT_VERSION` |

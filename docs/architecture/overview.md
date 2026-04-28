@@ -13,9 +13,11 @@ flowchart TB
         Portal["Portal (Vue.js)"]
         API["API (Express)"]
         Judge["Judge"]
+        GW["AI Gateway<br/><i>Rust TLS proxy</i>"]
         subgraph Workers["Coding Agent Workers"]
             Claude["coder-acp-claude-code"]
             Copilot["coder-acp-copilot"]
+            VSCodeElectron["coder-vscode-electron"]
         end
     end
 
@@ -34,6 +36,11 @@ flowchart TB
         KEDA["KEDA (Autoscaler)"]
     end
 
+    subgraph AI["AI Providers"]
+        CopilotAPI["GitHub Copilot API"]
+        AnthropicAPI["Anthropic API"]
+    end
+
     CLI -->|submit tasks| API
     Portal -->|manage runs| API
     API -->|enqueue| Queues
@@ -42,6 +49,8 @@ flowchart TB
     Workers -->|snapshots| Blob
     Workers -->|real-time logs| Redis
     Workers -->|invoke| Judge
+    VSCodeElectron -->|"TLS intercept<br/>HAR capture"| GW
+    GW --> AI
     Redis -->|SSE stream| API
     API -->|stream logs| CLI
     API -->|stream logs| Portal
@@ -70,6 +79,7 @@ flowchart TB
 | `shared` | Shared types and utilities |
 | `workers/coder-acp-claude-code` | Claude Code agent via Agent Client Protocol (ACP) |
 | `workers/coder-acp-copilot` | GitHub Copilot agent via Agent Client Protocol (ACP) |
+| `gateway` | AI Gateway — shared Rust TLS-intercepting proxy with plugin architecture (HAR capture, future: token refresh, rate limiting) |
 
 ## Data Flow
 
