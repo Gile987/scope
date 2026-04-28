@@ -10,6 +10,10 @@
 
 import { writeFile, readFile, access, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { parseHarFile } from "../har/har-parser.js";
+import { extractHarMetadata } from "../har/extract-metadata.js";
+import type { HarCollectionResult } from "../har/extract-metadata.js";
+import type { WorkerLogFn } from "../types/types.js";
 
 const DEFAULT_API_URL = "http://localhost:18897";
 const DEFAULT_HAR_DIR = "/har-output";
@@ -215,6 +219,28 @@ export class DevProxyClient {
     }
   }
 
+  /**
+   * Stop recording, retrieve the latest HAR file, and extract metadata.
+   *
+   * Safe to call in both success and error paths — all exceptions are caught
+   * and logged as warnings so callers never lose the primary error.
+   */
+  async stopAndCollectHar(log: WorkerLogFn): Promise<HarCollectionResult> {
+    try {
+      await this.stopRecording();
+      await log("info", "DevProxy recording stopped");
+      const harFilePath = await this.getLatestHarFile();
+      if (harFilePath) {
+        const har = await parseHarFile(harFilePath);
+        return extractHarMetadata(har, harFilePath, log);
+      }
+      await log("warn", "No HAR file found after DevProxy recording");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      await log("warn", `DevProxy post-processing failed: ${msg}`);
+    }
+    return { harFilePath: null };
+  }
 }
 
 function sleep(ms: number): Promise<void> {
