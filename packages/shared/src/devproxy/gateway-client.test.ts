@@ -61,22 +61,6 @@ describe("GatewayClient", () => {
       });
     });
 
-    it("includes X-Session-Id header when WORKER_NAME is set", async () => {
-      process.env.WORKER_NAME = "worker-42";
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response("", { status: 200 })
-      );
-
-      const client = new GatewayClient("http://test:18897");
-      await client.startSession();
-
-      expect(fetch).toHaveBeenCalledWith("http://test:18897/session/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Session-Id": "worker-42" },
-        body: JSON.stringify({ plugins: {} }),
-      });
-    });
-
     it("throws on error", async () => {
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response("", { status: 500, statusText: "Internal Server Error" })
@@ -98,7 +82,6 @@ describe("GatewayClient", () => {
 
       expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/session/stop", {
         method: "POST",
-        headers: {},
       });
     });
 
@@ -126,21 +109,7 @@ describe("GatewayClient", () => {
       const result = await client.downloadHar();
 
       expect(result).toEqual(mockHar);
-      expect(fetch).toHaveBeenCalledWith("http://test:18897/proxy/har", { headers: {} });
-    });
-
-    it("includes X-Session-Id when WORKER_NAME is set", async () => {
-      process.env.WORKER_NAME = "worker-99";
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(JSON.stringify({ log: { entries: [] } }), { status: 200 })
-      );
-
-      const client = new GatewayClient("http://test:18897");
-      await client.downloadHar();
-
-      expect(fetch).toHaveBeenCalledWith("http://test:18897/proxy/har", {
-        headers: { "X-Session-Id": "worker-99" },
-      });
+      expect(fetch).toHaveBeenCalledWith("http://test:18897/proxy/har");
     });
 
     it("returns null on 404", async () => {

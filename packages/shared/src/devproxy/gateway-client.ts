@@ -19,21 +19,11 @@ const DEFAULT_API_URL = "http://localhost:18897";
 
 export class GatewayClient {
   readonly apiUrl: string;
-  private sessionId: string | undefined;
 
   constructor(
     apiUrl: string = process.env.DEV_PROXY_API_URL || DEFAULT_API_URL,
   ) {
     this.apiUrl = apiUrl;
-    this.sessionId = process.env.WORKER_NAME || undefined;
-  }
-
-  private sessionHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {};
-    if (this.sessionId) {
-      headers["X-Session-Id"] = this.sessionId;
-    }
-    return headers;
   }
 
   async waitForReady(timeoutMs?: number): Promise<void> {
@@ -51,7 +41,7 @@ export class GatewayClient {
   async startSession(plugins: Record<string, unknown> = {}): Promise<void> {
     const response = await fetch(`${this.apiUrl}/session/start`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...this.sessionHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ plugins }),
     });
     if (!response.ok) {
@@ -62,7 +52,6 @@ export class GatewayClient {
   async stopSession(): Promise<void> {
     const response = await fetch(`${this.apiUrl}/session/stop`, {
       method: "POST",
-      headers: this.sessionHeaders(),
     });
     if (!response.ok) {
       throw new Error(`Failed to stop gateway session: ${response.status} ${response.statusText}`);
@@ -71,9 +60,7 @@ export class GatewayClient {
 
   async downloadHar(): Promise<HarFile | null> {
     try {
-      const response = await fetch(`${this.apiUrl}/proxy/har`, {
-        headers: this.sessionHeaders(),
-      });
+      const response = await fetch(`${this.apiUrl}/proxy/har`);
       if (response.ok) {
         return (await response.json()) as HarFile;
       }

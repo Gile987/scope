@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::extract::{ConnectInfo, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Json;
@@ -175,10 +175,9 @@ pub struct HarApiState {
 /// GET /proxy/har — build and return HAR from JSONL on the fly.
 pub async fn get_har(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     State(state): State<Arc<HarApiState>>,
 ) -> impl IntoResponse {
-    let session_id = resolve_session_id(&addr, &headers);
+    let session_id = addr.ip().to_string();
 
     match state.plugin.build_har_for_session(&session_id) {
         Some(har) => Json(har).into_response(),
@@ -194,23 +193,12 @@ pub fn har_api_router(plugin: Arc<HarPlugin>) -> axum::Router {
         .with_state(state)
 }
 
-fn resolve_session_id(addr: &SocketAddr, headers: &HeaderMap) -> String {
-    if let Some(header) = headers.get("x-session-id") {
-        if let Ok(val) = header.to_str() {
-            if !val.is_empty() {
-                return val.to_string();
-            }
-        }
-    }
-    addr.ip().to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::plugin::{ExchangeRequest, ExchangeResponse};
     use bytes::Bytes;
-    use http::{Method, Uri};
+    use http::{HeaderMap, Method, Uri};
     use tempfile::TempDir;
 
     fn make_exchange() -> HttpExchange {

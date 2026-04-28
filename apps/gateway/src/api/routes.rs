@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::{ConnectInfo, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -24,10 +24,9 @@ pub struct ApiState {
 /// GET /proxy — session status
 pub async fn get_proxy_status(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     State(state): State<Arc<ApiState>>,
 ) -> impl IntoResponse {
-    let session_id = resolve_session_id(&addr, &headers);
+    let session_id = addr.ip().to_string();
     let active = state.session_manager.get_status(&session_id).unwrap_or(false);
 
     Json(ProxyStatus { active })
@@ -41,11 +40,10 @@ pub struct ProxyStatus {
 /// POST /session/start — start a session with per-plugin settings
 pub async fn post_session_start(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     State(state): State<Arc<ApiState>>,
     Json(body): Json<SessionStartRequest>,
 ) -> impl IntoResponse {
-    let session_id = resolve_session_id(&addr, &headers);
+    let session_id = addr.ip().to_string();
     let plugin_settings = body.plugins.unwrap_or_default();
 
     info!("Starting session for {}", session_id);
@@ -67,10 +65,9 @@ pub struct SessionStartRequest {
 /// POST /session/stop — stop a session
 pub async fn post_session_stop(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     State(state): State<Arc<ApiState>>,
 ) -> impl IntoResponse {
-    let session_id = resolve_session_id(&addr, &headers);
+    let session_id = addr.ip().to_string();
 
     info!("Stopping session for {}", session_id);
 
@@ -103,46 +100,4 @@ pub async fn get_root_certificate(
     )
 }
 
-/// Resolve session ID: X-Session-Id header takes priority, then source IP.
-fn resolve_session_id(addr: &SocketAddr, headers: &HeaderMap) -> String {
-    if let Some(header) = headers.get("x-session-id") {
-        if let Ok(val) = header.to_str() {
-            if !val.is_empty() {
-                return val.to_string();
-            }
-        }
-    }
-    addr.ip().to_string()
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::net::{IpAddr, Ipv4Addr};
-
-    #[test]
-    fn resolve_session_id_from_ip() {
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 12345);
-        let headers = HeaderMap::new();
-        assert_eq!(resolve_session_id(&addr, &headers), "10.0.0.1");
-    }
-
-    #[test]
-    fn resolve_session_id_from_header() {
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345);
-        let mut headers = HeaderMap::new();
-        headers.insert("x-session-id", "coder-acp-copilot".parse().unwrap());
-        assert_eq!(
-            resolve_session_id(&addr, &headers),
-            "coder-acp-copilot"
-        );
-    }
-
-    #[test]
-    fn resolve_session_id_empty_header_falls_back_to_ip() {
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345);
-        let mut headers = HeaderMap::new();
-        headers.insert("x-session-id", "".parse().unwrap());
-        assert_eq!(resolve_session_id(&addr, &headers), "127.0.0.1");
-    }
-}
