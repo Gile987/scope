@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
+/// CLI arguments parsed by clap.
 #[derive(Parser, Debug)]
 #[command(name = "gateway", about = "TLS-intercepting HTTP proxy with plugin architecture")]
 pub struct Cli {
@@ -31,6 +32,7 @@ pub struct Cli {
     pub log_level: Option<String>,
 }
 
+/// Gateway configuration loaded from YAML, with defaults and CLI overrides.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {

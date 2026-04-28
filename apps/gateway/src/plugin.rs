@@ -24,6 +24,7 @@ pub struct HttpExchange {
     pub elapsed_ms: u64,
 }
 
+/// The request half of a captured HTTP exchange.
 #[derive(Debug, Clone)]
 pub struct ExchangeRequest {
     pub method: Method,
@@ -32,6 +33,7 @@ pub struct ExchangeRequest {
     pub body: Bytes,
 }
 
+/// The response half of a captured HTTP exchange.
 #[derive(Debug, Clone)]
 pub struct ExchangeResponse {
     pub status: StatusCode,
@@ -71,14 +73,17 @@ pub struct PluginRegistry {
 }
 
 impl PluginRegistry {
+    /// Create a registry with the given plugins.
     pub fn new(plugins: Vec<Arc<dyn ProxyPlugin>>) -> Self {
         Self { plugins }
     }
 
+    /// Get a reference to the registered plugins.
     pub fn plugins(&self) -> &[Arc<dyn ProxyPlugin>] {
         &self.plugins
     }
 
+    /// Notify all plugins that a session has started.
     pub fn on_session_start(
         &self,
         session_id: &SessionId,
@@ -91,18 +96,21 @@ impl PluginRegistry {
         }
     }
 
+    /// Broadcast a captured exchange to all plugins.
     pub fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
         for plugin in &self.plugins {
             plugin.on_exchange(session_id, exchange);
         }
     }
 
+    /// Notify all plugins that a session has stopped.
     pub fn on_session_stop(&self, session_id: &SessionId) {
         for plugin in &self.plugins {
             plugin.on_session_stop(session_id);
         }
     }
 
+    /// Notify all plugins that a session is being cleared (deleted or reaped).
     pub fn on_session_clear(&self, session_id: &SessionId) {
         for plugin in &self.plugins {
             plugin.on_session_clear(session_id);

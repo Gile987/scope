@@ -26,6 +26,7 @@ pub async fn get_health() -> impl IntoResponse {
     Json(HealthResponse { status: "ok" })
 }
 
+/// Response payload for health check.
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
@@ -53,11 +54,13 @@ pub async fn post_create_session(
     }
 }
 
+/// Request body for session creation.
 #[derive(Deserialize)]
 pub struct SessionCreateRequest {
     pub plugins: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// Response body after session creation.
 #[derive(Serialize)]
 pub struct SessionCreatedResponse {
     pub id: String,

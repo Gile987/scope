@@ -34,6 +34,7 @@ pub struct HarPlugin {
 }
 
 impl HarPlugin {
+    /// Create a new HAR plugin that stores JSONL files in `har_dir`.
     pub fn new(har_dir: PathBuf) -> Self {
         Self {
             har_dir,

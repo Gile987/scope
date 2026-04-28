@@ -53,6 +53,11 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
+    /// Create a new session manager.
+    ///
+    /// * `registry` — plugin registry to notify on lifecycle events
+    /// * `idle_timeout` — how long before an inactive session is reaped
+    /// * `max_sessions` — upper bound on concurrent sessions
     pub fn new(registry: Arc<PluginRegistry>, idle_timeout: Duration, max_sessions: usize) -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
