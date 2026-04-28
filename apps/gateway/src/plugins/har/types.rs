@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// HAR 1.2 data model (subset needed for our recording).
+/// HAR 1.2 data model.
 /// Spec: http://www.softwareishard.com/blog/har-12-spec/
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -31,6 +31,8 @@ pub struct HarEntry {
     pub time: f64,
     pub request: HarRequest,
     pub response: HarResponse,
+    pub cache: HarCache,
+    pub timings: HarTimings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -39,6 +41,7 @@ pub struct HarRequest {
     pub url: String,
     #[serde(rename = "httpVersion")]
     pub http_version: String,
+    pub cookies: Vec<HarCookie>,
     pub headers: Vec<HarHeader>,
     #[serde(rename = "queryString")]
     pub query_string: Vec<HarQueryParam>,
@@ -57,6 +60,7 @@ pub struct HarResponse {
     pub status_text: String,
     #[serde(rename = "httpVersion")]
     pub http_version: String,
+    pub cookies: Vec<HarCookie>,
     pub headers: Vec<HarHeader>,
     pub content: HarContent,
     #[serde(rename = "headersSize")]
@@ -69,6 +73,12 @@ pub struct HarResponse {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HarHeader {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct HarCookie {
     pub name: String,
     pub value: String,
 }
@@ -97,6 +107,20 @@ pub struct HarContent {
     pub encoding: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct HarCache {}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct HarTimings {
+    pub blocked: f64,
+    pub dns: f64,
+    pub connect: f64,
+    pub send: f64,
+    pub wait: f64,
+    pub receive: f64,
+    pub ssl: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,6 +141,7 @@ mod tests {
                         method: "POST".into(),
                         url: "https://api.github.com/chat".into(),
                         http_version: "HTTP/1.1".into(),
+                        cookies: vec![],
                         headers: vec![HarHeader {
                             name: "content-type".into(),
                             value: "application/json".into(),
@@ -133,6 +158,7 @@ mod tests {
                         status: 200,
                         status_text: "OK".into(),
                         http_version: "HTTP/1.1".into(),
+                        cookies: vec![],
                         headers: vec![],
                         content: HarContent {
                             size: 10,
@@ -143,6 +169,16 @@ mod tests {
                         headers_size: -1,
                         body_size: 10,
                         redirect_url: String::new(),
+                    },
+                    cache: HarCache::default(),
+                    timings: HarTimings {
+                        blocked: -1.0,
+                        dns: -1.0,
+                        connect: -1.0,
+                        send: 0.0,
+                        wait: 42.0,
+                        receive: 0.0,
+                        ssl: -1.0,
                     },
                 }],
             },

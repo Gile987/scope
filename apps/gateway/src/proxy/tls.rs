@@ -150,12 +150,16 @@ async fn relay_request_inner(
 
     let upstream_req = upstream_req.body(Full::new(req_body.clone()))?;
 
+    // Start timing from request send (after connect/TLS handshake)
+    let request_instant = std::time::Instant::now();
+
     // Send to upstream and collect response
     let upstream_resp = sender.send_request(upstream_req).await?;
+    let wait_ms = request_instant.elapsed().as_millis() as u64;
     let (resp_parts, resp_body) = upstream_resp.into_parts();
     let resp_body_bytes = resp_body.collect().await?.to_bytes();
 
-    let elapsed_ms = start_instant.elapsed().as_millis() as u64;
+    let elapsed_ms = request_instant.elapsed().as_millis() as u64;
 
     // Notify plugins
     let exchange = HttpExchange {
@@ -171,6 +175,7 @@ async fn relay_request_inner(
             body: resp_body_bytes.clone(),
         },
         started_at,
+        wait_ms,
         elapsed_ms,
     };
 

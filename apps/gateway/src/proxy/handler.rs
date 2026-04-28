@@ -1,22 +1,72 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::convert::Infallible;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context as TaskContext, Poll};
 
 use bytes::Bytes;
 use http::{Method, StatusCode};
-use http_body_util::Full;
-use hyper::body::Incoming;
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Frame, Incoming};
 use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 use crate::ca::CertificateAuthority;
 use crate::filters::UrlFilter;
-use crate::plugin::{PluginRegistry, SessionId};
+use crate::plugin::{ExchangeRequest, ExchangeResponse, HttpExchange, PluginRegistry, SessionId};
 use crate::session::SessionManager;
+
+/// A streaming response body backed by an mpsc channel.
+struct ChannelBody {
+    rx: mpsc::Receiver<Frame<Bytes>>,
+}
+
+impl hyper::body::Body for ChannelBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        self.get_mut().rx.poll_recv(cx).map(|opt| opt.map(Ok))
+    }
+}
+
+/// Response body — either buffered (CONNECT, errors) or streaming (HTTP forward).
+enum ProxyBody {
+    Buffered(Full<Bytes>),
+    Streaming(ChannelBody),
+}
+
+impl hyper::body::Body for ProxyBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        match self.get_mut() {
+            ProxyBody::Buffered(inner) => Pin::new(inner).poll_frame(cx),
+            ProxyBody::Streaming(inner) => Pin::new(inner).poll_frame(cx),
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        match self {
+            ProxyBody::Buffered(inner) => inner.is_end_stream(),
+            ProxyBody::Streaming(_) => false,
+        }
+    }
+}
 
 /// Shared state for the proxy handler.
 pub struct ProxyState {
@@ -59,7 +109,7 @@ async fn handle_request(
     req: hyper::Request<Incoming>,
     session_id: SessionId,
     state: Arc<ProxyState>,
-) -> Result<hyper::Response<Full<Bytes>>, hyper::Error> {
+) -> Result<hyper::Response<ProxyBody>, hyper::Error> {
     if req.method() == Method::CONNECT {
         match handle_connect(req, session_id, state).await {
             Ok(resp) => Ok(resp),
@@ -67,19 +117,18 @@ async fn handle_request(
                 warn!("CONNECT error: {}", e);
                 Ok(hyper::Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
-                    .body(Full::new(Bytes::from(format!("CONNECT failed: {}", e))))
+                    .body(ProxyBody::Buffered(Full::new(Bytes::from(format!("CONNECT failed: {}", e)))))
                     .unwrap())
             }
         }
     } else {
-        // Plain HTTP forwarding (non-CONNECT)
         match handle_plain_http(req, session_id, state).await {
             Ok(resp) => Ok(resp),
             Err(e) => {
                 warn!("HTTP forward error: {}", e);
                 Ok(hyper::Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
-                    .body(Full::new(Bytes::from(format!("Forward failed: {}", e))))
+                    .body(ProxyBody::Buffered(Full::new(Bytes::from(format!("Forward failed: {}", e)))))
                     .unwrap())
             }
         }
@@ -90,7 +139,7 @@ async fn handle_connect(
     req: hyper::Request<Incoming>,
     session_id: SessionId,
     state: Arc<ProxyState>,
-) -> anyhow::Result<hyper::Response<Full<Bytes>>> {
+) -> anyhow::Result<hyper::Response<ProxyBody>> {
     let host = req
         .uri()
         .authority()
@@ -106,7 +155,7 @@ async fn handle_connect(
     // We need to upgrade the connection
     let resp = hyper::Response::builder()
         .status(StatusCode::OK)
-        .body(Full::new(Bytes::new()))?;
+        .body(ProxyBody::Buffered(Full::new(Bytes::new())))?;
 
     // Spawn the tunnel after sending 200
     tokio::spawn(async move {
@@ -155,16 +204,107 @@ where
     Ok(())
 }
 
-/// Plain HTTP forwarding (non-CONNECT requests).
+/// Plain HTTP forwarding with streaming response (non-CONNECT requests).
 async fn handle_plain_http(
-    _req: hyper::Request<Incoming>,
-    _session_id: SessionId,
-    _state: Arc<ProxyState>,
-) -> anyhow::Result<hyper::Response<Full<Bytes>>> {
-    // For now, return 501 for non-CONNECT (agents use HTTPS via CONNECT)
-    Ok(hyper::Response::builder()
-        .status(StatusCode::NOT_IMPLEMENTED)
-        .body(Full::new(Bytes::from(
-            "Plain HTTP forwarding not implemented — use HTTPS via CONNECT",
-        )))?)
+    req: hyper::Request<Incoming>,
+    session_id: SessionId,
+    state: Arc<ProxyState>,
+) -> anyhow::Result<hyper::Response<ProxyBody>> {
+    let uri = req.uri().clone();
+    let method = req.method().clone();
+    let host = uri.host().unwrap_or("unknown").to_string();
+
+    debug!("HTTP {} {} from {}", method, uri, session_id);
+
+    let should_record =
+        state.session_manager.is_active(&session_id) && state.url_filter.matches_host(&host);
+
+    // Capture request metadata before consuming
+    let req_method = method.clone();
+    let req_uri: http::Uri = uri.to_string().parse()?;
+    let req_headers = req.headers().clone();
+
+    // Read request body (requests are typically small)
+    let (parts, body) = req.into_parts();
+    let req_body_bytes = body.collect().await?.to_bytes();
+
+    // Rebuild the request for upstream
+    let mut upstream_req = hyper::Request::builder()
+        .method(parts.method)
+        .uri(&uri)
+        .version(parts.version);
+    for (name, value) in &parts.headers {
+        upstream_req = upstream_req.header(name, value);
+    }
+    let upstream_req = upstream_req.body(Full::new(req_body_bytes.clone()))?;
+
+    // Forward to upstream
+    let started_at = chrono::Utc::now();
+    let start_instant = std::time::Instant::now();
+    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+    let upstream_resp = client.request(upstream_req).await?;
+
+    // TTFB: time from request start to response headers received
+    let wait_ms = start_instant.elapsed().as_millis() as u64;
+
+    let resp_status = upstream_resp.status();
+    let resp_headers = upstream_resp.headers().clone();
+
+    // Stream response body through a channel for real-time forwarding
+    let (tx, rx) = mpsc::channel::<Frame<Bytes>>(32);
+    let upstream_body = upstream_resp.into_body();
+    let record_headers = resp_headers.clone();
+
+    tokio::spawn(async move {
+        let mut upstream_body = upstream_body;
+        let mut resp_buffer = Vec::new();
+
+        while let Some(frame_result) = upstream_body.frame().await {
+            match frame_result {
+                Ok(frame) => {
+                    if should_record {
+                        if let Some(data) = frame.data_ref() {
+                            resp_buffer.extend_from_slice(data);
+                        }
+                    }
+                    if tx.send(frame).await.is_err() {
+                        break; // Client disconnected
+                    }
+                }
+                Err(e) => {
+                    warn!("Upstream body error for {}: {}", uri, e);
+                    break;
+                }
+            }
+        }
+
+        let elapsed_ms = start_instant.elapsed().as_millis() as u64;
+
+        if should_record {
+            let exchange = HttpExchange {
+                request: ExchangeRequest {
+                    method: req_method,
+                    uri: req_uri,
+                    headers: req_headers,
+                    body: req_body_bytes,
+                },
+                response: ExchangeResponse {
+                    status: resp_status,
+                    headers: record_headers,
+                    body: Bytes::from(resp_buffer),
+                },
+                started_at,
+                wait_ms,
+                elapsed_ms,
+            };
+            state.registry.on_exchange(&session_id, &exchange);
+        }
+    });
+
+    // Return streaming response immediately
+    let mut response = hyper::Response::builder().status(resp_status);
+    for (name, value) in &resp_headers {
+        response = response.header(name, value);
+    }
+    Ok(response.body(ProxyBody::Streaming(ChannelBody { rx }))?)
 }

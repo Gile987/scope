@@ -48,13 +48,18 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
         None
     };
 
+    let send_ms = 0.0_f64;
+    let wait_ms = exchange.wait_ms as f64;
+    let receive_ms = (exchange.elapsed_ms as f64 - wait_ms).max(0.0);
+
     HarEntry {
         started_date_time: exchange.started_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        time: exchange.elapsed_ms as f64,
+        time: send_ms + wait_ms + receive_ms,
         request: HarRequest {
             method: req.method.to_string(),
             url: req.uri.to_string(),
             http_version: "HTTP/1.1".into(),
+            cookies: vec![],
             headers: request_headers,
             query_string: parse_query_string(&req.uri),
             headers_size: -1,
@@ -69,6 +74,7 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
                 .unwrap_or("")
                 .to_string(),
             http_version: "HTTP/1.1".into(),
+            cookies: vec![],
             headers: response_headers,
             content: HarContent {
                 size: resp.body.len() as i64,
@@ -79,6 +85,16 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
             headers_size: -1,
             body_size: resp.body.len() as i64,
             redirect_url: String::new(),
+        },
+        cache: HarCache::default(),
+        timings: HarTimings {
+            blocked: -1.0,
+            dns: -1.0,
+            connect: -1.0,
+            send: send_ms,
+            wait: wait_ms,
+            receive: receive_ms,
+            ssl: -1.0,
         },
     }
 }
@@ -182,6 +198,7 @@ mod tests {
                 body: Bytes::from(r#"{"choices":[]}"#),
             },
             started_at: chrono::Utc::now(),
+            wait_ms: 50,
             elapsed_ms: 150,
         }
     }
@@ -262,5 +279,46 @@ mod tests {
         assert_eq!(har.log.version, "1.2");
         assert_eq!(har.log.creator.name, "gateway");
         assert_eq!(har.log.entries.len(), 1);
+    }
+
+    /// HAR 1.2 spec: "The time value for the request must be equal to the sum
+    /// of the timings supplied in this section (excluding any -1 values)."
+    #[test]
+    fn timing_invariant_time_equals_sum_of_positive_timings() {
+        let exchange = make_exchange();
+        let entry = exchange_to_har_entry(&exchange, false);
+
+        let t = &entry.timings;
+        let sum: f64 = [t.blocked, t.dns, t.connect, t.send, t.wait, t.receive, t.ssl]
+            .iter()
+            .filter(|&&v| v >= 0.0)
+            .sum();
+
+        assert!(
+            (entry.time - sum).abs() < 0.001,
+            "entry.time ({}) must equal sum of non-negative timings ({})",
+            entry.time,
+            sum,
+        );
+    }
+
+    #[test]
+    fn timing_fields_valid_per_har_spec() {
+        let exchange = make_exchange();
+        let entry = exchange_to_har_entry(&exchange, false);
+
+        let t = &entry.timings;
+        // Required fields must be >= -1 per spec
+        assert!(t.send >= -1.0, "send must be >= -1");
+        assert!(t.wait >= -1.0, "wait must be >= -1");
+        assert!(t.receive >= -1.0, "receive must be >= -1");
+        // Optional fields: -1 means not available
+        assert!(t.blocked == -1.0 || t.blocked >= 0.0, "blocked must be -1 or >= 0");
+        assert!(t.dns == -1.0 || t.dns >= 0.0, "dns must be -1 or >= 0");
+        assert!(t.connect == -1.0 || t.connect >= 0.0, "connect must be -1 or >= 0");
+        assert!(t.ssl == -1.0 || t.ssl >= 0.0, "ssl must be -1 or >= 0");
+        // wait should reflect actual TTFB
+        assert!(t.wait >= 0.0, "wait (TTFB) should be non-negative");
+        assert!(t.receive >= 0.0, "receive should be non-negative");
     }
 }
