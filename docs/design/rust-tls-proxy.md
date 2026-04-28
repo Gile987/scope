@@ -1,4 +1,4 @@
-# Design: Rust TLS Intercepting HTTP Proxy (`scope-proxy`)
+# Design: Rust TLS Intercepting HTTP Proxy (`gateway`)
 
 > **Status:** Draft  
 > **Date:** 2026-04-27  
@@ -17,11 +17,11 @@ Scope uses [Microsoft DevProxy](https://github.com/dotnet/dev-proxy) (a .NET too
 | **Opacity** | Closed-source plugin model (HarGeneratorPlugin DLL); hard to extend or debug |
 | **No transparent mode** | Only works as an explicit HTTP proxy (`HTTP_PROXY` env var); cannot intercept traffic from binaries that ignore proxy settings |
 
-A purpose-built Rust proxy (`scope-proxy`) can solve all of these while running as a **single shared service** instead of per-worker sidecars, using source-IP-based sessions to isolate traffic per worker.
+A purpose-built Rust proxy (`gateway`) can solve all of these while running as a **single shared service** instead of per-worker sidecars, using source-IP-based sessions to isolate traffic per worker.
 
 ## Goals
 
-1. **Shared service** — one `scope-proxy` instance serves all workers, with source-IP-keyed sessions
+1. **Shared service** — one `gateway` instance serves all workers, with source-IP-keyed sessions
 2. **API-compatible** with DevProxy — same control API endpoints, plus a new `GET /proxy/har` endpoint for HAR retrieval over HTTP (no shared volume needed)
 3. **TLS interception** with on-the-fly certificate generation (MITM via custom CA)
 4. **Transparent proxy mode** via iptables `TPROXY`/`REDIRECT` — intercept traffic from binaries that don't honor `HTTP_PROXY`
@@ -39,7 +39,7 @@ A purpose-built Rust proxy (`scope-proxy`) can solve all of these while running 
 
 ### Shared Proxy with Source-IP Sessions
 
-Instead of N sidecar proxies (one per worker), `scope-proxy` runs as a **single shared service**. Each worker container has a unique IP on the Docker/K8S network. The proxy uses the TCP source IP to key sessions — no explicit session IDs needed.
+Instead of N sidecar proxies (one per worker), `gateway` runs as a **single shared service**. Each worker container has a unique IP on the Docker/K8S network. The proxy uses the TCP source IP to key sessions — no explicit session IDs needed.
 
 ```mermaid
 graph LR
@@ -49,7 +49,7 @@ graph LR
         W3[vscode-electron<br/>172.18.0.7]
     end
 
-    subgraph "scope-proxy (shared service)"
+    subgraph "gateway (shared service)"
         API[:18897 API]
         PX[:18000 proxy]
         S1[Session 172.18.0.5<br/>HAR buffer]
@@ -82,7 +82,7 @@ graph LR
 ```mermaid
 sequenceDiagram
     participant W as Worker (172.18.0.5)
-    participant P as scope-proxy (:18000)
+    participant P as gateway (:18000)
     participant A as API (:18897)
     participant U as Upstream (GitHub/Anthropic)
 
@@ -121,7 +121,7 @@ sequenceDiagram
 
 ```
 apps/
-  scope-proxy/                    # New Rust crate
+  gateway/                    # New Rust crate
     Cargo.toml
     Dockerfile
     README.md
@@ -392,8 +392,8 @@ defaultPluginSettings:
 
 CLI:
 ```bash
-scope-proxy --config /config/proxy.yaml
-scope-proxy --port 18000 --api-port 18897 --har-dir /har-output
+gateway --config /config/proxy.yaml
+gateway --port 18000 --api-port 18897 --har-dir /har-output
 ```
 
 ### 9. Docker Image
@@ -408,10 +408,10 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 
 # Runtime stage
 FROM scratch
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/scope-proxy /scope-proxy
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/gateway /gateway
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 EXPOSE 18000 18897
-ENTRYPOINT ["/scope-proxy"]
+ENTRYPOINT ["/gateway"]
 ```
 
 **Expected image size:** ~10-15 MB (vs ~200 MB for DevProxy)
@@ -427,10 +427,10 @@ Add to root `package.json`:
 ```json
 {
   "scripts": {
-    "build:proxy": "cd apps/scope-proxy && cargo build --release",
-    "test:proxy": "cd apps/scope-proxy && cargo test",
-    "lint:proxy": "cd apps/scope-proxy && cargo clippy -- -D warnings",
-    "fmt:proxy": "cd apps/scope-proxy && cargo fmt --check"
+    "build:proxy": "cd apps/gateway && cargo build --release",
+    "test:proxy": "cd apps/gateway && cargo test",
+    "lint:proxy": "cd apps/gateway && cargo clippy -- -D warnings",
+    "fmt:proxy": "cd apps/gateway && cargo fmt --check"
   }
 }
 ```
@@ -446,7 +446,7 @@ rust-proxy:
   runs-on: ubuntu-latest
   defaults:
     run:
-      working-directory: apps/scope-proxy
+      working-directory: apps/gateway
   steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
@@ -454,30 +454,30 @@ rust-proxy:
         components: clippy, rustfmt
     - uses: Swatinem/rust-cache@v2
       with:
-        workspaces: apps/scope-proxy
+        workspaces: apps/gateway
     - run: cargo fmt --check
     - run: cargo clippy -- -D warnings
     - run: cargo test
     - run: cargo build --release --target x86_64-unknown-linux-musl
 ```
 
-**Path filter:** Only trigger on changes to `apps/scope-proxy/**` to avoid rebuilding Rust on TypeScript-only PRs.
+**Path filter:** Only trigger on changes to `apps/gateway/**` to avoid rebuilding Rust on TypeScript-only PRs.
 
 #### Docker image CI
 
-Extend the existing `build-acr.sh` / image build workflow to include `scope-proxy`:
+Extend the existing `build-acr.sh` / image build workflow to include `gateway`:
 
 ```bash
 # In build-acr.sh or equivalent
-docker build -t ${ACR_LOGIN_SERVER}/scoped/scope-proxy:${TAG} apps/scope-proxy/
-docker push ${ACR_LOGIN_SERVER}/scoped/scope-proxy:${TAG}
+docker build -t ${ACR_LOGIN_SERVER}/scoped/gateway:${TAG} apps/gateway/
+docker push ${ACR_LOGIN_SERVER}/scoped/gateway:${TAG}
 ```
 
 FluxCD image automation scans the ACR tag and auto-updates integration manifests (same pattern as existing workers).
 
 ### 10. Docker Compose Integration
 
-Replace per-worker DevProxy sidecars with a single shared `scope-proxy` service:
+Replace per-worker DevProxy sidecars with a single shared `gateway` service:
 
 ```yaml
 # BEFORE (3 extra containers PER worker: DevProxy + init + volumes)
@@ -495,18 +495,18 @@ devproxy-claude-code-init:
   # ...
 
 # AFTER (1 shared container for ALL workers)
-scope-proxy:
+gateway:
   build:
-    context: ./apps/scope-proxy
+    context: ./apps/gateway
     dockerfile: Dockerfile
   command: ["--config", "/config/proxy.yaml"]
   volumes:
-    - ./apps/scope-proxy/config/default.yaml:/config/proxy.yaml:ro
-    - scope_proxy_cert:/certs
+    - ./apps/gateway/config/default.yaml:/config/proxy.yaml:ro
+    - gateway_cert:/certs
   ports:
     - "${SCOPE_PROXY_API_PORT:-18800}:18897"
   healthcheck:
-    test: ["/scope-proxy", "--health-check"]
+    test: ["/gateway", "--health-check"]
     interval: 5s
     timeout: 3s
     retries: 10
@@ -518,13 +518,13 @@ Worker containers point to the shared proxy:
 coder-acp-copilot:
   environment:
     DEV_PROXY_ENABLED: "true"
-    DEV_PROXY_API_URL: http://scope-proxy:18897
-    HTTP_PROXY: http://scope-proxy:18000
-    HTTPS_PROXY: http://scope-proxy:18000
+    DEV_PROXY_API_URL: http://gateway:18897
+    HTTP_PROXY: http://gateway:18000
+    HTTPS_PROXY: http://gateway:18000
     NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,mcp-gateway-copilot"
     NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
   depends_on:
-    scope-proxy: { condition: service_healthy }
+    gateway: { condition: service_healthy }
 ```
 
 **Savings:** For 3 workers with DevProxy, this eliminates **6 containers** (3 DevProxy + 3 init) → **1 shared container**.
@@ -533,33 +533,33 @@ coder-acp-copilot:
 
 #### Deployment + Service
 
-**File:** `deploy/base/scope-proxy.yaml`
+**File:** `deploy/base/gateway.yaml`
 
 ```yaml
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: scope-proxy
+  name: gateway
   namespace: scoped
   labels:
-    app: scope-proxy
+    app: gateway
     app.kubernetes.io/part-of: scoped
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: scope-proxy
+      app: gateway
   template:
     metadata:
       labels:
-        app: scope-proxy
+        app: gateway
       annotations:
         reloader.stakater.com/auto: "true"
     spec:
       containers:
-        - name: scope-proxy
-          image: ${ACR_LOGIN_SERVER}/scoped/scope-proxy  # {"$imagepolicy": "flux-system:scope-proxy"}
+        - name: gateway
+          image: ${ACR_LOGIN_SERVER}/scoped/gateway  # {"$imagepolicy": "flux-system:gateway"}
           args: ["--config", "/config/proxy.yaml"]
           ports:
             - containerPort: 18000
@@ -594,7 +594,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: scope-proxy-config
+            name: gateway-config
         - name: certs
           emptyDir: {}
       terminationGracePeriodSeconds: 15
@@ -603,11 +603,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: scope-proxy-service
+  name: gateway-service
   namespace: scoped
 spec:
   selector:
-    app: scope-proxy
+    app: gateway
   ports:
     - name: proxy
       port: 18000
@@ -619,13 +619,13 @@ spec:
 
 #### ConfigMap
 
-**File:** `deploy/base/scope-proxy-config.yaml`
+**File:** `deploy/base/gateway-config.yaml`
 
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: scope-proxy-config
+  name: gateway-config
   namespace: scoped
 data:
   proxy.yaml: |
@@ -656,11 +656,11 @@ containers:
       - name: DEV_PROXY_ENABLED
         value: "true"
       - name: DEV_PROXY_API_URL
-        value: "http://scope-proxy-service.scoped.svc.cluster.local:18897"
+        value: "http://gateway-service.scoped.svc.cluster.local:18897"
       - name: HTTP_PROXY
-        value: "http://scope-proxy-service.scoped.svc.cluster.local:18000"
+        value: "http://gateway-service.scoped.svc.cluster.local:18000"
       - name: HTTPS_PROXY
-        value: "http://scope-proxy-service.scoped.svc.cluster.local:18000"
+        value: "http://gateway-service.scoped.svc.cluster.local:18000"
       - name: NO_PROXY
         value: "localhost,127.0.0.1,judge-service.scoped.svc.cluster.local,token-manager-service.scoped.svc.cluster.local,api-service.scoped.svc.cluster.local"
       - name: NODE_EXTRA_CA_CERTS
@@ -681,8 +681,8 @@ Add to `deploy/base/kustomization.yaml`:
 ```yaml
 resources:
   # ...existing resources...
-  - scope-proxy.yaml
-  - scope-proxy-config.yaml
+  - gateway.yaml
+  - gateway-config.yaml
 ```
 
 Add to `deploy/base/workers/kustomization.yaml`: remove references to `devproxy-config.yaml`, `devproxy-claude-code-config.yaml`, `devproxy-vscode-electron-driver-ext-config.yaml`.
@@ -690,8 +690,8 @@ Add to `deploy/base/workers/kustomization.yaml`: remove references to `devproxy-
 FluxCD image automation in `deploy/overlays/integration/images.yaml`:
 
 ```yaml
-- name: scope-proxy
-  newName: ${ACR_LOGIN_SERVER}/scoped/scope-proxy  # {"$imagepolicy": "flux-system:scope-proxy"}
+- name: gateway
+  newName: ${ACR_LOGIN_SERVER}/scoped/gateway  # {"$imagepolicy": "flux-system:gateway"}
   newTag: "latest"  # Overwritten by image automation
 ```
 
@@ -759,10 +759,10 @@ Update existing tests in `packages/shared/src/devproxy/devproxy-client.test.ts`:
 
 | Task | Description |
 |------|-------------|
-| 1.1 | Scaffold Rust crate (`apps/scope-proxy/`) with Cargo.toml, CI integration |
+| 1.1 | Scaffold Rust crate (`apps/gateway/`) with Cargo.toml, CI integration |
 | 1.2 | Add pnpm script aliases (`build:proxy`, `test:proxy`, `lint:proxy`, `fmt:proxy`) to root `package.json` |
 | 1.3 | Add Rust CI job (fmt + clippy + test + build) with path filter to GitHub Actions workflow |
-| 1.4 | Add `scope-proxy` Docker image build to `build-acr.sh` / image CI pipeline |
+| 1.4 | Add `gateway` Docker image build to `build-acr.sh` / image CI pipeline |
 | 1.5 | Implement `ProxyPlugin` trait and `PluginRegistry` (`plugin.rs`) |
 | 1.6 | Implement source-IP session manager (`session.rs`) with idle reaping + plugin lifecycle hooks |
 | 1.7 | Implement HTTP CONNECT tunnel handler (hyper) with session-aware routing + plugin `on_exchange` broadcast |
@@ -775,12 +775,12 @@ Update existing tests in `packages/shared/src/devproxy/devproxy-client.test.ts`:
 | 1.14 | Unit tests for all modules (see [Unit Testing Strategy](#12-unit-testing-strategy)) |
 | 1.15 | Integration tests (proxy + TLS + HAR + API + multi-session isolation + plugin lifecycle) |
 | 1.16 | Dockerfile (multi-stage, static musl binary) |
-| 1.17 | Docker Compose: add shared `scope-proxy` service (feature-flagged alongside DevProxy) |
-| 1.18 | K8S manifests: `scope-proxy.yaml` Deployment + Service, `scope-proxy-config.yaml` ConfigMap |
+| 1.17 | Docker Compose: add shared `gateway` service (feature-flagged alongside DevProxy) |
+| 1.18 | K8S manifests: `gateway.yaml` Deployment + Service, `gateway-config.yaml` ConfigMap |
 | 1.19 | Update `DevProxyClient`: add `startSession()` / `stopSession()` / `downloadHar()` methods, add `X-Session-Id` header support |
-| 1.20 | End-to-end test: run a worker with `scope-proxy` instead of DevProxy |
+| 1.20 | End-to-end test: run a worker with `gateway` instead of DevProxy |
 
-**Done when:** All workers can run with the shared `scope-proxy` service and produce identical HAR output via `GET /proxy/har`.
+**Done when:** All workers can run with the shared `gateway` service and produce identical HAR output via `GET /proxy/har`.
 
 ### Phase 2: Transparent Proxy Mode
 
@@ -792,7 +792,7 @@ Update existing tests in `packages/shared/src/devproxy/devproxy-client.test.ts`:
 | 2.2 | Recover original destination from socket options (`SO_ORIGINAL_DST`) |
 | 2.3 | Route transparently intercepted connections through the same TLS MITM path (session by source IP) |
 | 2.4 | Docker Compose: add `cap_add: [NET_ADMIN]` + iptables setup script |
-| 2.5 | K8S: add `NET_ADMIN` capability to scope-proxy container security context |
+| 2.5 | K8S: add `NET_ADMIN` capability to gateway container security context |
 | 2.6 | Unit + integration tests for transparent mode |
 
 ### Phase 3: Metrics Plugin & Observability
@@ -811,7 +811,7 @@ Update existing tests in `packages/shared/src/devproxy/devproxy-client.test.ts`:
 
 | Task | Description |
 |------|-------------|
-| 4.1 | Switch all workers to `scope-proxy` (remove feature flag) |
+| 4.1 | Switch all workers to `gateway` (remove feature flag) |
 | 4.2 | Remove DevProxy sidecar containers, init containers, and ConfigMaps from K8S manifests |
 | 4.3 | Remove DevProxy Docker Compose services and volumes |
 | 4.4 | Remove filesystem-based HAR retrieval from `DevProxyClient` (keep only `GET /proxy/har`) |
@@ -822,18 +822,18 @@ Update existing tests in `packages/shared/src/devproxy/devproxy-client.test.ts`:
 
 ```mermaid
 flowchart TD
-    A[Phase 1: Build scope-proxy] --> B[Feature flag: PROXY_BACKEND=scope-proxy]
+    A[Phase 1: Build gateway] --> B[Feature flag: PROXY_BACKEND=gateway]
     B --> C{Workers tested?}
     C -->|No| D[Fix compatibility issues]
     D --> C
     C -->|Yes| E[Phase 2-3: Add advanced features]
-    E --> F[Phase 4: Default to scope-proxy]
+    E --> F[Phase 4: Default to gateway]
     F --> G[Remove DevProxy]
 ```
 
 **Feature flag:** `PROXY_BACKEND` env var in Docker Compose:
 - `devproxy` (default) — current behavior
-- `scope-proxy` — use the Rust proxy
+- `gateway` — use the Rust proxy
 
 This allows gradual rollout per worker without breaking existing deployments.
 
@@ -844,7 +844,7 @@ Changes to `DevProxyClient` in `packages/shared/src/devproxy/devproxy-client.ts`
 1. **New `startSession(pluginSettings)` method** — `POST /session/start` with per-plugin settings (e.g., `{ har: { includeSensitiveInformation: false } }`). Replaces `startRecording()`.
 2. **New `stopSession()` method** — `POST /session/stop`. Replaces `stopRecording()`.
 3. **New `downloadHar()` method** — `GET /proxy/har` → returns parsed HAR object. Used by `stopAndCollectHar()` as the primary HAR retrieval path.
-4. **Fallback to filesystem** — if `GET /proxy/har` returns 404 (running against DevProxy, not scope-proxy), fall back to `getLatestHarFile()` for backward compatibility during migration.
+4. **Fallback to filesystem** — if `GET /proxy/har` returns 404 (running against DevProxy, not gateway), fall back to `getLatestHarFile()` for backward compatibility during migration.
 5. **`X-Session-Id` header** — when `WORKER_NAME` env var is set, include `X-Session-Id: {WORKER_NAME}` on all API requests. Only needed for localhost dev (Docker/K8S uses source IP).
 6. **Remove `DEV_PROXY_HAR_DIR` dependency** — no longer needed once `GET /proxy/har` is the primary path. Keep as fallback during Phase 1.
 
@@ -863,8 +863,8 @@ Changes to `DevProxyClient` in `packages/shared/src/devproxy/devproxy-client.ts`
 
 ## Open Questions
 
-1. ~~**Should `scope-proxy` live in `scope-mt-app/apps/` or as a separate top-level repo?**~~  
-   **Decided:** `apps/scope-proxy/` — keeps the monorepo pattern; Dockerfile builds independently.
+1. ~~**Should `gateway` live in `scope-mt-app/apps/` or as a separate top-level repo?**~~  
+   **Decided:** `apps/gateway/` — keeps the monorepo pattern; Dockerfile builds independently.
 
 2. ~~**Sidecar vs shared service?**~~  
    **Decided:** Shared service with source-IP sessions. Eliminates container sprawl; workers don't need code changes.
