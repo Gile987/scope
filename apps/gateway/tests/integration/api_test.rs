@@ -76,9 +76,9 @@ async fn har_returns_404_without_session() {
     assert_eq!(resp.status(), 404);
 }
 
-/// GET /proxy/har returns 404 when session is still active (not stopped).
+/// GET /proxy/har returns empty HAR when session is active (no exchanges yet).
 #[tokio::test]
-async fn har_returns_404_while_session_active() {
+async fn har_returns_empty_har_while_session_active() {
     let tmp = TempDir::new().unwrap();
     let gw = TestGateway::start(tmp.path().to_path_buf(), &[]).await;
 
@@ -93,7 +93,9 @@ async fn har_returns_404_while_session_active() {
         .unwrap();
 
     let resp = client.get(gw.api_url("/proxy/har")).send().await.unwrap();
-    assert_eq!(resp.status(), 404);
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["log"]["entries"].as_array().unwrap().len(), 0);
 }
 
 /// POST /session/stop without start returns error.

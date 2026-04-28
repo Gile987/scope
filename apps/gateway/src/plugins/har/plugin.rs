@@ -52,12 +52,8 @@ impl HarPlugin {
         let sessions = self.sessions.read();
         let session = sessions.get(session_id)?;
 
-        if session.finalized {
-            let entries = self.read_jsonl_entries(&session.jsonl_path);
-            Some(writer::build_har(entries))
-        } else {
-            None // Still active
-        }
+        let entries = self.read_jsonl_entries(&session.jsonl_path);
+        Some(writer::build_har(entries))
     }
 
     fn read_jsonl_entries(&self, path: &Path) -> Vec<HarEntry> {
@@ -251,13 +247,14 @@ mod tests {
         let exchange = make_exchange();
         plugin.on_exchange(&sid, &exchange);
 
-        // HAR not available while active
-        assert!(plugin.build_har_for_session(&sid).is_none());
+        // HAR available while active (returns entries so far)
+        let har_active = plugin.build_har_for_session(&sid).unwrap();
+        assert_eq!(har_active.log.entries.len(), 1);
 
         // Stop session
         plugin.on_session_stop(&sid);
 
-        // HAR available after stop
+        // HAR still available after stop
         let har = plugin.build_har_for_session(&sid).unwrap();
         assert_eq!(har.log.entries.len(), 1);
 
