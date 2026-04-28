@@ -382,7 +382,7 @@ services:
       - ./apps/gateway/config/default.yaml:/config/proxy.yaml:ro
       - gateway_cert:/certs
     ports:
-      - "${SCOPE_PROXY_API_PORT:-18800}:18897"
+      - "${GATEWAY_API_PORT:-18900}:18897"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18897/healthz || exit 1"]
       interval: 10s
@@ -436,7 +436,7 @@ services:
       - claude_har_output:/har-output
       - claude_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
     ports:
-      - "${DEVPROXY_CLAUDE_API_PORT:-18801}:18897"
+      - "${DEVPROXY_CLAUDE_API_PORT:-19000}:18897"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:18897/proxy"]
       interval: 5s
@@ -524,7 +524,7 @@ services:
       - copilot_har_output:/har-output
       - copilot_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
     ports:
-      - "${DEVPROXY_API_PORT:-18800}:18897"
+      - "${DEVPROXY_COPILOT_API_PORT:-18800}:18897"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:18897/proxy"]
       interval: 5s

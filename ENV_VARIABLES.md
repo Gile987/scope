@@ -210,8 +210,8 @@ URL of the DevProxy REST API. The `DevProxyClient` uses this to start/stop recor
 
 Directory where DevProxy writes HAR files. Shared between the DevProxy process and the worker via a volume mount.
 
-### DEVPROXY_API_PORT
-**Default:** `18897`
+### DEVPROXY_COPILOT_API_PORT
+**Default:** `18800`
 **Type:** integer (Docker Compose only)
 
-Host port mapping for the DevProxy REST API in Docker Compose.
+Host port mapping for the Copilot DevProxy REST API in Docker Compose.
