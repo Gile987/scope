@@ -10,5 +10,5 @@ certDir: /tmp/scope-gateway/certs
 logLevel: info
 defaultPluginSettings:
   har:
-    harOutputDir: /tmp/scope-gateway/har-output
+    outputDir: /tmp/scope-gateway/har-output
     includeSensitiveInformation: false

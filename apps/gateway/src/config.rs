@@ -115,12 +115,12 @@ impl Config {
         Ok(config)
     }
 
-    /// Get HAR output directory from `defaultPluginSettings.har.harOutputDir`.
-    /// Falls back to `/har-output` if not configured.
+    /// Get HAR output directory from `defaultPluginSettings.har.outputDir`.
+    /// Falls back to `/tmp/scope-gateway/har-output` if not configured.
     pub fn har_output_dir(&self) -> PathBuf {
         self.default_plugin_settings
             .get("har")
-            .and_then(|v| v.get("harOutputDir"))
+            .and_then(|v| v.get("outputDir"))
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/tmp/scope-gateway/har-output"))
@@ -152,7 +152,7 @@ certDir: /tmp/certs
 logLevel: debug
 defaultPluginSettings:
   har:
-    harOutputDir: /tmp/har
+    outputDir: /tmp/har
     includeSensitiveInformation: true
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
