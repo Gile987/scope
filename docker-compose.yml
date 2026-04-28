@@ -365,6 +365,27 @@ services:
       api:
         condition: service_started
 
+  # ===========================================================================
+  # Gateway proxy (shared TLS-intercepting HTTP proxy — replaces per-worker DevProxy)
+  # Enable with: PROXY_BACKEND=gateway
+  # ===========================================================================
+  gateway:
+    build:
+      context: ./apps/gateway
+      dockerfile: Dockerfile
+    profiles: [gateway]
+    volumes:
+      - ./apps/gateway/config/default.yaml:/config/proxy.yaml:ro
+      - gateway_cert:/certs
+    ports:
+      - "${SCOPE_PROXY_API_PORT:-18800}:18897"
+    healthcheck:
+      test: ["CMD", "/gateway", "--health-check"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   # Claude Code worker (via ACP)
   coder-acp-claude-code:
     build:
@@ -604,6 +625,7 @@ volumes:
   mongodb_data:
   azurite_data:
   lowkey_vault_data:
+  gateway_cert:
   copilot_har_output:
   copilot_devproxy_cert:
   copilot_workspace:
