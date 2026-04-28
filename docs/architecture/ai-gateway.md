@@ -56,24 +56,31 @@ The REST API runs on port **18897** and provides session management plus plugin 
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/proxy` | `GET` | Health check / session status (is caller's session active?) |
-| `/proxy/rootCertificate?format=crt` | `GET` | Download the CA certificate (PEM) |
-| `/session/start` | `POST` | Start a session with per-plugin settings |
-| `/session/stop` | `POST` | Stop a session, finalize plugin data |
-| `/proxy/har` | `GET` | Download the HAR file for the caller's session |
+| `/healthz` | `GET` | K8s liveness/readiness health check |
+| `/api/v1/cacert` | `GET` | Download the CA certificate (PEM) |
+| `/api/v1/sessions` | `POST` | Create a session → returns `{ id }` |
+| `/api/v1/sessions` | `GET` | List all sessions |
+| `/api/v1/sessions/{id}` | `GET` | Session status |
+| `/api/v1/sessions/{id}/stop` | `POST` | Stop recording, finalize plugin data |
+| `/api/v1/sessions/{id}/har` | `GET` | Download the HAR file |
+| `/api/v1/sessions/{id}` | `DELETE` | Delete session and clean up |
 
-All endpoints resolve the caller's session from the TCP source IP.
+Sessions are identified by a **UUID** returned from `POST /api/v1/sessions`. The gateway also maintains a reverse index from source IP to session ID, so the proxy data plane can associate traffic with the correct session without custom headers.
 
-### Session Start
+### Session Create
 
 ```json
-POST /session/start
+POST /api/v1/sessions
 {
   "plugins": {
     "har": {
       "includeSensitiveInformation": false
     }
   }
+}
+→ 201 Created
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -106,7 +113,7 @@ flowchart LR
 - On startup, the gateway generates (or loads from `/certs/`) a self-signed CA key pair
 - For each intercepted TLS connection, a leaf certificate is generated for the SNI domain using `rcgen`, signed by the CA
 - Leaf certs are cached in an in-memory LRU cache (~1000 entries, 24h TTL)
-- Workers download the CA cert via `GET /proxy/rootCertificate` and install it as `NODE_EXTRA_CA_CERTS`
+- Workers download the CA cert via `GET /api/v1/cacert` and install it as `NODE_EXTRA_CA_CERTS`
 
 ## Plugin Architecture
 
@@ -140,24 +147,31 @@ sequenceDiagram
     participant HAR as HAR Plugin
     participant PX as Proxy
 
-    W->>API: POST /session/start
-    API->>SM: start_session(ip, settings)
-    SM->>HAR: on_session_start(ip, {har: ...})
-    Note over HAR: Create .session-{ip}.jsonl
+    W->>API: POST /api/v1/sessions
+    API->>SM: create_session(ip, settings)
+    SM->>HAR: on_session_start(id, {har: ...})
+    Note over HAR: Create .session-{id}.jsonl
+    API-->>W: 201 {id: "uuid"}
 
     W->>PX: CONNECT api.githubcopilot.com
-    Note over PX: TLS intercept + relay
-    PX->>HAR: on_exchange(ip, exchange)
+    Note over PX: IP→session lookup, TLS intercept + relay
+    PX->>HAR: on_exchange(id, exchange)
     Note over HAR: Append JSON line to .jsonl
 
-    W->>API: POST /session/stop
-    API->>SM: stop_session(ip)
-    SM->>HAR: on_session_stop(ip)
+    W->>API: POST /api/v1/sessions/{id}/stop
+    API->>SM: stop_session(id)
+    SM->>HAR: on_session_stop(id)
     Note over HAR: Mark JSONL as finalized
 
-    W->>API: GET /proxy/har
+    W->>API: GET /api/v1/sessions/{id}/har
     Note over HAR: Read JSONL, wrap in HAR 1.2 envelope
     API-->>W: 200 application/json (HAR)
+
+    W->>API: DELETE /api/v1/sessions/{id}
+    API->>SM: delete_session(id)
+    SM->>HAR: on_session_clear(id)
+    Note over HAR: Delete JSONL file
+    API-->>W: 204 No Content
 ```
 
 **Key behaviors:**
@@ -167,14 +181,27 @@ sequenceDiagram
 - **On-the-fly HAR assembly**: `GET /proxy/har` reads the JSONL file and wraps the entries in a HAR 1.2 envelope. No separate `.har` file is stored.
 - **Idempotent reads**: The JSONL file can be read multiple times (safe for retries). It is deleted on session cleanup (next `on_session_start` or idle reap).
 
+### Timestamps
+
+All HAR timestamps are in **UTC**. The `startedDateTime` field uses RFC 3339 format with millisecond precision and `Z` suffix (e.g. `2026-04-28T08:25:03.123Z`).
+
+| Field | Source | Format |
+|-------|--------|--------|
+| `startedDateTime` | `chrono::Utc::now()` at request start | RFC 3339, ms precision, `Z` suffix |
+| `time` | `send + wait + receive` | Milliseconds (float) |
+| `timings.wait` | `Instant::elapsed()` at response headers received (TTFB) | Milliseconds (float) |
+| `timings.receive` | `elapsed_ms - wait_ms` | Milliseconds (float) |
+
+RFC 3339 is a strict subset of ISO 8601 — the key difference is that RFC 3339 **requires** a timezone offset (the gateway always uses `Z` for UTC), while ISO 8601 allows omitting it. The `to_rfc3339_opts(SecondsFormat::Millis, true)` call in `writer.rs` enforces the `Z` suffix rather than `+00:00`.
+
 ## Session Lifecycle
 
 | Event | Trigger | What happens |
 |-------|---------|--------------|
-| **Start** | `POST /session/start` | Clear any existing session for this IP, create new session, notify plugins |
-| **Active** | Proxy traffic from session IP | TLS interception + plugin `on_exchange()` |
-| **Stop** | `POST /session/stop` | Mark session inactive, notify plugins to finalize |
-| **Clear** | Next `start` or idle timeout | Delete session state, notify plugins to clean up temp files |
+| **Create** | `POST /api/v1/sessions` | Assign UUID, clear any existing session for this IP, create new session, notify plugins |
+| **Active** | Proxy traffic from session IP | IP→session lookup, TLS interception + plugin `on_exchange()` |
+| **Stop** | `POST /api/v1/sessions/{id}/stop` | Mark session inactive, notify plugins to finalize |
+| **Delete** | `DELETE /api/v1/sessions/{id}` or idle timeout | Delete session state, notify plugins to clean up temp files |
 | **Passthrough** | Traffic from IP with no active session | Forward directly, no interception, no plugin notification |
 
 Idle sessions are reaped after a configurable timeout (default: 5 minutes). Max concurrent sessions: 100.
@@ -203,7 +230,7 @@ apps/gateway/
 │   ├── plugin.rs               # ProxyPlugin trait + PluginRegistry
 │   ├── api/
 │   │   ├── server.rs           # Axum REST API on :18897
-│   │   └── routes.rs           # /proxy, /session/start, /session/stop, /proxy/har
+│   │   └── routes.rs           # /healthz, /api/v1/sessions, /api/v1/cacert
 │   ├── ca/
 │   │   └── generator.rs        # CA key pair generation + leaf cert signing (rcgen)
 │   ├── filters/
