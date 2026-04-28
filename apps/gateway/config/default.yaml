@@ -1,0 +1,14 @@
+urlsToWatch:
+  - "https://api.enterprise.githubcopilot.com/*"
+  - "https://api.github.com/*"
+  - "https://api.githubcopilot.com/*"
+  - "https://*.githubcopilot.com/*"
+  - "https://api.anthropic.com/*"
+port: 18000
+apiPort: 18897
+harOutputDir: /har-output
+certDir: /certs
+logLevel: info
+defaultPluginSettings:
+  har:
+    includeSensitiveInformation: false

@@ -1,0 +1,374 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+use std::collections::HashMap;
+use std::io::{BufRead, Write};
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use axum::extract::{ConnectInfo, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::Json;
+use parking_lot::RwLock;
+use tracing::{debug, warn};
+
+use crate::plugin::{HttpExchange, ProxyPlugin, SessionId};
+
+use super::types::HarEntry;
+use super::writer;
+
+/// Per-session state tracked by the HAR plugin.
+struct HarSession {
+    jsonl_path: PathBuf,
+    finalized: bool,
+    redact: bool,
+}
+
+/// HAR plugin — records HTTP exchanges to JSONL, serves HAR via GET /proxy/har.
+pub struct HarPlugin {
+    har_dir: PathBuf,
+    sessions: RwLock<HashMap<SessionId, HarSession>>,
+}
+
+impl HarPlugin {
+    pub fn new(har_dir: PathBuf) -> Self {
+        Self {
+            har_dir,
+            sessions: RwLock::new(HashMap::new()),
+        }
+    }
+
+    fn jsonl_path(&self, session_id: &SessionId) -> PathBuf {
+        self.har_dir
+            .join(format!(".session-{}.jsonl", session_id.replace(':', "_")))
+    }
+
+    /// Build HAR from JSONL file on the fly.
+    fn build_har_for_session(&self, session_id: &SessionId) -> Option<super::types::Har> {
+        let sessions = self.sessions.read();
+        let session = sessions.get(session_id)?;
+
+        if session.finalized {
+            let entries = self.read_jsonl_entries(&session.jsonl_path);
+            Some(writer::build_har(entries))
+        } else {
+            None // Still active
+        }
+    }
+
+    fn read_jsonl_entries(&self, path: &Path) -> Vec<HarEntry> {
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => return Vec::new(),
+        };
+
+        std::io::BufReader::new(file)
+            .lines()
+            .filter_map(|line| {
+                let line = line.ok()?;
+                serde_json::from_str(&line).ok()
+            })
+            .collect()
+    }
+}
+
+#[async_trait]
+impl ProxyPlugin for HarPlugin {
+    fn name(&self) -> &str {
+        "har"
+    }
+
+    fn on_session_start(&self, session_id: &SessionId, settings: &serde_json::Value) {
+        let redact = !settings
+            .get("includeSensitiveInformation")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let jsonl_path = self.jsonl_path(session_id);
+
+        // Delete stale JSONL from prior session
+        let _ = std::fs::remove_file(&jsonl_path);
+
+        // Create the har directory if needed
+        if let Some(parent) = jsonl_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        // Create empty JSONL file
+        if let Err(e) = std::fs::File::create(&jsonl_path) {
+            warn!(
+                "Failed to create JSONL file {:?}: {}",
+                jsonl_path, e
+            );
+        }
+
+        let mut sessions = self.sessions.write();
+        sessions.insert(
+            session_id.clone(),
+            HarSession {
+                jsonl_path,
+                finalized: false,
+                redact,
+            },
+        );
+
+        debug!("HAR plugin: session started for {}", session_id);
+    }
+
+    fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
+        let sessions = self.sessions.read();
+        let session = match sessions.get(session_id) {
+            Some(s) if !s.finalized => s,
+            _ => return, // No session or finalized — skip
+        };
+
+        let entry = writer::exchange_to_har_entry(exchange, session.redact);
+
+        // Append JSON line to JSONL file
+        match std::fs::OpenOptions::new()
+            .append(true)
+            .open(&session.jsonl_path)
+        {
+            Ok(mut file) => {
+                if let Ok(json) = serde_json::to_string(&entry) {
+                    let _ = writeln!(file, "{}", json);
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to append to JSONL {:?}: {}",
+                    session.jsonl_path, e
+                );
+            }
+        }
+    }
+
+    fn on_session_stop(&self, session_id: &SessionId) {
+        let mut sessions = self.sessions.write();
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.finalized = true;
+            debug!("HAR plugin: session finalized for {}", session_id);
+        }
+    }
+
+    fn on_session_clear(&self, session_id: &SessionId) {
+        let mut sessions = self.sessions.write();
+        if let Some(session) = sessions.remove(session_id) {
+            let _ = std::fs::remove_file(&session.jsonl_path);
+            debug!("HAR plugin: session cleared for {}", session_id);
+        }
+    }
+
+    fn api_routes(&self) -> Option<axum::Router> {
+        // We need to share the HarPlugin with the route handler.
+        // This is done by wrapping self in an Arc via the caller.
+        // For now, return None — routes are mounted externally.
+        None
+    }
+}
+
+/// State for the HAR API route handler.
+pub struct HarApiState {
+    pub plugin: Arc<HarPlugin>,
+}
+
+/// GET /proxy/har — build and return HAR from JSONL on the fly.
+pub async fn get_har(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    State(state): State<Arc<HarApiState>>,
+) -> impl IntoResponse {
+    let session_id = resolve_session_id(&addr, &headers);
+
+    match state.plugin.build_har_for_session(&session_id) {
+        Some(har) => Json(har).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Build an Axum router for the HAR plugin API.
+pub fn har_api_router(plugin: Arc<HarPlugin>) -> axum::Router {
+    let state = Arc::new(HarApiState { plugin });
+    axum::Router::new()
+        .route("/proxy/har", get(get_har))
+        .with_state(state)
+}
+
+fn resolve_session_id(addr: &SocketAddr, headers: &HeaderMap) -> String {
+    if let Some(header) = headers.get("x-session-id") {
+        if let Ok(val) = header.to_str() {
+            if !val.is_empty() {
+                return val.to_string();
+            }
+        }
+    }
+    addr.ip().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugin::{ExchangeRequest, ExchangeResponse};
+    use bytes::Bytes;
+    use http::{Method, Uri};
+    use tempfile::TempDir;
+
+    fn make_exchange() -> HttpExchange {
+        HttpExchange {
+            request: ExchangeRequest {
+                method: Method::GET,
+                uri: Uri::from_static("https://api.github.com/test"),
+                headers: HeaderMap::new(),
+                body: Bytes::new(),
+            },
+            response: ExchangeResponse {
+                status: http::StatusCode::OK,
+                headers: HeaderMap::new(),
+                body: Bytes::from_static(b"ok"),
+            },
+            started_at: chrono::Utc::now(),
+            elapsed_ms: 10,
+        }
+    }
+
+    #[test]
+    fn session_lifecycle() {
+        let tmp = TempDir::new().unwrap();
+        let plugin = HarPlugin::new(tmp.path().to_path_buf());
+
+        let sid = "10.0.0.1".to_string();
+        let settings = serde_json::json!({});
+
+        // Start session
+        plugin.on_session_start(&sid, &settings);
+        assert!(plugin.jsonl_path(&sid).exists());
+
+        // Exchange
+        let exchange = make_exchange();
+        plugin.on_exchange(&sid, &exchange);
+
+        // HAR not available while active
+        assert!(plugin.build_har_for_session(&sid).is_none());
+
+        // Stop session
+        plugin.on_session_stop(&sid);
+
+        // HAR available after stop
+        let har = plugin.build_har_for_session(&sid).unwrap();
+        assert_eq!(har.log.entries.len(), 1);
+
+        // Idempotent — can read again
+        let har2 = plugin.build_har_for_session(&sid).unwrap();
+        assert_eq!(har2.log.entries.len(), 1);
+
+        // Clear deletes JSONL
+        plugin.on_session_clear(&sid);
+        assert!(!plugin.jsonl_path(&sid).exists());
+        assert!(plugin.build_har_for_session(&sid).is_none());
+    }
+
+    #[test]
+    fn redacts_headers_by_default() {
+        let tmp = TempDir::new().unwrap();
+        let plugin = HarPlugin::new(tmp.path().to_path_buf());
+
+        let sid = "10.0.0.1".to_string();
+        plugin.on_session_start(&sid, &serde_json::json!({}));
+
+        let mut req_headers = HeaderMap::new();
+        req_headers.insert("authorization", "Bearer secret".parse().unwrap());
+
+        let exchange = HttpExchange {
+            request: ExchangeRequest {
+                method: Method::GET,
+                uri: Uri::from_static("https://api.github.com/test"),
+                headers: req_headers,
+                body: Bytes::new(),
+            },
+            response: ExchangeResponse {
+                status: http::StatusCode::OK,
+                headers: HeaderMap::new(),
+                body: Bytes::from_static(b"ok"),
+            },
+            started_at: chrono::Utc::now(),
+            elapsed_ms: 10,
+        };
+
+        plugin.on_exchange(&sid, &exchange);
+        plugin.on_session_stop(&sid);
+
+        let har = plugin.build_har_for_session(&sid).unwrap();
+        let auth = har.log.entries[0]
+            .request
+            .headers
+            .iter()
+            .find(|h| h.name == "authorization")
+            .unwrap();
+        assert_eq!(auth.value, "[REDACTED]");
+    }
+
+    #[test]
+    fn preserves_headers_when_configured() {
+        let tmp = TempDir::new().unwrap();
+        let plugin = HarPlugin::new(tmp.path().to_path_buf());
+
+        let sid = "10.0.0.1".to_string();
+        plugin.on_session_start(
+            &sid,
+            &serde_json::json!({"includeSensitiveInformation": true}),
+        );
+
+        let mut req_headers = HeaderMap::new();
+        req_headers.insert("authorization", "Bearer secret".parse().unwrap());
+
+        let exchange = HttpExchange {
+            request: ExchangeRequest {
+                method: Method::GET,
+                uri: Uri::from_static("https://api.github.com/test"),
+                headers: req_headers,
+                body: Bytes::new(),
+            },
+            response: ExchangeResponse {
+                status: http::StatusCode::OK,
+                headers: HeaderMap::new(),
+                body: Bytes::from_static(b"ok"),
+            },
+            started_at: chrono::Utc::now(),
+            elapsed_ms: 10,
+        };
+
+        plugin.on_exchange(&sid, &exchange);
+        plugin.on_session_stop(&sid);
+
+        let har = plugin.build_har_for_session(&sid).unwrap();
+        let auth = har.log.entries[0]
+            .request
+            .headers
+            .iter()
+            .find(|h| h.name == "authorization")
+            .unwrap();
+        assert_eq!(auth.value, "Bearer secret");
+    }
+
+    #[test]
+    fn restart_clears_previous_session() {
+        let tmp = TempDir::new().unwrap();
+        let plugin = HarPlugin::new(tmp.path().to_path_buf());
+
+        let sid = "10.0.0.1".to_string();
+        plugin.on_session_start(&sid, &serde_json::json!({}));
+        plugin.on_exchange(&sid, &make_exchange());
+        plugin.on_session_stop(&sid);
+
+        // Restart — should clear previous
+        plugin.on_session_start(&sid, &serde_json::json!({}));
+        plugin.on_session_stop(&sid);
+
+        let har = plugin.build_har_for_session(&sid).unwrap();
+        assert_eq!(har.log.entries.len(), 0); // Previous entries cleared
+    }
+}
