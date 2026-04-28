@@ -98,7 +98,6 @@ async fn relay_request_inner(
     state: &Arc<ProxyState>,
 ) -> anyhow::Result<hyper::Response<Full<Bytes>>> {
     let started_at = chrono::Utc::now();
-    let start_instant = std::time::Instant::now();
 
     // Capture request details
     let (parts, body) = req.into_parts();
