@@ -6,9 +6,9 @@ urlsToWatch:
   - "https://api.anthropic.com/*"
 port: 18000
 apiPort: 18897
-harOutputDir: /har-output
 certDir: /certs
 logLevel: info
 defaultPluginSettings:
   har:
+    harOutputDir: /har-output
     includeSensitiveInformation: false
