@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Plugin trait and broadcast registry for the proxy pipeline.
+//!
+//! The proxy core delegates all traffic observation to plugins via the
+//! `ProxyPlugin` trait, keeping the proxy pipeline decoupled from recording,
+//! analysis, or modification logic. Plugins are notified synchronously and
+//! sequentially — they're expected to be fast (append to buffer/file).
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -89,6 +96,8 @@ impl PluginRegistry {
         session_id: &SessionId,
         plugin_settings: &HashMap<String, Value>,
     ) {
+        // Plugins that aren't mentioned in the session's pluginSettings get an
+        // empty JSON object, so they can apply their own defaults without None checks.
         let empty = Value::Object(serde_json::Map::new());
         for plugin in &self.plugins {
             let settings = plugin_settings.get(plugin.name()).unwrap_or(&empty);

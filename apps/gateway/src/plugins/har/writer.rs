@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! HAR 1.2 JSON serializer.
+//!
+//! Converts internal `HttpExchange` captures into HAR-spec-compliant entries.
+//! Handles security-sensitive header redaction, body encoding (plaintext for
+//! small text responses, base64 for large or binary payloads), query string
+//! parsing, and HAR timing breakdown.
+
 use base64::Engine;
 use http::HeaderMap;
 
@@ -9,6 +16,9 @@ use crate::plugin::HttpExchange;
 use super::types::*;
 
 /// Headers to redact when redactCredentials is true.
+// SECURITY: These headers carry authentication tokens and session cookies.
+// HAR files are often shared for debugging — leaked credentials here could
+// compromise accounts. Redaction is on by default; callers must opt out.
 const SENSITIVE_HEADERS: &[&str] = &[
     "authorization",
     "x-github-token",
@@ -48,6 +58,9 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
         None
     };
 
+    // HAR 1.2 timing breakdown: send + wait + receive = total time.
+    // We set send=0 because we can't measure serialization time separately.
+    // blocked/dns/connect/ssl are -1 (not applicable) since we reuse connections.
     let send_ms = 0.0_f64;
     let wait_ms = exchange.wait_ms as f64;
     let receive_ms = (exchange.elapsed_ms as f64 - wait_ms).max(0.0);
@@ -150,6 +163,8 @@ fn parse_query_string(uri: &http::Uri) -> Vec<HarQueryParam> {
 }
 
 /// Encode body for HAR: text for small responses, base64 for >1MB or binary.
+// The 1MB threshold balances readability (text is human-inspectable in HAR viewers)
+// vs JSON size (base64 adds ~33% overhead but prevents invalid UTF-8 in JSON).
 fn encode_body(body: &[u8], content_type: &str) -> (Option<String>, Option<String>) {
     if body.is_empty() {
         return (None, None);

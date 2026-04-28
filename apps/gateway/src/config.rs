@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Configuration loading with a three-layer precedence chain:
+//! compiled defaults → YAML file → CLI flags.
+//!
+//! Uses serde for YAML deserialization with `#[serde(default)]` to fill
+//! missing fields from compiled defaults, so partial config files work.
+//! Plugin-specific settings live under `defaultPluginSettings.<pluginName>`.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

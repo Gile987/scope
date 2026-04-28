@@ -1,10 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! X.509 certificate authority with dynamic leaf certificate generation.
+//!
+//! The CA key pair is persisted to disk so the same root cert survives restarts
+//! (clients only need to trust it once). Leaf certificates are generated on-demand
+//! per domain and cached in an LRU to bound memory while avoiding repeated
+//! RSA key generation (~1ms per leaf cert).
+
 use std::path::Path;
 use std::sync::Arc;
 
 use lru::LruCache;
+// parking_lot::Mutex over std::Mutex: no poisoning, faster for the short critical
+// sections here (LRU lookup + insert). We never hold this across await points.
 use parking_lot::Mutex;
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, SanType};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -82,6 +91,8 @@ impl CertificateAuthority {
 
     /// Get or generate a rustls ServerConfig with a leaf cert for the given domain.
     pub fn server_config_for_domain(&self, domain: &str) -> anyhow::Result<Arc<ServerConfig>> {
+        // Two-phase lock: check cache, release lock, then generate if needed.
+        // Key generation is expensive (~1ms), so we don't hold the lock during it.
         {
             let mut cache = self.cache.lock();
             if let Some(config) = cache.get(domain) {
@@ -115,6 +126,8 @@ impl CertificateAuthority {
         let leaf_key_der =
             PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
 
+        // TLS requires the cert chain in order: leaf first, then issuing CA.
+        // The client validates the leaf against the CA it already trusts.
         let config = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(

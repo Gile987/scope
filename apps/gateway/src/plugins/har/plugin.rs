@@ -1,6 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! HAR plugin implementation: records HTTP exchanges to append-only JSONL files
+//! during active sessions, then builds HAR 1.2 JSON on-demand from the JSONL
+//! when requested via the API.
+//!
+//! Design: JSONL (one JSON object per line) avoids holding all entries in memory.
+//! Writes are append-only during the session; reads parse the file on each GET.
+//! This trades read latency for memory efficiency — suitable for long sessions
+//! with thousands of exchanges.
+
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -79,6 +88,8 @@ impl ProxyPlugin for HarPlugin {
     }
 
     fn on_session_start(&self, session_id: &SessionId, settings: &serde_json::Value) {
+        // Default to redacting sensitive headers (Authorization, cookies, API keys).
+        // Callers must explicitly opt out with `"redactCredentials": false`.
         let redact = settings
             .get("redactCredentials")
             .and_then(|v| v.as_bool())
@@ -86,7 +97,8 @@ impl ProxyPlugin for HarPlugin {
 
         let jsonl_path = self.jsonl_path(session_id);
 
-        // Delete stale JSONL from prior session
+        // Clean up any leftover JSONL from a prior crash or un-cleared session.
+        // Without this, a new session could inherit stale exchange data.
         let _ = std::fs::remove_file(&jsonl_path);
 
         // Create the har directory if needed
@@ -119,7 +131,9 @@ impl ProxyPlugin for HarPlugin {
         let sessions = self.sessions.read();
         let session = match sessions.get(session_id) {
             Some(s) if !s.finalized => s,
-            _ => return, // No session or finalized — skip
+            // Finalized sessions still serve existing data via GET /har,
+            // but we stop appending new exchanges after stop is called.
+            _ => return,
         };
 
         let entry = writer::exchange_to_har_entry(exchange, session.redact);

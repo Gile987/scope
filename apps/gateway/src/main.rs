@@ -1,6 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Entry point for the gateway proxy binary.
+//!
+//! Parses CLI args, loads YAML config, initializes the CA, plugin registry,
+//! session manager, and spawns two long-running tasks:
+//! - The REST API server (Axum) for session management and plugin endpoints
+//! - The TCP proxy listener that handles CONNECT tunneling and HTTP forwarding
+//!
+//! Shutdown is cooperative: if either task exits, `tokio::select!` logs and returns.
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let config = Config::load(&cli)?;
 
-    // Logging
+    // Logging: RUST_LOG env var takes precedence, then config file's logLevel, then default
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -56,7 +65,8 @@ async fn main() -> anyhow::Result<()> {
         100,
     ));
 
-    // Proxy state (shared by proxy handler)
+    // Shared HTTP/1.1 connection pool for plain (non-CONNECT) forwarding.
+    // A single client avoids per-request connection setup and enables keepalive reuse.
     let http_client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new())
         .pool_idle_timeout(Duration::from_secs(30))
         .pool_max_idle_per_host(4)
@@ -78,7 +88,8 @@ async fn main() -> anyhow::Result<()> {
     // Plugin API routes (session-scoped, mounted under /api/v1/sessions/:id/)
     let har_router = har_session_router(har_plugin);
 
-    // Idle reaper task
+    // Background task that periodically scans for sessions with no recent activity.
+    // Orphaned sessions (e.g., client crashed without calling stop) are cleaned up here.
     let reaper_session_mgr = session_manager.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));

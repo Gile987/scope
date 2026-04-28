@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Axum REST API server for session management and plugin endpoints.
+//!
+//! Routes are nested under `/api/v1/` with session-scoped sub-routes at
+//! `/api/v1/sessions/{id}/`. Plugin routers are merged into the session
+//! scope so plugins can expose per-session endpoints (e.g., GET /har).
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -24,7 +30,8 @@ pub async fn run_api_server(
         .route("/", delete(routes::delete_session))
         .with_state(state.clone());
 
-    // Merge plugin session-scoped routes (already have their own state applied)
+    // Plugin routers come with their own State already applied (e.g., Arc<HarApiState>),
+    // so we can merge them directly without re-wrapping in ApiState.
     let session_routes = plugin_session_routes
         .into_iter()
         .fold(session_routes, |r, plugin_r| r.merge(plugin_r));
@@ -44,6 +51,9 @@ pub async fn run_api_server(
     info!("API server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    // `into_make_service_with_connect_info` injects the client SocketAddr into
+    // each request, which route handlers extract via `ConnectInfo<SocketAddr>`
+    // to bind sessions to client IPs.
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),

@@ -1,11 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Session lifecycle manager with UUID-keyed sessions and an IP→session reverse index.
+//!
+//! The proxy layer resolves client IPs to session IDs on every request, so each
+//! coding-agent container automatically gets its own recording session without
+//! client-side session tracking. Sessions have an idle timeout enforced by a
+//! background reaper task.
+
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+// parking_lot::RwLock over std::sync::RwLock: no poisoning overhead, better
+// performance for read-heavy workloads (proxy lookups are reads; mutations are rare).
 use parking_lot::RwLock;
 use serde::Serialize;
 use serde_json::Value;
@@ -77,7 +86,9 @@ impl SessionManager {
         let mut sessions = self.sessions.write();
         let mut ip_index = self.ip_index.write();
 
-        // If this IP already has an active session, clear it first
+        // If this IP already has an active session, tear it down first.
+        // This handles agent container restarts — the new session replaces the
+        // stale one without hitting the max_sessions cap.
         if let Some(old_id) = ip_index.get(&client_ip) {
             let old_id = old_id.clone();
             self.registry.on_session_clear(&old_id);

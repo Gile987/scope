@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! REST API route handlers for session CRUD, health checks, and CA certificate retrieval.
+//!
+//! All session mutations go through `SessionManager`, which handles plugin
+//! lifecycle notifications. The client IP is extracted from the TCP connection
+//! (via Axum's `ConnectInfo`) and used as the session binding key.
+
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;

@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Glob-based URL filter for deciding which requests to intercept.
+//!
+//! Patterns from config (e.g., `https://*.github.com/*`) are compiled once at
+//! startup. Supports full-URL matching (plain HTTP) and host-only matching
+//! (CONNECT tunnels where only `host:port` is available before TLS handshake).
+
 use glob::Pattern;
 
 /// Matches URLs against glob patterns (urlsToWatch config).
@@ -27,8 +33,10 @@ impl UrlFilter {
     /// Used during CONNECT to decide intercept vs passthrough before
     /// we have the full URL.
     pub fn matches_host(&self, host: &str) -> bool {
-        // For CONNECT, we only have host:port. Check if any pattern
-        // would match a URL with this host.
+        // CONNECT requests only carry `host:port`, not a full URL. We extract
+        // the host portion from each glob pattern (stripping scheme + path) and
+        // match just the hostname. This means `https://api.github.com/*` will
+        // intercept CONNECT to `api.github.com:443`.
         self.patterns.iter().any(|p| {
             let pattern_str = p.as_str();
             // Extract host from pattern like "https://api.github.com/*"

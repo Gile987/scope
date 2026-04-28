@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! HTTP proxy handler implementing CONNECT tunneling and plain HTTP forwarding.
+//!
+//! CONNECT requests are upgraded to raw TCP, then either TLS-intercepted (when
+//! the URL matches a watch pattern and a session is active) or passed through
+//! as an opaque tunnel. Plain HTTP requests are forwarded via a shared
+//! connection-pooling client and streamed back to the caller.
+
 use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -25,6 +32,9 @@ use crate::plugin::{ExchangeRequest, ExchangeResponse, HttpExchange, PluginRegis
 use crate::session::SessionManager;
 
 /// A streaming response body backed by an mpsc channel.
+/// Upstream response frames are forwarded through this channel to the client
+/// in real time, while a background task simultaneously buffers them for
+/// plugin notification.
 struct ChannelBody {
     rx: mpsc::Receiver<Frame<Bytes>>,
 }
@@ -41,7 +51,8 @@ impl hyper::body::Body for ChannelBody {
     }
 }
 
-/// Response body — either buffered (CONNECT, errors) or streaming (HTTP forward).
+/// Response body — either buffered (CONNECT 200 ack, error responses) or
+/// streaming (forwarded HTTP responses via channel from upstream).
 enum ProxyBody {
     Buffered(Full<Bytes>),
     Streaming(ChannelBody),
@@ -91,6 +102,8 @@ pub async fn handle_client(
     let io = TokioIo::new(stream);
     let state_clone = state.clone();
 
+    // Run an HTTP/1.1 server on the client connection. preserve_header_case and
+    // title_case_headers ensure we don't mangle headers — important for proxies.
     hyper::server::conn::http1::Builder::new()
         .preserve_header_case(true)
         .title_case_headers(true)
@@ -161,9 +174,10 @@ async fn handle_connect(
         .status(StatusCode::OK)
         .body(ProxyBody::Buffered(Full::new(Bytes::new())))?;
 
-    // Spawn the tunnel after sending 200
+    // The tunnel runs in a background task: we return the 200 response immediately
+    // to complete the HTTP upgrade handshake, then the spawned task takes over the
+    // upgraded connection for either TLS interception or raw TCP passthrough.
     tokio::spawn(async move {
-        // Wait for the upgrade
         match hyper::upgrade::on(req).await {
             Ok(upgraded) => {
                 let io = TokioIo::new(upgraded);
@@ -274,7 +288,9 @@ async fn handle_plain_http(
     let resp_status = upstream_resp.status();
     let resp_headers = upstream_resp.headers().clone();
 
-    // Stream response body through a channel for real-time forwarding
+    // Stream response body through a channel: the spawned task reads frames from
+    // upstream and sends them to the client via tx. If recording is enabled, it also
+    // accumulates a copy for the plugin exchange notification after the body completes.
     let (tx, rx) = mpsc::channel::<Frame<Bytes>>(32);
     let upstream_body = upstream_resp.into_body();
     let record_headers = resp_headers.clone();

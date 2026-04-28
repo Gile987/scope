@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! HAR 1.2 data model as Rust structs with serde (de)serialization.
+//!
+//! Closely follows the spec at <http://www.softwareishard.com/blog/har-12-spec/>.
+//! Only includes fields we actually populate — optional HAR fields like `pages`,
+//! `pageref`, and `comment` are omitted for simplicity.
+
 use serde::{Deserialize, Serialize};
 
 /// HAR 1.2 data model.
@@ -107,11 +113,14 @@ pub struct HarContent {
     pub encoding: Option<String>,
 }
 
+// Required by the HAR spec but we don't track cache info — always empty.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct HarCache {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HarTimings {
+    // Per HAR spec, -1.0 means "not applicable". We set blocked/dns/connect/ssl
+    // to -1 because those phases are opaque to us (handled by the TLS layer).
     pub blocked: f64,
     pub dns: f64,
     pub connect: f64,

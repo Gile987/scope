@@ -1,6 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! TLS man-in-the-middle (MITM) interception layer.
+//!
+//! When the proxy decides to intercept a CONNECT tunnel, this module performs
+//! a two-phase TLS handshake:
+//!   1. **Client side**: Accept the client's TLS using a leaf cert forged by our CA
+//!      for the target domain. The client trusts this because it trusts our CA root.
+//!   2. **Upstream side**: Open a real TLS connection to the upstream server using
+//!      the system root certificates.
+//!
+//! HTTP/1.1 traffic is then relayed between the two TLS sessions while capturing
+//! request/response pairs for plugin notification.
+
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -35,11 +47,12 @@ where
         .and_then(|p| p.parse().ok())
         .unwrap_or(443);
 
-    // Get (or generate) a server config with a leaf cert for this domain
+    // Phase 1: Present a forged leaf cert to the client. The cert is signed by our
+    // CA and cached per domain, so repeated connections to the same host are fast.
     let server_config = state.ca.server_config_for_domain(domain)?;
     let acceptor = TlsAcceptor::from(server_config);
 
-    // TLS handshake with client (using forged cert)
+    // The client thinks it's talking to the real server — our forged cert matches the domain.
     let client_tls = acceptor.accept(client_io).await?;
     debug!("TLS handshake complete with client for {}", domain);
 
@@ -111,9 +124,13 @@ async fn relay_request_inner(
     let uri_str = format!("https://{}:{}{}", domain, port, parts.uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
     let upstream_uri: hyper::Uri = uri_str.parse()?;
 
-    // Connect to upstream with real TLS
+    // Phase 2: Connect to the real upstream with genuine TLS.
+    // We use webpki's bundled Mozilla root certs for validation.
     let upstream_tcp = TcpStream::connect(format!("{}:{}", domain, port)).await?;
 
+    // Root cert store is rebuilt per request — cheap since webpki_roots are static.
+    // Sharing a single ClientConfig across requests would save ~1µs but complicate
+    // the ownership model for minimal gain.
     let mut root_store = rustls::RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let client_config = ClientConfig::builder()
@@ -160,8 +177,9 @@ async fn relay_request_inner(
 
     let elapsed_ms = request_instant.elapsed().as_millis() as u64;
 
-    // Drop sender to signal the connection task to close the upstream socket.
-    // Without this, keepalive keeps the TCP+TLS fd open until the server closes it.
+    // Explicitly drop the HTTP sender to close the upstream connection.
+    // Without this, HTTP/1.1 keepalive would hold the TCP+TLS file descriptor
+    // open until the upstream server's idle timeout fires — leaking fds under load.
     drop(sender);
 
     // Notify plugins
