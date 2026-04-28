@@ -6,9 +6,9 @@ urlsToWatch:
   - "https://api.anthropic.com/*"
 port: 18000
 apiPort: 18897
-certDir: /certs
+certDir: /tmp/scope-gateway/certs
 logLevel: info
 defaultPluginSettings:
   har:
-    harOutputDir: /har-output
+    harOutputDir: /tmp/scope-gateway/har-output
     includeSensitiveInformation: false

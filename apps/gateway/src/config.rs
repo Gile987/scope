@@ -66,7 +66,7 @@ fn default_api_port() -> u16 {
 }
 
 fn default_cert_dir() -> PathBuf {
-    PathBuf::from("/certs")
+    PathBuf::from("/tmp/scope-gateway/certs")
 }
 
 fn default_log_level() -> String {
@@ -123,7 +123,7 @@ impl Config {
             .and_then(|v| v.get("harOutputDir"))
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/har-output"))
+            .unwrap_or_else(|| PathBuf::from("/tmp/scope-gateway/har-output"))
     }
 }
 
@@ -180,7 +180,7 @@ defaultPluginSettings:
         let config = Config::load(&cli).unwrap();
         assert_eq!(config.port, 7777);
         assert_eq!(config.api_port, 7778);
-        assert_eq!(config.har_output_dir(), PathBuf::from("/har-output")); // default
+        assert_eq!(config.har_output_dir(), PathBuf::from("/tmp/scope-gateway/har-output")); // default
         assert_eq!(config.cert_dir, default_cert_dir()); // not overridden
         assert_eq!(config.log_level, "debug");
     }
