@@ -18,3 +18,4 @@ test-snapshots/
 .worktrees/
 plan.md
 plan.md
+tmp/
