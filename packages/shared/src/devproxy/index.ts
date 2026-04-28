@@ -2,13 +2,14 @@
 // Licensed under the MIT License.
 
 export { DevProxyClient } from "./devproxy-client.js";
-export type { DevProxyInfo, HarCollectionResult } from "./devproxy-client.js";
+export type { DevProxyInfo } from "./devproxy-client.js";
 export { GatewayClient } from "./gateway-client.js";
-export type { ProxyClient } from "./proxy-client.js";
+export type { ProxyClient, HarCollectionResult } from "./proxy-client.js";
 export { isProxyEnabled } from "./proxy-client.js";
 
 import { DevProxyClient } from "./devproxy-client.js";
 import { GatewayClient } from "./gateway-client.js";
+import { parseHarFile } from "../har/har-parser.js";
 import type { ProxyClient } from "./proxy-client.js";
 import { extractHarMetadata } from "./proxy-client.js";
 
@@ -18,7 +19,7 @@ const DEFAULT_API_URL = "http://localhost:18897";
  * Create the appropriate proxy client based on PROXY_BACKEND env var.
  *
  * Both backends are wrapped in a thin adapter that satisfies ProxyClient.
- * DevProxyClient and GatewayClient stay untouched — no interface coupling.
+ * Clients handle proxy lifecycle; the adapter composes HAR collection.
  */
 export function createProxyClient(): ProxyClient {
   const backend = process.env.PROXY_BACKEND || "devproxy";
@@ -39,7 +40,6 @@ export function createProxyClient(): ProxyClient {
           await log("info", "Gateway session stopped");
           const har = await gw.downloadHar();
           if (har) {
-            await log("info", "HAR retrieved via gateway API");
             return extractHarMetadata(har, null, log);
           }
           await log("warn", "No HAR data returned from gateway");
@@ -60,6 +60,21 @@ export function createProxyClient(): ProxyClient {
     downloadCertificate: (p) => dp.downloadCertificate(p),
     createCombinedCaBundle: (c, o) => dp.createCombinedCaBundle(c, o),
     startRecording: () => dp.startRecording(),
-    stopAndCollectHar: (l) => dp.stopAndCollectHar(l),
+    stopAndCollectHar: async (log) => {
+      try {
+        await dp.stopRecording();
+        await log("info", "DevProxy recording stopped");
+        const harFilePath = await dp.getLatestHarFile();
+        if (harFilePath) {
+          const har = await parseHarFile(harFilePath);
+          return extractHarMetadata(har, harFilePath, log);
+        }
+        await log("warn", "No HAR file found after DevProxy recording");
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        await log("warn", `DevProxy HAR collection failed: ${msg}`);
+      }
+      return { harFilePath: null };
+    },
   };
 }

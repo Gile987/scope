@@ -11,10 +11,14 @@
 import { writeFile, readFile, access } from "node:fs/promises";
 import { extractToolCalls, extractTokenUsage, extractAiCallCount } from "../har/har-parser.js";
 import type { HarFile } from "../har/types.js";
-import type { WorkerLogFn } from "../types/types.js";
-import type { HarCollectionResult } from "./devproxy-client.js";
+import type { TokenUsage, WorkerLogFn } from "../types/types.js";
 
-export type { HarCollectionResult };
+/** Result returned by {@link ProxyClient.stopAndCollectHar}. */
+export interface HarCollectionResult {
+  harFilePath: string | null;
+  tokenUsage?: TokenUsage;
+  aiCallCount?: number;
+}
 
 const POLL_INTERVAL_MS = 500;
 const DEFAULT_TIMEOUT_MS = 30_000;
