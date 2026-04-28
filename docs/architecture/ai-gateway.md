@@ -4,6 +4,20 @@ The AI gateway is a shared Rust TLS-intercepting proxy that sits between coding 
 
 **Source:** [`apps/gateway/`](../../apps/gateway/)
 
+## Motivation
+
+The platform previously used [Microsoft DevProxy](https://github.com/dotnet/dev-proxy) (a .NET tool) as a per-worker sidecar to intercept HTTPS traffic and record HAR files. This had several drawbacks:
+
+| Issue | Detail |
+|-------|--------|
+| **Image size** | `ghcr.io/dotnet/dev-proxy:2.1.0` pulls ~200 MB; requires .NET runtime |
+| **Init container** | Needs a busybox init sidecar to fix UID 1000 volume permissions |
+| **Sidecar sprawl** | 3 containers per worker (DevProxy + init + MCP gateway) × N workers |
+| **Control API surface** | Only exposes start/stop recording + cert download; no hooks for real-time inspection |
+| **Opacity** | Closed-source plugin model (HarGeneratorPlugin DLL); hard to extend or debug |
+
+The Rust gateway replaces all of these with a **single shared service** (~23 MB alpine image, no init containers), using source-IP-based sessions to isolate traffic per worker.
+
 ## Architecture
 
 ```mermaid
@@ -176,10 +190,10 @@ sequenceDiagram
 
 **Key behaviors:**
 
-- **Disk-based buffering**: Each session writes to a JSONL file (`/har-output/.session-{ip}.jsonl`), one JSON line per HTTP exchange. No in-memory accumulation.
+- **Disk-based buffering**: Each session writes to a JSONL file (`.session-{id}.jsonl`), one JSON line per HTTP exchange. No in-memory accumulation.
 - **Sensitive header redaction**: When `redactCredentials` is `true` (default), headers like `authorization`, `x-github-token`, `x-api-key`, `cookie`, and `set-cookie` are redacted at write time. Secrets never touch disk.
-- **On-the-fly HAR assembly**: `GET /proxy/har` reads the JSONL file and wraps the entries in a HAR 1.2 envelope. No separate `.har` file is stored.
-- **Idempotent reads**: The JSONL file can be read multiple times (safe for retries). It is deleted on session cleanup (next `on_session_start` or idle reap).
+- **On-the-fly HAR assembly**: `GET /api/v1/sessions/{id}/har` reads the JSONL file and wraps the entries in a HAR 1.2 envelope. No separate `.har` file is stored.
+- **Idempotent reads**: The JSONL file can be read multiple times (safe for retries). It is deleted on session cleanup (`DELETE /api/v1/sessions/{id}` or idle reap).
 
 ### Timestamps
 
@@ -254,11 +268,11 @@ urlsToWatch:
   - "https://api.anthropic.com/*"
 port: 18000
 apiPort: 18897
-harOutputDir: /har-output
-certDir: /certs
+certDir: /tmp/scope-gateway/certs
 logLevel: info
 defaultPluginSettings:
   har:
+    outputDir: /tmp/scope-gateway/har-output
     redactCredentials: true
 ```
 
@@ -275,7 +289,7 @@ gateway:
     - "18000:18000"
     - "18897:18897"
   healthcheck:
-    test: ["CMD", "wget", "-q", "--spider", "http://localhost:18897/proxy"]
+    test: ["CMD", "wget", "-q", "--spider", "http://localhost:18897/healthz"]
     interval: 5s
     retries: 10
 ```
@@ -312,3 +326,20 @@ env:
 | 1.c | CAPI HMAC Signing | Sign requests with HMAC for Copilot API |
 | 2.b | Rate Limiting | Budget-aware rate limiting for Claude Code (#659) |
 | 3 | Metrics | Prometheus `/metrics` — request counts, latency, bytes, error rates |
+
+## Migration Strategy
+
+The gateway coexists with DevProxy via the `PROXY_BACKEND` env var:
+
+```mermaid
+flowchart TD
+    A["Phase 1: Build gateway<br/><i>VS Code Electron worker</i>"] --> B["Feature flag: PROXY_BACKEND=gateway"]
+    B --> C{"Workers tested?"}
+    C -->|No| D[Fix compatibility issues]
+    D --> C
+    C -->|Yes| E["Phase 2-3: Add plugins<br/><i>token refresh, rate limiting, metrics</i>"]
+    E --> F["Phase 4: Default all workers to gateway"]
+    F --> G["Remove DevProxy sidecars + init containers"]
+```
+
+**Current status (Phase 1):** VS Code Electron worker uses the gateway. Other workers (ACP Copilot, ACP Claude Code) still use DevProxy sidecars. Both paths converge on the same `extractHarMetadata()` pipeline, so HAR output is identical regardless of backend.
