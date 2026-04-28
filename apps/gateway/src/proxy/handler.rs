@@ -179,10 +179,8 @@ async fn handle_connect(
                             warn!("TLS interception error for {}: {}", host, e);
                         }
                     }
-                } else {
-                    if let Err(e) = tunnel_passthrough(io, &host).await {
-                        debug!("Tunnel passthrough ended for {}: {}", host, e);
-                    }
+                } else if let Err(e) = tunnel_passthrough(io, &host).await {
+                    debug!("Tunnel passthrough ended for {}: {}", host, e);
                 }
             }
             Err(e) => {

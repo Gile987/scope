@@ -47,7 +47,8 @@ impl CertificateAuthority {
         };
 
         let cache = Mutex::new(LruCache::new(
-            std::num::NonZeroUsize::new(cache_size).unwrap(),
+            std::num::NonZeroUsize::new(cache_size.max(1))
+                .expect("cache_size.max(1) is always > 0"),
         ));
 
         Ok(Self {

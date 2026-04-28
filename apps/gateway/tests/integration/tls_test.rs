@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use gateway::ca::CertificateAuthority;
-use rustls::pki_types::{CertificateDer, ServerName};
 use tempfile::TempDir;
 
 fn install_crypto_provider() {
@@ -23,7 +22,7 @@ fn cert_chain_validates() {
     let ca_pem = ca.ca_cert_pem();
 
     // Generate a leaf for example.com
-    let server_config = ca.server_config_for_domain("example.com").unwrap();
+    let _server_config = ca.server_config_for_domain("example.com").unwrap();
 
     // The server config should have certs
     // We can't easily extract the cert chain from ServerConfig,

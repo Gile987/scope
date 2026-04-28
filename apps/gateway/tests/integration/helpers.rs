@@ -24,9 +24,13 @@ use tokio::net::TcpListener;
 pub struct TestGateway {
     pub proxy_addr: SocketAddr,
     pub api_addr: SocketAddr,
+    #[allow(dead_code)]
     pub ca: Arc<CertificateAuthority>,
+    #[allow(dead_code)]
     pub session_manager: Arc<SessionManager>,
+    #[allow(dead_code)]
     pub har_plugin: Arc<HarPlugin>,
+    #[allow(dead_code)]
     pub har_dir: PathBuf,
 }
 
@@ -68,16 +72,11 @@ impl TestGateway {
         let proxy_addr = proxy_listener.local_addr().unwrap();
 
         tokio::spawn(async move {
-            loop {
-                match proxy_listener.accept().await {
-                    Ok((stream, peer_addr)) => {
-                        let state = proxy_state.clone();
-                        tokio::spawn(async move {
-                            let _ = handle_client(stream, peer_addr, state).await;
-                        });
-                    }
-                    Err(_) => break,
-                }
+            while let Ok((stream, peer_addr)) = proxy_listener.accept().await {
+                let state = proxy_state.clone();
+                tokio::spawn(async move {
+                    let _ = handle_client(stream, peer_addr, state).await;
+                });
             }
         });
 
