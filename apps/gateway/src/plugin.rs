@@ -18,6 +18,9 @@ pub struct HttpExchange {
     pub request: ExchangeRequest,
     pub response: ExchangeResponse,
     pub started_at: chrono::DateTime<chrono::Utc>,
+    /// Time to first byte (headers received) in ms.
+    pub wait_ms: u64,
+    /// Total request duration (send + wait + receive) in ms.
     pub elapsed_ms: u64,
 }
 
@@ -167,6 +170,7 @@ mod tests {
                 body: Bytes::from_static(b"ok"),
             },
             started_at: chrono::Utc::now(),
+            wait_ms: 10,
             elapsed_ms: 42,
         }
     }

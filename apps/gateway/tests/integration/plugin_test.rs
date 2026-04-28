@@ -105,6 +105,7 @@ fn custom_plugin_receives_exchanges() {
             body: bytes::Bytes::from_static(b"ok"),
         },
         started_at: chrono::Utc::now(),
+        wait_ms: 5,
         elapsed_ms: 10,
     };
 
@@ -142,6 +143,7 @@ fn multiple_plugins_receive_exchanges() {
             body: bytes::Bytes::from_static(b"ok"),
         },
         started_at: chrono::Utc::now(),
+        wait_ms: 2,
         elapsed_ms: 5,
     };
 

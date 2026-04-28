@@ -227,6 +227,7 @@ mod tests {
                 body: Bytes::from_static(b"ok"),
             },
             started_at: chrono::Utc::now(),
+            wait_ms: 5,
             elapsed_ms: 10,
         }
     }
@@ -292,6 +293,7 @@ mod tests {
                 body: Bytes::from_static(b"ok"),
             },
             started_at: chrono::Utc::now(),
+            wait_ms: 5,
             elapsed_ms: 10,
         };
 
@@ -335,6 +337,7 @@ mod tests {
                 body: Bytes::from_static(b"ok"),
             },
             started_at: chrono::Utc::now(),
+            wait_ms: 5,
             elapsed_ms: 10,
         };
 

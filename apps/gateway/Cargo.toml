@@ -7,7 +7,7 @@ description = "TLS-intercepting HTTP proxy with plugin architecture"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 hyper = { version = "1", features = ["http1", "http2", "server", "client"] }
-hyper-util = { version = "0.1", features = ["tokio", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio", "http1", "http2", "client-legacy"] }
 http-body-util = "0.1"
 axum = "0.8"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
