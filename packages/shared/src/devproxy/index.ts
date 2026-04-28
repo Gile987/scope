@@ -11,7 +11,7 @@ import { DevProxyClient } from "./devproxy-client.js";
 import { GatewayClient } from "./gateway-client.js";
 import { parseHarFile } from "../har/har-parser.js";
 import type { ProxyClient } from "./proxy-client.js";
-import { extractHarMetadata } from "./proxy-client.js";
+import { extractHarMetadata } from "../har/extract-metadata.js";
 
 const DEFAULT_API_URL = "http://localhost:18897";
 

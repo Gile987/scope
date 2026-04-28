@@ -9,16 +9,11 @@
  */
 
 import { writeFile, readFile, access } from "node:fs/promises";
-import { extractToolCalls, extractTokenUsage, extractAiCallCount } from "../har/har-parser.js";
-import type { HarFile } from "../har/types.js";
-import type { TokenUsage, WorkerLogFn } from "../types/types.js";
+import type { WorkerLogFn } from "../types/types.js";
+import type { HarCollectionResult } from "../har/extract-metadata.js";
 
-/** Result returned by {@link ProxyClient.stopAndCollectHar}. */
-export interface HarCollectionResult {
-  harFilePath: string | null;
-  tokenUsage?: TokenUsage;
-  aiCallCount?: number;
-}
+export type { HarCollectionResult };
+export { extractHarMetadata } from "../har/extract-metadata.js";
 
 const POLL_INTERVAL_MS = 500;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -131,25 +126,6 @@ export async function createCombinedCaBundle(
 
   await writeFile(outputPath, combined, "utf-8");
   return outputPath;
-}
-
-export async function extractHarMetadata(
-  har: HarFile,
-  harFilePath: string | null,
-  log: WorkerLogFn,
-): Promise<HarCollectionResult> {
-  const toolCalls = extractToolCalls(har);
-  await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
-    toolCallCount: toolCalls.length,
-    toolNames: toolCalls.map((tc) => tc.name),
-  });
-  const tokenUsage = extractTokenUsage(har) ?? undefined;
-  if (tokenUsage) {
-    await log("info", `Token usage: ${tokenUsage.promptTokens} prompt, ${tokenUsage.completionTokens} completion, ${tokenUsage.totalTokens} total`);
-  }
-  const aiCallCount = extractAiCallCount(har);
-  await log("info", `AI call count: ${aiCallCount}`);
-  return { harFilePath, tokenUsage, aiCallCount };
 }
 
 export function sleep(ms: number): Promise<void> {
