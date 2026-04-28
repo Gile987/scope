@@ -137,7 +137,7 @@ describe("extractHarMetadata", () => {
     expect(result.tokenUsage).toBeUndefined();
     // Should NOT have logged token usage
     const tokenLogCalls = log.mock.calls.filter(
-      ([, msg]: [string, string]) => (msg as string).startsWith("Token usage:"),
+      (args) => typeof args[1] === "string" && args[1].startsWith("Token usage:"),
     );
     expect(tokenLogCalls).toHaveLength(0);
   });
