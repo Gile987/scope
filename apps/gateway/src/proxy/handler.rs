@@ -157,7 +157,7 @@ where
 
 /// Plain HTTP forwarding (non-CONNECT requests).
 async fn handle_plain_http(
-    req: hyper::Request<Incoming>,
+    _req: hyper::Request<Incoming>,
     _session_id: SessionId,
     _state: Arc<ProxyState>,
 ) -> anyhow::Result<hyper::Response<Full<Bytes>>> {
