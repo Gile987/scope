@@ -124,35 +124,34 @@ describe("DevProxyClient", () => {
     });
   });
 
-  describe("stopRecording (via stopAndCollectHar)", () => {
-    it("stops recording and collects HAR from filesystem", async () => {
+  describe("stopRecording", () => {
+    it("sends POST with recording: false and polls until stopped", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch")
-        // POST to stop recording
+        // POST to stop
         .mockResolvedValueOnce(new Response("", { status: 200 }))
+        // GET status — still recording
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ recording: true, configFile: "" }), { status: 200 })
+        )
         // GET status — stopped
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ recording: false, configFile: "" }), { status: 200 })
         );
-      // No HAR files on disk
-      mockReaddir.mockResolvedValueOnce([]);
 
-      const log = vi.fn();
       const client = new DevProxyClient("http://test:18897");
-      const result = await client.stopAndCollectHar(log);
+      await client.stopRecording(5000);
 
-      expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/proxy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recording: false }),
-      });
-      expect(result).toEqual({ harFilePath: null });
+      // First call: POST to stop, second + third: GET status polls
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
     });
-  });
 
-  describe("backend", () => {
-    it("returns 'devproxy'", () => {
+    it("throws on POST failure", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("", { status: 500, statusText: "Error" })
+      );
+
       const client = new DevProxyClient("http://test:18897");
-      expect(client.backend).toBe("devproxy");
+      await expect(client.stopRecording()).rejects.toThrow("Failed to stop recording: 500");
     });
   });
 

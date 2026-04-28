@@ -2,33 +2,29 @@
 // Licensed under the MIT License.
 
 /**
- * ProxyClient — common interface for DevProxy and Gateway proxy backends.
+ * ProxyClient — adapter interface for proxy backends.
  *
- * Workers use this interface to start/stop recording and collect HAR data.
- * The concrete implementation is selected by {@link createProxyClient}.
+ * Workers code against this interface. The factory in index.ts wraps
+ * DevProxyClient (unchanged from main) or returns GatewayClient directly.
  */
 
 import { writeFile, readFile, access } from "node:fs/promises";
-import { parseHarFile, extractToolCalls, extractTokenUsage, extractAiCallCount } from "../har/har-parser.js";
+import { extractToolCalls, extractTokenUsage, extractAiCallCount } from "../har/har-parser.js";
 import type { HarFile } from "../har/types.js";
-import type { TokenUsage, WorkerLogFn } from "../types/types.js";
+import type { WorkerLogFn } from "../types/types.js";
+import type { HarCollectionResult } from "./devproxy-client.js";
+
+export type { HarCollectionResult };
 
 const POLL_INTERVAL_MS = 500;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-/** Result returned by {@link ProxyClient.stopAndCollectHar}. */
-export interface HarCollectionResult {
-  harFilePath: string | null;
-  tokenUsage?: TokenUsage;
-  aiCallCount?: number;
-}
-
 /**
- * Common proxy client interface implemented by DevProxyClient and GatewayClient.
+ * Common proxy adapter interface used by workers.
  */
 export interface ProxyClient {
   /** Which backend this client talks to. */
-  readonly backend: "devproxy" | "gateway";
+  readonly backend: string;
   /** The base API URL for the proxy. */
   readonly apiUrl: string;
 
