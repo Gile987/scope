@@ -366,6 +366,40 @@ jobs:
       - name: Build
         run: pnpm build
 
+  gateway:
+    name: Gateway (Rust)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry + build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/gateway
+
+      - name: Check formatting
+        working-directory: apps/gateway
+        run: cargo fmt --check
+
+      - name: Clippy
+        working-directory: apps/gateway
+        run: cargo clippy -- -D warnings
+
+      - name: Run tests
+        working-directory: apps/gateway
+        run: cargo test
+
+      - name: Build release binary
+        working-directory: apps/gateway
+        run: cargo build --release
+
   # ---------------------------------------------------------------------------
   # Detect which images changed (runs in parallel with CI jobs)
   # ---------------------------------------------------------------------------
@@ -384,6 +418,7 @@ jobs:
       scheduler: ${{ steps.changes.outputs.scheduler }}
       db-migrations: ${{ steps.changes.outputs.db-migrations }}
       shared: ${{ steps.changes.outputs.shared }}
+      gateway: ${{ steps.changes.outputs.gateway }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
     steps:
       - uses: actions/checkout@v4
@@ -424,6 +459,8 @@ jobs:
               - 'apps/scheduler/**'
             db-migrations:
               - 'packages/db-migrations/**'
+            gateway:
+              - 'apps/gateway/**'
 
   # ---------------------------------------------------------------------------
   # Build container images — gated on CI passing
@@ -436,6 +473,7 @@ jobs:
       github.repository == 'growth-ecosystems/scope-core' &&
       needs.test.result == 'success' &&
       needs.build.result == 'success' &&
+      (needs.gateway.result == 'success' || needs.gateway.result == 'skipped') &&
       (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped') &&
       (
         (github.event_name == 'workflow_dispatch' && github.event.inputs.images != '') ||
@@ -451,11 +489,12 @@ jobs:
           needs.detect-changes.outputs.report-generator == 'true' ||
           needs.detect-changes.outputs.scheduler == 'true' ||
           needs.detect-changes.outputs.db-migrations == 'true' ||
+          needs.detect-changes.outputs.gateway == 'true' ||
           needs.detect-changes.outputs.shared == 'true' ||
           needs.detect-changes.outputs.model-scanning == 'true'
         ))
       )
-    needs: [test, integration-test, build, detect-changes]
+    needs: [test, integration-test, build, gateway, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
     strategy:
@@ -495,6 +534,9 @@ jobs:
           - name: db-migrations
             dockerfile: packages/db-migrations/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
+          - name: gateway
+            dockerfile: apps/gateway/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.gateway == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: "false"
