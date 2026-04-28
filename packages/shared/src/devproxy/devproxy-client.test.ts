@@ -290,4 +290,195 @@ describe("DevProxyClient", () => {
       expect(result).toBe("/har-output/devproxy-2025-01-15T10.har");
     });
   });
+
+  describe("sessionHeaders", () => {
+    it("includes X-Session-Id when WORKER_NAME is set", () => {
+      process.env.WORKER_NAME = "worker-42";
+      const client = new DevProxyClient("http://test:18897");
+      // Access private method via any cast for testing
+      const headers = (client as any).sessionHeaders();
+      expect(headers).toEqual({ "X-Session-Id": "worker-42" });
+    });
+
+    it("returns empty object when WORKER_NAME is not set", () => {
+      delete process.env.WORKER_NAME;
+      const client = new DevProxyClient("http://test:18897");
+      const headers = (client as any).sessionHeaders();
+      expect(headers).toEqual({});
+    });
+  });
+
+  describe("startSession", () => {
+    it("calls /session/start with plugin settings", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("", { status: 200 })
+      );
+
+      const client = new DevProxyClient("http://test:18897");
+      await client.startSession({ har: { captureHeaders: true } });
+
+      expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/session/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plugins: { har: { captureHeaders: true } } }),
+      });
+    });
+
+    it("sends empty plugins when none provided", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("", { status: 200 })
+      );
+
+      const client = new DevProxyClient("http://test:18897");
+      await client.startSession();
+
+      expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/session/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plugins: {} }),
+      });
+    });
+
+    it("includes X-Session-Id header when WORKER_NAME is set", async () => {
+      process.env.WORKER_NAME = "worker-7";
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("", { status: 200 })
+      );
+
+      const client = new DevProxyClient("http://test:18897");
+      await client.startSession();
+
+      expect(fetch).toHaveBeenCalledWith("http://test:18897/session/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Id": "worker-7" },
+        body: JSON.stringify({ plugins: {} }),
+      });
+    });
+
+    it("falls back to startRecording on 404", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        // 404 from /session/start
+        .mockResolvedValueOnce(new Response("", { status: 404 }))
+        // 200 from /proxy (legacy startRecording)
+        .mockResolvedValueOnce(new Response("", { status: 200 }));
+
+      const client = new DevProxyClient("http://test:18897");
+      await client.startSession();
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy).toHaveBeenNthCalledWith(2, "http://test:18897/proxy", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ recording: true }),
+      }));
+    });
+
+    it("falls back to startRecording on network error", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockRejectedValueOnce(new TypeError("fetch failed"))
+        .mockResolvedValueOnce(new Response("", { status: 200 }));
+
+      const client = new DevProxyClient("http://test:18897");
+      await client.startSession();
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("throws on non-404 error", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("", { status: 500, statusText: "Internal Server Error" })
+      );
+
+      const client = new DevProxyClient("http://test:18897");
+      await expect(client.startSession()).rejects.toThrow("Failed to start session: 500");
+    });
+  });
+
+  describe("stopSession", () => {
+    it("calls /session/stop", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("", { status: 200 })
+      );
+
+      const client = new DevProxyClient("http://test:18897");
+      await client.stopSession();
+
+      expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/session/stop", {
+        method: "POST",
+        headers: {},
+      });
+    });
+
+    it("falls back to stopRecording on 404", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response("", { status: 404 }))
+        // stopRecording POST
+        .mockResolvedValueOnce(new Response("", { status: 200 }))
+        // stopRecording poll — already stopped
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ recording: false, configFile: "" }), { status: 200 })
+        );
+
+      const client = new DevProxyClient("http://test:18897");
+      await client.stopSession();
+
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+    });
+
+    it("throws on non-404 error", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("", { status: 500, statusText: "Internal Server Error" })
+      );
+
+      const client = new DevProxyClient("http://test:18897");
+      await expect(client.stopSession()).rejects.toThrow("Failed to stop session: 500");
+    });
+  });
+
+  describe("downloadHar", () => {
+    it("returns parsed HAR on success", async () => {
+      const mockHar = { log: { version: "1.2", entries: [] } };
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(mockHar), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const client = new DevProxyClient("http://test:18897");
+      const result = await client.downloadHar();
+
+      expect(result).toEqual(mockHar);
+      expect(fetch).toHaveBeenCalledWith("http://test:18897/proxy/har", { headers: {} });
+    });
+
+    it("includes X-Session-Id header when WORKER_NAME is set", async () => {
+      process.env.WORKER_NAME = "worker-99";
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ log: { entries: [] } }), { status: 200 })
+      );
+
+      const client = new DevProxyClient("http://test:18897");
+      await client.downloadHar();
+
+      expect(fetch).toHaveBeenCalledWith("http://test:18897/proxy/har", {
+        headers: { "X-Session-Id": "worker-99" },
+      });
+    });
+
+    it("returns null on 404", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("", { status: 404 })
+      );
+
+      const client = new DevProxyClient("http://test:18897");
+      expect(await client.downloadHar()).toBeNull();
+    });
+
+    it("returns null on network error", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError("fetch failed"));
+
+      const client = new DevProxyClient("http://test:18897");
+      expect(await client.downloadHar()).toBeNull();
+    });
+  });
 });

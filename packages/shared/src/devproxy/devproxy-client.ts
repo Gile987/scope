@@ -2,15 +2,19 @@
 // Licensed under the MIT License.
 
 /**
- * DevProxy API Client
+ * DevProxy / Gateway API Client
  *
- * Controls a DevProxy instance via its REST API for recording lifecycle management.
+ * Controls a DevProxy or Gateway proxy instance via its REST API for recording
+ * lifecycle management. Supports both the legacy DevProxy API (POST /proxy with
+ * {recording: bool}) and the new Gateway session API (POST /session/start + stop).
+ *
  * Used by workers to start/stop recording and download the CA certificate.
  */
 
 import { writeFile, readFile, access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parseHarFile, extractToolCalls, extractTokenUsage, extractAiCallCount } from "../har/har-parser.js";
+import type { HarFile } from "../har/types.js";
 import type { TokenUsage, WorkerLogFn } from "../types/types.js";
 
 const DEFAULT_API_URL = "http://localhost:18897";
@@ -33,6 +37,7 @@ export interface HarCollectionResult {
 export class DevProxyClient {
   private apiUrl: string;
   private harDir: string;
+  private sessionId: string | undefined;
 
   constructor(
     apiUrl: string = process.env.DEV_PROXY_API_URL || DEFAULT_API_URL,
@@ -40,6 +45,8 @@ export class DevProxyClient {
   ) {
     this.apiUrl = apiUrl;
     this.harDir = harDir;
+    // For localhost dev: use WORKER_NAME as X-Session-Id header
+    this.sessionId = process.env.WORKER_NAME || undefined;
   }
 
   /**
@@ -224,38 +231,151 @@ export class DevProxyClient {
     }
   }
 
+  // ===========================================================================
+  // Gateway session API (new — works alongside legacy DevProxy methods)
+  // ===========================================================================
+
+  /**
+   * Build request headers, including X-Session-Id when running on localhost.
+   */
+  private sessionHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (this.sessionId) {
+      headers["X-Session-Id"] = this.sessionId;
+    }
+    return headers;
+  }
+
+  /**
+   * Start a gateway session with optional per-plugin settings.
+   * Uses POST /session/start (gateway API). Falls back to startRecording()
+   * if the endpoint is not available (running against legacy DevProxy).
+   */
+  async startSession(pluginSettings?: Record<string, unknown>): Promise<void> {
+    try {
+      const response = await fetch(`${this.apiUrl}/session/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...this.sessionHeaders() },
+        body: JSON.stringify({ plugins: pluginSettings ?? {} }),
+      });
+      if (response.ok) {
+        return;
+      }
+      // If 404, gateway endpoint not available — fall back to DevProxy
+      if (response.status === 404) {
+        return this.startRecording();
+      }
+      throw new Error(`Failed to start session: ${response.status} ${response.statusText}`);
+    } catch (error) {
+      // Network error or fetch failure — try legacy API
+      if (error instanceof TypeError) {
+        return this.startRecording();
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Stop a gateway session. Uses POST /session/stop (gateway API).
+   * Falls back to stopRecording() if the endpoint is not available.
+   */
+  async stopSession(): Promise<void> {
+    try {
+      const response = await fetch(`${this.apiUrl}/session/stop`, {
+        method: "POST",
+        headers: this.sessionHeaders(),
+      });
+      if (response.ok) {
+        return;
+      }
+      if (response.status === 404) {
+        return this.stopRecording();
+      }
+      throw new Error(`Failed to stop session: ${response.status} ${response.statusText}`);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        return this.stopRecording();
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Download HAR data via GET /proxy/har (gateway API).
+   * Returns the parsed HAR object, or null if not available.
+   */
+  async downloadHar(): Promise<HarFile | null> {
+    try {
+      const response = await fetch(`${this.apiUrl}/proxy/har`, {
+        headers: this.sessionHeaders(),
+      });
+      if (response.ok) {
+        return (await response.json()) as HarFile;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Stop recording, retrieve the latest HAR file, and extract metadata.
+   *
+   * Tries the gateway session API first (stopSession + downloadHar), then
+   * falls back to legacy DevProxy (stopRecording + getLatestHarFile) for
+   * backward compatibility during the migration period.
    *
    * Safe to call in both success and error paths — all exceptions are caught
    * and logged as warnings so callers never lose the primary error.
    */
   async stopAndCollectHar(log: WorkerLogFn): Promise<HarCollectionResult> {
     try {
-      await this.stopRecording();
-      await log("info", "DevProxy recording stopped");
+      // Try gateway session API first, then fall back to legacy DevProxy
+      await this.stopSession();
+      await log("info", "Proxy recording stopped");
+
+      // Try to download HAR via HTTP (gateway API)
+      const har = await this.downloadHar();
+      if (har) {
+        await log("info", "HAR retrieved via gateway API");
+        return this.extractHarMetadata(har, null, log);
+      }
+
+      // Fall back to filesystem (legacy DevProxy)
       const harFilePath = await this.getLatestHarFile();
       if (harFilePath) {
-        const har = await parseHarFile(harFilePath);
-        const toolCalls = extractToolCalls(har);
-        await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
-          toolCallCount: toolCalls.length,
-          toolNames: toolCalls.map((tc) => tc.name),
-        });
-        const tokenUsage = extractTokenUsage(har) ?? undefined;
-        if (tokenUsage) {
-          await log("info", `Token usage: ${tokenUsage.promptTokens} prompt, ${tokenUsage.completionTokens} completion, ${tokenUsage.totalTokens} total`);
-        }
-        const aiCallCount = extractAiCallCount(har);
-        await log("info", `AI call count: ${aiCallCount}`);
-        return { harFilePath, tokenUsage, aiCallCount };
+        const harFromFile = await parseHarFile(harFilePath);
+        return this.extractHarMetadata(harFromFile, harFilePath, log);
       }
-      await log("warn", "No HAR file found after DevProxy recording");
+
+      await log("warn", "No HAR data found after proxy recording");
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      await log("warn", `DevProxy post-processing failed: ${msg}`);
+      await log("warn", `Proxy post-processing failed: ${msg}`);
     }
     return { harFilePath: null };
+  }
+
+  /**
+   * Extract metadata (tool calls, token usage, AI call count) from a parsed HAR.
+   */
+  private async extractHarMetadata(
+    har: HarFile,
+    harFilePath: string | null,
+    log: WorkerLogFn,
+  ): Promise<HarCollectionResult> {
+    const toolCalls = extractToolCalls(har);
+    await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
+      toolCallCount: toolCalls.length,
+      toolNames: toolCalls.map((tc) => tc.name),
+    });
+    const tokenUsage = extractTokenUsage(har) ?? undefined;
+    if (tokenUsage) {
+      await log("info", `Token usage: ${tokenUsage.promptTokens} prompt, ${tokenUsage.completionTokens} completion, ${tokenUsage.totalTokens} total`);
+    }
+    const aiCallCount = extractAiCallCount(har);
+    await log("info", `AI call count: ${aiCallCount}`);
+    return { harFilePath, tokenUsage, aiCallCount };
   }
 }
 
