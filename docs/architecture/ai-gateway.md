@@ -2,9 +2,7 @@
 
 The AI gateway is a shared Rust TLS-intercepting proxy that sits between coding agent workers and upstream AI providers (GitHub Copilot, Anthropic). It replaces per-worker DevProxy sidecars with a single centralized service, reducing memory usage and enabling a plugin architecture for traffic inspection and modification.
 
-**Source:** [`apps/gateway/`](../../apps/gateway/)  
-**Design doc:** [`docs/design/rust-tls-proxy.md`](../design/rust-tls-proxy.md)  
-**PR:** [#702](https://github.com/growth-ecosystems/scope-core/pull/702)
+**Source:** [`apps/gateway/`](../../apps/gateway/)
 
 ## Architecture
 
