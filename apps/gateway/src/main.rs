@@ -4,7 +4,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
 use clap::Parser;
+use http_body_util::Full;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
@@ -53,11 +57,16 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     // Proxy state (shared by proxy handler)
+    let http_client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new())
+        .pool_idle_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(4)
+        .build_http();
     let proxy_state = Arc::new(ProxyState {
         session_manager: session_manager.clone(),
         registry: registry.clone(),
         ca: ca.clone(),
         url_filter,
+        http_client,
     });
 
     // API state
@@ -108,6 +117,8 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Err(e) => {
                     error!("Accept error: {}", e);
+                    // Back off on transient errors (e.g. EMFILE) to avoid hot-looping
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
             }
         }

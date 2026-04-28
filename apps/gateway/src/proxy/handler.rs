@@ -12,7 +12,8 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Frame, Incoming};
 use hyper::service::service_fn;
 use hyper_util::client::legacy::Client;
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -74,6 +75,9 @@ pub struct ProxyState {
     pub registry: Arc<PluginRegistry>,
     pub ca: Arc<CertificateAuthority>,
     pub url_filter: Arc<UrlFilter>,
+    /// Shared HTTP/1.1 client for plain (non-CONNECT) forwarding.
+    /// Using a single client avoids creating a new connection pool per request.
+    pub http_client: Client<HttpConnector, Full<Bytes>>,
 }
 
 /// Handle a single client connection on the proxy port.
@@ -261,11 +265,10 @@ async fn handle_plain_http(
     }
     let upstream_req = upstream_req.body(Full::new(req_body_bytes.clone()))?;
 
-    // Forward to upstream
+    // Forward to upstream using the shared HTTP client
     let started_at = chrono::Utc::now();
     let start_instant = std::time::Instant::now();
-    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
-    let upstream_resp = client.request(upstream_req).await?;
+    let upstream_resp = state.http_client.request(upstream_req).await?;
 
     // TTFB: time from request start to response headers received
     let wait_ms = start_instant.elapsed().as_millis() as u64;

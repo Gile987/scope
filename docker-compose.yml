@@ -374,6 +374,10 @@ services:
       context: ./apps/gateway
       dockerfile: Dockerfile
     profiles: [gateway, vscode-electron-driver-ext]
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
       - ./apps/gateway/config/default.yaml:/config/proxy.yaml:ro
       - gateway_cert:/certs

@@ -6,6 +6,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
+use http_body_util::Full;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
+
 use gateway::ca::CertificateAuthority;
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
@@ -46,11 +51,16 @@ impl TestGateway {
             100,
         ));
 
+        let http_client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new())
+            .pool_idle_timeout(Duration::from_secs(5))
+            .pool_max_idle_per_host(2)
+            .build_http();
         let proxy_state = Arc::new(ProxyState {
             session_manager: session_manager.clone(),
             registry: registry.clone(),
             ca: ca.clone(),
             url_filter,
+            http_client,
         });
 
         // Bind proxy on ephemeral port

@@ -160,6 +160,10 @@ async fn relay_request_inner(
 
     let elapsed_ms = request_instant.elapsed().as_millis() as u64;
 
+    // Drop sender to signal the connection task to close the upstream socket.
+    // Without this, keepalive keeps the TCP+TLS fd open until the server closes it.
+    drop(sender);
+
     // Notify plugins
     let exchange = HttpExchange {
         request: ExchangeRequest {
