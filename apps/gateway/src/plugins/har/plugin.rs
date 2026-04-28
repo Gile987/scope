@@ -177,8 +177,15 @@ pub async fn get_har(
     State(state): State<Arc<HarApiState>>,
 ) -> impl IntoResponse {
     match state.plugin.build_har_for_session(&session_id) {
-        Some(har) => Json(har).into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
+        Some(har) => {
+            let count = har.log.entries.len();
+            debug!("HAR plugin: returning {} entries for session {}", count, session_id);
+            Json(har).into_response()
+        }
+        None => {
+            debug!("HAR plugin: no data for session {}", session_id);
+            StatusCode::NOT_FOUND.into_response()
+        }
     }
 }
 
