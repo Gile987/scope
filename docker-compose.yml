@@ -380,11 +380,11 @@ services:
     ports:
       - "${SCOPE_PROXY_API_PORT:-18800}:18897"
     healthcheck:
-      test: ["CMD", "/gateway", "--health-check"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:18897/proxy || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 5s
+      start_period: 15s
 
   # Claude Code worker (via ACP)
   coder-acp-claude-code:

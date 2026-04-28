@@ -179,3 +179,20 @@ services:
           path: ./apps/workers/report-generator/package.json
         - action: rebuild
           path: ./pnpm-lock.yaml
+
+  # Gateway: cargo-watch inside dev container, sync source files in
+  gateway:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/gateway/src
+          target: /build/src
+        - action: sync
+          path: ./apps/gateway/config
+          target: /build/config
+        - action: rebuild
+          path: ./apps/gateway/Cargo.toml
+        - action: rebuild
+          path: ./apps/gateway/Cargo.lock
