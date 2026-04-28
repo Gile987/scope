@@ -1,15 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-mod api;
-mod ca;
-mod config;
-mod filters;
-mod plugin;
-mod plugins;
-mod proxy;
-mod session;
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,14 +8,14 @@ use clap::Parser;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-use api::routes::ApiState;
-use ca::CertificateAuthority;
-use config::{Cli, Config};
-use filters::UrlFilter;
-use plugin::PluginRegistry;
-use plugins::har::plugin::{HarPlugin, har_api_router};
-use proxy::handler::{ProxyState, handle_client};
-use session::SessionManager;
+use gateway::api::routes::ApiState;
+use gateway::ca::CertificateAuthority;
+use gateway::config::{Cli, Config};
+use gateway::filters::UrlFilter;
+use gateway::plugin::PluginRegistry;
+use gateway::plugins::har::plugin::{HarPlugin, har_api_router};
+use gateway::proxy::handler::{ProxyState, handle_client};
+use gateway::session::SessionManager;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -94,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
     // Start API server
     let api_port = config.api_port;
     let api_handle = tokio::spawn(async move {
-        if let Err(e) = api::server::run_api_server(api_state, api_port, vec![("", har_router)]).await {
+        if let Err(e) = gateway::api::server::run_api_server(api_state, api_port, vec![("", har_router)]).await {
             error!("API server error: {}", e);
         }
     });

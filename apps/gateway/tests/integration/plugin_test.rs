@@ -1,0 +1,152 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+use super::helpers::TestGateway;
+use gateway::plugin::{HttpExchange, ExchangeRequest, ExchangeResponse, ProxyPlugin, SessionId};
+use tempfile::TempDir;
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+/// Custom test plugin that counts exchanges.
+struct CounterPlugin {
+    exchange_count: AtomicUsize,
+}
+
+impl CounterPlugin {
+    fn new() -> Self {
+        Self {
+            exchange_count: AtomicUsize::new(0),
+        }
+    }
+
+    fn count(&self) -> usize {
+        self.exchange_count.load(Ordering::SeqCst)
+    }
+}
+
+impl ProxyPlugin for CounterPlugin {
+    fn name(&self) -> &str {
+        "counter"
+    }
+
+    fn on_session_start(&self, _session_id: &SessionId, _settings: &serde_json::Value) {}
+
+    fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange) {
+        self.exchange_count.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn on_session_stop(&self, _session_id: &SessionId) {}
+
+    fn on_session_clear(&self, _session_id: &SessionId) {}
+
+    fn api_routes(&self) -> Option<axum::Router> {
+        None
+    }
+}
+
+/// HAR plugin lifecycle: start → stop → GET /proxy/har returns valid HAR.
+#[tokio::test]
+async fn har_plugin_lifecycle() {
+    let tmp = TempDir::new().unwrap();
+    let gw = TestGateway::start(tmp.path().to_path_buf(), &["https://example.com/*"]).await;
+
+    let client = reqwest::Client::new();
+
+    // Start session with HAR settings
+    let resp = client
+        .post(gw.api_url("/session/start"))
+        .json(&serde_json::json!({"plugins": {"har": {"includeSensitiveInformation": false}}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // Stop session
+    let resp = client
+        .post(gw.api_url("/session/stop"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // Get HAR
+    let resp = client.get(gw.api_url("/proxy/har")).send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+    let har: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(har["log"]["version"], "1.2");
+    assert!(har["log"]["creator"]["name"].is_string());
+}
+
+/// Custom plugin implementing ProxyPlugin receives exchanges.
+#[test]
+fn custom_plugin_receives_exchanges() {
+    let counter = Arc::new(CounterPlugin::new());
+
+    let registry = gateway::plugin::PluginRegistry::new(vec![counter.clone()]);
+
+    let sid = "test-session".to_string();
+
+    // Simulate session start
+    let settings = std::collections::HashMap::new();
+    registry.on_session_start(&sid, &settings);
+
+    // Simulate exchange
+    let exchange = HttpExchange {
+        request: ExchangeRequest {
+            method: http::Method::GET,
+            uri: http::Uri::from_static("https://example.com/test"),
+            headers: http::HeaderMap::new(),
+            body: bytes::Bytes::new(),
+        },
+        response: ExchangeResponse {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: bytes::Bytes::from_static(b"ok"),
+        },
+        started_at: chrono::Utc::now(),
+        elapsed_ms: 10,
+    };
+
+    registry.on_exchange(&sid, &exchange);
+    registry.on_exchange(&sid, &exchange);
+
+    assert_eq!(counter.count(), 2);
+
+    registry.on_session_stop(&sid);
+}
+
+/// Multiple plugins all receive the same exchanges.
+#[test]
+fn multiple_plugins_receive_exchanges() {
+    let counter1 = Arc::new(CounterPlugin::new());
+    let counter2 = Arc::new(CounterPlugin::new());
+
+    let registry = gateway::plugin::PluginRegistry::new(vec![counter1.clone(), counter2.clone()]);
+
+    let sid = "test".to_string();
+
+    let settings = std::collections::HashMap::new();
+    registry.on_session_start(&sid, &settings);
+
+    let exchange = HttpExchange {
+        request: ExchangeRequest {
+            method: http::Method::GET,
+            uri: http::Uri::from_static("https://example.com/"),
+            headers: http::HeaderMap::new(),
+            body: bytes::Bytes::new(),
+        },
+        response: ExchangeResponse {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: bytes::Bytes::from_static(b"ok"),
+        },
+        started_at: chrono::Utc::now(),
+        elapsed_ms: 5,
+    };
+
+    registry.on_exchange(&sid, &exchange);
+
+    assert_eq!(counter1.count(), 1);
+    assert_eq!(counter2.count(), 1);
+}
