@@ -167,7 +167,13 @@ async fn handle_connect(
                     if let Err(e) =
                         super::tls::intercept_tls(io, &host, &sid_for_intercept, &state).await
                     {
-                        warn!("TLS interception error for {}: {}", host, e);
+                        // Connection resets are expected when sessions are stopped mid-flight
+                        let msg = e.to_string();
+                        if msg.contains("connection") || msg.contains("reset") || msg.contains("broken pipe") {
+                            debug!("TLS interception ended for {}: {}", host, e);
+                        } else {
+                            warn!("TLS interception error for {}: {}", host, e);
+                        }
                     }
                 } else {
                     if let Err(e) = tunnel_passthrough(io, &host).await {
@@ -210,7 +216,24 @@ async fn handle_plain_http(
     session_id: Option<SessionId>,
     state: Arc<ProxyState>,
 ) -> anyhow::Result<hyper::Response<ProxyBody>> {
-    let uri = req.uri().clone();
+    // Ensure we have an absolute URI (required for proxy forwarding).
+    // If the client sent a relative URI (e.g. GET /path), reconstruct from the Host header.
+    let uri = if req.uri().host().is_none() {
+        let host = req
+            .headers()
+            .get(hyper::header::HOST)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown");
+        let scheme = req.uri().scheme_str().unwrap_or("http");
+        let path_and_query = req
+            .uri()
+            .path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or("/");
+        format!("{}://{}{}", scheme, host, path_and_query).parse::<http::Uri>()?
+    } else {
+        req.uri().clone()
+    };
     let method = req.method().clone();
     let host = uri.host().unwrap_or("unknown").to_string();
 
