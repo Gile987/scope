@@ -21,7 +21,7 @@ A purpose-built Rust proxy (`scope-proxy`) can solve all of these while running 
 
 ## Goals
 
-1. **Shared service** — one `scope-proxy` instance serves all workers, with source-IP-keyed recording sessions
+1. **Shared service** — one `scope-proxy` instance serves all workers, with source-IP-keyed sessions
 2. **API-compatible** with DevProxy — same control API endpoints, plus a new `GET /proxy/har` endpoint for HAR retrieval over HTTP (no shared volume needed)
 3. **TLS interception** with on-the-fly certificate generation (MITM via custom CA)
 4. **Transparent proxy mode** via iptables `TPROXY`/`REDIRECT` — intercept traffic from binaries that don't honor `HTTP_PROXY`
@@ -39,7 +39,7 @@ A purpose-built Rust proxy (`scope-proxy`) can solve all of these while running 
 
 ### Shared Proxy with Source-IP Sessions
 
-Instead of N sidecar proxies (one per worker), `scope-proxy` runs as a **single shared service**. Each worker container has a unique IP on the Docker/K8S network. The proxy uses the TCP source IP to key recording sessions — no explicit session IDs needed.
+Instead of N sidecar proxies (one per worker), `scope-proxy` runs as a **single shared service**. Each worker container has a unique IP on the Docker/K8S network. The proxy uses the TCP source IP to key sessions — no explicit session IDs needed.
 
 ```mermaid
 graph LR
@@ -52,9 +52,9 @@ graph LR
     subgraph "scope-proxy (shared service)"
         API[:18897 API]
         PX[:18000 proxy]
-        S1[Session 172.18.0.5<br/>HAR buffer + recording state]
-        S2[Session 172.18.0.6<br/>HAR buffer + recording state]
-        S3[Session 172.18.0.7<br/>HAR buffer + recording state]
+        S1[Session 172.18.0.5<br/>HAR buffer]
+        S2[Session 172.18.0.6<br/>HAR buffer]
+        S3[Session 172.18.0.7<br/>HAR buffer]
     end
 
     subgraph Upstream
@@ -88,13 +88,12 @@ sequenceDiagram
 
     Note over A,P: 1. Initialization
     A->>P: GET /proxy (health check)
-    P-->>A: {recording: false}
-    Note over P: Session for 172.18.0.5 created (lazy)
+    P-->>A: 200 OK
     A->>P: GET /proxy/rootCertificate?format=crt
     P-->>A: PEM certificate (shared CA)
     A->>P: POST /session/start {plugins: {har: {...}}}
     P-->>A: 200 OK
-    Note over P: Session 172.18.0.5: recording=true
+    Note over P: Session 172.18.0.5: active
 
     Note over W,U: 2. Agent Execution
     W->>P: CONNECT api.githubcopilot.com:443
@@ -106,11 +105,11 @@ sequenceDiagram
     P->>U: POST /chat/completions {messages: [...]}
     U-->>P: 200 {choices: [...]}
     P-->>W: 200 {choices: [...]}
-    Note over P: Record entry in session 172.18.0.5 HAR buffer
+    Note over P: Notify plugins (exchange for session 172.18.0.5)
 
     Note over A,P: 3. HAR Collection
     A->>P: POST /session/stop
-    Note over P: Finalize HAR for session 172.18.0.5
+    Note over P: End session 172.18.0.5, notify plugins
     P-->>A: 200 OK
     A->>P: GET /proxy/har
     P-->>A: 200 application/json (HAR file body)
@@ -198,10 +197,10 @@ The REST API on port 18897 provides session management, certificate download, an
 
 | Endpoint | Method | Request | Response | Notes |
 |----------|--------|---------|----------|-------|
-| `/proxy` | `GET` | — | `{"recording": bool}` | Per-session health/status |
+| `/proxy` | `GET` | — | `{"active": bool}` | Per-session status (is session active?) |
 | `/proxy/rootCertificate?format=crt` | `GET` | — | PEM certificate body | Shared CA (same for all sessions) |
-| `/session/start` | `POST` | `{"plugins": { ... }}` | `200` | Start recording. Accepts per-plugin settings. |
-| `/session/stop` | `POST` | — | `200` | Stop recording. Finalizes plugin buffers. |
+| `/session/start` | `POST` | `{"plugins": { ... }}` | `200` | Start session. Accepts per-plugin settings. |
+| `/session/stop` | `POST` | — | `200` | Stop session. Notifies plugins to finalize. |
 | `/proxy/har` | `GET` | — | `200` HAR JSON body | Returns the finalized HAR for the caller's session. |
 
 **`POST /session/start` request body:**
@@ -221,8 +220,8 @@ Each key under `plugins` maps to a registered plugin name. The value is a `serde
 **Session resolution:** Extract source IP from the TCP connection. If `X-Session-Id` header is present, use that instead (localhost dev fallback).
 
 **`GET /proxy/har` semantics:**
-- Returns `200 application/json` with the HAR body if a recording was finalized via `POST /session/stop`
-- Returns `404` if no recording exists or the session is still actively recording
+- Returns `200 application/json` with the HAR body if the session has been stopped via `POST /session/stop`
+- Returns `404` if no session exists or the session is still active
 - Idempotent — the JSONL file remains on disk (deleted during session cleanup, not on read)
 
 This eliminates the need for shared volumes between proxy and workers for HAR file exchange.
@@ -231,7 +230,7 @@ This eliminates the need for shared volumes between proxy and workers for HAR fi
 
 ```mermaid
 flowchart LR
-    A[Client CONNECT] --> B{Active session<br/>recording?}
+    A[Client CONNECT] --> B{Active session?}
     B -->|No| C[Tunnel passthrough<br/>no interception]
     B -->|Yes| D{URL matches filter?}
     D -->|No| C
@@ -255,7 +254,7 @@ flowchart LR
 
 ### 5. Plugin Architecture
 
-The proxy core knows nothing about HAR, metrics, or any specific recording format. All traffic observation is handled by **plugins** — Rust trait objects registered at startup.
+The proxy core knows nothing about HAR, metrics, or any specific observation format. All traffic observation is handled by **plugins** — Rust trait objects registered at startup.
 
 #### Plugin Trait
 
@@ -266,7 +265,7 @@ pub trait ProxyPlugin: Send + Sync {
     /// Unique name (used in config and API routes).
     fn name(&self) -> &str;
 
-    /// Called when recording starts for a session.
+    /// Called when a session starts.
     /// `settings` is the plugin-specific JSON from the POST /session/start body
     /// (e.g., `{"includeSensitiveInformation": false}` for the HAR plugin).
     fn on_session_start(&self, session_id: &SessionId, settings: &serde_json::Value);
@@ -274,7 +273,7 @@ pub trait ProxyPlugin: Send + Sync {
     /// Called for each intercepted request/response pair.
     fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange);
 
-    /// Called when recording stops (POST /session/stop). Plugin should finalize any buffered data.
+    /// Called when a session stops (POST /session/stop). Plugin should finalize any buffered data.
     fn on_session_stop(&self, session_id: &SessionId);
 
     /// Called when a session is reaped (idle timeout or explicit clear).
@@ -315,14 +314,14 @@ The HAR plugin is the first (and initially only) built-in plugin. It uses **disk
 - **Implements** `ProxyPlugin` trait
 - **`on_session_start(settings)`** — reads `settings["includeSensitiveInformation"]` (default `false`) and stores it for the session. Creates a temp file (`{har_dir}/.session-{session_id}.jsonl`).
 - **`on_exchange`** — serializes the `HarEntry` as a single JSON line and appends it to the session's temp file. **Redacts sensitive headers** (`authorization`, `x-github-token`, `x-api-key`, `cookie`, `set-cookie`) at write time when `includeSensitiveInformation` is `false`. Secrets never touch disk.
-- **`on_session_stop`** — marks the session as finalized (no more entries accepted). The JSONL temp file remains on disk.
+- **`on_session_stop`** — marks the session's JSONL as finalized (no more entries accepted). The JSONL temp file remains on disk.
 - **`on_session_clear`** — deletes the temp JSONL file
 - **`api_routes`** — registers `GET /proxy/har` (builds the HAR on the fly from the JSONL file for the caller's session)
 
 **Disk layout** (`har_dir` defaults to `/har-output`):
 ```
 /har-output/
-  .session-172.18.0.5.jsonl           # Active/finalized recording (append-only, one JSON line per exchange)
+  .session-172.18.0.5.jsonl           # Active/finalized session (append-only, one JSON line per exchange)
 ```
 
 No separate `.har` file is written. The HAR envelope is assembled on the fly when `GET /proxy/har` is called by reading the JSONL entries and wrapping them in the HAR 1.2 structure.
@@ -336,7 +335,7 @@ No separate `.har` file is written. The HAR envelope is assembled on the fly whe
 
 **`GET /proxy/har` semantics** (registered by HAR plugin, served at `/proxy/har`):
 - Reads the JSONL temp file, wraps entries in a HAR 1.2 envelope, and returns `200 application/json`
-- Returns `404` if no recording exists or the session is still actively recording
+- Returns `404` if no session exists or the session is still active
 - Idempotent — the JSONL file remains on disk and can be read multiple times (safe for client retries)
 - The JSONL file is deleted during **session cleanup** (idle reap or next `on_session_start`)
 
@@ -348,8 +347,8 @@ No separate `.har` file is written. The HAR envelope is assembled on the fly whe
 
 ### 6. Session Lifecycle
 
-- Sessions are created by `POST /session/start`; `POST /session/stop` finalizes recording
-- **No session = passthrough.** Proxy traffic from an IP with no active recording session is forwarded directly to the upstream without TLS interception or plugin notification. This keeps the proxy transparent to workers that haven't started a session yet (or whose session was already reaped).
+- Sessions are created by `POST /session/start`; `POST /session/stop` ends a session
+- **No session = passthrough.** Proxy traffic from an IP with no active session is forwarded directly to the upstream without TLS interception or plugin notification. This keeps the proxy transparent to workers that haven't started a session yet (or whose session was already reaped).
 - Sessions are reaped after a configurable idle timeout (default: 5 min)
 - Max concurrent sessions capped at 100 (safety valve)
 - On session start/stop/clear, all plugins are notified via the registry with per-plugin settings
@@ -368,8 +367,8 @@ Match the DevProxy `urlsToWatch` config format:
 ```
 
 - Convert glob patterns to regex at startup
-- Non-matching URLs: tunnel passthrough (no MITM, no HAR recording)
-- Matching URLs: full interception + recording
+- Non-matching URLs: tunnel passthrough (no MITM, no plugin notification)
+- Matching URLs: full interception + plugin on_exchange
 
 ### 8. Configuration
 
@@ -721,7 +720,7 @@ Each source module includes co-located unit tests:
 | `filters/url_matcher.rs` | Glob-to-regex conversion, match `https://api.github.com/foo`, reject `https://other.com/bar`, wildcard `*` semantics, edge cases (empty pattern, trailing slash) |
 | `proxy/handler.rs` | Parse CONNECT request, extract host:port, reject malformed CONNECT, plain HTTP forwarding, passthrough when no active session |
 | `proxy/tls.rs` | SNI extraction from ClientHello bytes, cert selection from cache, cache miss triggers generation |
-| `api/routes.rs` | GET /proxy returns session state, POST /session/start starts recording with plugin settings, POST /session/stop finalizes recording, GET /proxy/rootCertificate returns PEM, GET /proxy/har returns HAR body, GET /proxy/har returns 404 when empty, session isolation (two IPs see independent state) |
+| `api/routes.rs` | GET /proxy returns session state, POST /session/start creates session with plugin settings, POST /session/stop ends session, GET /proxy/rootCertificate returns PEM, GET /proxy/har returns HAR body, GET /proxy/har returns 404 when no stopped session, session isolation (two IPs see independent state) |
 
 Run with `cargo test` (no external dependencies needed — all unit tests use in-memory state).
 
@@ -737,7 +736,7 @@ These test the full proxy stack end-to-end:
 | `proxy_test::sse_streaming_body` | Upstream sends SSE stream → verify full body accumulated in HAR |
 | `proxy_test::large_response_base64` | Response >1 MB → verify base64 encoding in HAR |
 | `api_test::session_lifecycle` | POST /session/start → POST /session/stop → GET /proxy/har → verify HAR content |
-| `api_test::multi_session_isolation` | Two clients (different source IPs via loopback aliases) → verify independent recording state and HAR buffers |
+| `api_test::multi_session_isolation` | Two clients (different source IPs via loopback aliases) → verify independent session state and HAR buffers |
 | `api_test::x_session_id_header` | Requests with `X-Session-Id` header → sessions keyed by header value instead of IP |
 | `tls_test::cert_generation_and_trust` | Generate CA → generate leaf for `example.com` → verify leaf validates against CA with `webpki` |
 | `tls_test::sni_based_cert_selection` | Two CONNECT requests to different domains → verify different leaf certs |
@@ -866,7 +865,7 @@ Changes to `DevProxyClient` in `packages/shared/src/devproxy/devproxy-client.ts`
 | Large response bodies causing OOM | HAR plugin uses disk-based buffering (JSONL append per exchange). Only the single response body being proxied is in memory at a time. Per-response body cap at 50 MB with truncation marker. |
 | `TPROXY` requires `NET_ADMIN` | Phase 2 only; explicit proxy mode (Phase 1) needs no special capabilities |
 | Single point of failure (shared proxy) | Liveness probe auto-restarts. Workers degrade gracefully (continue without HAR if proxy is down — already handled by `DevProxyClient`). Phase 3 adds `/metrics` for alerting. |
-| Session memory leaks (workers crash without stopping recording) | Idle session reaping with configurable timeout (default: 5 min). Max session cap (100). Temp JSONL files cleaned up on reap. |
+| Session memory leaks (workers crash without stopping session) | Idle session reaping with configurable timeout (default: 5 min). Max session cap (100). Temp JSONL files cleaned up on reap. |
 | Localhost dev: all traffic from 127.0.0.1 | `X-Session-Id` header override keyed by `WORKER_NAME` env var |
 
 ## Open Questions
