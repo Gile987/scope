@@ -12,6 +12,9 @@ import { GatewayClient } from "./gateway-client.js";
 import { parseHarFile } from "../har/har-parser.js";
 import type { ProxyClient } from "./proxy-client.js";
 import { extractHarMetadata } from "../har/extract-metadata.js";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const DEFAULT_API_URL = "http://localhost:18897";
 
@@ -40,7 +43,10 @@ export function createProxyClient(): ProxyClient {
           await log("info", "Gateway session stopped");
           const har = await gw.downloadHar();
           if (har) {
-            return extractHarMetadata(har, null, log);
+            // Write HAR to temp file so the upload pipeline can pick it up
+            const harFilePath = join(tmpdir(), `gateway-${Date.now()}.har`);
+            await writeFile(harFilePath, JSON.stringify(har), "utf-8");
+            return extractHarMetadata(har, harFilePath, log);
           }
           await log("warn", "No HAR data returned from gateway");
         } catch (error) {
