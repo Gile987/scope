@@ -61,7 +61,7 @@ export async function waitForProxyReady(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${apiUrl}/proxy`);
+      const response = await fetch(`${apiUrl}/healthz`);
       if (response.ok) return;
     } catch {
       // Not ready yet
@@ -82,7 +82,7 @@ export async function downloadProxyCertificate(
     // Download it
   }
 
-  const response = await fetch(`${apiUrl}/proxy/rootCertificate?format=crt`);
+  const response = await fetch(`${apiUrl}/api/v1/cacert`);
   if (!response.ok) {
     throw new Error(`Failed to download certificate: ${response.status} ${response.statusText}`);
   }

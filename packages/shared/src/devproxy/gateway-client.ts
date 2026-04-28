@@ -4,8 +4,15 @@
 /**
  * GatewayClient — talks to the Rust TLS-intercepting gateway proxy.
  *
- * Uses the gateway session API (POST /session/start, POST /session/stop)
- * and retrieves HAR data via GET /proxy/har.
+ * Uses the RESTful session API:
+ *   POST   /api/v1/sessions           → create session (returns { id })
+ *   GET    /api/v1/sessions           → list sessions
+ *   GET    /api/v1/sessions/:id       → session status
+ *   POST   /api/v1/sessions/:id/stop  → stop recording
+ *   GET    /api/v1/sessions/:id/har   → download HAR
+ *   DELETE /api/v1/sessions/:id       → delete session
+ *   GET    /api/v1/cacert             → CA certificate
+ *   GET    /healthz                   → health check
  */
 
 import type { HarFile } from "../har/types.js";
@@ -19,11 +26,17 @@ const DEFAULT_API_URL = "http://localhost:18897";
 
 export class GatewayClient {
   readonly apiUrl: string;
+  private sessionId: string | null = null;
 
   constructor(
     apiUrl: string = process.env.DEV_PROXY_API_URL || DEFAULT_API_URL,
   ) {
     this.apiUrl = apiUrl;
+  }
+
+  /** The MCP endpoint URL for MCP-aware workers. */
+  get mcpEndpoint(): string {
+    return `${this.apiUrl}/mcp`;
   }
 
   async waitForReady(timeoutMs?: number): Promise<void> {
@@ -38,19 +51,23 @@ export class GatewayClient {
     return createCombinedCaBundle(proxyCertPath, outputPath);
   }
 
-  async startSession(plugins: Record<string, unknown> = {}): Promise<void> {
-    const response = await fetch(`${this.apiUrl}/session/start`, {
+  async startSession(plugins: Record<string, unknown> = {}): Promise<string> {
+    const response = await fetch(`${this.apiUrl}/api/v1/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ plugins }),
     });
     if (!response.ok) {
-      throw new Error(`Failed to start gateway session: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to create gateway session: ${response.status} ${response.statusText}`);
     }
+    const body = (await response.json()) as { id: string };
+    this.sessionId = body.id;
+    return body.id;
   }
 
   async stopSession(): Promise<void> {
-    const response = await fetch(`${this.apiUrl}/session/stop`, {
+    const id = this.requireSessionId();
+    const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}/stop`, {
       method: "POST",
     });
     if (!response.ok) {
@@ -59,8 +76,10 @@ export class GatewayClient {
   }
 
   async downloadHar(): Promise<HarFile | null> {
+    const id = this.sessionId;
+    if (!id) return null;
     try {
-      const response = await fetch(`${this.apiUrl}/proxy/har`);
+      const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}/har`);
       if (response.ok) {
         return (await response.json()) as HarFile;
       }
@@ -68,5 +87,24 @@ export class GatewayClient {
     } catch {
       return null;
     }
+  }
+
+  async deleteSession(): Promise<void> {
+    const id = this.requireSessionId();
+    const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Failed to delete gateway session: ${response.status} ${response.statusText}`);
+    }
+    this.sessionId = null;
+  }
+
+  /** Returns the current session ID, or throws if no session has been started. */
+  private requireSessionId(): string {
+    if (!this.sessionId) {
+      throw new Error("No active gateway session — call startSession() first");
+    }
+    return this.sessionId;
   }
 }

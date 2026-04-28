@@ -36,7 +36,7 @@ export function createProxyClient(): ProxyClient {
       waitForReady: (t) => gw.waitForReady(t),
       downloadCertificate: (p) => gw.downloadCertificate(p),
       createCombinedCaBundle: (c, o) => gw.createCombinedCaBundle(c, o),
-      startRecording: () => gw.startSession(),
+      startRecording: async () => { await gw.startSession(); },
       stopAndCollectHar: async (log) => {
         try {
           await gw.stopSession();
@@ -46,13 +46,18 @@ export function createProxyClient(): ProxyClient {
             // Write HAR to temp file so the upload pipeline can pick it up
             const harFilePath = join(tmpdir(), `gateway-${Date.now()}.har`);
             await writeFile(harFilePath, JSON.stringify(har), "utf-8");
-            return extractHarMetadata(har, harFilePath, log);
+            const result = extractHarMetadata(har, harFilePath, log);
+            // Clean up session on the gateway after collecting data
+            try { await gw.deleteSession(); } catch { /* best effort */ }
+            return result;
           }
           await log("warn", "No HAR data returned from gateway");
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
-          await log("warn", `Gateway HAR collection failed: ${msg}`);
+          await log("warn", `Gateway HAR collection failed (session may have been lost due to a gateway restart): ${msg}`);
         }
+        // Best-effort cleanup even on failure
+        try { await gw.deleteSession(); } catch { /* best effort */ }
         return { harFilePath: null };
       },
     };
@@ -78,7 +83,7 @@ export function createProxyClient(): ProxyClient {
         await log("warn", "No HAR file found after DevProxy recording");
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        await log("warn", `DevProxy HAR collection failed: ${msg}`);
+        await log("warn", `Gateway HAR collection failed (session may have been lost due to a gateway restart): ${msg}`);
       }
       return { harFilePath: null };
     },

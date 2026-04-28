@@ -6,6 +6,7 @@ import { GatewayClient } from "./gateway-client.js";
 
 describe("GatewayClient", () => {
   let originalEnv: NodeJS.ProcessEnv;
+  const SESSION_ID = "550e8400-e29b-41d4-a716-446655440000";
 
   beforeEach(() => {
     originalEnv = { ...process.env };
@@ -28,18 +29,27 @@ describe("GatewayClient", () => {
       const client = new GatewayClient();
       expect(client.apiUrl).toBe("http://localhost:18897");
     });
+
+    it("exposes mcpEndpoint", () => {
+      const client = new GatewayClient("http://test:18897");
+      expect(client.mcpEndpoint).toBe("http://test:18897/mcp");
+    });
   });
 
   describe("startSession", () => {
-    it("calls POST /session/start", async () => {
+    it("calls POST /api/v1/sessions and returns session ID", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response("", { status: 200 })
+        new Response(JSON.stringify({ id: SESSION_ID }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
       );
 
       const client = new GatewayClient("http://test:18897");
-      await client.startSession();
+      const id = await client.startSession();
 
-      expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/session/start", {
+      expect(id).toBe(SESSION_ID);
+      expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/api/v1/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plugins: {} }),
@@ -48,13 +58,16 @@ describe("GatewayClient", () => {
 
     it("passes custom plugins", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response("", { status: 200 })
+        new Response(JSON.stringify({ id: SESSION_ID }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
       );
 
       const client = new GatewayClient("http://test:18897");
       await client.startSession({ har: { captureHeaders: true } });
 
-      expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/session/start", {
+      expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/api/v1/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plugins: { har: { captureHeaders: true } } }),
@@ -67,30 +80,50 @@ describe("GatewayClient", () => {
       );
 
       const client = new GatewayClient("http://test:18897");
-      await expect(client.startSession()).rejects.toThrow("Failed to start gateway session: 500");
+      await expect(client.startSession()).rejects.toThrow("Failed to create gateway session: 500");
     });
   });
 
   describe("stopSession", () => {
-    it("calls POST /session/stop", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response("", { status: 200 })
-      );
+    it("calls POST /api/v1/sessions/:id/stop", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(new Response("", { status: 200 }));
 
       const client = new GatewayClient("http://test:18897");
+      await client.startSession();
       await client.stopSession();
 
-      expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/session/stop", {
-        method: "POST",
-      });
+      expect(fetch).toHaveBeenCalledWith(
+        `http://test:18897/api/v1/sessions/${SESSION_ID}/stop`,
+        { method: "POST" },
+      );
+    });
+
+    it("throws if no session started", async () => {
+      const client = new GatewayClient("http://test:18897");
+      await expect(client.stopSession()).rejects.toThrow("No active gateway session");
     });
 
     it("throws on error", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response("", { status: 500, statusText: "Internal Server Error" })
-      );
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response("", { status: 500, statusText: "Internal Server Error" })
+        );
 
       const client = new GatewayClient("http://test:18897");
+      await client.startSession();
       await expect(client.stopSession()).rejects.toThrow("Failed to stop gateway session: 500");
     });
   });
@@ -98,35 +131,90 @@ describe("GatewayClient", () => {
   describe("downloadHar", () => {
     it("returns parsed HAR on success", async () => {
       const mockHar = { log: { version: "1.2", entries: [] } };
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(JSON.stringify(mockHar), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-      );
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(mockHar), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
 
       const client = new GatewayClient("http://test:18897");
+      await client.startSession();
       const result = await client.downloadHar();
 
       expect(result).toEqual(mockHar);
-      expect(fetch).toHaveBeenCalledWith("http://test:18897/proxy/har");
+      expect(fetch).toHaveBeenCalledWith(
+        `http://test:18897/api/v1/sessions/${SESSION_ID}/har`,
+      );
+    });
+
+    it("returns null when no session started", async () => {
+      const client = new GatewayClient("http://test:18897");
+      expect(await client.downloadHar()).toBeNull();
     });
 
     it("returns null on 404", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response("", { status: 404 })
-      );
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(new Response("", { status: 404 }));
 
       const client = new GatewayClient("http://test:18897");
+      await client.startSession();
       expect(await client.downloadHar()).toBeNull();
     });
 
     it("returns null on network error", async () => {
-      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError("fetch failed"));
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockRejectedValueOnce(new TypeError("fetch failed"));
 
       const client = new GatewayClient("http://test:18897");
+      await client.startSession();
       expect(await client.downloadHar()).toBeNull();
     });
   });
 
+  describe("deleteSession", () => {
+    it("calls DELETE /api/v1/sessions/:id", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+      const client = new GatewayClient("http://test:18897");
+      await client.startSession();
+      await client.deleteSession();
+
+      expect(fetch).toHaveBeenCalledWith(
+        `http://test:18897/api/v1/sessions/${SESSION_ID}`,
+        { method: "DELETE" },
+      );
+    });
+
+    it("throws if no session started", async () => {
+      const client = new GatewayClient("http://test:18897");
+      await expect(client.deleteSession()).rejects.toThrow("No active gateway session");
+    });
+  });
 });
