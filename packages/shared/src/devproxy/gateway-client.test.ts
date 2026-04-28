@@ -17,11 +17,6 @@ describe("GatewayClient", () => {
   });
 
   describe("constructor", () => {
-    it("has backend='gateway'", () => {
-      const client = new GatewayClient("http://test:18897");
-      expect(client.backend).toBe("gateway");
-    });
-
     it("uses DEV_PROXY_API_URL env var", () => {
       process.env.DEV_PROXY_API_URL = "http://env-gateway:9999";
       const client = new GatewayClient();
@@ -35,19 +30,34 @@ describe("GatewayClient", () => {
     });
   });
 
-  describe("startRecording", () => {
+  describe("startSession", () => {
     it("calls POST /session/start", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response("", { status: 200 })
       );
 
       const client = new GatewayClient("http://test:18897");
-      await client.startRecording();
+      await client.startSession();
 
       expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/session/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plugins: {} }),
+      });
+    });
+
+    it("passes custom plugins", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("", { status: 200 })
+      );
+
+      const client = new GatewayClient("http://test:18897");
+      await client.startSession({ har: { captureHeaders: true } });
+
+      expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/session/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plugins: { har: { captureHeaders: true } } }),
       });
     });
 
@@ -58,7 +68,7 @@ describe("GatewayClient", () => {
       );
 
       const client = new GatewayClient("http://test:18897");
-      await client.startRecording();
+      await client.startSession();
 
       expect(fetch).toHaveBeenCalledWith("http://test:18897/session/start", {
         method: "POST",
@@ -73,7 +83,7 @@ describe("GatewayClient", () => {
       );
 
       const client = new GatewayClient("http://test:18897");
-      await expect(client.startRecording()).rejects.toThrow("Failed to start gateway session: 500");
+      await expect(client.startSession()).rejects.toThrow("Failed to start gateway session: 500");
     });
   });
 
@@ -150,56 +160,4 @@ describe("GatewayClient", () => {
     });
   });
 
-  describe("stopAndCollectHar", () => {
-    it("stops session and downloads HAR", async () => {
-      const mockHar = {
-        log: {
-          version: "1.2",
-          creator: { name: "gateway", version: "0.1.0" },
-          entries: [],
-        },
-      };
-      vi.spyOn(globalThis, "fetch")
-        // stopSession
-        .mockResolvedValueOnce(new Response("", { status: 200 }))
-        // downloadHar
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify(mockHar), { status: 200 })
-        );
-
-      const log = vi.fn();
-      const client = new GatewayClient("http://test:18897");
-      const result = await client.stopAndCollectHar(log);
-
-      expect(result.harFilePath).toBeNull(); // gateway serves HAR over HTTP, no file
-      expect(log).toHaveBeenCalledWith("info", "Gateway session stopped");
-      expect(log).toHaveBeenCalledWith("info", "HAR retrieved via gateway API");
-    });
-
-    it("returns empty result when HAR download returns null", async () => {
-      vi.spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(new Response("", { status: 200 }))
-        .mockResolvedValueOnce(new Response("", { status: 404 }));
-
-      const log = vi.fn();
-      const client = new GatewayClient("http://test:18897");
-      const result = await client.stopAndCollectHar(log);
-
-      expect(result).toEqual({ harFilePath: null });
-      expect(log).toHaveBeenCalledWith("warn", "No HAR data returned from gateway");
-    });
-
-    it("handles stop failure gracefully", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response("", { status: 500, statusText: "Error" })
-      );
-
-      const log = vi.fn();
-      const client = new GatewayClient("http://test:18897");
-      const result = await client.stopAndCollectHar(log);
-
-      expect(result).toEqual({ harFilePath: null });
-      expect(log).toHaveBeenCalledWith("warn", expect.stringContaining("Gateway HAR collection failed"));
-    });
-  });
 });

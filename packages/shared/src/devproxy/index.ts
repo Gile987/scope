@@ -10,31 +10,56 @@ export { isProxyEnabled } from "./proxy-client.js";
 import { DevProxyClient } from "./devproxy-client.js";
 import { GatewayClient } from "./gateway-client.js";
 import type { ProxyClient } from "./proxy-client.js";
+import { extractHarMetadata } from "./proxy-client.js";
 
 const DEFAULT_API_URL = "http://localhost:18897";
 
 /**
  * Create the appropriate proxy client based on PROXY_BACKEND env var.
  *
- *   PROXY_BACKEND=gateway  → GatewayClient (implements ProxyClient directly)
- *   PROXY_BACKEND=devproxy → thin adapter over unmodified DevProxyClient
+ * Both backends are wrapped in a thin adapter that satisfies ProxyClient.
+ * DevProxyClient and GatewayClient stay untouched — no interface coupling.
  */
 export function createProxyClient(): ProxyClient {
   const backend = process.env.PROXY_BACKEND || "devproxy";
+  const apiUrl = process.env.DEV_PROXY_API_URL || DEFAULT_API_URL;
+
   if (backend === "gateway") {
-    return new GatewayClient();
+    const gw = new GatewayClient(apiUrl);
+    return {
+      backend: "gateway",
+      apiUrl: gw.apiUrl,
+      waitForReady: (t) => gw.waitForReady(t),
+      downloadCertificate: (p) => gw.downloadCertificate(p),
+      createCombinedCaBundle: (c, o) => gw.createCombinedCaBundle(c, o),
+      startRecording: () => gw.startSession(),
+      stopAndCollectHar: async (log) => {
+        try {
+          await gw.stopSession();
+          await log("info", "Gateway session stopped");
+          const har = await gw.downloadHar();
+          if (har) {
+            await log("info", "HAR retrieved via gateway API");
+            return extractHarMetadata(har, null, log);
+          }
+          await log("warn", "No HAR data returned from gateway");
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          await log("warn", `Gateway HAR collection failed: ${msg}`);
+        }
+        return { harFilePath: null };
+      },
+    };
   }
 
-  // Wrap the unchanged DevProxyClient in an adapter that adds backend/apiUrl
-  const apiUrl = process.env.DEV_PROXY_API_URL || DEFAULT_API_URL;
-  const client = new DevProxyClient(apiUrl);
+  const dp = new DevProxyClient(apiUrl);
   return {
     backend: "devproxy",
     apiUrl,
-    waitForReady: (t) => client.waitForReady(t),
-    downloadCertificate: (p) => client.downloadCertificate(p),
-    createCombinedCaBundle: (c, o) => client.createCombinedCaBundle(c, o),
-    startRecording: () => client.startRecording(),
-    stopAndCollectHar: (l) => client.stopAndCollectHar(l),
+    waitForReady: (t) => dp.waitForReady(t),
+    downloadCertificate: (p) => dp.downloadCertificate(p),
+    createCombinedCaBundle: (c, o) => dp.createCombinedCaBundle(c, o),
+    startRecording: () => dp.startRecording(),
+    stopAndCollectHar: (l) => dp.stopAndCollectHar(l),
   };
 }

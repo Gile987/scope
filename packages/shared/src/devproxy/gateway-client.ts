@@ -9,19 +9,15 @@
  */
 
 import type { HarFile } from "../har/types.js";
-import type { WorkerLogFn } from "../types/types.js";
-import type { ProxyClient, HarCollectionResult } from "./proxy-client.js";
 import {
   waitForProxyReady,
   downloadProxyCertificate,
   createCombinedCaBundle,
-  extractHarMetadata,
 } from "./proxy-client.js";
 
 const DEFAULT_API_URL = "http://localhost:18897";
 
-export class GatewayClient implements ProxyClient {
-  readonly backend = "gateway" as const;
+export class GatewayClient {
   readonly apiUrl: string;
   private sessionId: string | undefined;
 
@@ -52,11 +48,11 @@ export class GatewayClient implements ProxyClient {
     return createCombinedCaBundle(proxyCertPath, outputPath);
   }
 
-  async startRecording(): Promise<void> {
+  async startSession(plugins: Record<string, unknown> = {}): Promise<void> {
     const response = await fetch(`${this.apiUrl}/session/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...this.sessionHeaders() },
-      body: JSON.stringify({ plugins: {} }),
+      body: JSON.stringify({ plugins }),
     });
     if (!response.ok) {
       throw new Error(`Failed to start gateway session: ${response.status} ${response.statusText}`);
@@ -85,24 +81,5 @@ export class GatewayClient implements ProxyClient {
     } catch {
       return null;
     }
-  }
-
-  async stopAndCollectHar(log: WorkerLogFn): Promise<HarCollectionResult> {
-    try {
-      await this.stopSession();
-      await log("info", "Gateway session stopped");
-
-      const har = await this.downloadHar();
-      if (har) {
-        await log("info", "HAR retrieved via gateway API");
-        return extractHarMetadata(har, null, log);
-      }
-
-      await log("warn", "No HAR data returned from gateway");
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      await log("warn", `Gateway HAR collection failed: ${msg}`);
-    }
-    return { harFilePath: null };
   }
 }
