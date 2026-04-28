@@ -11,23 +11,76 @@
 //!      the system root certificates.
 //!
 //! HTTP/1.1 traffic is then relayed between the two TLS sessions while capturing
-//! request/response pairs for plugin notification.
+//! request/response pairs for plugin notification. Response bodies are streamed
+//! frame-by-frame to the client (important for SSE) while a background task
+//! accumulates a copy for HAR recording.
 
+use std::convert::Infallible;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context as TaskContext, Poll};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
+use hyper::body::{Frame, Incoming};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::{debug, warn};
 
 use crate::plugin::{ExchangeRequest, ExchangeResponse, HttpExchange, SessionId};
 use crate::proxy::handler::ProxyState;
+
+/// Streaming response body for TLS-intercepted requests, backed by an mpsc channel.
+/// Frames from upstream are forwarded in real time while a background task buffers
+/// them for HAR recording.
+struct RelayBody {
+    rx: mpsc::Receiver<Frame<Bytes>>,
+}
+
+impl hyper::body::Body for RelayBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        self.get_mut().rx.poll_recv(cx).map(|opt| opt.map(Ok))
+    }
+}
+
+/// Response body for relayed requests — either streaming (normal) or buffered (errors).
+enum RelayResponseBody {
+    Buffered(Full<Bytes>),
+    Streaming(RelayBody),
+}
+
+impl hyper::body::Body for RelayResponseBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        match self.get_mut() {
+            RelayResponseBody::Buffered(inner) => Pin::new(inner).poll_frame(cx),
+            RelayResponseBody::Streaming(inner) => Pin::new(inner).poll_frame(cx),
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        match self {
+            RelayResponseBody::Buffered(inner) => inner.is_end_stream(),
+            RelayResponseBody::Streaming(_) => false,
+        }
+    }
+}
 
 /// Intercept a TLS connection: MITM with forged cert, relay, and notify plugins.
 pub async fn intercept_tls<S>(
@@ -90,14 +143,14 @@ async fn relay_request(
     port: u16,
     session_id: &SessionId,
     state: &Arc<ProxyState>,
-) -> Result<hyper::Response<Full<Bytes>>, hyper::Error> {
+) -> Result<hyper::Response<RelayResponseBody>, hyper::Error> {
     match relay_request_inner(req, domain, port, session_id, state).await {
         Ok(resp) => Ok(resp),
         Err(e) => {
             warn!("Relay error for {}: {}", domain, e);
             Ok(hyper::Response::builder()
                 .status(502)
-                .body(Full::new(Bytes::from(format!("Upstream error: {}", e))))
+                .body(RelayResponseBody::Buffered(Full::new(Bytes::from(format!("Upstream error: {}", e)))))
                 .unwrap())
         }
     }
@@ -109,7 +162,7 @@ async fn relay_request_inner(
     port: u16,
     session_id: &SessionId,
     state: &Arc<ProxyState>,
-) -> anyhow::Result<hyper::Response<Full<Bytes>>> {
+) -> anyhow::Result<hyper::Response<RelayResponseBody>> {
     let started_at = chrono::Utc::now();
 
     // Capture request details
@@ -169,46 +222,76 @@ async fn relay_request_inner(
     // Start timing from request send (after connect/TLS handshake)
     let request_instant = std::time::Instant::now();
 
-    // Send to upstream and collect response
+    // Send to upstream
     let upstream_resp = sender.send_request(upstream_req).await?;
     let wait_ms = request_instant.elapsed().as_millis() as u64;
-    let (resp_parts, resp_body) = upstream_resp.into_parts();
-    let resp_body_bytes = resp_body.collect().await?.to_bytes();
 
-    let elapsed_ms = request_instant.elapsed().as_millis() as u64;
+    let resp_status = upstream_resp.status();
+    let resp_headers = upstream_resp.headers().clone();
 
-    // Explicitly drop the HTTP sender to close the upstream connection.
-    // Without this, HTTP/1.1 keepalive would hold the TCP+TLS file descriptor
-    // open until the upstream server's idle timeout fires — leaking fds under load.
-    drop(sender);
+    // Stream response body through a channel: frames are forwarded to the client
+    // in real time (critical for SSE) while a background task accumulates a copy
+    // for HAR recording and plugin notification.
+    let (tx, rx) = mpsc::channel::<Frame<Bytes>>(32);
+    let upstream_body = upstream_resp.into_body();
+    let record_headers = resp_headers.clone();
+    let session_id_owned = session_id.clone();
+    let state_owned = state.clone();
+    let domain_for_log = domain.to_string();
 
-    // Notify plugins
-    let exchange = HttpExchange {
-        request: ExchangeRequest {
-            method: req_method,
-            uri: req_uri,
-            headers: req_headers,
-            body: req_body,
-        },
-        response: ExchangeResponse {
-            status: resp_parts.status,
-            headers: resp_parts.headers.clone(),
-            body: resp_body_bytes.clone(),
-        },
-        started_at,
-        wait_ms,
-        elapsed_ms,
-    };
+    tokio::spawn(async move {
+        let mut upstream_body = upstream_body;
+        let mut resp_buffer = Vec::new();
 
-    state.session_manager.touch(session_id);
-    state.registry.on_exchange(session_id, &exchange);
+        while let Some(frame_result) = upstream_body.frame().await {
+            match frame_result {
+                Ok(frame) => {
+                    if let Some(data) = frame.data_ref() {
+                        resp_buffer.extend_from_slice(data);
+                    }
+                    if tx.send(frame).await.is_err() {
+                        break; // Client disconnected
+                    }
+                }
+                Err(e) => {
+                    warn!("Upstream body error for {}: {}", domain_for_log, e);
+                    break;
+                }
+            }
+        }
 
-    // Build response back to client
-    let mut resp = hyper::Response::builder().status(resp_parts.status);
-    for (key, value) in &resp_parts.headers {
+        let elapsed_ms = request_instant.elapsed().as_millis() as u64;
+
+        // Drop the HTTP sender to close the upstream connection. Without this,
+        // HTTP/1.1 keepalive holds the TCP+TLS fd open until the upstream's idle
+        // timeout fires — leaking fds under load.
+        drop(sender);
+
+        let exchange = HttpExchange {
+            request: ExchangeRequest {
+                method: req_method,
+                uri: req_uri,
+                headers: req_headers,
+                body: req_body,
+            },
+            response: ExchangeResponse {
+                status: resp_status,
+                headers: record_headers,
+                body: Bytes::from(resp_buffer),
+            },
+            started_at,
+            wait_ms,
+            elapsed_ms,
+        };
+
+        state_owned.session_manager.touch(&session_id_owned);
+        state_owned.registry.on_exchange(&session_id_owned, &exchange);
+    });
+
+    // Return streaming response immediately
+    let mut resp = hyper::Response::builder().status(resp_status);
+    for (key, value) in &resp_headers {
         resp = resp.header(key, value);
     }
-    let resp = resp.body(Full::new(resp_body_bytes))?;
-
-    Ok(resp)
+    Ok(resp.body(RelayResponseBody::Streaming(RelayBody { rx }))?)
 }
