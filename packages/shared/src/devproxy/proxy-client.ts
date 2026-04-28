@@ -1,0 +1,157 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+/**
+ * ProxyClient — common interface for DevProxy and Gateway proxy backends.
+ *
+ * Workers use this interface to start/stop recording and collect HAR data.
+ * The concrete implementation is selected by {@link createProxyClient}.
+ */
+
+import { writeFile, readFile, access } from "node:fs/promises";
+import { parseHarFile, extractToolCalls, extractTokenUsage, extractAiCallCount } from "../har/har-parser.js";
+import type { HarFile } from "../har/types.js";
+import type { TokenUsage, WorkerLogFn } from "../types/types.js";
+
+const POLL_INTERVAL_MS = 500;
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+/** Result returned by {@link ProxyClient.stopAndCollectHar}. */
+export interface HarCollectionResult {
+  harFilePath: string | null;
+  tokenUsage?: TokenUsage;
+  aiCallCount?: number;
+}
+
+/**
+ * Common proxy client interface implemented by DevProxyClient and GatewayClient.
+ */
+export interface ProxyClient {
+  /** Which backend this client talks to. */
+  readonly backend: "devproxy" | "gateway";
+  /** The base API URL for the proxy. */
+  readonly apiUrl: string;
+
+  /** Wait for the proxy to become ready. */
+  waitForReady(timeoutMs?: number): Promise<void>;
+
+  /** Download the CA certificate and write it to disk. */
+  downloadCertificate(outputPath: string): Promise<void>;
+
+  /** Create a combined CA bundle (system + proxy cert). */
+  createCombinedCaBundle(proxyCertPath: string, outputPath: string): Promise<string>;
+
+  /** Start recording / session. */
+  startRecording(): Promise<void>;
+
+  /** Stop recording / session, collect HAR, extract metadata. */
+  stopAndCollectHar(log: WorkerLogFn): Promise<HarCollectionResult>;
+}
+
+/**
+ * Check whether proxy integration is enabled via environment variable.
+ */
+export function isProxyEnabled(): boolean {
+  return !!process.env.DEV_PROXY_ENABLED;
+}
+
+// =============================================================================
+// Shared helpers used by both DevProxyClient and GatewayClient
+// =============================================================================
+
+export async function waitForProxyReady(
+  apiUrl: string,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${apiUrl}/proxy`);
+      if (response.ok) return;
+    } catch {
+      // Not ready yet
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(`Proxy did not become ready within ${timeoutMs}ms at ${apiUrl}`);
+}
+
+export async function downloadProxyCertificate(
+  apiUrl: string,
+  outputPath: string,
+): Promise<void> {
+  try {
+    await access(outputPath);
+    return; // Already exists
+  } catch {
+    // Download it
+  }
+
+  const response = await fetch(`${apiUrl}/proxy/rootCertificate?format=crt`);
+  if (!response.ok) {
+    throw new Error(`Failed to download certificate: ${response.status} ${response.statusText}`);
+  }
+  const certData = await response.text();
+  await writeFile(outputPath, certData, "utf-8");
+}
+
+export async function createCombinedCaBundle(
+  proxyCertPath: string,
+  outputPath: string,
+): Promise<string> {
+  try {
+    await access(outputPath);
+    return outputPath; // Already exists
+  } catch {
+    // Create it
+  }
+
+  const proxyCert = await readFile(proxyCertPath, "utf-8");
+
+  const systemCaBundlePaths = [
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/ca-bundle.pem",
+    "/etc/ssl/cert.pem",
+  ];
+
+  let systemCerts = "";
+  for (const bundlePath of systemCaBundlePaths) {
+    try {
+      systemCerts = await readFile(bundlePath, "utf-8");
+      break;
+    } catch {
+      // Try next
+    }
+  }
+
+  const combined = systemCerts
+    ? `${systemCerts.trimEnd()}\n${proxyCert}`
+    : proxyCert;
+
+  await writeFile(outputPath, combined, "utf-8");
+  return outputPath;
+}
+
+export async function extractHarMetadata(
+  har: HarFile,
+  harFilePath: string | null,
+  log: WorkerLogFn,
+): Promise<HarCollectionResult> {
+  const toolCalls = extractToolCalls(har);
+  await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
+    toolCallCount: toolCalls.length,
+    toolNames: toolCalls.map((tc) => tc.name),
+  });
+  const tokenUsage = extractTokenUsage(har) ?? undefined;
+  if (tokenUsage) {
+    await log("info", `Token usage: ${tokenUsage.promptTokens} prompt, ${tokenUsage.completionTokens} completion, ${tokenUsage.totalTokens} total`);
+  }
+  const aiCallCount = extractAiCallCount(har);
+  await log("info", `AI call count: ${aiCallCount}`);
+  return { harFilePath, tokenUsage, aiCallCount };
+}
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
