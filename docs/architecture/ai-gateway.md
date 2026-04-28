@@ -255,6 +255,28 @@ gateway:
 
 Workers connect via `HTTP_PROXY=http://gateway:18000` and `DEV_PROXY_API_URL=http://gateway:18897`.
 
+## Kubernetes Deployment
+
+The gateway runs as a standalone Deployment (not a sidecar) in the `scoped` namespace:
+
+- **2 replicas** for high availability
+- **Service** with `sessionAffinity: ClientIP` (10 min timeout) — ensures a worker's API calls and proxy traffic hit the same gateway pod
+- **Resources**: 100m CPU / 128Mi memory (requests), 500m CPU / 512Mi memory (limits) per pod
+
+Workers that use the gateway (currently VS Code Electron) have their DevProxy sidecar **removed entirely**. The worker pod drops from 3 containers to 1, and proxy URLs point to the gateway Service:
+
+```yaml
+env:
+  - name: PROXY_BACKEND
+    value: "gateway"
+  - name: DEV_PROXY_API_URL
+    value: "http://gateway-service.scoped.svc.cluster.local:18897"
+  - name: HTTP_PROXY
+    value: "http://gateway-service.scoped.svc.cluster.local:18000"
+```
+
+**Manifests:** [`deploy/base/gateway.yaml`](../../deploy/base/gateway.yaml), [`deploy/base/gateway-config.yaml`](../../deploy/base/gateway-config.yaml)
+
 ## Future Plugins
 
 | Phase | Plugin | Purpose |
