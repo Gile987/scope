@@ -56,7 +56,7 @@ async fn har_plugin_lifecycle() {
     // Create session with HAR settings
     let resp = client
         .post(gw.api_url("/api/v1/sessions"))
-        .json(&serde_json::json!({"plugins": {"har": {"redactSensitiveHeaders": true}}}))
+        .json(&serde_json::json!({"plugins": {"har": {"redactCredentials": true}}}))
         .send()
         .await
         .unwrap();

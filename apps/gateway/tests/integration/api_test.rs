@@ -19,7 +19,7 @@ async fn session_lifecycle() {
     // POST /api/v1/sessions — create session
     let resp = client
         .post(gw.api_url("/api/v1/sessions"))
-        .json(&serde_json::json!({"plugins": {"har": {"redactSensitiveHeaders": true}}}))
+        .json(&serde_json::json!({"plugins": {"har": {"redactCredentials": true}}}))
         .send()
         .await
         .unwrap();

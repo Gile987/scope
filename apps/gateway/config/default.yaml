@@ -11,4 +11,4 @@ logLevel: info
 defaultPluginSettings:
   har:
     outputDir: /tmp/scope-gateway/har-output
-    redactSensitiveHeaders: true
+    redactCredentials: true

@@ -229,12 +229,12 @@ mod tests {
         let mut settings = HashMap::new();
         settings.insert(
             "capture".to_string(),
-            serde_json::json!({"redactSensitiveHeaders": false}),
+            serde_json::json!({"redactCredentials": false}),
         );
         registry.on_session_start(&"10.0.0.1".to_string(), &settings);
 
         let captured = plugin.captured.lock().unwrap().clone().unwrap();
-        assert_eq!(captured["redactSensitiveHeaders"], false);
+        assert_eq!(captured["redactCredentials"], false);
     }
 
     #[test]
