@@ -18,8 +18,8 @@ EXPOSE 18000 18897
 CMD ["cargo", "watch", "-x", "run -- --config /config/proxy.yaml --port 18000 --api-port 18897 --cert-dir /tmp/scope-gateway/certs"]
 
 # Runtime stage
-FROM scratch
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/gateway /gateway
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/gateway /usr/local/bin/gateway
 EXPOSE 18000 18897
-ENTRYPOINT ["/gateway", "--config", "/config/proxy.yaml"]
+ENTRYPOINT ["gateway", "--config", "/config/proxy.yaml"]
