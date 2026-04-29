@@ -74,7 +74,7 @@ services:
 
   # Redis (pub/sub for real-time log streaming)
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.2-alpine
     ports:
       - "${REDIS_PORT:-6300}:6379"
     healthcheck:
@@ -86,7 +86,7 @@ services:
   # Lowkey Vault (Azure Key Vault emulator)
   # Persists vault state via export/import. On first start, seeds from import.json.hbs.
   lowkey-vault:
-    image: nagyesta/lowkey-vault:7.1.13-ubi10-minimal
+    image: nagyesta/lowkey-vault:7.2.0-ubi10-minimal
     ports:
       - "${LOWKEY_VAULT_PORT:-8400}:8443"
     environment:
@@ -116,7 +116,7 @@ services:
 
   # Azurite (Azure Storage emulator - queues + blobs)
   azurite:
-    image: mcr.microsoft.com/azure-storage/azurite
+    image: mcr.microsoft.com/azure-storage/azurite:3.29.0
     ports:
       - "${AZURITE_BLOB_PORT:-10100}:10000" # Blob
       - "${AZURITE_QUEUE_PORT:-10200}:10001" # Queue
