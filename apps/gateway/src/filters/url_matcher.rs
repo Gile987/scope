@@ -41,14 +41,17 @@ impl UrlFilter {
             let pattern_str = p.as_str();
             // Extract host from pattern like "https://api.github.com/*"
             if let Some(rest) = pattern_str.strip_prefix("https://") {
-                let pattern_host = rest.split('/').next().unwrap_or("");
-                // Strip port from connect host
+                let pattern_host_port = rest.split('/').next().unwrap_or("");
+                // Strip port from both pattern and connect host so that
+                // "https://localhost:*" matches CONNECT to "localhost:12345"
+                let pattern_host = pattern_host_port.split(':').next().unwrap_or(pattern_host_port);
                 let connect_host = host.split(':').next().unwrap_or(host);
                 Pattern::new(pattern_host)
                     .map(|hp| hp.matches(connect_host))
                     .unwrap_or(false)
             } else if let Some(rest) = pattern_str.strip_prefix("http://") {
-                let pattern_host = rest.split('/').next().unwrap_or("");
+                let pattern_host_port = rest.split('/').next().unwrap_or("");
+                let pattern_host = pattern_host_port.split(':').next().unwrap_or(pattern_host_port);
                 let connect_host = host.split(':').next().unwrap_or(host);
                 Pattern::new(pattern_host)
                     .map(|hp| hp.matches(connect_host))
@@ -103,6 +106,19 @@ mod tests {
         assert!(filter.matches_host("api.githubcopilot.com:443"));
         assert!(filter.matches_host("proxy.githubcopilot.com:443"));
         assert!(!filter.matches_host("api.openai.com:443"));
+    }
+
+    #[test]
+    fn host_matching_with_port_wildcard() {
+        // Pattern like "https://localhost:*" should match CONNECT to any port
+        let filter = UrlFilter::new(&["https://localhost:*/*".into()]).unwrap();
+        assert!(filter.matches_host("localhost:12345"));
+        assert!(filter.matches_host("localhost:443"));
+        assert!(!filter.matches_host("other.com:443"));
+
+        // Also works with just "https://localhost:*"
+        let filter2 = UrlFilter::new(&["https://localhost:*".into()]).unwrap();
+        assert!(filter2.matches_host("localhost:9999"));
     }
 
     #[test]
