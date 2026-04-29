@@ -6,3 +6,4 @@ mod api_test;
 mod proxy_test;
 mod tls_test;
 mod plugin_test;
+mod e2e_test;
