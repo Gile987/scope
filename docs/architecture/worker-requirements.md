@@ -137,20 +137,27 @@ The Token Manager provides round-robin distribution, automatic validation, and s
 
 ### 6. Capture HAR files
 
-Workers should capture HTTP traffic using the **DevProxy sidecar** pattern. HAR (HTTP Archive) files enable analysis of tool calls, API usage patterns, and token consumption.
+Workers should capture HTTP traffic using a **proxy-based** approach. HAR (HTTP Archive) files enable analysis of tool calls, API usage patterns, and token consumption.
+
+Two proxy backends are available, selected via the `createProxyClient()` factory:
+
+| Backend | Set via | Description |
+|---------|---------|-------------|
+| **AI Gateway** (default) | `PROXY_BACKEND=gateway` | Shared Rust TLS-intercepting proxy with plugin architecture. Single centralized service replaces per-worker sidecars. |
+| **DevProxy** (legacy) | `PROXY_BACKEND=devproxy` | .NET DevProxy sidecar. One per worker. Used by CLI-based workers. |
 
 ```typescript
-import { DevProxyClient } from "shared";
+import { createProxyClient } from "shared";
 
-if (DevProxyClient.isEnabled()) {
-  const devProxy = new DevProxyClient();
-  await devProxy.waitForReady();
-  await devProxy.downloadCertificate("/tmp/dev-proxy-ca.crt");
-  await devProxy.startRecording();
+const proxyClient = createProxyClient(log);
+if (proxyClient) {
+  await proxyClient.waitForReady();
+  await proxyClient.downloadCertificate("/tmp/proxy-ca.crt");
+  await proxyClient.startRecording();
 
   // ... run the agent ...
 
-  const { harFilePath, tokenUsage } = await devProxy.stopAndCollectHar(log);
+  const { harFilePath, tokenUsage } = await proxyClient.stopAndCollectHar(log);
   return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }) };
 }
 ```
@@ -159,11 +166,12 @@ The queue processor automatically sanitizes HAR files (strips credentials) befor
 
 HAR files are parsed to extract `ToolCall[]` data (tool name, arguments, timestamps) for analytics. The `stopAndCollectHar()` method also extracts `TokenUsage` from HAR entries, enabling token usage reporting without agent-specific instrumentation.
 
-For native CLI binaries that don't honor `NODE_EXTRA_CA_CERTS` (e.g., the Copilot CLI binary), workers should create a combined CA bundle using `devProxy.createCombinedCaBundle()` and inject it via `SSL_CERT_FILE`.
+For native CLI binaries that don't honor `NODE_EXTRA_CA_CERTS` (e.g., the Copilot CLI binary), workers should create a combined CA bundle using `proxyClient.createCombinedCaBundle()` and inject it via `SSL_CERT_FILE`.
 
 **When required:** All CLI-based workers (Copilot, Claude Code) and desktop workers (VS Code Electron) should support HAR capture. Browser-based workers (VS Code Web) may use alternative approaches.
 
-**Source:** [`packages/shared/src/har/`](../../packages/shared/src/har/) — HAR parsing and sanitization.
+**Source:** [`packages/shared/src/har/`](../../packages/shared/src/har/) — HAR parsing and sanitization.  
+**Source:** [`docs/design/rust-tls-proxy.md`](../design/rust-tls-proxy.md) — AI Gateway design document.
 
 ---
 

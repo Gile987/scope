@@ -365,6 +365,31 @@ services:
       api:
         condition: service_started
 
+  # ===========================================================================
+  # Gateway proxy (shared TLS-intercepting HTTP proxy — replaces per-worker DevProxy)
+  # Enable with: PROXY_BACKEND=gateway
+  # ===========================================================================
+  gateway:
+    build:
+      context: ./apps/gateway
+      dockerfile: Dockerfile
+    profiles: [gateway, vscode-electron-driver-ext]
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - ./apps/gateway/config/default.yaml:/config/proxy.yaml:ro
+      - gateway_cert:/certs
+    ports:
+      - "${GATEWAY_API_PORT:-18900}:18897"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18897/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+
   # Claude Code worker (via ACP)
   coder-acp-claude-code:
     build:
@@ -411,7 +436,7 @@ services:
       - claude_har_output:/har-output
       - claude_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
     ports:
-      - "${DEVPROXY_CLAUDE_API_PORT:-18801}:18897"
+      - "${DEVPROXY_CLAUDE_API_PORT:-19000}:18897"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:18897/proxy"]
       interval: 5s
@@ -499,7 +524,7 @@ services:
       - copilot_har_output:/har-output
       - copilot_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
     ports:
-      - "${DEVPROXY_API_PORT:-18800}:18897"
+      - "${DEVPROXY_COPILOT_API_PORT:-18800}:18897"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:18897/proxy"]
       interval: 5s
@@ -543,37 +568,6 @@ services:
       retries: 5
       start_period: 10s
 
-  devproxy-vscode-electron:
-    image: ghcr.io/dotnet/dev-proxy:2.1.0
-    profiles: [vscode-electron-driver-ext]
-    user: "1000:1000"
-    working_dir: /har-output
-    command: ["--config-file", "/config/devproxyrc.json", "--record"]
-    volumes:
-      - vscode_electron_har_output:/har-output
-      - vscode_electron_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:18897/proxy"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
-    depends_on:
-      devproxy-vscode-electron-init:
-        condition: service_completed_successfully
-
-  devproxy-vscode-electron-init:
-    image: busybox:1.37
-    profiles: [vscode-electron-driver-ext]
-    command:
-      [
-        "sh",
-        "-c",
-        "echo 'Fixing volume ownership for UID 1000...' && chown -v 1000:1000 /har-output /certs /workspace && chmod -v 775 /har-output /certs /workspace && echo 'Done'",
-      ]
-    volumes:
-      - vscode_electron_har_output:/har-output
-      - vscode_electron_devproxy_cert:/certs
 
   # Report Generator worker (LLM-powered run reports via Copilot SDK)
   report-generator:
@@ -604,14 +598,13 @@ volumes:
   mongodb_data:
   azurite_data:
   lowkey_vault_data:
+  gateway_cert:
   copilot_har_output:
   copilot_devproxy_cert:
   copilot_workspace:
   claude_har_output:
   claude_devproxy_cert:
   claude_workspace:
-  vscode_electron_har_output:
-  vscode_electron_devproxy_cert:
 
 networks:
   default:

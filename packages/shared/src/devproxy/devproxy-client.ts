@@ -10,8 +10,10 @@
 
 import { writeFile, readFile, access, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { parseHarFile, extractToolCalls, extractTokenUsage, extractAiCallCount } from "../har/har-parser.js";
-import type { TokenUsage, WorkerLogFn } from "../types/types.js";
+import { parseHarFile } from "../har/har-parser.js";
+import { extractHarMetadata } from "../har/extract-metadata.js";
+import type { HarCollectionResult } from "../har/extract-metadata.js";
+import type { WorkerLogFn } from "../types/types.js";
 
 const DEFAULT_API_URL = "http://localhost:18897";
 const DEFAULT_HAR_DIR = "/har-output";
@@ -21,13 +23,6 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 export interface DevProxyInfo {
   recording: boolean;
   configFile: string;
-}
-
-/** Result returned by {@link DevProxyClient.stopAndCollectHar}. */
-export interface HarCollectionResult {
-  harFilePath: string | null;
-  tokenUsage?: TokenUsage;
-  aiCallCount?: number;
 }
 
 export class DevProxyClient {
@@ -237,18 +232,7 @@ export class DevProxyClient {
       const harFilePath = await this.getLatestHarFile();
       if (harFilePath) {
         const har = await parseHarFile(harFilePath);
-        const toolCalls = extractToolCalls(har);
-        await log("info", `Extracted ${toolCalls.length} tool calls from HAR`, {
-          toolCallCount: toolCalls.length,
-          toolNames: toolCalls.map((tc) => tc.name),
-        });
-        const tokenUsage = extractTokenUsage(har) ?? undefined;
-        if (tokenUsage) {
-          await log("info", `Token usage: ${tokenUsage.promptTokens} prompt, ${tokenUsage.completionTokens} completion, ${tokenUsage.totalTokens} total`);
-        }
-        const aiCallCount = extractAiCallCount(har);
-        await log("info", `AI call count: ${aiCallCount}`);
-        return { harFilePath, tokenUsage, aiCallCount };
+        return extractHarMetadata(har, harFilePath, log);
       }
       await log("warn", "No HAR file found after DevProxy recording");
     } catch (error) {
