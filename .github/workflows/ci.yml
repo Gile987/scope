@@ -574,7 +574,7 @@ jobs:
             dockerfile: packages/db-migrations/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
           - name: gateway
-            dockerfile: Dockerfile
+            dockerfile: apps/gateway/Dockerfile
             context: apps/gateway
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.gateway == 'true') && 'true' || 'false' }}
         exclude:
