@@ -25,7 +25,6 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Frame, Incoming};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -178,18 +177,9 @@ async fn relay_request_inner(
     let upstream_uri: hyper::Uri = uri_str.parse()?;
 
     // Phase 2: Connect to the real upstream with genuine TLS.
-    // We use webpki's bundled Mozilla root certs for validation.
     let upstream_tcp = TcpStream::connect(format!("{}:{}", domain, port)).await?;
 
-    // Root cert store is rebuilt per request — cheap since webpki_roots are static.
-    // Sharing a single ClientConfig across requests would save ~1µs but complicate
-    // the ownership model for minimal gain.
-    let mut root_store = rustls::RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let client_config = ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-    let connector = TlsConnector::from(Arc::new(client_config));
+    let connector = TlsConnector::from(state.upstream_tls_config.clone());
 
     let server_name = rustls::pki_types::ServerName::try_from(domain.to_string())?;
     let upstream_tls = connector.connect(server_name, upstream_tcp).await?;

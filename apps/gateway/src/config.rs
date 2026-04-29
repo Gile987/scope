@@ -37,6 +37,10 @@ pub struct Cli {
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, name = "log-level")]
     pub log_level: Option<String>,
+
+    /// Paths to PEM files with additional CA certificates for upstream TLS (repeatable)
+    #[arg(long = "additional-ca-certs")]
+    pub additional_ca_certs: Vec<PathBuf>,
 }
 
 /// Gateway configuration loaded from YAML, with defaults and CLI overrides.
@@ -60,6 +64,13 @@ pub struct Config {
 
     #[serde(default)]
     pub default_plugin_settings: HashMap<String, serde_json::Value>,
+
+    /// Paths to PEM files with additional CA certificates trusted for upstream
+    /// TLS connections. Each file may contain one or more PEM-encoded certs.
+    /// Useful for local testing with self-signed certs and corporate environments
+    /// with TLS inspection proxies.
+    #[serde(default)]
+    pub additional_ca_certs: Vec<PathBuf>,
 }
 
 fn default_urls_to_watch() -> Vec<String> {
@@ -91,6 +102,7 @@ impl Default for Config {
             cert_dir: default_cert_dir(),
             log_level: default_log_level(),
             default_plugin_settings: HashMap::new(),
+            additional_ca_certs: Vec::new(),
         }
     }
 }
@@ -120,6 +132,9 @@ impl Config {
         if let Some(log_level) = &cli.log_level {
             config.log_level = log_level.clone();
         }
+        if !cli.additional_ca_certs.is_empty() {
+            config.additional_ca_certs = cli.additional_ca_certs.clone();
+        }
 
         Ok(config)
     }
@@ -133,6 +148,26 @@ impl Config {
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/tmp/scope-gateway/har-output"))
+    }
+
+    /// Build a rustls `RootCertStore` containing Mozilla roots plus any
+    /// additional CA certificates from `additionalCaCerts` PEM files.
+    pub fn upstream_root_store(&self) -> anyhow::Result<rustls::RootCertStore> {
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+        for path in &self.additional_ca_certs {
+            let pem_data = std::fs::read(path)
+                .map_err(|e| anyhow::anyhow!("Failed to read additional CA certs {:?}: {}", path, e))?;
+            let certs = rustls_pemfile::certs(&mut &pem_data[..])
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| anyhow::anyhow!("Failed to parse PEM from {:?}: {}", path, e))?;
+            for cert in &certs {
+                root_store.add(cert.clone())?;
+            }
+        }
+
+        Ok(root_store)
     }
 }
 
@@ -185,6 +220,7 @@ defaultPluginSettings:
             api_port: Some(7778),
             cert_dir: None,
             log_level: Some("debug".to_string()),
+            additional_ca_certs: vec![],
         };
         let config = Config::load(&cli).unwrap();
         assert_eq!(config.port, 7777);
@@ -211,6 +247,7 @@ defaultPluginSettings:
             api_port: None,
             cert_dir: None,
             log_level: None,
+            additional_ca_certs: vec![],
         };
         assert!(Config::load(&cli).is_err());
     }

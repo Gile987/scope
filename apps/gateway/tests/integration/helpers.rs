@@ -17,7 +17,6 @@ use gateway::plugin::PluginRegistry;
 use gateway::plugins::har::plugin::{HarPlugin, har_session_router};
 use gateway::proxy::handler::{ProxyState, handle_client};
 use gateway::session::SessionManager;
-
 use tokio::net::TcpListener;
 
 /// A fully wired test gateway that can be torn down after each test.
@@ -59,12 +58,22 @@ impl TestGateway {
             .pool_idle_timeout(Duration::from_secs(5))
             .pool_max_idle_per_host(2)
             .build_http();
+
+        let mut upstream_root_store = rustls::RootCertStore::empty();
+        upstream_root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let upstream_tls_config = Arc::new(
+            rustls::ClientConfig::builder()
+                .with_root_certificates(upstream_root_store)
+                .with_no_client_auth(),
+        );
+
         let proxy_state = Arc::new(ProxyState {
             session_manager: session_manager.clone(),
             registry: registry.clone(),
             ca: ca.clone(),
             url_filter,
             http_client,
+            upstream_tls_config,
         });
 
         // Bind proxy on ephemeral port

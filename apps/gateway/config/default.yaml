@@ -4,6 +4,8 @@ urlsToWatch:
   - "https://api.githubcopilot.com/*"
   - "https://*.githubcopilot.com/*"
   - "https://api.anthropic.com/*"
+  - "http://localhost:9999/*"
+  - "https://localhost:9443/*"
 port: 18000
 apiPort: 18897
 certDir: /tmp/scope-gateway/certs

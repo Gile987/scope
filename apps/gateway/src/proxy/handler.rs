@@ -89,6 +89,9 @@ pub struct ProxyState {
     /// Shared HTTP/1.1 client for plain (non-CONNECT) forwarding.
     /// Using a single client avoids creating a new connection pool per request.
     pub http_client: Client<HttpConnector, Full<Bytes>>,
+    /// Pre-built TLS config for upstream connections (MITM relay).
+    /// Contains Mozilla roots + any additional CA certs from config.
+    pub upstream_tls_config: Arc<rustls::ClientConfig>,
 }
 
 /// Handle a single client connection on the proxy port.

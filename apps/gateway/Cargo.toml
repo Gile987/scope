@@ -11,6 +11,7 @@ hyper-util = { version = "0.1", features = ["tokio", "http1", "http2", "client-l
 http-body-util = "0.1"
 axum = "0.8"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
+rustls-pemfile = "2"
 tokio-rustls = "0.26"
 rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
 anyhow = "1"

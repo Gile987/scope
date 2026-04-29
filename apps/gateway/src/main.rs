@@ -71,12 +71,26 @@ async fn main() -> anyhow::Result<()> {
         .pool_idle_timeout(Duration::from_secs(30))
         .pool_max_idle_per_host(4)
         .build_http();
+
+    // Pre-built TLS config for upstream connections (MITM relay).
+    // Contains Mozilla roots + any additional CA certs from config.
+    let upstream_root_store = config.upstream_root_store()?;
+    let upstream_tls_config = Arc::new(
+        rustls::ClientConfig::builder()
+            .with_root_certificates(upstream_root_store)
+            .with_no_client_auth(),
+    );
+    if !config.additional_ca_certs.is_empty() {
+        info!("Loaded additional CA certs from {:?}", config.additional_ca_certs);
+    }
+
     let proxy_state = Arc::new(ProxyState {
         session_manager: session_manager.clone(),
         registry: registry.clone(),
         ca: ca.clone(),
         url_filter,
         http_client,
+        upstream_tls_config,
     });
 
     // API state
