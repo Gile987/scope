@@ -574,7 +574,8 @@ jobs:
             dockerfile: packages/db-migrations/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
           - name: gateway
-            dockerfile: apps/gateway/Dockerfile
+            dockerfile: Dockerfile
+            context: apps/gateway
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.gateway == 'true') && 'true' || 'false' }}
         exclude:
           - image:
@@ -676,7 +677,7 @@ jobs:
             --build-arg BUILD_TIME=${{ steps.tags.outputs.build_time }} \
             ${{ steps.versions.outputs.extra_args }} \
             --file "${{ matrix.image.dockerfile }}" \
-            .
+            ${{ matrix.image.context || '.' }}
 
   # ---------------------------------------------------------------------------
   # Summary

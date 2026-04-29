@@ -371,8 +371,8 @@ services:
   # ===========================================================================
   gateway:
     build:
-      context: .
-      dockerfile: apps/gateway/Dockerfile
+      context: ./apps/gateway
+      dockerfile: Dockerfile
     profiles: [gateway, vscode-electron-driver-ext]
     ulimits:
       nofile:
