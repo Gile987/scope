@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 
 /// CLI arguments parsed by clap.
 #[derive(Parser, Debug)]
-#[command(name = "gateway", about = "TLS-intercepting HTTP proxy with plugin architecture")]
+#[command(
+    name = "gateway",
+    about = "TLS-intercepting HTTP proxy with plugin architecture"
+)]
 pub struct Cli {
     /// Path to YAML config file
     #[arg(long, short)]
@@ -146,8 +149,9 @@ impl Config {
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
         for path in &self.additional_ca_certs {
-            let pem_data = std::fs::read(path)
-                .map_err(|e| anyhow::anyhow!("Failed to read additional CA certs {:?}: {}", path, e))?;
+            let pem_data = std::fs::read(path).map_err(|e| {
+                anyhow::anyhow!("Failed to read additional CA certs {:?}: {}", path, e)
+            })?;
             let certs = rustls_pemfile::certs(&mut &pem_data[..])
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| anyhow::anyhow!("Failed to parse PEM from {:?}: {}", path, e))?;

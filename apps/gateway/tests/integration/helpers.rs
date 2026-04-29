@@ -15,7 +15,7 @@ use gateway::ca::CertificateAuthority;
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
 use gateway::plugins::har::plugin::HarPlugin;
-use gateway::proxy::handler::{ProxyState, handle_client};
+use gateway::proxy::handler::{handle_client, ProxyState};
 use gateway::session::SessionManager;
 use tokio::net::TcpListener;
 
@@ -45,7 +45,8 @@ impl TestGateway {
         let ca = Arc::new(CertificateAuthority::new(&cert_dir, 100).unwrap());
         let url_strs: Vec<String> = urls.iter().map(|s| s.to_string()).collect();
         let url_filter = Arc::new(UrlFilter::new(&url_strs).unwrap());
-        let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = Arc::new(HarPlugin::new(har_dir.clone()));
+        let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> =
+            Arc::new(HarPlugin::new(har_dir.clone()));
         let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
         let session_manager = Arc::new(SessionManager::new(
             registry.clone(),
@@ -182,8 +183,11 @@ pub struct TestHttpsBackend {
 
 /// Route handler type: receives the request path, returns (status, headers, body).
 type RouteHandler = Box<
-    dyn Fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = (u16, Vec<(String, String)>, Vec<u8>)> + Send>>
-        + Send
+    dyn Fn(
+            String,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = (u16, Vec<(String, String)>, Vec<u8>)> + Send>,
+        > + Send
         + Sync,
 >;
 
@@ -202,12 +206,16 @@ impl TestHttpsBackend {
 
         tokio::spawn(async move {
             loop {
-                let Ok((stream, _)) = listener.accept().await else { break };
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
                 let acceptor = tls_acceptor.clone();
                 let handler = handler.clone();
 
                 tokio::spawn(async move {
-                    let Ok(tls_stream) = acceptor.accept(stream).await else { return };
+                    let Ok(tls_stream) = acceptor.accept(stream).await else {
+                        return;
+                    };
                     let io = TokioIo::new(tls_stream);
 
                     let handler = handler.clone();
@@ -257,7 +265,10 @@ impl hyper::body::Body for SseBody {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
-        self.get_mut().rx.poll_recv(cx).map(|opt| opt.map(|b| Ok(hyper::body::Frame::data(b))))
+        self.get_mut()
+            .rx
+            .poll_recv(cx)
+            .map(|opt| opt.map(|b| Ok(hyper::body::Frame::data(b))))
     }
 }
 
@@ -280,12 +291,16 @@ impl TestSseBackend {
 
         tokio::spawn(async move {
             loop {
-                let Ok((stream, _)) = listener.accept().await else { break };
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
                 let acceptor = tls_acceptor.clone();
                 let events = events.clone();
 
                 tokio::spawn(async move {
-                    let Ok(tls_stream) = acceptor.accept(stream).await else { return };
+                    let Ok(tls_stream) = acceptor.accept(stream).await else {
+                        return;
+                    };
                     let io = TokioIo::new(tls_stream);
 
                     let events = events.clone();
@@ -345,7 +360,9 @@ impl TestHttpBackend {
 
         tokio::spawn(async move {
             loop {
-                let Ok((stream, _)) = listener.accept().await else { break };
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
                 let handler = handler.clone();
 
                 tokio::spawn(async move {

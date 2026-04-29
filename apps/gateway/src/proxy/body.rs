@@ -100,8 +100,7 @@ pub(crate) fn spawn_stream_and_record<B, F>(
     state: Arc<ProxyState>,
     log_target: String,
     on_complete: F,
-)
-where
+) where
     B: hyper::body::Body<Data = Bytes> + Send + 'static,
     B::Error: std::fmt::Display + Send,
     F: FnOnce() + Send + 'static,

@@ -44,14 +44,20 @@ impl UrlFilter {
                 let pattern_host_port = rest.split('/').next().unwrap_or("");
                 // Strip port from both pattern and connect host so that
                 // "https://localhost:*" matches CONNECT to "localhost:12345"
-                let pattern_host = pattern_host_port.split(':').next().unwrap_or(pattern_host_port);
+                let pattern_host = pattern_host_port
+                    .split(':')
+                    .next()
+                    .unwrap_or(pattern_host_port);
                 let connect_host = host.split(':').next().unwrap_or(host);
                 Pattern::new(pattern_host)
                     .map(|hp| hp.matches(connect_host))
                     .unwrap_or(false)
             } else if let Some(rest) = pattern_str.strip_prefix("http://") {
                 let pattern_host_port = rest.split('/').next().unwrap_or("");
-                let pattern_host = pattern_host_port.split(':').next().unwrap_or(pattern_host_port);
+                let pattern_host = pattern_host_port
+                    .split(':')
+                    .next()
+                    .unwrap_or(pattern_host_port);
                 let connect_host = host.split(':').next().unwrap_or(host);
                 Pattern::new(pattern_host)
                     .map(|hp| hp.matches(connect_host))

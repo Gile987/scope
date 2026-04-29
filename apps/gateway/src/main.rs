@@ -27,7 +27,7 @@ use gateway::config::{Cli, Config};
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
 use gateway::plugins::har::plugin::HarPlugin;
-use gateway::proxy::handler::{ProxyState, handle_client};
+use gateway::proxy::handler::{handle_client, ProxyState};
 use gateway::session::SessionManager;
 
 #[tokio::main]
@@ -82,7 +82,10 @@ async fn main() -> anyhow::Result<()> {
             .with_no_client_auth(),
     );
     if !config.additional_ca_certs.is_empty() {
-        info!("Loaded additional CA certs from {:?}", config.additional_ca_certs);
+        info!(
+            "Loaded additional CA certs from {:?}",
+            config.additional_ca_certs
+        );
     }
 
     let proxy_state = Arc::new(ProxyState {
@@ -124,7 +127,9 @@ async fn main() -> anyhow::Result<()> {
     // Start API server
     let api_port = config.api_port;
     let api_handle = tokio::spawn(async move {
-        if let Err(e) = gateway::api::server::run_api_server(api_state, api_port, plugin_routes).await {
+        if let Err(e) =
+            gateway::api::server::run_api_server(api_state, api_port, plugin_routes).await
+        {
             error!("API server error: {}", e);
         }
     });

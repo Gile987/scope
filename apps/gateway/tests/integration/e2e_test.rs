@@ -117,7 +117,10 @@ async fn https_intercept_captures_har() {
     // Request through the proxy (CONNECT → TLS MITM → backend)
     let client = proxy_client(gw.proxy_addr, &gw.ca.ca_cert_pem());
     let resp = client
-        .get(format!("https://localhost:{}/api/test", backend.addr.port()))
+        .get(format!(
+            "https://localhost:{}/api/test",
+            backend.addr.port()
+        ))
         .send()
         .await
         .unwrap();
@@ -151,8 +154,7 @@ async fn sse_streaming_not_buffered() {
     let gw = TestGateway::start(tmp.path().to_path_buf(), &["https://localhost:*"]).await;
 
     let events = vec!["event1".into(), "event2".into(), "event3".into()];
-    let backend =
-        TestSseBackend::start(&gw.ca, events.clone(), Duration::from_millis(80)).await;
+    let backend = TestSseBackend::start(&gw.ca, events.clone(), Duration::from_millis(80)).await;
 
     let api_client = reqwest::Client::new();
     let session_id = create_session(&api_client, &gw).await;
@@ -300,10 +302,7 @@ async fn large_response_streams_without_timeout() {
 
     let client = proxy_client(gw.proxy_addr, &gw.ca.ca_cert_pem());
     let resp = client
-        .get(format!(
-            "https://localhost:{}/large",
-            backend.addr.port()
-        ))
+        .get(format!("https://localhost:{}/large", backend.addr.port()))
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -321,5 +320,9 @@ async fn large_response_streams_without_timeout() {
 
     // Large binary body should be base64-encoded in HAR
     let encoding = entries[0]["response"]["content"]["encoding"].as_str();
-    assert_eq!(encoding, Some("base64"), "Large body should be base64 in HAR");
+    assert_eq!(
+        encoding,
+        Some("base64"),
+        "Large body should be base64 in HAR"
+    );
 }

@@ -15,8 +15,8 @@ use http::{Method, StatusCode};
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Frame, Incoming};
 use hyper::service::service_fn;
-use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
@@ -26,7 +26,9 @@ use tracing::{debug, warn};
 use crate::ca::CertificateAuthority;
 use crate::filters::UrlFilter;
 use crate::plugin::{PluginRegistry, SessionId};
-use crate::proxy::body::{ExchangeContext, StreamingBody, streaming_response, spawn_stream_and_record};
+use crate::proxy::body::{
+    spawn_stream_and_record, streaming_response, ExchangeContext, StreamingBody,
+};
 use crate::session::SessionManager;
 
 /// Shared state for the proxy handler.
@@ -86,7 +88,10 @@ async fn handle_request(
                 warn!("CONNECT error: {}", e);
                 Ok(hyper::Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
-                    .body(StreamingBody::Buffered(Full::new(Bytes::from(format!("CONNECT failed: {}", e)))))
+                    .body(StreamingBody::Buffered(Full::new(Bytes::from(format!(
+                        "CONNECT failed: {}",
+                        e
+                    )))))
                     .unwrap())
             }
         }
@@ -97,7 +102,10 @@ async fn handle_request(
                 warn!("HTTP forward error: {}", e);
                 Ok(hyper::Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
-                    .body(StreamingBody::Buffered(Full::new(Bytes::from(format!("Forward failed: {}", e)))))
+                    .body(StreamingBody::Buffered(Full::new(Bytes::from(format!(
+                        "Forward failed: {}",
+                        e
+                    )))))
                     .unwrap())
             }
         }
@@ -139,7 +147,10 @@ async fn handle_connect(
                     {
                         // Connection resets are expected when sessions are stopped mid-flight
                         let msg = e.to_string();
-                        if msg.contains("connection") || msg.contains("reset") || msg.contains("broken pipe") {
+                        if msg.contains("connection")
+                            || msg.contains("reset")
+                            || msg.contains("broken pipe")
+                        {
                             debug!("TLS interception ended for {}: {}", host, e);
                         } else {
                             warn!("TLS interception error for {}: {}", host, e);

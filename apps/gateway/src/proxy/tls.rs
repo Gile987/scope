@@ -29,7 +29,9 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::{debug, warn};
 
 use crate::plugin::SessionId;
-use crate::proxy::body::{ExchangeContext, StreamingBody, streaming_response, spawn_stream_and_record};
+use crate::proxy::body::{
+    spawn_stream_and_record, streaming_response, ExchangeContext, StreamingBody,
+};
 use crate::proxy::handler::ProxyState;
 
 /// Intercept a TLS connection: MITM with forged cert, relay, and notify plugins.
@@ -76,9 +78,7 @@ where
                 let state = state_clone.clone();
                 let sid = session_id_clone.clone();
                 let domain = domain_owned.clone();
-                async move {
-                    relay_request(req, &domain, port_owned, &sid, &state).await
-                }
+                async move { relay_request(req, &domain, port_owned, &sid, &state).await }
             }),
         )
         .await?;
@@ -100,7 +100,10 @@ async fn relay_request(
             warn!("Relay error for {}: {}", domain, e);
             Ok(hyper::Response::builder()
                 .status(502)
-                .body(StreamingBody::Buffered(Full::new(Bytes::from(format!("Upstream error: {}", e)))))
+                .body(StreamingBody::Buffered(Full::new(Bytes::from(format!(
+                    "Upstream error: {}",
+                    e
+                )))))
                 .unwrap())
         }
     }
@@ -124,7 +127,16 @@ async fn relay_request_inner(
     let req_headers = parts.headers.clone();
 
     // Build the full URI for the upstream request
-    let uri_str = format!("https://{}:{}{}", domain, port, parts.uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
+    let uri_str = format!(
+        "https://{}:{}{}",
+        domain,
+        port,
+        parts
+            .uri
+            .path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or("/")
+    );
     let upstream_uri: hyper::Uri = uri_str.parse()?;
 
     // Phase 2: Connect to the real upstream with genuine TLS.
@@ -151,7 +163,12 @@ async fn relay_request_inner(
     // Build upstream request
     let mut upstream_req = hyper::Request::builder()
         .method(&parts.method)
-        .uri(upstream_uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"))
+        .uri(
+            upstream_uri
+                .path_and_query()
+                .map(|pq| pq.as_str())
+                .unwrap_or("/"),
+        )
         .version(parts.version);
 
     for (key, value) in &parts.headers {
@@ -188,13 +205,20 @@ async fn relay_request_inner(
     };
 
     let state_owned = state.clone();
-    spawn_stream_and_record(upstream_body, tx, ctx, state.clone(), domain.to_string(), move || {
-        // Drop the HTTP sender to close the upstream connection. Without this,
-        // HTTP/1.1 keepalive holds the TCP+TLS fd open until the upstream's idle
-        // timeout fires — leaking fds under load.
-        drop(sender);
-        state_owned.session_manager.touch(&session_id_owned);
-    });
+    spawn_stream_and_record(
+        upstream_body,
+        tx,
+        ctx,
+        state.clone(),
+        domain.to_string(),
+        move || {
+            // Drop the HTTP sender to close the upstream connection. Without this,
+            // HTTP/1.1 keepalive holds the TCP+TLS fd open until the upstream's idle
+            // timeout fires — leaking fds under load.
+            drop(sender);
+            state_owned.session_manager.touch(&session_id_owned);
+        },
+    );
 
     streaming_response(resp_status, &resp_headers, rx)
 }

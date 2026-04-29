@@ -66,7 +66,9 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
     let receive_ms = (exchange.elapsed_ms as f64 - wait_ms).max(0.0);
 
     HarEntry {
-        started_date_time: exchange.started_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        started_date_time: exchange
+            .started_at
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         time: send_ms + wait_ms + receive_ms,
         request: HarRequest {
             method: req.method.to_string(),
@@ -81,11 +83,7 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
         },
         response: HarResponse {
             status: resp.status.as_u16(),
-            status_text: resp
-                .status
-                .canonical_reason()
-                .unwrap_or("")
-                .to_string(),
+            status_text: resp.status.canonical_reason().unwrap_or("").to_string(),
             http_version: "HTTP/1.1".into(),
             cookies: vec![],
             headers: response_headers,
@@ -304,10 +302,12 @@ mod tests {
         let entry = exchange_to_har_entry(&exchange, false);
 
         let t = &entry.timings;
-        let sum: f64 = [t.blocked, t.dns, t.connect, t.send, t.wait, t.receive, t.ssl]
-            .iter()
-            .filter(|&&v| v >= 0.0)
-            .sum();
+        let sum: f64 = [
+            t.blocked, t.dns, t.connect, t.send, t.wait, t.receive, t.ssl,
+        ]
+        .iter()
+        .filter(|&&v| v >= 0.0)
+        .sum();
 
         assert!(
             (entry.time - sum).abs() < 0.001,
@@ -328,9 +328,15 @@ mod tests {
         assert!(t.wait >= -1.0, "wait must be >= -1");
         assert!(t.receive >= -1.0, "receive must be >= -1");
         // Optional fields: -1 means not available
-        assert!(t.blocked == -1.0 || t.blocked >= 0.0, "blocked must be -1 or >= 0");
+        assert!(
+            t.blocked == -1.0 || t.blocked >= 0.0,
+            "blocked must be -1 or >= 0"
+        );
         assert!(t.dns == -1.0 || t.dns >= 0.0, "dns must be -1 or >= 0");
-        assert!(t.connect == -1.0 || t.connect >= 0.0, "connect must be -1 or >= 0");
+        assert!(
+            t.connect == -1.0 || t.connect >= 0.0,
+            "connect must be -1 or >= 0"
+        );
         assert!(t.ssl == -1.0 || t.ssl >= 0.0, "ssl must be -1 or >= 0");
         // wait should reflect actual TTFB
         assert!(t.wait >= 0.0, "wait (TTFB) should be non-negative");

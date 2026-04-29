@@ -47,7 +47,9 @@ impl From<&Session> for SessionInfo {
         Self {
             id: s.id.clone(),
             active: s.active,
-            started_at: s.started_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            started_at: s
+                .started_at
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         }
     }
 }
@@ -103,7 +105,8 @@ impl SessionManager {
 
         let session_id = Uuid::new_v4().to_string();
 
-        self.registry.on_session_start(&session_id, &plugin_settings);
+        self.registry
+            .on_session_start(&session_id, &plugin_settings);
 
         sessions.insert(
             session_id.clone(),
@@ -124,9 +127,7 @@ impl SessionManager {
     /// Stop a session. Notifies plugins to finalize.
     pub fn stop_session(&self, session_id: &SessionId) -> Result<(), SessionError> {
         let mut sessions = self.sessions.write();
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or(SessionError::NotFound)?;
+        let session = sessions.get_mut(session_id).ok_or(SessionError::NotFound)?;
 
         if !session.active {
             return Err(SessionError::NotActive);
@@ -164,10 +165,7 @@ impl SessionManager {
     /// Check if a session is active (for proxy handler to decide intercept vs passthrough).
     pub fn is_active(&self, session_id: &SessionId) -> bool {
         let sessions = self.sessions.read();
-        sessions
-            .get(session_id)
-            .map(|s| s.active)
-            .unwrap_or(false)
+        sessions.get(session_id).map(|s| s.active).unwrap_or(false)
     }
 
     /// Touch a session to reset its idle timer.

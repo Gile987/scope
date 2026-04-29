@@ -53,9 +53,11 @@ pub async fn post_create_session(
         .session_manager
         .create_session(client_ip, plugin_settings)
     {
-        Ok(session_id) => {
-            (StatusCode::CREATED, Json(SessionCreatedResponse { id: session_id })).into_response()
-        }
+        Ok(session_id) => (
+            StatusCode::CREATED,
+            Json(SessionCreatedResponse { id: session_id }),
+        )
+            .into_response(),
         Err(e) => (StatusCode::SERVICE_UNAVAILABLE, e.to_string()).into_response(),
     }
 }
@@ -73,9 +75,7 @@ pub struct SessionCreatedResponse {
 }
 
 /// GET /api/v1/sessions — list all sessions
-pub async fn get_list_sessions(
-    State(state): State<Arc<ApiState>>,
-) -> impl IntoResponse {
+pub async fn get_list_sessions(State(state): State<Arc<ApiState>>) -> impl IntoResponse {
     let sessions = state.session_manager.list_sessions();
     Json(sessions)
 }
@@ -127,18 +127,11 @@ pub async fn delete_session(
 }
 
 /// GET /api/v1/cacert — CA certificate in PEM format
-pub async fn get_cacert(
-    State(state): State<Arc<ApiState>>,
-) -> impl IntoResponse {
+pub async fn get_cacert(State(state): State<Arc<ApiState>>) -> impl IntoResponse {
     let pem = state.ca.ca_cert_pem();
 
     (
-        [(
-            axum::http::header::CONTENT_TYPE,
-            "application/x-pem-file",
-        )],
+        [(axum::http::header::CONTENT_TYPE, "application/x-pem-file")],
         pem,
     )
 }
-
-

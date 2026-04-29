@@ -36,24 +36,23 @@ impl CertificateAuthority {
         let cert_path = cert_dir.join("ca.crt");
         let key_path = cert_dir.join("ca.key");
 
-        let (ca_cert, ca_key, ca_cert_der, ca_cert_pem_str) = if cert_path.exists()
-            && key_path.exists()
-        {
-            let cert_pem = std::fs::read_to_string(&cert_path)?;
-            let key_pem = std::fs::read_to_string(&key_path)?;
-            let key = KeyPair::from_pem(&key_pem)?;
-            let params = CertificateParams::from_ca_cert_pem(&cert_pem)?;
-            let cert = params.self_signed(&key)?;
-            let der = CertificateDer::from(cert.der().to_vec());
-            (cert, key, der, cert_pem)
-        } else {
-            let (cert, key, der) = Self::generate_ca()?;
-            let pem = cert.pem();
-            std::fs::create_dir_all(cert_dir)?;
-            std::fs::write(&cert_path, &pem)?;
-            std::fs::write(&key_path, key.serialize_pem())?;
-            (cert, key, der, pem)
-        };
+        let (ca_cert, ca_key, ca_cert_der, ca_cert_pem_str) =
+            if cert_path.exists() && key_path.exists() {
+                let cert_pem = std::fs::read_to_string(&cert_path)?;
+                let key_pem = std::fs::read_to_string(&key_path)?;
+                let key = KeyPair::from_pem(&key_pem)?;
+                let params = CertificateParams::from_ca_cert_pem(&cert_pem)?;
+                let cert = params.self_signed(&key)?;
+                let der = CertificateDer::from(cert.der().to_vec());
+                (cert, key, der, cert_pem)
+            } else {
+                let (cert, key, der) = Self::generate_ca()?;
+                let pem = cert.pem();
+                std::fs::create_dir_all(cert_dir)?;
+                std::fs::write(&cert_path, &pem)?;
+                std::fs::write(&key_path, key.serialize_pem())?;
+                (cert, key, der, pem)
+            };
 
         let cache = Mutex::new(LruCache::new(
             std::num::NonZeroUsize::new(cache_size.max(1))
@@ -123,17 +122,13 @@ impl CertificateAuthority {
         let leaf_cert = params.signed_by(&leaf_key, &self.ca_cert, &self.ca_key)?;
 
         let leaf_cert_der = CertificateDer::from(leaf_cert.der().to_vec());
-        let leaf_key_der =
-            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
+        let leaf_key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
 
         // TLS requires the cert chain in order: leaf first, then issuing CA.
         // The client validates the leaf against the CA it already trusts.
         let config = ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(
-                vec![leaf_cert_der, self.ca_cert_der.clone()],
-                leaf_key_der,
-            )?;
+            .with_single_cert(vec![leaf_cert_der, self.ca_cert_der.clone()], leaf_key_der)?;
 
         Ok(config)
     }

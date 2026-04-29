@@ -92,9 +92,7 @@ impl HarPlugin {
 
     /// Extract HAR output directory from `defaultPluginSettings`.
     /// Falls back to `/tmp/scope-gateway/har-output` if not configured.
-    pub fn output_dir_from_settings(
-        settings: &HashMap<String, serde_json::Value>,
-    ) -> PathBuf {
+    pub fn output_dir_from_settings(settings: &HashMap<String, serde_json::Value>) -> PathBuf {
         settings
             .get("har")
             .and_then(|v| v.get("outputDir"))
@@ -131,10 +129,7 @@ impl ProxyPlugin for HarPlugin {
 
         // Create empty JSONL file
         if let Err(e) = std::fs::File::create(&jsonl_path) {
-            warn!(
-                "Failed to create JSONL file {:?}: {}",
-                jsonl_path, e
-            );
+            warn!("Failed to create JSONL file {:?}: {}", jsonl_path, e);
         }
 
         let mut sessions = self.inner.sessions.write();
@@ -172,10 +167,7 @@ impl ProxyPlugin for HarPlugin {
                 }
             }
             Err(e) => {
-                warn!(
-                    "Failed to append to JSONL {:?}: {}",
-                    session.jsonl_path, e
-                );
+                warn!("Failed to append to JSONL {:?}: {}", session.jsonl_path, e);
             }
         }
     }
@@ -214,7 +206,10 @@ async fn get_har(
     match inner.build_har_for_session(&session_id) {
         Some(har) => {
             let count = har.log.entries.len();
-            debug!("HAR plugin: returning {} entries for session {}", count, session_id);
+            debug!(
+                "HAR plugin: returning {} entries for session {}",
+                count, session_id
+            );
             Json(har).into_response()
         }
         None => {
@@ -335,10 +330,7 @@ mod tests {
         let plugin = HarPlugin::new(tmp.path().to_path_buf());
 
         let sid = "10.0.0.1".to_string();
-        plugin.on_session_start(
-            &sid,
-            &serde_json::json!({"redactCredentials": false}),
-        );
+        plugin.on_session_start(&sid, &serde_json::json!({"redactCredentials": false}));
 
         let mut req_headers = HeaderMap::new();
         req_headers.insert("authorization", "Bearer secret".parse().unwrap());

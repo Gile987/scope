@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use super::helpers::TestGateway;
-use gateway::plugin::{HttpExchange, ExchangeRequest, ExchangeResponse, ProxyPlugin, SessionId};
+use gateway::plugin::{ExchangeRequest, ExchangeResponse, HttpExchange, ProxyPlugin, SessionId};
 use tempfile::TempDir;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
