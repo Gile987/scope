@@ -244,6 +244,7 @@ async fn handle_plain_http(
     let upstream_body = upstream_resp.into_body();
 
     if should_record {
+        let sid_clone = sid_for_record.clone();
         let ctx = ExchangeContext {
             req_method,
             req_uri,
@@ -256,7 +257,10 @@ async fn handle_plain_http(
             request_instant,
             session_id: sid_for_record,
         };
-        spawn_stream_and_record(upstream_body, tx, ctx, state, uri.to_string(), || {});
+        let state_clone = state.clone();
+        spawn_stream_and_record(upstream_body, tx, ctx, state, uri.to_string(), move || {
+            state_clone.session_manager.touch(&sid_clone);
+        });
     } else {
         // No recording — just forward frames to the client
         let uri_for_log = uri.to_string();
