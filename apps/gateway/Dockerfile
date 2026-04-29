@@ -23,4 +23,5 @@ FROM alpine:3.21 AS runtime
 RUN apk add --no-cache ca-certificates wget
 COPY --from=builder /build/target/release/gateway /usr/local/bin/gateway
 EXPOSE 18000 18897
-ENTRYPOINT ["gateway", "--config", "/config/proxy.yaml"]
+ENTRYPOINT ["gateway"]
+CMD ["--config", "/config/proxy.yaml"]
