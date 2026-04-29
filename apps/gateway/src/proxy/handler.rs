@@ -8,10 +8,7 @@
 //! as an opaque tunnel. Plain HTTP requests are forwarded via a shared
 //! connection-pooling client and streamed back to the caller.
 
-use std::convert::Infallible;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context as TaskContext, Poll};
 
 use bytes::Bytes;
 use http::{Method, StatusCode};
@@ -28,57 +25,9 @@ use tracing::{debug, warn};
 
 use crate::ca::CertificateAuthority;
 use crate::filters::UrlFilter;
-use crate::plugin::{ExchangeRequest, ExchangeResponse, HttpExchange, PluginRegistry, SessionId};
+use crate::plugin::{PluginRegistry, SessionId};
+use crate::proxy::body::{ExchangeContext, StreamingBody, streaming_response, spawn_stream_and_record};
 use crate::session::SessionManager;
-
-/// A streaming response body backed by an mpsc channel.
-/// Upstream response frames are forwarded through this channel to the client
-/// in real time, while a background task simultaneously buffers them for
-/// plugin notification.
-struct ChannelBody {
-    rx: mpsc::Receiver<Frame<Bytes>>,
-}
-
-impl hyper::body::Body for ChannelBody {
-    type Data = Bytes;
-    type Error = Infallible;
-
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        self.get_mut().rx.poll_recv(cx).map(|opt| opt.map(Ok))
-    }
-}
-
-/// Response body — either buffered (CONNECT 200 ack, error responses) or
-/// streaming (forwarded HTTP responses via channel from upstream).
-enum ProxyBody {
-    Buffered(Full<Bytes>),
-    Streaming(ChannelBody),
-}
-
-impl hyper::body::Body for ProxyBody {
-    type Data = Bytes;
-    type Error = Infallible;
-
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        match self.get_mut() {
-            ProxyBody::Buffered(inner) => Pin::new(inner).poll_frame(cx),
-            ProxyBody::Streaming(inner) => Pin::new(inner).poll_frame(cx),
-        }
-    }
-
-    fn is_end_stream(&self) -> bool {
-        match self {
-            ProxyBody::Buffered(inner) => inner.is_end_stream(),
-            ProxyBody::Streaming(_) => false,
-        }
-    }
-}
 
 /// Shared state for the proxy handler.
 pub struct ProxyState {
@@ -129,7 +78,7 @@ async fn handle_request(
     req: hyper::Request<Incoming>,
     session_id: Option<SessionId>,
     state: Arc<ProxyState>,
-) -> Result<hyper::Response<ProxyBody>, hyper::Error> {
+) -> Result<hyper::Response<StreamingBody>, hyper::Error> {
     if req.method() == Method::CONNECT {
         match handle_connect(req, session_id, state).await {
             Ok(resp) => Ok(resp),
@@ -137,7 +86,7 @@ async fn handle_request(
                 warn!("CONNECT error: {}", e);
                 Ok(hyper::Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
-                    .body(ProxyBody::Buffered(Full::new(Bytes::from(format!("CONNECT failed: {}", e)))))
+                    .body(StreamingBody::Buffered(Full::new(Bytes::from(format!("CONNECT failed: {}", e)))))
                     .unwrap())
             }
         }
@@ -148,7 +97,7 @@ async fn handle_request(
                 warn!("HTTP forward error: {}", e);
                 Ok(hyper::Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
-                    .body(ProxyBody::Buffered(Full::new(Bytes::from(format!("Forward failed: {}", e)))))
+                    .body(StreamingBody::Buffered(Full::new(Bytes::from(format!("Forward failed: {}", e)))))
                     .unwrap())
             }
         }
@@ -159,7 +108,7 @@ async fn handle_connect(
     req: hyper::Request<Incoming>,
     session_id: Option<SessionId>,
     state: Arc<ProxyState>,
-) -> anyhow::Result<hyper::Response<ProxyBody>> {
+) -> anyhow::Result<hyper::Response<StreamingBody>> {
     let host = req
         .uri()
         .authority()
@@ -175,7 +124,7 @@ async fn handle_connect(
     // We need to upgrade the connection
     let resp = hyper::Response::builder()
         .status(StatusCode::OK)
-        .body(ProxyBody::Buffered(Full::new(Bytes::new())))?;
+        .body(StreamingBody::Buffered(Full::new(Bytes::new())))?;
 
     // The tunnel runs in a background task: we return the 200 response immediately
     // to complete the HTTP upgrade handshake, then the spawned task takes over the
@@ -234,7 +183,7 @@ async fn handle_plain_http(
     req: hyper::Request<Incoming>,
     session_id: Option<SessionId>,
     state: Arc<ProxyState>,
-) -> anyhow::Result<hyper::Response<ProxyBody>> {
+) -> anyhow::Result<hyper::Response<StreamingBody>> {
     // Ensure we have an absolute URI (required for proxy forwarding).
     // If the client sent a relative URI (e.g. GET /path), reconstruct from the Host header.
     let uri = if req.uri().host().is_none() {
@@ -282,72 +231,52 @@ async fn handle_plain_http(
 
     // Forward to upstream using the shared HTTP client
     let started_at = chrono::Utc::now();
-    let start_instant = std::time::Instant::now();
+    let request_instant = std::time::Instant::now();
     let upstream_resp = state.http_client.request(upstream_req).await?;
 
     // TTFB: time from request start to response headers received
-    let wait_ms = start_instant.elapsed().as_millis() as u64;
+    let wait_ms = request_instant.elapsed().as_millis() as u64;
 
     let resp_status = upstream_resp.status();
     let resp_headers = upstream_resp.headers().clone();
 
-    // Stream response body through a channel: the spawned task reads frames from
-    // upstream and sends them to the client via tx. If recording is enabled, it also
-    // accumulates a copy for the plugin exchange notification after the body completes.
     let (tx, rx) = mpsc::channel::<Frame<Bytes>>(32);
     let upstream_body = upstream_resp.into_body();
-    let record_headers = resp_headers.clone();
 
-    tokio::spawn(async move {
-        let mut upstream_body = upstream_body;
-        let mut resp_buffer = Vec::new();
-
-        while let Some(frame_result) = upstream_body.frame().await {
-            match frame_result {
-                Ok(frame) => {
-                    if should_record {
-                        if let Some(data) = frame.data_ref() {
-                            resp_buffer.extend_from_slice(data);
+    if should_record {
+        let ctx = ExchangeContext {
+            req_method,
+            req_uri,
+            req_headers,
+            req_body: req_body_bytes,
+            resp_status,
+            resp_headers: resp_headers.clone(),
+            started_at,
+            wait_ms,
+            request_instant,
+            session_id: sid_for_record,
+        };
+        spawn_stream_and_record(upstream_body, tx, ctx, state, uri.to_string(), || {});
+    } else {
+        // No recording — just forward frames to the client
+        let uri_for_log = uri.to_string();
+        tokio::spawn(async move {
+            let mut upstream_body = upstream_body;
+            while let Some(frame_result) = upstream_body.frame().await {
+                match frame_result {
+                    Ok(frame) => {
+                        if tx.send(frame).await.is_err() {
+                            break;
                         }
                     }
-                    if tx.send(frame).await.is_err() {
-                        break; // Client disconnected
+                    Err(e) => {
+                        warn!("Upstream body error for {}: {}", uri_for_log, e);
+                        break;
                     }
                 }
-                Err(e) => {
-                    warn!("Upstream body error for {}: {}", uri, e);
-                    break;
-                }
             }
-        }
-
-        let elapsed_ms = start_instant.elapsed().as_millis() as u64;
-
-        if should_record {
-            let exchange = HttpExchange {
-                request: ExchangeRequest {
-                    method: req_method,
-                    uri: req_uri,
-                    headers: req_headers,
-                    body: req_body_bytes,
-                },
-                response: ExchangeResponse {
-                    status: resp_status,
-                    headers: record_headers,
-                    body: Bytes::from(resp_buffer),
-                },
-                started_at,
-                wait_ms,
-                elapsed_ms,
-            };
-            state.registry.on_exchange(&sid_for_record, &exchange);
-        }
-    });
-
-    // Return streaming response immediately
-    let mut response = hyper::Response::builder().status(resp_status);
-    for (name, value) in &resp_headers {
-        response = response.header(name, value);
+        });
     }
-    Ok(response.body(ProxyBody::Streaming(ChannelBody { rx }))?)
+
+    streaming_response(resp_status, &resp_headers, rx)
 }

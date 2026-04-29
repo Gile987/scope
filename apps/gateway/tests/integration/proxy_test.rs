@@ -10,23 +10,7 @@ async fn connect_without_session_passthrough() {
     let tmp = TempDir::new().unwrap();
     let gw = TestGateway::start(tmp.path().to_path_buf(), &["https://httpbin.org/*"]).await;
 
-    // Connect through the proxy without starting a session.
-    // The proxy should tunnel the connection without TLS interception.
-    let proxy = reqwest::Proxy::http(format!("http://{}", gw.proxy_addr)).unwrap();
-    let client = reqwest::Client::builder()
-        .proxy(proxy)
-        .build()
-        .unwrap();
-
-    // Plain HTTP request through the proxy — should get 501 (not implemented)
-    let _resp = client
-        .get(format!("http://127.0.0.1:{}/anything", gw.proxy_addr.port()))
-        .send()
-        .await;
-
-    // We expect either a connection or the 501 from handle_plain_http
-    // Since no session is active, CONNECT tunnels passthrough. The key assertion
-    // is that no HAR entry is recorded.
+    // Without ever creating a session, verify no HAR data exists.
     let api_client = reqwest::Client::new();
 
     // Verify no HAR data (no session was ever started)

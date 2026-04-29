@@ -21,6 +21,7 @@ use tokio::net::TcpListener;
 
 /// A fully wired test gateway that can be torn down after each test.
 pub struct TestGateway {
+    #[allow(dead_code)]
     pub proxy_addr: SocketAddr,
     pub api_addr: SocketAddr,
     #[allow(dead_code)]
