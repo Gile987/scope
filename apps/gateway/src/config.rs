@@ -139,17 +139,6 @@ impl Config {
         Ok(config)
     }
 
-    /// Get HAR output directory from `defaultPluginSettings.har.outputDir`.
-    /// Falls back to `/tmp/scope-gateway/har-output` if not configured.
-    pub fn har_output_dir(&self) -> PathBuf {
-        self.default_plugin_settings
-            .get("har")
-            .and_then(|v| v.get("outputDir"))
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/tmp/scope-gateway/har-output"))
-    }
-
     /// Build a rustls `RootCertStore` containing Mozilla roots plus any
     /// additional CA certificates from `additionalCaCerts` PEM files.
     pub fn upstream_root_store(&self) -> anyhow::Result<rustls::RootCertStore> {
@@ -203,7 +192,6 @@ defaultPluginSettings:
         assert_eq!(config.port, 9000);
         assert_eq!(config.api_port, 9001);
         assert_eq!(config.urls_to_watch.len(), 2);
-        assert_eq!(config.har_output_dir(), PathBuf::from("/tmp/har"));
         assert_eq!(config.cert_dir, PathBuf::from("/tmp/certs"));
         assert_eq!(config.log_level, "debug");
         assert_eq!(
@@ -225,7 +213,6 @@ defaultPluginSettings:
         let config = Config::load(&cli).unwrap();
         assert_eq!(config.port, 7777);
         assert_eq!(config.api_port, 7778);
-        assert_eq!(config.har_output_dir(), PathBuf::from("/tmp/scope-gateway/har-output")); // default
         assert_eq!(config.cert_dir, default_cert_dir()); // not overridden
         assert_eq!(config.log_level, "debug");
     }

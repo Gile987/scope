@@ -36,27 +36,20 @@ struct HarSession {
     redact: bool,
 }
 
-/// HAR plugin — records HTTP exchanges to JSONL, serves HAR via GET /proxy/har.
-pub struct HarPlugin {
+/// Shared interior state, cheaply cloneable via `Arc` so that the Axum route
+/// handler can hold a reference without requiring `Arc<HarPlugin>` from the
+/// outside. This lets `api_routes(&self)` work without `Arc<Self>`.
+struct HarInner {
     har_dir: PathBuf,
     sessions: RwLock<HashMap<SessionId, HarSession>>,
 }
 
-impl HarPlugin {
-    /// Create a new HAR plugin that stores JSONL files in `har_dir`.
-    pub fn new(har_dir: PathBuf) -> Self {
-        Self {
-            har_dir,
-            sessions: RwLock::new(HashMap::new()),
-        }
-    }
-
+impl HarInner {
     fn jsonl_path(&self, session_id: &SessionId) -> PathBuf {
         self.har_dir
             .join(format!(".session-{}.jsonl", session_id.replace(':', "_")))
     }
 
-    /// Build HAR from JSONL file on the fly.
     fn build_har_for_session(&self, session_id: &SessionId) -> Option<super::types::Har> {
         let sessions = self.sessions.read();
         let session = sessions.get(session_id)?;
@@ -81,6 +74,36 @@ impl HarPlugin {
     }
 }
 
+/// HAR plugin — records HTTP exchanges to JSONL, serves HAR via GET .../har.
+pub struct HarPlugin {
+    inner: Arc<HarInner>,
+}
+
+impl HarPlugin {
+    /// Create a new HAR plugin that stores JSONL files in `har_dir`.
+    pub fn new(har_dir: PathBuf) -> Self {
+        Self {
+            inner: Arc::new(HarInner {
+                har_dir,
+                sessions: RwLock::new(HashMap::new()),
+            }),
+        }
+    }
+
+    /// Extract HAR output directory from `defaultPluginSettings`.
+    /// Falls back to `/tmp/scope-gateway/har-output` if not configured.
+    pub fn output_dir_from_settings(
+        settings: &HashMap<String, serde_json::Value>,
+    ) -> PathBuf {
+        settings
+            .get("har")
+            .and_then(|v| v.get("outputDir"))
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/tmp/scope-gateway/har-output"))
+    }
+}
+
 #[async_trait]
 impl ProxyPlugin for HarPlugin {
     fn name(&self) -> &str {
@@ -95,7 +118,7 @@ impl ProxyPlugin for HarPlugin {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let jsonl_path = self.jsonl_path(session_id);
+        let jsonl_path = self.inner.jsonl_path(session_id);
 
         // Clean up any leftover JSONL from a prior crash or un-cleared session.
         // Without this, a new session could inherit stale exchange data.
@@ -114,7 +137,7 @@ impl ProxyPlugin for HarPlugin {
             );
         }
 
-        let mut sessions = self.sessions.write();
+        let mut sessions = self.inner.sessions.write();
         sessions.insert(
             session_id.clone(),
             HarSession {
@@ -128,7 +151,7 @@ impl ProxyPlugin for HarPlugin {
     }
 
     fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
-        let sessions = self.sessions.read();
+        let sessions = self.inner.sessions.read();
         let session = match sessions.get(session_id) {
             Some(s) if !s.finalized => s,
             // Finalized sessions still serve existing data via GET /har,
@@ -158,7 +181,7 @@ impl ProxyPlugin for HarPlugin {
     }
 
     fn on_session_stop(&self, session_id: &SessionId) {
-        let mut sessions = self.sessions.write();
+        let mut sessions = self.inner.sessions.write();
         if let Some(session) = sessions.get_mut(session_id) {
             session.finalized = true;
             debug!("HAR plugin: session finalized for {}", session_id);
@@ -166,7 +189,7 @@ impl ProxyPlugin for HarPlugin {
     }
 
     fn on_session_clear(&self, session_id: &SessionId) {
-        let mut sessions = self.sessions.write();
+        let mut sessions = self.inner.sessions.write();
         if let Some(session) = sessions.remove(session_id) {
             let _ = std::fs::remove_file(&session.jsonl_path);
             debug!("HAR plugin: session cleared for {}", session_id);
@@ -174,24 +197,21 @@ impl ProxyPlugin for HarPlugin {
     }
 
     fn api_routes(&self) -> Option<axum::Router> {
-        // We need to share the HarPlugin with the route handler.
-        // This is done by wrapping self in an Arc via the caller.
-        // For now, return None — routes are mounted externally.
-        None
+        let inner = self.inner.clone();
+        Some(
+            axum::Router::new()
+                .route("/har", get(get_har))
+                .with_state(inner),
+        )
     }
 }
 
-/// State for the HAR API route handler.
-pub struct HarApiState {
-    pub plugin: Arc<HarPlugin>,
-}
-
 /// GET /api/v1/sessions/:id/har — build and return HAR from JSONL on the fly.
-pub async fn get_har(
+async fn get_har(
     AxumPath(session_id): AxumPath<String>,
-    State(state): State<Arc<HarApiState>>,
+    State(inner): State<Arc<HarInner>>,
 ) -> impl IntoResponse {
-    match state.plugin.build_har_for_session(&session_id) {
+    match inner.build_har_for_session(&session_id) {
         Some(har) => {
             let count = har.log.entries.len();
             debug!("HAR plugin: returning {} entries for session {}", count, session_id);
@@ -202,15 +222,6 @@ pub async fn get_har(
             StatusCode::NOT_FOUND.into_response()
         }
     }
-}
-
-/// Build an Axum router for the HAR plugin's session-scoped routes.
-/// This is merged into /api/v1/sessions/:id/
-pub fn har_session_router(plugin: Arc<HarPlugin>) -> axum::Router {
-    let state = Arc::new(HarApiState { plugin });
-    axum::Router::new()
-        .route("/har", get(get_har))
-        .with_state(state)
 }
 
 #[cfg(test)]
@@ -250,31 +261,31 @@ mod tests {
 
         // Start session
         plugin.on_session_start(&sid, &settings);
-        assert!(plugin.jsonl_path(&sid).exists());
+        assert!(plugin.inner.jsonl_path(&sid).exists());
 
         // Exchange
         let exchange = make_exchange();
         plugin.on_exchange(&sid, &exchange);
 
         // HAR available while active (returns entries so far)
-        let har_active = plugin.build_har_for_session(&sid).unwrap();
+        let har_active = plugin.inner.build_har_for_session(&sid).unwrap();
         assert_eq!(har_active.log.entries.len(), 1);
 
         // Stop session
         plugin.on_session_stop(&sid);
 
         // HAR still available after stop
-        let har = plugin.build_har_for_session(&sid).unwrap();
+        let har = plugin.inner.build_har_for_session(&sid).unwrap();
         assert_eq!(har.log.entries.len(), 1);
 
         // Idempotent — can read again
-        let har2 = plugin.build_har_for_session(&sid).unwrap();
+        let har2 = plugin.inner.build_har_for_session(&sid).unwrap();
         assert_eq!(har2.log.entries.len(), 1);
 
         // Clear deletes JSONL
         plugin.on_session_clear(&sid);
-        assert!(!plugin.jsonl_path(&sid).exists());
-        assert!(plugin.build_har_for_session(&sid).is_none());
+        assert!(!plugin.inner.jsonl_path(&sid).exists());
+        assert!(plugin.inner.build_har_for_session(&sid).is_none());
     }
 
     #[test]
@@ -308,7 +319,7 @@ mod tests {
         plugin.on_exchange(&sid, &exchange);
         plugin.on_session_stop(&sid);
 
-        let har = plugin.build_har_for_session(&sid).unwrap();
+        let har = plugin.inner.build_har_for_session(&sid).unwrap();
         let auth = har.log.entries[0]
             .request
             .headers
@@ -352,7 +363,7 @@ mod tests {
         plugin.on_exchange(&sid, &exchange);
         plugin.on_session_stop(&sid);
 
-        let har = plugin.build_har_for_session(&sid).unwrap();
+        let har = plugin.inner.build_har_for_session(&sid).unwrap();
         let auth = har.log.entries[0]
             .request
             .headers
@@ -376,7 +387,7 @@ mod tests {
         plugin.on_session_start(&sid, &serde_json::json!({}));
         plugin.on_session_stop(&sid);
 
-        let har = plugin.build_har_for_session(&sid).unwrap();
+        let har = plugin.inner.build_har_for_session(&sid).unwrap();
         assert_eq!(har.log.entries.len(), 0); // Previous entries cleared
     }
 }

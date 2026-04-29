@@ -26,7 +26,7 @@ use gateway::ca::CertificateAuthority;
 use gateway::config::{Cli, Config};
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
-use gateway::plugins::har::plugin::{HarPlugin, har_session_router};
+use gateway::plugins::har::plugin::HarPlugin;
 use gateway::proxy::handler::{ProxyState, handle_client};
 use gateway::session::SessionManager;
 
@@ -55,8 +55,9 @@ async fn main() -> anyhow::Result<()> {
     let url_filter = Arc::new(UrlFilter::new(&config.urls_to_watch)?);
 
     // Plugins
-    let har_plugin = Arc::new(HarPlugin::new(config.har_output_dir()));
-    let registry = Arc::new(PluginRegistry::new(vec![har_plugin.clone()]));
+    let har_dir = HarPlugin::output_dir_from_settings(&config.default_plugin_settings);
+    let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = Arc::new(HarPlugin::new(har_dir));
+    let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
 
     // Session manager
     let session_manager = Arc::new(SessionManager::new(
@@ -100,7 +101,11 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Plugin API routes (session-scoped, mounted under /api/v1/sessions/:id/)
-    let har_router = har_session_router(har_plugin);
+    let plugin_routes: Vec<axum::Router> = registry
+        .plugins()
+        .iter()
+        .filter_map(|p| p.api_routes())
+        .collect();
 
     // Background task that periodically scans for sessions with no recent activity.
     // Orphaned sessions (e.g., client crashed without calling stop) are cleaned up here.
@@ -119,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
     // Start API server
     let api_port = config.api_port;
     let api_handle = tokio::spawn(async move {
-        if let Err(e) = gateway::api::server::run_api_server(api_state, api_port, vec![har_router]).await {
+        if let Err(e) = gateway::api::server::run_api_server(api_state, api_port, plugin_routes).await {
             error!("API server error: {}", e);
         }
     });

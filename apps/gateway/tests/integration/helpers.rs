@@ -14,7 +14,7 @@ use hyper_util::rt::TokioExecutor;
 use gateway::ca::CertificateAuthority;
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
-use gateway::plugins::har::plugin::{HarPlugin, har_session_router};
+use gateway::plugins::har::plugin::HarPlugin;
 use gateway::proxy::handler::{ProxyState, handle_client};
 use gateway::session::SessionManager;
 use tokio::net::TcpListener;
@@ -28,8 +28,6 @@ pub struct TestGateway {
     pub ca: Arc<CertificateAuthority>,
     #[allow(dead_code)]
     pub session_manager: Arc<SessionManager>,
-    #[allow(dead_code)]
-    pub har_plugin: Arc<HarPlugin>,
     #[allow(dead_code)]
     pub har_dir: PathBuf,
 }
@@ -47,8 +45,8 @@ impl TestGateway {
         let ca = Arc::new(CertificateAuthority::new(&cert_dir, 100).unwrap());
         let url_strs: Vec<String> = urls.iter().map(|s| s.to_string()).collect();
         let url_filter = Arc::new(UrlFilter::new(&url_strs).unwrap());
-        let har_plugin = Arc::new(HarPlugin::new(har_dir.clone()));
-        let registry = Arc::new(PluginRegistry::new(vec![har_plugin.clone()]));
+        let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = Arc::new(HarPlugin::new(har_dir.clone()));
+        let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
         let session_manager = Arc::new(SessionManager::new(
             registry.clone(),
             Duration::from_secs(300),
@@ -107,7 +105,11 @@ impl TestGateway {
             ca: ca.clone(),
         });
 
-        let har_router = har_session_router(har_plugin.clone());
+        let plugin_routes: Vec<axum::Router> = registry
+            .plugins()
+            .iter()
+            .filter_map(|p| p.api_routes())
+            .collect();
 
         let api_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api_addr = api_listener.local_addr().unwrap();
@@ -120,8 +122,12 @@ impl TestGateway {
                 .route("/", get(gateway::api::routes::get_session))
                 .route("/stop", post(gateway::api::routes::post_stop_session))
                 .route("/", delete(gateway::api::routes::delete_session))
-                .with_state(api_state.clone())
-                .merge(har_router);
+                .with_state(api_state.clone());
+
+            // Merge plugin-provided session-scoped routes
+            let session_routes = plugin_routes
+                .into_iter()
+                .fold(session_routes, |r, plugin_r| r.merge(plugin_r));
 
             let api_v1 = Router::new()
                 .route("/cacert", get(gateway::api::routes::get_cacert))
@@ -150,7 +156,6 @@ impl TestGateway {
             api_addr,
             ca,
             session_manager,
-            har_plugin,
             har_dir,
         }
     }

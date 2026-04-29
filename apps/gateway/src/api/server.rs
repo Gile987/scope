@@ -30,7 +30,7 @@ pub async fn run_api_server(
         .route("/", delete(routes::delete_session))
         .with_state(state.clone());
 
-    // Plugin routers come with their own State already applied (e.g., Arc<HarApiState>),
+    // Plugin routers come with their own State already applied,
     // so we can merge them directly without re-wrapping in ApiState.
     let session_routes = plugin_session_routes
         .into_iter()
