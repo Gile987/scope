@@ -16,6 +16,9 @@ RUN pnpm install --frozen-lockfile --filter db-migrations
 COPY packages/db-migrations/tsconfig.json ./packages/db-migrations/
 COPY packages/db-migrations/src ./packages/db-migrations/src/
 
+# Force rebuild to pick up migration 016 in prod ACR (see PR #706)
+LABEL scope-mt.rebuild-trigger="2026-04-28"
+
 WORKDIR /app/packages/db-migrations
 
 CMD ["npx", "tsx", "src/migrate.ts", "up"]
