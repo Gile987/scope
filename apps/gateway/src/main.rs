@@ -32,6 +32,12 @@ use gateway::session::SessionManager;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install the process-level CryptoProvider so that all rustls consumers
+    // (our proxy TLS + reqwest in plugins) use the same aws-lc-rs backend.
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install default CryptoProvider");
+
     let cli = Cli::parse();
     let config = Config::load(&cli)?;
 
