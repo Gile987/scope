@@ -27,7 +27,7 @@ use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tower::Service;
+use tower::ServiceExt;
 use tracing::{debug, warn};
 
 use crate::ca::CertificateAuthority;
@@ -156,9 +156,10 @@ async fn dispatch_to_api(
     let req = hyper::Request::from_parts(parts, body);
 
     // Clone the router — Axum routers are cheap to clone (Arc internals).
-    let mut router = state.api_router.clone();
+    // oneshot() consumes the router clone and drives it to completion.
+    let router = state.api_router.clone();
 
-    match router.call(req).await {
+    match router.oneshot(req).await {
         Ok(resp) => {
             // Convert Axum's response body to our StreamingBody type.
             let (parts, body) = resp.into_parts();
