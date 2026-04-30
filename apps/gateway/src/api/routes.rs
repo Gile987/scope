@@ -27,7 +27,7 @@ pub struct ApiState {
     pub ca: Arc<CertificateAuthority>,
 }
 
-/// GET /healthz — liveness / readiness check
+/// GET /health — liveness / readiness check
 pub async fn get_health() -> impl IntoResponse {
     Json(HealthResponse { status: "ok" })
 }

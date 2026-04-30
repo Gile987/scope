@@ -21,7 +21,7 @@ use super::routes::{self, ApiState};
 /// Build the Axum router (without binding to a port).
 ///
 /// The returned router is used by the unified proxy listener to handle
-/// non-proxy requests (relative-URI paths like `/api/v1/...` and `/healthz`).
+/// non-proxy requests (relative-URI paths like `/api/v1/...` and `/health`).
 pub fn build_api_router(
     state: Arc<ApiState>,
     plugin_session_routes: Vec<Router>,
@@ -48,6 +48,6 @@ pub fn build_api_router(
         .nest("/sessions/{id}", session_routes);
 
     Router::new()
-        .route("/healthz", get(routes::get_health))
+        .route("/health", get(routes::get_health))
         .nest("/api/v1", api_v1)
 }
