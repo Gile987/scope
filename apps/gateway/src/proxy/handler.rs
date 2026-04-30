@@ -92,7 +92,7 @@ pub async fn handle_client(
 /// Returns true if this request should be routed to the API (Axum) rather
 /// than the proxy pipeline. API requests use relative URIs (no host in the
 /// request-target), while proxy requests use CONNECT or absolute URIs.
-fn is_api_request(req: &hyper::Request<Incoming>) -> bool {
+fn is_api_request<B>(req: &hyper::Request<B>) -> bool {
     if req.method() == Method::CONNECT {
         return false;
     }
@@ -370,4 +370,51 @@ async fn handle_plain_http(
     }
 
     streaming_response(resp_status, &resp_headers, rx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyper::Request;
+
+    /// Helper to build a minimal request with a given method and URI.
+    fn make_request(method: &str, uri: &str) -> Request<()> {
+        Request::builder().method(method).uri(uri).body(()).unwrap()
+    }
+
+    #[test]
+    fn is_api_request_connect_returns_false() {
+        let req = make_request("CONNECT", "example.com:443");
+        assert!(!is_api_request(&req));
+    }
+
+    #[test]
+    fn is_api_request_absolute_uri_returns_false() {
+        let req = make_request("GET", "http://example.com/path");
+        assert!(!is_api_request(&req));
+    }
+
+    #[test]
+    fn is_api_request_relative_uri_returns_true() {
+        let req = make_request("GET", "/api/v1/sessions");
+        assert!(is_api_request(&req));
+    }
+
+    #[test]
+    fn is_api_request_root_returns_true() {
+        let req = make_request("GET", "/");
+        assert!(is_api_request(&req));
+    }
+
+    #[test]
+    fn is_api_request_health_returns_true() {
+        let req = make_request("GET", "/health");
+        assert!(is_api_request(&req));
+    }
+
+    #[test]
+    fn is_api_request_post_relative_returns_true() {
+        let req = make_request("POST", "/api/v1/sessions");
+        assert!(is_api_request(&req));
+    }
 }
