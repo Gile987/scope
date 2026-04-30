@@ -22,10 +22,7 @@ use super::routes::{self, ApiState};
 ///
 /// The returned router is used by the unified proxy listener to handle
 /// non-proxy requests (relative-URI paths like `/api/v1/...` and `/health`).
-pub fn build_api_router(
-    state: Arc<ApiState>,
-    plugin_session_routes: Vec<Router>,
-) -> Router {
+pub fn build_api_router(state: Arc<ApiState>, plugin_session_routes: Vec<Router>) -> Router {
     // Session sub-routes: /api/v1/sessions/:id/*
     // Start with the core session routes that need ApiState
     let session_routes = Router::new()

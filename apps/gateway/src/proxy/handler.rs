@@ -176,10 +176,7 @@ async fn dispatch_to_api(
                 Ok(collected) => collected.to_bytes(),
                 Err(_) => Bytes::new(),
             };
-            hyper::Response::from_parts(
-                parts,
-                StreamingBody::Buffered(Full::new(body_bytes)),
-            )
+            hyper::Response::from_parts(parts, StreamingBody::Buffered(Full::new(body_bytes)))
         }
         Err(infallible) => match infallible {},
     }
