@@ -8,6 +8,7 @@ export default defineConfig({
     include: [
       "packages/*/src/**/*.integration.test.ts",
       "apps/*/src/**/*.integration.test.ts",
+      "apps/*/tests/**/*.integration.test.ts",
       "apps/workers/*/src/**/*.integration.test.ts",
       "apps/model-scanners/*/src/**/*.integration.test.ts",
     ],

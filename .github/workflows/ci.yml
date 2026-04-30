@@ -477,7 +477,7 @@ jobs:
           install_only: true
 
       - name: Run gateway load integration test
-        run: npx vitest run --config vitest.integration.config.ts apps/gateway/src/integration/gateway-load.integration.test.ts
+        run: npx vitest run --config vitest.integration.config.ts apps/gateway/tests/integration/gateway-load.integration.test.ts
 
       - name: Cleanup Kind cluster (best-effort)
         if: always()
