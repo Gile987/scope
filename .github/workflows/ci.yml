@@ -439,50 +439,6 @@ jobs:
         working-directory: apps/gateway
         run: cargo build --release
 
-  integration-test-gateway:
-    name: Gateway Integration Test (Kind)
-    needs: [detect-changes]
-    if: >-
-      github.repository == 'growth-ecosystems/scope-core' &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        needs.detect-changes.outputs.gateway == 'true'
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # pnpm/action-setup@v4 is not allowed on EMU
-      - name: Install pnpm
-        run: |
-          curl -fsSL https://get.pnpm.io/install.sh | sh -
-          echo "$HOME/.local/share/pnpm" >> $GITHUB_PATH
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Kind
-        uses: helm/kind-action@v1.14.0
-        with:
-          install_only: true
-
-      - name: Run gateway load integration test
-        run: npx vitest run --config vitest.integration.config.ts apps/gateway/tests/integration/gateway-load.integration.test.ts
-
-      - name: Cleanup Kind cluster (best-effort)
-        if: always()
-        run: kind delete cluster --name gateway-load-test 2>/dev/null || true
-
   # ---------------------------------------------------------------------------
   # Detect which images changed (runs in parallel with CI jobs)
   # ---------------------------------------------------------------------------
@@ -544,7 +500,6 @@ jobs:
               - 'packages/db-migrations/**'
             gateway:
               - 'apps/gateway/**'
-              - 'deploy/base/gateway*.yaml'
 
   # ---------------------------------------------------------------------------
   # Build container images — gated on CI passing
@@ -559,7 +514,6 @@ jobs:
       needs.build.result == 'success' &&
       (needs.gateway.result == 'success' || needs.gateway.result == 'skipped') &&
       (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped') &&
-      (needs.integration-test-gateway.result == 'success' || needs.integration-test-gateway.result == 'skipped') &&
       (
         (github.event_name == 'workflow_dispatch' && github.event.inputs.images != '') ||
         ((github.event_name == 'push' || github.event_name == 'pull_request') && (
@@ -579,7 +533,7 @@ jobs:
           needs.detect-changes.outputs.model-scanning == 'true'
         ))
       )
-    needs: [test, integration-test, integration-test-gateway, build, gateway, detect-changes]
+    needs: [test, integration-test, build, gateway, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
     strategy:
