@@ -161,14 +161,14 @@ describe("GatewayClient", () => {
     });
 
     it("returns null on 404", async () => {
-      vi.spyOn(globalThis, "fetch")
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ id: SESSION_ID }), {
             status: 201,
             headers: { "Content-Type": "application/json" },
           })
         )
-        .mockResolvedValueOnce(new Response("", { status: 404 }));
+        .mockResolvedValue(new Response("", { status: 404 }));
 
       const client = new GatewayClient("http://test:18897");
       await client.startSession();
@@ -176,14 +176,14 @@ describe("GatewayClient", () => {
     });
 
     it("returns null on network error", async () => {
-      vi.spyOn(globalThis, "fetch")
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ id: SESSION_ID }), {
             status: 201,
             headers: { "Content-Type": "application/json" },
           })
         )
-        .mockRejectedValueOnce(new TypeError("fetch failed"));
+        .mockRejectedValue(new TypeError("fetch failed"));
 
       const client = new GatewayClient("http://test:18897");
       await client.startSession();
