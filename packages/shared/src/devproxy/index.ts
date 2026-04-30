@@ -36,7 +36,27 @@ export function createProxyClient(): ProxyClient {
       waitForReady: (t) => gw.waitForReady(t),
       downloadCertificate: (p) => gw.downloadCertificate(p),
       createCombinedCaBundle: (c, o) => gw.createCombinedCaBundle(c, o),
-      startRecording: async () => { await gw.startSession(); },
+      startRecording: async () => {
+        const plugins: Record<string, unknown> = {};
+
+        // Enable the copilot_token auto-refresh plugin when token minting is
+        // handled by the gateway (MINT_COPILOT_TOKEN is not "true").
+        const tokenManagerUrl = process.env.TOKEN_MANAGER_URL;
+        if (process.env.MINT_COPILOT_TOKEN !== "true" && tokenManagerUrl) {
+          plugins.copilot_token = {
+            tokenManagerUrl,
+            capability: process.env.COPILOT_TOKEN_CAPABILITY || "generic",
+            refreshBufferSecs: 300,
+            targetHosts: [
+              "api.githubcopilot.com",
+              "api.enterprise.githubcopilot.com",
+              "copilot-proxy.githubusercontent.com",
+            ],
+          };
+        }
+
+        await gw.startSession(plugins);
+      },
       stopAndCollectHar: async (log) => {
         try {
           await gw.stopSession();
