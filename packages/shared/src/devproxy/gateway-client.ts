@@ -22,7 +22,7 @@ import {
   createCombinedCaBundle,
 } from "./proxy-client.js";
 
-const DEFAULT_API_URL = "http://localhost:18897";
+const DEFAULT_API_URL = "http://localhost:18000";
 
 export class GatewayClient {
   readonly apiUrl: string;

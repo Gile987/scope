@@ -7,9 +7,15 @@
 //! the URL matches a watch pattern and a session is active) or passed through
 //! as an opaque tunnel. Plain HTTP requests are forwarded via a shared
 //! connection-pooling client and streamed back to the caller.
+//!
+//! The same port also serves the REST API (Axum router): requests with relative
+//! URIs (e.g. GET /api/v1/sessions) are dispatched to Axum, while CONNECT and
+//! absolute-URI requests go through the proxy path.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::extract::connect_info::ConnectInfo;
 use bytes::Bytes;
 use http::{Method, StatusCode};
 use http_body_util::{BodyExt, Full};
@@ -21,6 +27,7 @@ use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tower::Service;
 use tracing::{debug, warn};
 
 use crate::ca::CertificateAuthority;
@@ -43,9 +50,16 @@ pub struct ProxyState {
     /// Pre-built TLS config for upstream connections (MITM relay).
     /// Contains Mozilla roots + any additional CA certs from config.
     pub upstream_tls_config: Arc<rustls::ClientConfig>,
+    /// Axum router for the REST API, served on the same port.
+    pub api_router: axum::Router,
 }
 
-/// Handle a single client connection on the proxy port.
+/// Handle a single client connection on the unified port.
+///
+/// Requests are dispatched as follows:
+/// - `CONNECT host:port` → proxy tunnel (TLS interception or passthrough)
+/// - Absolute URI (e.g. `GET http://example.com/path`) → plain HTTP forwarding
+/// - Relative URI (e.g. `GET /api/v1/sessions`) → Axum REST API
 pub async fn handle_client(
     stream: TcpStream,
     peer_addr: std::net::SocketAddr,
@@ -65,9 +79,8 @@ pub async fn handle_client(
             io,
             service_fn(move |req| {
                 let state = state_clone.clone();
-                // Resolve IP → session ID on each request (session may start/stop between requests)
                 let session_id = state.session_manager.session_id_for_ip(&client_ip);
-                async move { handle_request(req, session_id, state).await }
+                async move { handle_request(req, session_id, state, peer_addr).await }
             }),
         )
         .with_upgrades()
@@ -76,11 +89,29 @@ pub async fn handle_client(
     Ok(())
 }
 
+/// Returns true if this request should be routed to the API (Axum) rather
+/// than the proxy pipeline. API requests use relative URIs (no host in the
+/// request-target), while proxy requests use CONNECT or absolute URIs.
+fn is_api_request(req: &hyper::Request<Incoming>) -> bool {
+    if req.method() == Method::CONNECT {
+        return false;
+    }
+    // Proxy clients send absolute-form URIs (e.g. http://example.com/path).
+    // Regular HTTP clients send origin-form (e.g. /api/v1/sessions).
+    req.uri().host().is_none()
+}
+
 async fn handle_request(
     req: hyper::Request<Incoming>,
     session_id: Option<SessionId>,
     state: Arc<ProxyState>,
+    peer_addr: SocketAddr,
 ) -> Result<hyper::Response<StreamingBody>, hyper::Error> {
+    // Route API requests (relative URIs) to the Axum router.
+    if is_api_request(&req) {
+        return Ok(dispatch_to_api(req, state, peer_addr).await);
+    }
+
     if req.method() == Method::CONNECT {
         match handle_connect(req, session_id, state).await {
             Ok(resp) => Ok(resp),
@@ -109,6 +140,38 @@ async fn handle_request(
                     .unwrap())
             }
         }
+    }
+}
+
+/// Dispatch a request to the Axum API router, injecting ConnectInfo so that
+/// route handlers can extract the client's SocketAddr.
+async fn dispatch_to_api(
+    req: hyper::Request<Incoming>,
+    state: Arc<ProxyState>,
+    peer_addr: SocketAddr,
+) -> hyper::Response<StreamingBody> {
+    // Inject ConnectInfo extension so Axum handlers can extract the client IP.
+    let (mut parts, body) = req.into_parts();
+    parts.extensions.insert(ConnectInfo(peer_addr));
+    let req = hyper::Request::from_parts(parts, body);
+
+    // Clone the router — Axum routers are cheap to clone (Arc internals).
+    let mut router = state.api_router.clone();
+
+    match router.call(req).await {
+        Ok(resp) => {
+            // Convert Axum's response body to our StreamingBody type.
+            let (parts, body) = resp.into_parts();
+            let body_bytes = match body.collect().await {
+                Ok(collected) => collected.to_bytes(),
+                Err(_) => Bytes::new(),
+            };
+            hyper::Response::from_parts(
+                parts,
+                StreamingBody::Buffered(Full::new(body_bytes)),
+            )
+        }
+        Err(infallible) => match infallible {},
     }
 }
 

@@ -85,6 +85,7 @@ impl TestGateway {
             url_filter,
             http_client,
             upstream_tls_config,
+            api_router: axum::Router::new(),
         });
 
         // Bind proxy on ephemeral port

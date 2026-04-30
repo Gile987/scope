@@ -1,27 +1,31 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Axum REST API server for session management and plugin endpoints.
+//! Axum REST API router for session management and plugin endpoints.
 //!
 //! Routes are nested under `/api/v1/` with session-scoped sub-routes at
 //! `/api/v1/sessions/{id}/`. Plugin routers are merged into the session
 //! scope so plugins can expose per-session endpoints (e.g., GET /har).
+//!
+//! The router is embedded into the proxy's unified port rather than running
+//! on a separate listener. See `proxy::handler` for how API requests are
+//! distinguished from proxy traffic.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::routing::{delete, get, post};
 use axum::Router;
-use tracing::info;
 
 use super::routes::{self, ApiState};
 
-/// Build and run the Axum API server on the given port.
-pub async fn run_api_server(
+/// Build the Axum router (without binding to a port).
+///
+/// The returned router is used by the unified proxy listener to handle
+/// non-proxy requests (relative-URI paths like `/api/v1/...` and `/healthz`).
+pub fn build_api_router(
     state: Arc<ApiState>,
-    port: u16,
     plugin_session_routes: Vec<Router>,
-) -> anyhow::Result<()> {
+) -> Router {
     // Session sub-routes: /api/v1/sessions/:id/*
     // Start with the core session routes that need ApiState
     let session_routes = Router::new()
@@ -43,22 +47,7 @@ pub async fn run_api_server(
         .with_state(state)
         .nest("/sessions/{id}", session_routes);
 
-    let app = Router::new()
+    Router::new()
         .route("/healthz", get(routes::get_health))
-        .nest("/api/v1", api_v1);
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    info!("API server listening on {}", addr);
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    // `into_make_service_with_connect_info` injects the client SocketAddr into
-    // each request, which route handlers extract via `ConnectInfo<SocketAddr>`
-    // to bind sessions to client IPs.
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await?;
-
-    Ok(())
+        .nest("/api/v1", api_v1)
 }
