@@ -107,19 +107,18 @@ async fn handle_request(
     state: Arc<ProxyState>,
     peer_addr: SocketAddr,
 ) -> Result<hyper::Response<StreamingBody>, hyper::Error> {
-    debug!(
-        "Request: {} {} from {} session={:?}",
-        req.method(),
-        req.uri(),
-        peer_addr.ip(),
-        session_id
-    );
-
     // Route API requests (relative URIs) to the Axum router.
     if is_api_request(&req) {
-        debug!("Dispatching to API: {} {}", req.method(), req.uri());
+        let path = req.uri().path();
+        if path.starts_with("/api/") {
+            debug!(target: "gateway::api", "{} {} from {} session={:?}", req.method(), req.uri(), peer_addr.ip(), session_id);
+        } else {
+            debug!(target: "gateway::internal", "{} {} from {}", req.method(), req.uri(), peer_addr.ip());
+        }
         return Ok(dispatch_to_api(req, state, peer_addr).await);
     }
+
+    debug!(target: "gateway::proxy", "{} {} from {} session={:?}", req.method(), req.uri(), peer_addr.ip(), session_id);
 
     if req.method() == Method::CONNECT {
         match handle_connect(req, session_id, state, peer_addr).await {
@@ -292,7 +291,7 @@ async fn handle_plain_http(
     let method = req.method().clone();
     let host = uri.host().unwrap_or("unknown").to_string();
 
-    debug!("HTTP forward {} {} session={:?}", method, uri, session_id);
+    debug!(target: "gateway::proxy", "HTTP forward {} {} session={:?}", method, uri, session_id);
 
     let should_record = session_id.is_some() && state.url_filter.matches_host(&host);
     let sid_for_record = session_id.unwrap_or_default();
