@@ -300,7 +300,15 @@ async fn handle_plain_http(
     // Capture request metadata before consuming
     let req_method = method.clone();
     let req_uri: http::Uri = uri.to_string().parse()?;
-    let req_headers = req.headers().clone();
+    let mut req_headers = req.headers().clone();
+
+    // Give plugins a chance to mutate headers (e.g. refresh auth tokens)
+    if should_record {
+        state
+            .registry
+            .on_request(&sid_for_record, &req_uri, &mut req_headers)
+            .await?;
+    }
 
     // Read request body (requests are typically small)
     let (parts, body) = req.into_parts();
@@ -311,7 +319,7 @@ async fn handle_plain_http(
         .method(parts.method)
         .uri(&uri)
         .version(parts.version);
-    for (name, value) in &parts.headers {
+    for (name, value) in &req_headers {
         upstream_req = upstream_req.header(name, value);
     }
     let upstream_req = upstream_req.body(Full::new(req_body_bytes.clone()))?;

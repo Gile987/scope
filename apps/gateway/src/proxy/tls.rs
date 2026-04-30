@@ -124,7 +124,7 @@ async fn relay_request_inner(
 
     let req_method = parts.method.clone();
     let req_uri = parts.uri.clone();
-    let req_headers = parts.headers.clone();
+    let mut req_headers = parts.headers.clone();
 
     // Build the full URI for the upstream request
     let uri_str = format!(
@@ -138,6 +138,12 @@ async fn relay_request_inner(
             .unwrap_or("/")
     );
     let upstream_uri: hyper::Uri = uri_str.parse()?;
+
+    // Give plugins a chance to mutate headers (e.g. refresh auth tokens)
+    state
+        .registry
+        .on_request(session_id, &upstream_uri, &mut req_headers)
+        .await?;
 
     // Phase 2: Connect to the real upstream with genuine TLS.
     let upstream_tcp = TcpStream::connect(format!("{}:{}", domain, port)).await?;
@@ -171,7 +177,7 @@ async fn relay_request_inner(
         )
         .version(parts.version);
 
-    for (key, value) in &parts.headers {
+    for (key, value) in &req_headers {
         upstream_req = upstream_req.header(key, value);
     }
 
