@@ -29,8 +29,7 @@ flowchart TB
     end
 
     subgraph GW["AI Gateway (Rust)"]
-        API[":18897 Control API<br/><i>session mgmt, certs</i>"]
-        PX[":18000 Proxy Data Plane<br/><i>CONNECT tunneling, TLS MITM</i>"]
+        PX[":18000 Single Port<br/><i>CONNECT tunneling, TLS MITM,<br/>Control API (session mgmt, certs)</i>"]
         SM["Session Manager<br/><i>source-IP keyed</i>"]
         PR["Plugin Registry"]
         HAR["HAR Plugin<br/><i>JSONL → HAR 1.2</i>"]
@@ -42,9 +41,8 @@ flowchart TB
         AN["api.anthropic.com"]
     end
 
-    W1 -->|"HTTP_PROXY"| PX
-    W1 -->|"start/stop session<br/>download cert/HAR"| API
-    API --> SM
+    W1 -->|"HTTP_PROXY +<br/>start/stop session,<br/>download cert/HAR"| PX
+    PX --> SM
     SM --> PR
     PR --> HAR
     PX -->|"TLS intercept<br/>notify plugins"| PR
@@ -66,11 +64,11 @@ Sessions are keyed by **source IP** (`peer_addr.ip()`). Each worker container ha
 
 ## Control API
 
-The REST API runs on port **18897** and provides session management plus plugin endpoints:
+The REST API is served on the same port as the proxy (**18000**) and provides session management plus plugin endpoints:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/healthz` | `GET` | K8s liveness/readiness health check |
+| `/health` | `GET` | K8s liveness/readiness health check |
 | `/api/v1/cacert` | `GET` | Download the CA certificate (PEM) |
 | `/api/v1/sessions` | `POST` | Create a session → returns `{ id }` |
 | `/api/v1/sessions` | `GET` | List all sessions |
@@ -243,8 +241,8 @@ apps/gateway/
 │   ├── session.rs              # Source-IP session manager
 │   ├── plugin.rs               # ProxyPlugin trait + PluginRegistry
 │   ├── api/
-│   │   ├── server.rs           # Axum REST API on :18897
-│   │   └── routes.rs           # /healthz, /api/v1/sessions, /api/v1/cacert
+│   │   ├── server.rs           # Axum REST API (same port as proxy)
+│   │   └── routes.rs           # /health, /api/v1/sessions, /api/v1/cacert
 │   ├── ca/
 │   │   └── generator.rs        # CA key pair generation + leaf cert signing (rcgen)
 │   ├── filters/
@@ -267,7 +265,6 @@ urlsToWatch:
   - "https://api.githubcopilot.com/*"
   - "https://api.anthropic.com/*"
 port: 18000
-apiPort: 18897
 certDir: /tmp/scope-gateway/certs
 logLevel: info
 defaultPluginSettings:
@@ -287,14 +284,13 @@ gateway:
     target: dev
   ports:
     - "18000:18000"
-    - "18897:18897"
   healthcheck:
-    test: ["CMD", "wget", "-q", "--spider", "http://localhost:18897/healthz"]
+    test: ["CMD", "wget", "-q", "--spider", "http://localhost:18000/health"]
     interval: 5s
     retries: 10
 ```
 
-Workers connect via `HTTP_PROXY=http://gateway:18000` and `DEV_PROXY_API_URL=http://gateway:18897`.
+Workers connect via `HTTP_PROXY=http://gateway:18000` and `DEV_PROXY_API_URL=http://gateway:18000`.
 
 ## Kubernetes Deployment
 
@@ -311,7 +307,7 @@ env:
   - name: PROXY_BACKEND
     value: "gateway"
   - name: DEV_PROXY_API_URL
-    value: "http://gateway-service.scoped.svc.cluster.local:18897"
+    value: "http://gateway-service.scoped.svc.cluster.local:18000"
   - name: HTTP_PROXY
     value: "http://gateway-service.scoped.svc.cluster.local:18000"
 ```
