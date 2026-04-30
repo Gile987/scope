@@ -95,6 +95,17 @@ export function McpServerDetail() {
           .map((p) => [p.name, p.value]),
       );
 
+      // Guard: if a key is new (not in the originally-fetched env) and has no value,
+      // the API would delete the old secret but not create one for the new key.
+      const originalEnvKeys = new Set(server?.env ? Object.keys(server.env) : []);
+      const renamedWithoutValue = Object.entries(envPayload).find(
+        ([key, value]) => !value && !originalEnvKeys.has(key),
+      );
+      if (renamedWithoutValue) {
+        toast.error(`Enter a value for "${renamedWithoutValue[0]}" or remove the row`);
+        return;
+      }
+
       updateMutation.mutate({
         name,
         type,
@@ -109,6 +120,18 @@ export function McpServerDetail() {
       });
     } else {
       const filteredHeaders = headers.filter(h => h.name);
+
+      // Guard: if a header name is new (not in the originally-fetched headers) and has no
+      // value, the API would delete the old secret but not create one for the new name.
+      const originalHeaderNames = new Set(server?.headers?.map(h => h.name) ?? []);
+      const renamedWithoutValue = filteredHeaders.find(
+        h => !h.value && !originalHeaderNames.has(h.name),
+      );
+      if (renamedWithoutValue) {
+        toast.error(`Enter a value for "${renamedWithoutValue.name}" or remove the row`);
+        return;
+      }
+
       updateMutation.mutate({
         name,
         type,

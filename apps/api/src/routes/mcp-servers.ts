@@ -181,11 +181,6 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    if (env !== undefined && headers !== undefined) {
-      res.status(400).json({ error: "Only one of 'env' or 'headers' may be provided" });
-      return;
-    }
-
     const hasSecrets = (env && Object.keys(env).length > 0) || (headers && headers.length > 0);
     if (hasSecrets && !mcpSecretClient) {
       res.status(503).json({ error: "Secret storage unavailable: TOKEN_MANAGER_URL is not configured" });
