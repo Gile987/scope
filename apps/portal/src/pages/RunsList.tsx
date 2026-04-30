@@ -24,7 +24,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, ChevronsLeft, ChevronsRight, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
@@ -96,6 +96,7 @@ export function RunsList() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [cursorDirection, setCursorDirection] = useState<"after" | "before" | undefined>(undefined);
+  const [isJumpingToLast, setIsJumpingToLast] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(loadHiddenColumns);
   const queryClient = useQueryClient();
 
@@ -120,6 +121,77 @@ export function RunsList() {
   const effectiveTaskPromptId = taskFilter !== "all" ? taskFilter : taskPromptId;
   const effectiveStatus = statusFilter !== "all" ? statusFilter : undefined;
   const effectiveOutcome = outcomeFilter !== "all" ? outcomeFilter : undefined;
+
+  const goToLastPage = useCallback(async () => {
+    if (isJumpingToLast) return;
+
+    setIsJumpingToLast(true);
+    try {
+      let after: string | undefined;
+      const maxHops = 1000;
+
+      for (let i = 0; i < maxHops; i++) {
+        const page = groupBy !== "none"
+          ? await api.listRunGroups({
+            groupBy: groupBy as "task" | "submissionId" | "profile",
+            worker: workerFilter === "all" ? undefined : workerFilter,
+            taskPromptId: effectiveTaskPromptId,
+            status: effectiveStatus,
+            outcome: effectiveOutcome,
+            criteria: criteriaState,
+            submissionId,
+            limit,
+            after,
+            before: undefined,
+          })
+          : await api.listRuns({
+            worker: workerFilter === "all" ? undefined : workerFilter,
+            taskPromptId: effectiveTaskPromptId,
+            status: effectiveStatus,
+            outcome: effectiveOutcome,
+            criteria: criteriaState,
+            submissionId,
+            limit,
+            after,
+            before: undefined,
+          });
+
+        const next = page.cursors?.next ?? null;
+        if (!next) {
+          if (after) {
+            setCursor(after);
+            setCursorDirection("after");
+          } else {
+            resetCursor();
+          }
+          return;
+        }
+
+        after = next;
+      }
+
+      toast.error("Unable to jump to last page", {
+        description: "Too many pages to traverse safely.",
+      });
+    } catch (error) {
+      toast.error("Unable to jump to last page", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setIsJumpingToLast(false);
+    }
+  }, [
+    isJumpingToLast,
+    groupBy,
+    workerFilter,
+    effectiveTaskPromptId,
+    effectiveStatus,
+    effectiveOutcome,
+    criteriaState,
+    submissionId,
+    limit,
+    resetCursor,
+  ]);
 
   const { data: runsResponse, isLoading, isRefetching } = useQuery({
     queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
@@ -1518,6 +1590,14 @@ export function RunsList() {
             <Button
               variant="outline"
               size="sm"
+              disabled={!cursor && !cursorDirection}
+              onClick={resetCursor}
+            >
+              <ChevronsLeft className="h-4 w-4 mr-1" /> First
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               disabled={!activeCursors.prev}
               onClick={() => { setCursor(activeCursors.prev!); setCursorDirection("before"); }}
             >
@@ -1530,6 +1610,14 @@ export function RunsList() {
               onClick={() => { setCursor(activeCursors.next!); setCursorDirection("after"); }}
             >
               Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!activeCursors.next || isJumpingToLast}
+              onClick={goToLastPage}
+            >
+              Last {isJumpingToLast ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <ChevronsRight className="h-4 w-4 mr-1" />}
             </Button>
           </div>
         );
