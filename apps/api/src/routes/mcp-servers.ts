@@ -189,6 +189,13 @@ apiRoute(ctx.app, ctx.registry, {
 
     const wantsSecretReconciliation = env !== undefined || headers !== undefined;
 
+    // Detect a transport-kind change across the stdio boundary.
+    // GET interprets all Token Manager secrets as env (stdio) or headers (http/sse),
+    // so keeping them when the type changes would return them as the wrong kind.
+    const existingIsStdio = existing.type === "stdio";
+    const newIsStdio = type !== undefined ? type === "stdio" : existingIsStdio;
+    const typeChangesKind = type !== undefined && existingIsStdio !== newIsStdio;
+
     const updateFields: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) updateFields.name = name;
     if (type !== undefined) updateFields.type = type;
@@ -205,6 +212,14 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     await ctx.mcpServerCollection.updateOne({ _id: id }, mongoUpdate);
+
+    // When the transport kind changes (stdio ↔ non-stdio) and no explicit secret
+    // reconciliation was requested, delete all existing secrets — GET would otherwise
+    // re-interpret them as the wrong type (env ↔ headers).
+    if (mcpSecretClient && typeChangesKind && !wantsSecretReconciliation) {
+      const itemsToDelete = await mcpSecretClient.listSecrets(id);
+      await Promise.all(itemsToDelete.map((item) => mcpSecretClient!.deleteSecret(id, item.name)));
+    }
 
     // Reconcile secrets in Token Manager when secret fields are provided.
     // - Empty/`"<secret>"` values preserve the existing secret for that key.

@@ -326,4 +326,94 @@ describe("PUT /api/v1/mcp/servers/:id — secret reconciliation", () => {
 
     expect(res.status).toBe(404);
   });
+
+  // ─── type change across stdio boundary → delete all secrets ─────────────────
+
+  it("deletes all secrets when type changes from stdio to http without secret fields", async () => {
+    // Server is currently stdio type
+    const findOneSpy = vi.fn()
+      .mockResolvedValueOnce({ _id: "srv-1", name: "Test", type: "stdio", createdAt: new Date() })
+      .mockResolvedValueOnce({ _id: "srv-1", name: "Test", type: "http", createdAt: new Date() });
+    listSecrets.mockResolvedValue([makeListItem("ENV_KEY"), makeListItem("OTHER_KEY")]);
+    const { app: appWithFind } = buildCtx({ mcpSecretClient, findOneSpy });
+
+    const res = await request(appWithFind)
+      .put("/api/v1/mcp/servers/srv-1")
+      .send({ type: "http", url: "https://example.com/mcp" });
+
+    expect(res.status).toBe(200);
+    expect(deleteSecret).toHaveBeenCalledTimes(2);
+    expect(deleteSecret).toHaveBeenCalledWith("srv-1", "ENV_KEY");
+    expect(deleteSecret).toHaveBeenCalledWith("srv-1", "OTHER_KEY");
+    expect(storeSecret).not.toHaveBeenCalled();
+  });
+
+  it("deletes all secrets when type changes from http to stdio without secret fields", async () => {
+    // Server is currently http type
+    const findOneSpy = vi.fn()
+      .mockResolvedValueOnce({ _id: "srv-1", name: "Test", type: "http", createdAt: new Date() })
+      .mockResolvedValueOnce({ _id: "srv-1", name: "Test", type: "stdio", createdAt: new Date() });
+    listSecrets.mockResolvedValue([makeListItem("X-Api-Key")]);
+    const { app: appWithFind } = buildCtx({ mcpSecretClient, findOneSpy });
+
+    const res = await request(appWithFind)
+      .put("/api/v1/mcp/servers/srv-1")
+      .send({ type: "stdio", command: "npx my-server" });
+
+    expect(res.status).toBe(200);
+    expect(deleteSecret).toHaveBeenCalledOnce();
+    expect(deleteSecret).toHaveBeenCalledWith("srv-1", "X-Api-Key");
+    expect(storeSecret).not.toHaveBeenCalled();
+  });
+
+  it("does NOT delete secrets when type stays within the same kind (http → sse)", async () => {
+    const findOneSpy = vi.fn()
+      .mockResolvedValueOnce({ _id: "srv-1", name: "Test", type: "http", createdAt: new Date() })
+      .mockResolvedValueOnce({ _id: "srv-1", name: "Test", type: "sse", createdAt: new Date() });
+    listSecrets.mockResolvedValue([makeListItem("X-Api-Key")]);
+    const { app: appWithFind } = buildCtx({ mcpSecretClient, findOneSpy });
+
+    const res = await request(appWithFind)
+      .put("/api/v1/mcp/servers/srv-1")
+      .send({ type: "sse", url: "https://example.com/sse" });
+
+    expect(res.status).toBe(200);
+    expect(deleteSecret).not.toHaveBeenCalled();
+    expect(storeSecret).not.toHaveBeenCalled();
+  });
+
+  it("does NOT delete secrets on type change when explicit secret reconciliation was also provided", async () => {
+    // When the client sends both type and env/headers, explicit reconciliation handles secrets
+    const findOneSpy = vi.fn()
+      .mockResolvedValueOnce({ _id: "srv-1", name: "Test", type: "stdio", createdAt: new Date() })
+      .mockResolvedValueOnce({ _id: "srv-1", name: "Test", type: "http", createdAt: new Date() });
+    listSecrets.mockResolvedValue([makeListItem("OLD_KEY")]);
+    const { app: appWithFind } = buildCtx({ mcpSecretClient, findOneSpy });
+
+    const res = await request(appWithFind)
+      .put("/api/v1/mcp/servers/srv-1")
+      .send({ type: "http", headers: [{ name: "X-New-Header", value: "token123" }] });
+
+    expect(res.status).toBe(200);
+    // Only the explicit reconciliation runs (deletes OLD_KEY, stores X-New-Header)
+    expect(deleteSecret).toHaveBeenCalledOnce();
+    expect(deleteSecret).toHaveBeenCalledWith("srv-1", "OLD_KEY");
+    expect(storeSecret).toHaveBeenCalledOnce();
+    expect(storeSecret).toHaveBeenCalledWith("srv-1", "X-New-Header", "token123");
+  });
+
+  it("propagates listSecrets error during type-change cleanup", async () => {
+    const findOneSpy = vi.fn()
+      .mockResolvedValueOnce({ _id: "srv-1", name: "Test", type: "stdio", createdAt: new Date() })
+      .mockResolvedValueOnce({ _id: "srv-1", name: "Test", type: "http", createdAt: new Date() });
+    listSecrets.mockRejectedValue(new Error("Token Manager unreachable"));
+    const { app: appWithFind } = buildCtx({ mcpSecretClient, findOneSpy });
+
+    const res = await request(appWithFind)
+      .put("/api/v1/mcp/servers/srv-1")
+      .send({ type: "http", url: "https://example.com/mcp" });
+
+    expect(res.status).toBe(500);
+    expect(deleteSecret).not.toHaveBeenCalled();
+  });
 });
