@@ -374,6 +374,8 @@ services:
       context: ./apps/gateway
       dockerfile: Dockerfile
     profiles: [gateway, vscode-electron-driver-ext]
+    environment:
+      RUST_LOG: debug
     ulimits:
       nofile:
         soft: 65536
