@@ -24,10 +24,10 @@ describe("GatewayClient", () => {
       expect(client.apiUrl).toBe("http://env-gateway:9999");
     });
 
-    it("defaults to localhost:18897", () => {
+    it("defaults to localhost:18000", () => {
       delete process.env.DEV_PROXY_API_URL;
       const client = new GatewayClient();
-      expect(client.apiUrl).toBe("http://localhost:18897");
+      expect(client.apiUrl).toBe("http://localhost:18000");
     });
 
     it("exposes mcpEndpoint", () => {

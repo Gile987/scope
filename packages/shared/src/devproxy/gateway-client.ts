@@ -12,7 +12,7 @@
  *   GET    /api/v1/sessions/:id/har   → download HAR
  *   DELETE /api/v1/sessions/:id       → delete session
  *   GET    /api/v1/cacert             → CA certificate
- *   GET    /healthz                   → health check
+ *   GET    /health                   → health check
  */
 
 import type { HarFile } from "../har/types.js";
