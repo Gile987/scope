@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Command } from "commander";
 import { registerRunCommands } from "./run.js";
 
@@ -42,6 +42,10 @@ async function runListAndCaptureOutput(args: string[] = []): Promise<string> {
 
 describe("run list", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
     vi.restoreAllMocks();
   });
 
