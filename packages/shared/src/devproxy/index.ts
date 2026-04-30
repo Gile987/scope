@@ -46,7 +46,7 @@ export function createProxyClient(): ProxyClient {
           plugins.copilot_token = {
             tokenManagerUrl,
             capability: process.env.COPILOT_TOKEN_CAPABILITY || "generic",
-            refreshBufferSecs: 300,
+            refreshBufferSecs: 120,
             targetHosts: [
               "api.githubcopilot.com",
               "api.enterprise.githubcopilot.com",
