@@ -472,7 +472,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Kind
-        uses: helm/kind-action@v1
+        uses: helm/kind-action@v1.14.0
         with:
           install_only: true
 
