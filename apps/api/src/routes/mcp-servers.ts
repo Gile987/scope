@@ -187,6 +187,8 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    const wantsSecretReconciliation = env !== undefined || headers !== undefined;
+
     const updateFields: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) updateFields.name = name;
     if (type !== undefined) updateFields.type = type;
@@ -198,7 +200,7 @@ apiRoute(ctx.app, ctx.registry, {
     if (description !== undefined) updateFields.description = description;
 
     const mongoUpdate: Record<string, unknown> = { $set: updateFields };
-    if (mcpSecretClient && (env !== undefined || headers !== undefined)) {
+    if (mcpSecretClient && wantsSecretReconciliation) {
       (mongoUpdate as any).$unset = { env: "", headers: "" };
     }
 
@@ -206,21 +208,16 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Reconcile secrets in Token Manager when secret fields are provided.
     // Empty/"<secret>" values mean "keep existing value" for that key.
-    // Keys removed from the payload are deleted.
-    if (mcpSecretClient && (env !== undefined || headers !== undefined)) {
-      const existingItems = await mcpSecretClient.listSecrets(id).catch(() => []);
+    // Keys removed from the payload are deleted. Empty env/headers means delete all.
+    if (mcpSecretClient && wantsSecretReconciliation) {
+      const existingItems = await mcpSecretClient.listSecrets(id);
       const existingNames = new Set(existingItems.map((item) => item.name));
 
       if (env !== undefined) {
         const submittedEntries = Object.entries(env);
-        if (submittedEntries.length === 0) {
-          const updated = await ctx.mcpServerCollection.findOne({ _id: id });
-          res.json({ ...updated, id: updated!._id });
-          return;
-        }
         const submittedNames = new Set(submittedEntries.map(([name]) => name));
 
-        // Delete secrets that the client explicitly removed.
+        // Delete secrets that the client explicitly removed (including all when env is {}).
         for (const name of existingNames) {
           if (!submittedNames.has(name)) {
             await mcpSecretClient.deleteSecret(id, name);
@@ -234,10 +231,12 @@ apiRoute(ctx.app, ctx.registry, {
             await mcpSecretClient.storeSecret(id, name, valueStr);
           }
         }
-      } else if (headers !== undefined) {
+      }
+
+      if (headers !== undefined) {
         const submittedNames = new Set(headers.map((h) => h.name));
 
-        // Delete secrets that the client explicitly removed.
+        // Delete secrets that the client explicitly removed (including all when headers is []).
         for (const name of existingNames) {
           if (!submittedNames.has(name)) {
             await mcpSecretClient.deleteSecret(id, name);
