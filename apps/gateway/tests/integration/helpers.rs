@@ -85,6 +85,7 @@ impl TestGateway {
             url_filter,
             http_client,
             upstream_tls_config,
+            api_router: axum::Router::new(),
         });
 
         // Bind proxy on ephemeral port
@@ -138,7 +139,7 @@ impl TestGateway {
                 .nest("/sessions/{id}", session_routes);
 
             let app = Router::new()
-                .route("/healthz", get(gateway::api::routes::get_health))
+                .route("/health", get(gateway::api::routes::get_health))
                 .nest("/api/v1", api_v1);
 
             axum::serve(

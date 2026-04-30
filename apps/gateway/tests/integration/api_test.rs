@@ -12,8 +12,8 @@ async fn session_lifecycle() {
 
     let client = reqwest::Client::new();
 
-    // GET /healthz
-    let resp = client.get(gw.api_url("/healthz")).send().await.unwrap();
+    // GET /health
+    let resp = client.get(gw.api_url("/health")).send().await.unwrap();
     assert_eq!(resp.status(), 200);
 
     // POST /api/v1/sessions — create session

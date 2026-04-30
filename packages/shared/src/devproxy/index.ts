@@ -16,7 +16,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const DEFAULT_API_URL = "http://localhost:18897";
+const DEFAULT_API_URL = "http://localhost:18000";
 
 /**
  * Create the appropriate proxy client based on PROXY_BACKEND env var.

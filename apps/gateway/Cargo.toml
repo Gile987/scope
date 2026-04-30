@@ -10,6 +10,7 @@ hyper = { version = "1", features = ["http1", "http2", "server", "client"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1", "http2", "client-legacy"] }
 http-body-util = "0.1"
 axum = "0.8"
+tower = { version = "0.5", features = ["util"] }
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 rustls-pemfile = "2"
 tokio-rustls = "0.26"

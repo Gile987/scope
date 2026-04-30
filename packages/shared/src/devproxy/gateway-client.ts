@@ -12,17 +12,18 @@
  *   GET    /api/v1/sessions/:id/har   → download HAR
  *   DELETE /api/v1/sessions/:id       → delete session
  *   GET    /api/v1/cacert             → CA certificate
- *   GET    /healthz                   → health check
+ *   GET    /health                   → health check
  */
 
 import type { HarFile } from "../har/types.js";
+import { withRetry } from "../utils/retry.js";
 import {
   waitForProxyReady,
   downloadProxyCertificate,
   createCombinedCaBundle,
 } from "./proxy-client.js";
 
-const DEFAULT_API_URL = "http://localhost:18897";
+const DEFAULT_API_URL = "http://localhost:18000";
 
 export class GatewayClient {
   readonly apiUrl: string;
@@ -79,11 +80,24 @@ export class GatewayClient {
     const id = this.sessionId;
     if (!id) return null;
     try {
-      const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}/har`);
-      if (response.ok) {
-        return (await response.json()) as HarFile;
-      }
-      return null;
+      return await withRetry(
+        async () => {
+          const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}/har`);
+          if (!response.ok) {
+            throw new Error(`HAR download failed: ${response.status} ${response.statusText}`);
+          }
+          return (await response.json()) as HarFile;
+        },
+        {
+          maxRetries: 3,
+          baseDelayMs: 500,
+          isRetryable: () => true,
+          onRetry: (err, attempt) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.warn(`[GatewayClient] HAR download attempt ${attempt} failed: ${msg}`);
+          },
+        },
+      );
     } catch {
       return null;
     }

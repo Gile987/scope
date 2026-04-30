@@ -196,13 +196,14 @@ Enables DevProxy integration for capturing HTTP traffic as HAR files. When `true
 - **Kubernetes:** Set in the deployment manifest env vars (auto-set when sidecar is present)
 
 ### DEV_PROXY_API_URL
-**Default:** `http://localhost:18897`
+**Default:** `http://localhost:18000`
 **Type:** URL string
 
-URL of the DevProxy REST API. The `DevProxyClient` uses this to start/stop recording, check status, and download the CA certificate.
+URL of the gateway/DevProxy REST API. Used to start/stop recording, check status, and download the CA certificate.
 
-- **Docker Compose:** `http://devproxy-copilot:18897` (separate service)
-- **Kubernetes:** `http://localhost:18897` (sidecar in same pod)
+- **Docker Compose (gateway):** `http://gateway:18000` (shared service)
+- **Docker Compose (devproxy-copilot):** `http://devproxy-copilot:18897` (separate legacy service)
+- **Kubernetes:** `http://gateway-service:18000` (shared service)
 
 ### DEV_PROXY_HAR_DIR
 **Default:** `/har-output`

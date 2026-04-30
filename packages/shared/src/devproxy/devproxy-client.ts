@@ -15,7 +15,7 @@ import { extractHarMetadata } from "../har/extract-metadata.js";
 import type { HarCollectionResult } from "../har/extract-metadata.js";
 import type { WorkerLogFn } from "../types/types.js";
 
-const DEFAULT_API_URL = "http://localhost:18897";
+const DEFAULT_API_URL = "http://localhost:18000";
 const DEFAULT_HAR_DIR = "/har-output";
 const POLL_INTERVAL_MS = 500;
 const DEFAULT_TIMEOUT_MS = 30_000;

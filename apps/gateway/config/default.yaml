@@ -5,7 +5,6 @@ urlsToWatch:
   - "https://*.githubcopilot.com/*"
   - "https://api.anthropic.com/*"
 port: 18000
-apiPort: 18897
 certDir: /tmp/scope-gateway/certs
 logLevel: info
 defaultPluginSettings:
