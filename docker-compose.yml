@@ -382,9 +382,9 @@ services:
       - ./apps/gateway/config/default.yaml:/config/proxy.yaml:ro
       - gateway_cert:/certs
     ports:
-      - "${GATEWAY_API_PORT:-18900}:18897"
+      - "${GATEWAY_API_PORT:-18900}:18000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18897/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18000/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
