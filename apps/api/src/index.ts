@@ -49,6 +49,8 @@ import type {
 
 dotenv.config();
 
+const processStartMs = performance.now();
+
 const TOKEN_MANAGER_URL = process.env.TOKEN_MANAGER_URL || "";
 const mcpSecretClient: McpSecretClient | null = TOKEN_MANAGER_URL
   ? new McpSecretClient(TOKEN_MANAGER_URL)
@@ -129,49 +131,6 @@ async function initializeClients(): Promise<void> {
 
   // Note: Collection indexes are managed by db-migrations (see 002-create-indexes.ts).
   // Run `pnpm migrate:up` to apply pending migrations.
-
-  const criteriaCount = await criteriaCollection.countDocuments({ deletedAt: { $exists: false } });
-  console.log(`Criteria collection has ${criteriaCount} documents`);
-
-  const promptFeatureCount = await promptFeatureCollection.countDocuments({ deletedAt: { $exists: false } });
-  console.log(`Prompt features collection has ${promptFeatureCount} documents`);
-
-  const agentCount = await agentCollection.countDocuments({ deletedAt: { $exists: false } });
-  console.log(`Agents collection has ${agentCount} documents`);
-
-  const modelCount = await modelCollection.countDocuments();
-  console.log(`Models collection has ${modelCount} documents`);
-
-  const mcpServerCount = await mcpServerCollection.countDocuments({ deletedAt: { $exists: false } });
-  console.log(`MCP servers collection has ${mcpServerCount} documents`);
-
-  const skillCount = await skillCollection.countDocuments({ deletedAt: { $exists: false } });
-  console.log(`Skills collection has ${skillCount} documents`);
-
-  const extensionCount = await extensionCollection.countDocuments({ deletedAt: { $exists: false } });
-  console.log(`Extensions collection has ${extensionCount} documents`);
-
-  // Seed default feature flags (upsert — won't overwrite existing enabled state)
-  const defaultFlags: Array<{ key: string; label: string }> = [
-    { key: "mcp", label: "MCP Servers" },
-    { key: "models", label: "Models" },
-    { key: "agents", label: "Agents" },
-    { key: "tokens", label: "Tokens" },
-    { key: "extensions", label: "VS Code Extensions" },
-    { key: "statistics-graph", label: "Statistics Graph" },
-  ];
-  for (const flag of defaultFlags) {
-    await featureFlagCollection.updateOne(
-      { key: flag.key },
-      { $setOnInsert: { key: flag.key, label: flag.label, enabled: true, updatedAt: new Date() } },
-      { upsert: true }
-    );
-  }
-  const featureFlagCount = await featureFlagCollection.countDocuments();
-  console.log(`Feature flags collection has ${featureFlagCount} documents`);
-
-  const insightCount = await insightsCollection.countDocuments({ deletedAt: { $exists: false } });
-  console.log(`Insights collection has ${insightCount} documents`);
 
   // Seed default agents (upsert — always updates name and modelProvider, preserves existing models)
   const defaultAgents: Array<{ _id: string; name: string; modelProvider?: string }> = [
