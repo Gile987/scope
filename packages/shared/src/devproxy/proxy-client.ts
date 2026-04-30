@@ -61,7 +61,7 @@ export async function waitForProxyReady(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${apiUrl}/healthz`);
+      const response = await fetch(`${apiUrl}/health`);
       if (response.ok) return;
     } catch {
       // Not ready yet
