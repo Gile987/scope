@@ -100,7 +100,8 @@ export function McpServerDetail() {
         type,
         command,
         args: args.trim() ? args.trim().split(/\s+/) : undefined,
-        // Always send env object (including empty) so API can reconcile removals.
+        // Always send env object so the API can reconcile removals.
+        // Sending `{}` explicitly clears all env secrets (user removed all pairs).
         env: envPayload,
         sessionMode,
         version: version.trim() || undefined,
@@ -113,7 +114,8 @@ export function McpServerDetail() {
         type,
         url,
         description: description.trim() || undefined,
-        // Always send headers array (including empty) so API can reconcile removals.
+        // Always send headers array so the API can reconcile removals.
+        // Sending `[]` explicitly clears all header secrets (user removed all headers).
         headers: filteredHeaders,
       });
     }

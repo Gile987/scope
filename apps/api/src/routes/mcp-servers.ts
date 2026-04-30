@@ -181,6 +181,11 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    if (env !== undefined && headers !== undefined) {
+      res.status(400).json({ error: "Only one of 'env' or 'headers' may be provided" });
+      return;
+    }
+
     const hasSecrets = (env && Object.keys(env).length > 0) || (headers && headers.length > 0);
     if (hasSecrets && !mcpSecretClient) {
       res.status(503).json({ error: "Secret storage unavailable: TOKEN_MANAGER_URL is not configured" });
@@ -207,8 +212,10 @@ apiRoute(ctx.app, ctx.registry, {
     await ctx.mcpServerCollection.updateOne({ _id: id }, mongoUpdate);
 
     // Reconcile secrets in Token Manager when secret fields are provided.
-    // Empty/"<secret>" values mean "keep existing value" for that key.
-    // Keys removed from the payload are deleted. Empty env/headers means delete all.
+    // - Empty/`"<secret>"` values preserve the existing secret for that key.
+    // - Keys omitted from the payload are deleted.
+    // - An empty env object (`{}`) or empty headers array (`[]`) deletes all existing secrets.
+    // Only one of env/headers may be present (enforced above).
     if (mcpSecretClient && wantsSecretReconciliation) {
       const existingItems = await mcpSecretClient.listSecrets(id);
       const existingNames = new Set(existingItems.map((item) => item.name));
