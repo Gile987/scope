@@ -89,24 +89,32 @@ export function McpServerDetail() {
 
   const handleSave = () => {
     if (isStdio) {
+      const envPayload = Object.fromEntries(
+        envPairs
+          .filter((p) => p.name)
+          .map((p) => [p.name, p.value]),
+      );
+
       updateMutation.mutate({
         name,
         type,
         command,
         args: args.trim() ? args.trim().split(/\s+/) : undefined,
-        env: envPairs.length > 0 ? Object.fromEntries(envPairs.filter(p => p.name && p.value).map(p => [p.name, p.value])) : undefined,
+        // Always send env object (including empty) so API can reconcile removals.
+        env: envPayload,
         sessionMode,
         version: version.trim() || undefined,
         description: description.trim() || undefined,
       });
     } else {
-      const filteredHeaders = headers.filter(h => h.name && h.value);
+      const filteredHeaders = headers.filter(h => h.name);
       updateMutation.mutate({
         name,
         type,
         url,
         description: description.trim() || undefined,
-        headers: filteredHeaders.length > 0 ? filteredHeaders : undefined,
+        // Always send headers array (including empty) so API can reconcile removals.
+        headers: filteredHeaders,
       });
     }
   };

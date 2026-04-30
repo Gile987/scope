@@ -204,13 +204,52 @@ apiRoute(ctx.app, ctx.registry, {
 
     await ctx.mcpServerCollection.updateOne({ _id: id }, mongoUpdate);
 
-    // Replace all secrets in Token Manager if provided
+    // Reconcile secrets in Token Manager when secret fields are provided.
+    // Empty/"<secret>" values mean "keep existing value" for that key.
+    // Keys removed from the payload are deleted.
     if (mcpSecretClient && (env !== undefined || headers !== undefined)) {
-      await mcpSecretClient.deleteAllSecrets(id);
-      if (env && Object.keys(env).length > 0) {
-        await mcpSecretClient.storeEnv(id, env);
-      } else if (headers && headers.length > 0) {
-        await mcpSecretClient.storeHeaders(id, headers);
+      const existingItems = await mcpSecretClient.listSecrets(id).catch(() => []);
+      const existingNames = new Set(existingItems.map((item) => item.name));
+
+      if (env !== undefined) {
+        const submittedEntries = Object.entries(env);
+        if (submittedEntries.length === 0) {
+          const updated = await ctx.mcpServerCollection.findOne({ _id: id });
+          res.json({ ...updated, id: updated!._id });
+          return;
+        }
+        const submittedNames = new Set(submittedEntries.map(([name]) => name));
+
+        // Delete secrets that the client explicitly removed.
+        for (const name of existingNames) {
+          if (!submittedNames.has(name)) {
+            await mcpSecretClient.deleteSecret(id, name);
+          }
+        }
+
+        // Upsert only explicit new values; keep existing values when masked/empty.
+        for (const [name, rawValue] of submittedEntries) {
+          const valueStr = String(rawValue ?? "");
+          if (valueStr && valueStr !== "<secret>") {
+            await mcpSecretClient.storeSecret(id, name, valueStr);
+          }
+        }
+      } else if (headers !== undefined) {
+        const submittedNames = new Set(headers.map((h) => h.name));
+
+        // Delete secrets that the client explicitly removed.
+        for (const name of existingNames) {
+          if (!submittedNames.has(name)) {
+            await mcpSecretClient.deleteSecret(id, name);
+          }
+        }
+
+        // Upsert only explicit new values; keep existing values when masked/empty.
+        for (const header of headers) {
+          if (header.value && header.value !== "<secret>") {
+            await mcpSecretClient.storeSecret(id, header.name, header.value);
+          }
+        }
       }
     }
 
