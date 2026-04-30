@@ -49,8 +49,6 @@ import type {
 
 dotenv.config();
 
-const processStartMs = performance.now();
-
 const TOKEN_MANAGER_URL = process.env.TOKEN_MANAGER_URL || "";
 const mcpSecretClient: McpSecretClient | null = TOKEN_MANAGER_URL
   ? new McpSecretClient(TOKEN_MANAGER_URL)
@@ -131,6 +129,23 @@ async function initializeClients(): Promise<void> {
 
   // Note: Collection indexes are managed by db-migrations (see 002-create-indexes.ts).
   // Run `pnpm migrate:up` to apply pending migrations.
+
+  // Seed default feature flags (upsert — won't overwrite existing enabled state)
+  const defaultFlags: Array<{ key: string; label: string }> = [
+    { key: "mcp", label: "MCP Servers" },
+    { key: "models", label: "Models" },
+    { key: "agents", label: "Agents" },
+    { key: "tokens", label: "Tokens" },
+    { key: "extensions", label: "VS Code Extensions" },
+    { key: "statistics-graph", label: "Statistics Graph" },
+  ];
+  for (const flag of defaultFlags) {
+    await featureFlagCollection.updateOne(
+      { key: flag.key },
+      { $setOnInsert: { key: flag.key, label: flag.label, enabled: true, updatedAt: new Date() } },
+      { upsert: true }
+    );
+  }
 
   // Seed default agents (upsert — always updates name and modelProvider, preserves existing models)
   const defaultAgents: Array<{ _id: string; name: string; modelProvider?: string }> = [
