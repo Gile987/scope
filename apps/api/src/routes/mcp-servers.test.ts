@@ -48,7 +48,7 @@ function buildCtx(overrides: {
     find: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
     insertOne: vi.fn().mockResolvedValue({ insertedId: "srv-1" }),
     deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
-  };
+  } as unknown as RouteContext["mcpServerCollection"];
 
   const ctx = {
     app,
@@ -84,7 +84,7 @@ function buildCtx(overrides: {
     validWorkers: [],
     storageConnectionString: "",
     storageAccountName: "",
-  } as RouteContext;
+  } as unknown as RouteContext;
 
   registerMcpServersRoutes(ctx);
 

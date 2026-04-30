@@ -507,7 +507,7 @@ export function McpServerDetail() {
                       className="font-mono text-sm"
                     />
                     <Input
-                      placeholder={pair.value === "" && server?.env?.[pair.name] === "<secret>" ? "(already set — enter new value to change)" : "value"}
+                      placeholder={pair.value === "" && server?.env?.[pair.name] === "<secret>" ? "" : "value"}
                       type="password"
                       value={pair.value}
                       onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
