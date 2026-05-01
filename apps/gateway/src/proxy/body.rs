@@ -149,7 +149,7 @@ pub(crate) fn spawn_stream_and_record<B, F>(
             elapsed_ms,
         };
 
-        state.registry.on_exchange(&ctx.session_id, &exchange);
+        state.registry.on_exchange(&ctx.session_id, &exchange).await;
     });
 }
 

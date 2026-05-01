@@ -108,7 +108,7 @@ impl ProxyPlugin for HarPlugin {
         "har"
     }
 
-    fn on_session_start(&self, session_id: &SessionId, settings: &serde_json::Value) {
+    async fn on_session_start(&self, session_id: &SessionId, settings: &serde_json::Value) {
         // Default to redacting sensitive headers (Authorization, cookies, API keys).
         // Callers must explicitly opt out with `"redactCredentials": false`.
         let redact = settings
@@ -145,7 +145,7 @@ impl ProxyPlugin for HarPlugin {
         debug!("HAR plugin: session started for {}", session_id);
     }
 
-    fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
+    async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
         let sessions = self.inner.sessions.read();
         let session = match sessions.get(session_id) {
             Some(s) if !s.finalized => s,
@@ -172,7 +172,7 @@ impl ProxyPlugin for HarPlugin {
         }
     }
 
-    fn on_session_stop(&self, session_id: &SessionId) {
+    async fn on_session_stop(&self, session_id: &SessionId) {
         let mut sessions = self.inner.sessions.write();
         if let Some(session) = sessions.get_mut(session_id) {
             session.finalized = true;
@@ -180,7 +180,7 @@ impl ProxyPlugin for HarPlugin {
         }
     }
 
-    fn on_session_clear(&self, session_id: &SessionId) {
+    async fn on_session_clear(&self, session_id: &SessionId) {
         let mut sessions = self.inner.sessions.write();
         if let Some(session) = sessions.remove(session_id) {
             let _ = std::fs::remove_file(&session.jsonl_path);

@@ -5,8 +5,8 @@
 //!
 //! The proxy core delegates all traffic observation to plugins via the
 //! `ProxyPlugin` trait, keeping the proxy pipeline decoupled from recording,
-//! analysis, or modification logic. Plugins are notified synchronously and
-//! sequentially — they're expected to be fast (append to buffer/file).
+//! analysis, or modification logic. All hooks are async — plugins may perform
+//! I/O (blob appends, Redis writes) without blocking Tokio worker threads.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -57,7 +57,7 @@ pub trait ProxyPlugin: Send + Sync {
 
     /// Called when a session starts.
     /// `settings` is the plugin-specific JSON from POST /session/start body.
-    fn on_session_start(&self, session_id: &SessionId, settings: &Value);
+    async fn on_session_start(&self, session_id: &SessionId, settings: &Value);
 
     /// Called before a request is forwarded upstream. Plugins may mutate headers
     /// (e.g. to refresh/inject credentials). Only called for intercepted sessions.
@@ -72,13 +72,13 @@ pub trait ProxyPlugin: Send + Sync {
     }
 
     /// Called for each intercepted request/response pair.
-    fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange);
+    async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange);
 
     /// Called when a session stops (POST /session/stop).
-    fn on_session_stop(&self, session_id: &SessionId);
+    async fn on_session_stop(&self, session_id: &SessionId);
 
     /// Called when a session is reaped (idle timeout or next start).
-    fn on_session_clear(&self, session_id: &SessionId);
+    async fn on_session_clear(&self, session_id: &SessionId);
 
     /// Optional: register additional API routes.
     fn api_routes(&self) -> Option<axum::Router> {
@@ -103,7 +103,7 @@ impl PluginRegistry {
     }
 
     /// Notify all plugins that a session has started.
-    pub fn on_session_start(
+    pub async fn on_session_start(
         &self,
         session_id: &SessionId,
         plugin_settings: &HashMap<String, Value>,
@@ -113,7 +113,7 @@ impl PluginRegistry {
         let empty = Value::Object(serde_json::Map::new());
         for plugin in &self.plugins {
             let settings = plugin_settings.get(plugin.name()).unwrap_or(&empty);
-            plugin.on_session_start(session_id, settings);
+            plugin.on_session_start(session_id, settings).await;
         }
     }
 
@@ -131,23 +131,23 @@ impl PluginRegistry {
     }
 
     /// Broadcast a captured exchange to all plugins.
-    pub fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
+    pub async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
         for plugin in &self.plugins {
-            plugin.on_exchange(session_id, exchange);
+            plugin.on_exchange(session_id, exchange).await;
         }
     }
 
     /// Notify all plugins that a session has stopped.
-    pub fn on_session_stop(&self, session_id: &SessionId) {
+    pub async fn on_session_stop(&self, session_id: &SessionId) {
         for plugin in &self.plugins {
-            plugin.on_session_stop(session_id);
+            plugin.on_session_stop(session_id).await;
         }
     }
 
     /// Notify all plugins that a session is being cleared (deleted or reaped).
-    pub fn on_session_clear(&self, session_id: &SessionId) {
+    pub async fn on_session_clear(&self, session_id: &SessionId) {
         for plugin in &self.plugins {
-            plugin.on_session_clear(session_id);
+            plugin.on_session_clear(session_id).await;
         }
     }
 }

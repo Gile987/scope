@@ -93,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
-            let reaped = reaper_session_mgr.reap_idle();
+            let reaped = reaper_session_mgr.reap_idle().await;
             if !reaped.is_empty() {
                 info!("Reaped {} idle sessions", reaped.len());
             }
