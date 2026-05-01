@@ -39,10 +39,11 @@ export function createProxyClient(): ProxyClient {
       startRecording: async () => {
         const plugins: Record<string, unknown> = {};
 
-        // Enable the copilot_token auto-refresh plugin when token minting is
-        // handled by the gateway (MINT_COPILOT_TOKEN is not "true").
+        // Enable the copilot_token auto-refresh plugin when the gateway can
+        // reach the Token Manager. The worker also mints a token at startup,
+        // but the gateway plugin keeps it fresh throughout long-running sessions.
         const tokenManagerUrl = process.env.TOKEN_MANAGER_URL;
-        if (process.env.MINT_COPILOT_TOKEN !== "true" && tokenManagerUrl) {
+        if (tokenManagerUrl) {
           plugins.copilot_token = {
             tokenManagerUrl,
             capability: process.env.COPILOT_TOKEN_CAPABILITY || "generic",
