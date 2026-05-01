@@ -111,6 +111,79 @@ async fn main() -> anyhow::Result<()> {
         info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
         Arc::new(HarPlugin::new(har_dir))
     };
+    let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
+
+    // Session manager — wire Redis store when env vars are present.
+    let session_manager = {
+        let redis_host = std::env::var("REDIS_HOST").ok();
+        if let Some(host) = redis_host {
+            let port: u16 = std::env::var("REDIS_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(6380);
+            let password = std::env::var("REDIS_PASSWORD").ok();
+            // Use TLS only when REDIS_TLS=true is explicitly set.
+            let tls = if std::env::var("REDIS_TLS")
+                .map(|v| v == "true")
+                .unwrap_or(false)
+            {
+                fred::types::config::TlsConnector::default_rustls()
+                    .ok()
+                    .map(Into::into)
+            } else {
+                None
+            };
+            let redis_config = fred::types::config::Config {
+                server: fred::types::config::ServerConfig::new_centralized(host.as_str(), port),
+                password,
+                tls,
+                ..Default::default()
+            };
+            match fred::types::Builder::from_config(redis_config).build() {
+                Ok(client) => {
+                    use fred::interfaces::ClientLike;
+                    match client.init().await {
+                        Ok(_) => {
+                            info!("Session store: connected to Redis at {}:{}", host, port);
+                            let store = SessionStore::new(client);
+                            Arc::new(SessionManager::new_with_store(
+                                registry.clone(),
+                                Duration::from_secs(300),
+                                100,
+                                store,
+                            ))
+                        }
+                        Err(e) => {
+                            warn!("Session store: Redis connect failed, running without persistence: {}", e);
+                            Arc::new(SessionManager::new(
+                                registry.clone(),
+                                Duration::from_secs(300),
+                                100,
+                            ))
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Session store: Redis config error, running without persistence: {}",
+                        e
+                    );
+                    Arc::new(SessionManager::new(
+                        registry.clone(),
+                        Duration::from_secs(300),
+                        100,
+                    ))
+                }
+            }
+        } else {
+            info!("Session store: REDIS_HOST not set, running without persistence");
+            Arc::new(SessionManager::new(
+                registry.clone(),
+                Duration::from_secs(300),
+                100,
+            ))
+        }
+    };
 
     // Shared HTTP/1.1 connection pool for plain (non-CONNECT) forwarding.
     // A single client avoids per-request connection setup and enables keepalive reuse.

@@ -398,6 +398,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ""
+      TOKEN_MANAGER_URL: http://token-manager:80
     ulimits:
       nofile:
         soft: 65536

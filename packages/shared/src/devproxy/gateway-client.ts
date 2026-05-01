@@ -56,7 +56,7 @@ export class GatewayClient {
     const response = await fetch(`${this.apiUrl}/api/v1/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionPluginSettings: plugins }),
+      body: JSON.stringify({ plugins }),
     });
     if (!response.ok) {
       throw new Error(`Failed to create gateway session: ${response.status} ${response.statusText}`);
