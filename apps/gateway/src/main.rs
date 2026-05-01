@@ -18,7 +18,7 @@ use http_body_util::Full;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use gateway::api::routes::ApiState;
 use gateway::api::server::build_api_router;
@@ -27,6 +27,7 @@ use gateway::config::{Cli, Config};
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
 use gateway::plugins::har::plugin::HarPlugin;
+use gateway::session_store::SessionStore;
 use azure_storage::StorageCredentials;
 use azure_storage_blobs::prelude::BlobServiceClient;
 use gateway::proxy::handler::{handle_client, ProxyState};
@@ -80,6 +81,28 @@ async fn main() -> anyhow::Result<()> {
         info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
         Arc::new(HarPlugin::new(har_dir))
     };
+
+    // Shared HTTP/1.1 connection pool for plain (non-CONNECT) forwarding.
+    // A single client avoids per-request connection setup and enables keepalive reuse.
+    let http_client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new())
+        .pool_idle_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(4)
+        .build_http();
+
+    // Pre-built TLS config for upstream connections (MITM relay).
+    // Contains Mozilla roots + any additional CA certs from config.
+    let upstream_root_store = config.upstream_root_store()?;
+    let upstream_tls_config = Arc::new(
+        rustls::ClientConfig::builder()
+            .with_root_certificates(upstream_root_store)
+            .with_no_client_auth(),
+    );
+    if !config.additional_ca_certs.is_empty() {
+        info!(
+            "Loaded additional CA certs from {:?}",
+            config.additional_ca_certs
+        );
+    }
 
     // API state & router (served on the same port as proxy traffic)
     let api_state = Arc::new(ApiState {

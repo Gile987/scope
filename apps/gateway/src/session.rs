@@ -21,6 +21,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::plugin::{PluginRegistry, SessionId};
+use crate::session_store::{PersistedSession, SessionStore, session_ttl};
 
 /// State of a single session.
 #[derive(Debug)]
@@ -61,14 +62,12 @@ pub struct SessionManager {
     registry: Arc<PluginRegistry>,
     idle_timeout: Duration,
     max_sessions: usize,
+    /// Optional Redis-backed persistence for crash recovery.
+    store: Option<SessionStore>,
 }
 
 impl SessionManager {
-    /// Create a new session manager.
-    ///
-    /// * `registry` — plugin registry to notify on lifecycle events
-    /// * `idle_timeout` — how long before an inactive session is reaped
-    /// * `max_sessions` — upper bound on concurrent sessions
+    /// Create a new session manager without Redis persistence.
     pub fn new(registry: Arc<PluginRegistry>, idle_timeout: Duration, max_sessions: usize) -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
@@ -76,6 +75,24 @@ impl SessionManager {
             registry,
             idle_timeout,
             max_sessions,
+            store: None,
+        }
+    }
+
+    /// Create a session manager with Redis-backed session persistence.
+    pub fn new_with_store(
+        registry: Arc<PluginRegistry>,
+        idle_timeout: Duration,
+        max_sessions: usize,
+        store: SessionStore,
+    ) -> Self {
+        Self {
+            sessions: RwLock::new(HashMap::new()),
+            ip_index: RwLock::new(HashMap::new()),
+            registry,
+            idle_timeout,
+            max_sessions,
+            store: Some(store),
         }
     }
 
@@ -114,20 +131,35 @@ impl SessionManager {
             .on_session_start(&session_id, &plugin_settings)
             .await;
 
-        let mut sessions = self.sessions.write();
-        let mut ip_index = self.ip_index.write();
-        sessions.insert(
-            session_id.clone(),
-            Session {
-                id: session_id.clone(),
+        // Insert into maps inside a block so guards drop before any .await.
+        {
+            let mut sessions = self.sessions.write();
+            let mut ip_index = self.ip_index.write();
+            sessions.insert(
+                session_id.clone(),
+                Session {
+                    id: session_id.clone(),
+                    client_ip,
+                    active: true,
+                    plugin_settings: plugin_settings.clone(),
+                    started_at: chrono::Utc::now(),
+                    last_activity: Instant::now(),
+                },
+            );
+            ip_index.insert(client_ip, session_id.clone());
+        }
+
+        // Persist to Redis so a replacement pod can restore the session.
+        if let Some(store) = &self.store {
+            let persisted = PersistedSession {
+                session_id: session_id.clone(),
                 client_ip,
-                active: true,
-                plugin_settings,
+                plugin_settings: plugin_settings.clone(),
                 started_at: chrono::Utc::now(),
-                last_activity: Instant::now(),
-            },
-        );
-        ip_index.insert(client_ip, session_id.clone());
+            };
+            let ttl = session_ttl(&plugin_settings);
+            store.save(&persisted, ttl).await;
+        }
 
         Ok(session_id)
     }
@@ -144,6 +176,18 @@ impl SessionManager {
             session.active = false;
         }
         self.registry.on_session_stop(session_id).await;
+
+        // Delete from Redis on explicit stop.
+        if let Some(store) = &self.store {
+            let client_ip = {
+                let sessions = self.sessions.read();
+                sessions.get(session_id).map(|s| s.client_ip)
+            };
+            if let Some(ip) = client_ip {
+                store.delete(session_id, &ip).await;
+            }
+        }
+
         Ok(())
     }
 
@@ -157,8 +201,13 @@ impl SessionManager {
             ip_index.remove(&session.client_ip);
             session.client_ip
         };
-        let _ = client_ip; // used above
         self.registry.on_session_clear(session_id).await;
+
+        // Delete from Redis on explicit clear.
+        if let Some(store) = &self.store {
+            store.delete(session_id, &client_ip).await;
+        }
+
         Ok(())
     }
 
@@ -179,6 +228,52 @@ impl SessionManager {
     pub fn is_active(&self, session_id: &SessionId) -> bool {
         let sessions = self.sessions.read();
         sessions.get(session_id).map(|s| s.active).unwrap_or(false)
+    }
+
+    /// Attempt to restore a session from Redis for a client IP that has no
+    /// in-memory session. Called by the proxy handler when it encounters
+    /// traffic from an IP with no active session (pod crash recovery).
+    ///
+    /// Returns the restored session ID if successful, `None` otherwise.
+    pub async fn restore_session_for_ip(&self, ip: &IpAddr) -> Option<SessionId> {
+        let store = self.store.as_ref()?;
+        let persisted = store.get_by_ip(ip).await?;
+
+        // Don't exceed max sessions.
+        {
+            let sessions = self.sessions.read();
+            if sessions.len() >= self.max_sessions {
+                return None;
+            }
+        }
+
+        let session_id = persisted.session_id.clone();
+
+        // Notify plugins to restore session state (e.g. re-attach blob writer).
+        self.registry
+            .on_session_start(&session_id, &persisted.plugin_settings)
+            .await;
+
+        let mut sessions = self.sessions.write();
+        let mut ip_index = self.ip_index.write();
+        sessions.insert(
+            session_id.clone(),
+            Session {
+                id: session_id.clone(),
+                client_ip: *ip,
+                active: true,
+                plugin_settings: persisted.plugin_settings,
+                started_at: persisted.started_at,
+                last_activity: Instant::now(),
+            },
+        );
+        ip_index.insert(*ip, session_id.clone());
+
+        tracing::info!(
+            "SessionManager: restored session {} for IP {} from Redis",
+            session_id, ip
+        );
+        Some(session_id)
     }
 
     /// Touch a session to reset its idle timer.
