@@ -64,7 +64,8 @@ function formatMs(ms: number): string {
 function formatStarted(iso: string): string {
   try {
     const d = new Date(iso);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3 });
+    const ms = String(d.getMilliseconds()).padStart(3, "0");
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + `.${ms}`;
   } catch {
     return iso;
   }
