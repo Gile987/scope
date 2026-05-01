@@ -279,7 +279,7 @@ export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
                           {entry.request.method}
                         </span>
                       </td>
-                      <td className="p-2 text-xs text-muted-foreground tabular-nums" title={new Date(entry.startedDateTime).toISOString()}>
+                      <td className="p-2 text-xs text-muted-foreground tabular-nums" title={`UTC: ${new Date(entry.startedDateTime).toISOString()}\nLocal: ${new Date(entry.startedDateTime).toString()}`}>
                         {formatStarted(entry.startedDateTime)}
                       </td>
                       <td className="p-2 truncate max-w-[400px]">
