@@ -133,9 +133,11 @@ export function RunsList() {
       // beginning in that case.
       let after: string | undefined = cursorDirection === "after" ? cursor : undefined;
 
+      // Hard upper bound on sequential API requests regardless of dataset size.
+      const maxHopsAbsolute = 500;
       // Conservative initial bound; tightened after the first response using
-      // the API-reported estimatedTotal and page size.
-      let maxHops = 200;
+      // the API-reported estimatedTotal and page size, but never above the hard cap.
+      let maxHops = maxHopsAbsolute;
       // Buffer of 2 extra pages guards against new records arriving mid-traversal
       // causing the real page count to exceed the estimate.
       const traversalBufferPages = 2;
@@ -169,12 +171,16 @@ export function RunsList() {
             before: undefined,
           });
 
-        // On the first iteration, derive a tight hop bound from the response metadata.
+        // On the first iteration, derive a tight hop bound from the response metadata,
+        // but never exceed the hard absolute cap.
         if (i === 0) {
           estimatedTotalForDisplay = page.estimatedTotal;
           const pageSize = page.limit > 0 ? page.limit : defaultPageSize;
           if (page.estimatedTotal > 0 && pageSize > 0) {
-            maxHops = Math.ceil(page.estimatedTotal / pageSize) + traversalBufferPages;
+            maxHops = Math.min(
+              Math.ceil(page.estimatedTotal / pageSize) + traversalBufferPages,
+              maxHopsAbsolute,
+            );
           }
         }
 
