@@ -69,3 +69,112 @@ pub async fn acquire_github_token(
 
     Ok(key_resp.value)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn acquire_success_returns_token_value() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/keys/acquire"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "value": "gh-oauth-token-abc",
+                "keyId": "key-42",
+                "keyType": "generic-keytype",
+                "capability": "generic-cap"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let result =
+            acquire_github_token(&client, &server.uri(), "generic-cap").await;
+
+        assert_eq!(result.unwrap(), "gh-oauth-token-abc");
+    }
+
+    #[tokio::test]
+    async fn acquire_non_success_status_returns_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/keys/acquire"))
+            .respond_with(
+                ResponseTemplate::new(503).set_body_string("Service Unavailable"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let result =
+            acquire_github_token(&client, &server.uri(), "generic-cap").await;
+
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("503"));
+        assert!(err.to_string().contains("Service Unavailable"));
+    }
+
+    #[tokio::test]
+    async fn acquire_invalid_json_returns_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/keys/acquire"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("{invalid json}"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let result =
+            acquire_github_token(&client, &server.uri(), "generic-cap").await;
+
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("parse"));
+    }
+
+    #[tokio::test]
+    async fn acquire_unreachable_server_returns_error() {
+        let client = reqwest::Client::new();
+        let result =
+            acquire_github_token(&client, "http://127.0.0.1:1", "generic-cap")
+                .await;
+
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Failed to reach"));
+    }
+
+    #[tokio::test]
+    async fn acquire_trims_trailing_slash_from_url() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/keys/acquire"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "value": "token-xyz",
+                "keyId": "k1",
+                "keyType": "generic-keytype",
+                "capability": "test"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        // Pass URL with trailing slash
+        let url_with_slash = format!("{}/", server.uri());
+        let result = acquire_github_token(&client, &url_with_slash, "test").await;
+
+        assert_eq!(result.unwrap(), "token-xyz");
+    }
+}
