@@ -64,8 +64,11 @@ function formatMs(ms: number): string {
 function formatStarted(iso: string): string {
   try {
     const d = new Date(iso);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
     const ms = String(d.getMilliseconds()).padStart(3, "0");
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + `.${ms}`;
+    return `${hh}:${mm}:${ss}.${ms}`;
   } catch {
     return iso;
   }
@@ -276,7 +279,7 @@ export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
                           {entry.request.method}
                         </span>
                       </td>
-                      <td className="p-2 text-xs text-muted-foreground tabular-nums">
+                      <td className="p-2 text-xs text-muted-foreground tabular-nums" title={new Date(entry.startedDateTime).toISOString()}>
                         {formatStarted(entry.startedDateTime)}
                       </td>
                       <td className="p-2 truncate max-w-[400px]">
