@@ -27,6 +27,8 @@ use gateway::config::{Cli, Config};
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
 use gateway::plugins::har::plugin::HarPlugin;
+use azure_storage::StorageCredentials;
+use azure_storage_blobs::prelude::BlobServiceClient;
 use gateway::proxy::handler::{handle_client, ProxyState};
 use gateway::session::SessionManager;
 
@@ -60,9 +62,24 @@ async fn main() -> anyhow::Result<()> {
     // URL filter
     let url_filter = Arc::new(UrlFilter::new(&config.urls_to_watch)?);
 
-    // Plugins
-    let har_dir = HarPlugin::output_dir_from_settings(&config.default_plugin_settings);
-    let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = Arc::new(HarPlugin::new(har_dir));
+    // Plugins — HAR writer backend selected from config
+    let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = if let Some(blob_cfg) = &config.har_blob {
+        info!(
+            "HAR plugin: using Azure Blob Storage backend (account={}, container={})",
+            blob_cfg.storage_account_url, blob_cfg.container_name
+        );
+        let credential = azure_identity::DefaultAzureCredentialBuilder::new()
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to create Azure credential: {}", e))?;
+        let storage_creds = StorageCredentials::token_credential(Arc::new(credential));
+        let service_client = BlobServiceClient::new(&blob_cfg.storage_account_url, storage_creds);
+        let container_client = service_client.container_client(&blob_cfg.container_name);
+        Arc::new(HarPlugin::new_with_blob(container_client))
+    } else {
+        let har_dir = HarPlugin::output_dir_from_settings(&config.default_plugin_settings);
+        info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
+        Arc::new(HarPlugin::new(har_dir))
+    };
 
     // API state & router (served on the same port as proxy traffic)
     let api_state = Arc::new(ApiState {

@@ -46,6 +46,20 @@ pub struct Cli {
     pub additional_ca_certs: Vec<PathBuf>,
 }
 
+/// Azure Blob Storage config for HAR streaming (optional).
+/// When present, HAR entries are streamed to an Azure append blob instead of
+/// being written to the pod's local filesystem.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarBlobConfig {
+    /// Full URL of the Azure Storage account, e.g.
+    /// `https://<account>.blob.core.windows.net`
+    pub storage_account_url: String,
+
+    /// Name of the blob container that holds HAR files (must already exist).
+    pub container_name: String,
+}
+
 /// Gateway configuration loaded from YAML, with defaults and CLI overrides.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +88,11 @@ pub struct Config {
     /// with TLS inspection proxies.
     #[serde(default)]
     pub additional_ca_certs: Vec<PathBuf>,
+
+    /// Optional Azure Blob Storage config for HAR streaming.
+    /// When absent, HAR entries are written to local JSONL files (default).
+    #[serde(default)]
+    pub har_blob: Option<HarBlobConfig>,
 }
 
 fn default_urls_to_watch() -> Vec<String> {
@@ -106,6 +125,7 @@ impl Default for Config {
             log_level: default_log_level(),
             default_plugin_settings: HashMap::new(),
             additional_ca_certs: Vec::new(),
+            har_blob: None,
         }
     }
 }
