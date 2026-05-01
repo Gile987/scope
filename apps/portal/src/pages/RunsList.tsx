@@ -1590,7 +1590,7 @@ export function RunsList() {
             <Button
               variant="outline"
               size="sm"
-              disabled={!cursor && !cursorDirection}
+              disabled={!activeCursors.prev}
               onClick={resetCursor}
             >
               <ChevronsLeft className="h-4 w-4 mr-1" /> First
