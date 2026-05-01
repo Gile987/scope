@@ -52,11 +52,11 @@ export class GatewayClient {
     return createCombinedCaBundle(proxyCertPath, outputPath);
   }
 
-  async startSession(sessionPluginSettings: Record<string, unknown> = {}): Promise<string> {
+  async startSession(plugins: Record<string, unknown> = {}): Promise<string> {
     const response = await fetch(`${this.apiUrl}/api/v1/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionPluginSettings }),
+      body: JSON.stringify({ sessionPluginSettings: plugins }),
     });
     if (!response.ok) {
       throw new Error(`Failed to create gateway session: ${response.status} ${response.statusText}`);
