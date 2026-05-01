@@ -32,6 +32,12 @@ use gateway::session::SessionManager;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install the process-level CryptoProvider so that all rustls consumers
+    // (our proxy TLS + reqwest in plugins) use the same aws-lc-rs backend.
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install default CryptoProvider");
+
     let cli = Cli::parse();
     let config = Config::load(&cli)?;
 
@@ -57,36 +63,6 @@ async fn main() -> anyhow::Result<()> {
     // Plugins
     let har_dir = HarPlugin::output_dir_from_settings(&config.default_plugin_settings);
     let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = Arc::new(HarPlugin::new(har_dir));
-    let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
-
-    // Session manager
-    let session_manager = Arc::new(SessionManager::new(
-        registry.clone(),
-        Duration::from_secs(300),
-        100,
-    ));
-
-    // Shared HTTP/1.1 connection pool for plain (non-CONNECT) forwarding.
-    // A single client avoids per-request connection setup and enables keepalive reuse.
-    let http_client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new())
-        .pool_idle_timeout(Duration::from_secs(30))
-        .pool_max_idle_per_host(4)
-        .build_http();
-
-    // Pre-built TLS config for upstream connections (MITM relay).
-    // Contains Mozilla roots + any additional CA certs from config.
-    let upstream_root_store = config.upstream_root_store()?;
-    let upstream_tls_config = Arc::new(
-        rustls::ClientConfig::builder()
-            .with_root_certificates(upstream_root_store)
-            .with_no_client_auth(),
-    );
-    if !config.additional_ca_certs.is_empty() {
-        info!(
-            "Loaded additional CA certs from {:?}",
-            config.additional_ca_certs
-        );
-    }
 
     // API state & router (served on the same port as proxy traffic)
     let api_state = Arc::new(ApiState {

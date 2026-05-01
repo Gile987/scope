@@ -59,6 +59,18 @@ pub trait ProxyPlugin: Send + Sync {
     /// `settings` is the plugin-specific JSON from POST /session/start body.
     fn on_session_start(&self, session_id: &SessionId, settings: &Value);
 
+    /// Called before a request is forwarded upstream. Plugins may mutate headers
+    /// (e.g. to refresh/inject credentials). Only called for intercepted sessions.
+    /// Default implementation is a no-op.
+    async fn on_request(
+        &self,
+        _session_id: &SessionId,
+        _uri: &Uri,
+        _headers: &mut HeaderMap,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// Called for each intercepted request/response pair.
     fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange);
 
@@ -103,6 +115,19 @@ impl PluginRegistry {
             let settings = plugin_settings.get(plugin.name()).unwrap_or(&empty);
             plugin.on_session_start(session_id, settings);
         }
+    }
+
+    /// Give all plugins a chance to mutate request headers before forwarding.
+    pub async fn on_request(
+        &self,
+        session_id: &SessionId,
+        uri: &Uri,
+        headers: &mut HeaderMap,
+    ) -> anyhow::Result<()> {
+        for plugin in &self.plugins {
+            plugin.on_request(session_id, uri, headers).await?;
+        }
+        Ok(())
     }
 
     /// Broadcast a captured exchange to all plugins.

@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod ca;
+pub mod clients;
 pub mod config;
 pub mod filters;
 pub mod plugin;
