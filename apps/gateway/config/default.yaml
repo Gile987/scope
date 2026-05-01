@@ -11,3 +11,6 @@ defaultPluginSettings:
   har:
     outputDir: /tmp/scope-gateway/har-output
     redactCredentials: true
+harBlob:
+  storageAccountUrl: "http://azurite:10000/devstoreaccount1"
+  containerName: "har"

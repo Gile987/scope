@@ -28,8 +28,8 @@ use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
 use gateway::plugins::har::plugin::HarPlugin;
 use gateway::session_store::SessionStore;
-use azure_storage::StorageCredentials;
-use azure_storage_blobs::prelude::BlobServiceClient;
+use azure_storage::{CloudLocation, StorageCredentials};
+use azure_storage_blobs::prelude::{BlobServiceClient, ClientBuilder};
 use gateway::proxy::handler::{handle_client, ProxyState};
 use gateway::session::SessionManager;
 
@@ -65,16 +65,45 @@ async fn main() -> anyhow::Result<()> {
 
     // Plugins — HAR writer backend selected from config
     let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = if let Some(blob_cfg) = &config.har_blob {
-        info!(
-            "HAR plugin: using Azure Blob Storage backend (account={}, container={})",
-            blob_cfg.storage_account_url, blob_cfg.container_name
-        );
-        let credential = azure_identity::DefaultAzureCredentialBuilder::new()
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to create Azure credential: {}", e))?;
-        let storage_creds = StorageCredentials::token_credential(Arc::new(credential));
-        let service_client = BlobServiceClient::new(&blob_cfg.storage_account_url, storage_creds);
-        let container_client = service_client.container_client(&blob_cfg.container_name);
+        let use_emulator = std::env::var("AZURE_STORAGE_USE_EMULATOR")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+
+        let container_client = if use_emulator {
+            // Azurite emulator: parse host/port from the storage account URL so
+            // the same config works for both local Docker Compose and CI.
+            // URL format: http://<host>:<port>/devstoreaccount1
+            let emulator_host = std::env::var("AZURITE_BLOB_HOST")
+                .unwrap_or_else(|_| "127.0.0.1".to_string());
+            let emulator_port: u16 = std::env::var("AZURITE_BLOB_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(10000);
+            info!(
+                "HAR plugin: using Azurite emulator backend ({}:{}, container={})",
+                emulator_host, emulator_port, blob_cfg.container_name
+            );
+            ClientBuilder::with_location(
+                CloudLocation::Emulator {
+                    address: emulator_host,
+                    port: emulator_port,
+                },
+                StorageCredentials::emulator(),
+            )
+            .blob_service_client()
+            .container_client(&blob_cfg.container_name)
+        } else {
+            info!(
+                "HAR plugin: using Azure Blob Storage backend (account={}, container={})",
+                blob_cfg.storage_account_url, blob_cfg.container_name
+            );
+            let credential = azure_identity::DefaultAzureCredentialBuilder::new()
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to create Azure credential: {}", e))?;
+            let storage_creds = StorageCredentials::token_credential(Arc::new(credential));
+            BlobServiceClient::new(&blob_cfg.storage_account_url, storage_creds)
+                .container_client(&blob_cfg.container_name)
+        };
         Arc::new(HarPlugin::new_with_blob(container_client))
     } else {
         let har_dir = HarPlugin::output_dir_from_settings(&config.default_plugin_settings);
