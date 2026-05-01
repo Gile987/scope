@@ -7,9 +7,9 @@ urlsToWatch:
 port: 18000
 certDir: /tmp/scope-gateway/certs
 logLevel: info
+harOutputDir: /tmp/scope-gateway/har-output
 defaultPluginSettings:
   har:
-    outputDir: /tmp/scope-gateway/har-output
     redactCredentials: true
 harBlob:
   storageAccountUrl: "http://azurite:10000/devstoreaccount1"

@@ -123,11 +123,7 @@ impl HarWriter for LocalWriter {
         };
         let line = format!("{}\n", json);
 
-        match tokio::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .await
-        {
+        match tokio::fs::OpenOptions::new().append(true).open(&path).await {
             Ok(mut file) => {
                 if let Err(e) = file.write_all(line.as_bytes()).await {
                     warn!("HAR local: failed to append to {:?}: {}", path, e);

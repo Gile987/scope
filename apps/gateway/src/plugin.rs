@@ -224,12 +224,16 @@ mod tests {
         let registry = PluginRegistry::new(vec![p1.clone(), p2.clone()]);
 
         let settings = HashMap::new();
-        registry.on_session_start(&"10.0.0.1".to_string(), &settings).await;
+        registry
+            .on_session_start(&"10.0.0.1".to_string(), &settings)
+            .await;
         assert_eq!(p1.start_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.start_count.load(Ordering::SeqCst), 1);
 
         let exchange = make_exchange();
-        registry.on_exchange(&"10.0.0.1".to_string(), &exchange).await;
+        registry
+            .on_exchange(&"10.0.0.1".to_string(), &exchange)
+            .await;
         assert_eq!(p1.exchange_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.exchange_count.load(Ordering::SeqCst), 1);
 
@@ -273,7 +277,9 @@ mod tests {
             "capture".to_string(),
             serde_json::json!({"redactCredentials": false}),
         );
-        registry.on_session_start(&"10.0.0.1".to_string(), &settings).await;
+        registry
+            .on_session_start(&"10.0.0.1".to_string(), &settings)
+            .await;
 
         let captured = plugin.captured.lock().unwrap().clone().unwrap();
         assert_eq!(captured["redactCredentials"], false);
@@ -307,7 +313,9 @@ mod tests {
 
         // No settings for "nocfg" plugin
         let settings = HashMap::new();
-        registry.on_session_start(&"10.0.0.1".to_string(), &settings).await;
+        registry
+            .on_session_start(&"10.0.0.1".to_string(), &settings)
+            .await;
 
         let captured = plugin.captured.lock().unwrap().clone().unwrap();
         assert!(captured.is_object());

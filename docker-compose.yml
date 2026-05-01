@@ -387,7 +387,7 @@ services:
       dockerfile: Dockerfile
     profiles: [gateway, vscode-electron-driver-ext]
     environment:
-      RUST_LOG: debug,gateway::internal=info,azure_core=info
+      RUST_LOG: debug,gateway::internal=info,azure_core::policies::transport=info
       COPILOT_TOKEN_REFRESH_BUFFER_SECS: 120
       COPILOT_TOKEN_MINT_RETRIES: 3
       COPILOT_TOKEN_MINT_BACKOFF_MS: 500

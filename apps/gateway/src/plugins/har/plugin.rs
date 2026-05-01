@@ -68,9 +68,7 @@ impl HarPlugin {
     }
 
     /// Create using a `BlobWriter`.
-    pub fn new_with_blob(
-        container_client: azure_storage_blobs::prelude::ContainerClient,
-    ) -> Self {
+    pub fn new_with_blob(container_client: azure_storage_blobs::prelude::ContainerClient) -> Self {
         let writer = Arc::new(BlobWriter::new(container_client));
         Self {
             inner: Arc::new(HarInner {
@@ -78,19 +76,6 @@ impl HarPlugin {
                 writer,
             }),
         }
-    }
-
-    /// Extract HAR output directory from `defaultPluginSettings`.
-    /// Falls back to `/tmp/scope-gateway/har-output` if not configured.
-    pub fn output_dir_from_settings(
-        settings: &HashMap<String, serde_json::Value>,
-    ) -> std::path::PathBuf {
-        settings
-            .get("har")
-            .and_then(|v| v.get("outputDir"))
-            .and_then(|v| v.as_str())
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from("/tmp/scope-gateway/har-output"))
     }
 }
 

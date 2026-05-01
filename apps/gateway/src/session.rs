@@ -21,7 +21,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::plugin::{PluginRegistry, SessionId};
-use crate::session_store::{PersistedSession, SessionStore, session_ttl};
+use crate::session_store::{session_ttl, PersistedSession, SessionStore};
 
 /// State of a single session.
 #[derive(Debug)]
@@ -271,7 +271,8 @@ impl SessionManager {
 
         tracing::info!(
             "SessionManager: restored session {} for IP {} from Redis",
-            session_id, ip
+            session_id,
+            ip
         );
         Some(session_id)
     }

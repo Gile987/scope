@@ -93,6 +93,10 @@ pub struct Config {
     /// When absent, HAR entries are written to local JSONL files (default).
     #[serde(default)]
     pub har_blob: Option<HarBlobConfig>,
+
+    /// Directory for local HAR JSONL output (used when `har_blob` is absent).
+    #[serde(default = "default_har_output_dir")]
+    pub har_output_dir: PathBuf,
 }
 
 fn default_urls_to_watch() -> Vec<String> {
@@ -115,6 +119,10 @@ fn default_log_level() -> String {
     "info".to_string()
 }
 
+fn default_har_output_dir() -> PathBuf {
+    PathBuf::from("/tmp/scope-gateway/har-output")
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -126,6 +134,7 @@ impl Default for Config {
             default_plugin_settings: HashMap::new(),
             additional_ca_certs: Vec::new(),
             har_blob: None,
+            har_output_dir: default_har_output_dir(),
         }
     }
 }
@@ -207,9 +216,9 @@ port: 9000
 apiPort: 9001
 certDir: /tmp/certs
 logLevel: debug
+harOutputDir: /tmp/har
 defaultPluginSettings:
   har:
-    outputDir: /tmp/har
     redactCredentials: false
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
@@ -218,6 +227,7 @@ defaultPluginSettings:
         assert_eq!(config.urls_to_watch.len(), 2);
         assert_eq!(config.cert_dir, PathBuf::from("/tmp/certs"));
         assert_eq!(config.log_level, "debug");
+        assert_eq!(config.har_output_dir, PathBuf::from("/tmp/har"));
         assert_eq!(
             config.default_plugin_settings["har"]["redactCredentials"],
             false

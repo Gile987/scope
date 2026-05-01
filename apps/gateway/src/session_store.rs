@@ -49,37 +49,57 @@ impl SessionStore {
 
     /// Persist a session to Redis with a TTL.
     /// Both the session record and the IP→sessionId index are written atomically.
-    pub async fn save(
-        &self,
-        session: &PersistedSession,
-        ttl: Duration,
-    ) {
+    pub async fn save(&self, session: &PersistedSession, ttl: Duration) {
         let ttl_secs = ttl.as_secs() as i64;
         let session_key = format!("gateway:session:{}", session.session_id);
         let ip_key = format!("gateway:ip:{}", session.client_ip);
 
         let Ok(json) = serde_json::to_string(session) else {
-            warn!("SessionStore: failed to serialise session {}", session.session_id);
+            warn!(
+                "SessionStore: failed to serialise session {}",
+                session.session_id
+            );
             return;
         };
 
         // SET key value EX ttl
         if let Err(e) = self
             .client
-            .set::<(), _, _>(&session_key, json.as_str(), Some(Expiration::EX(ttl_secs)), None, false)
+            .set::<(), _, _>(
+                &session_key,
+                json.as_str(),
+                Some(Expiration::EX(ttl_secs)),
+                None,
+                false,
+            )
             .await
         {
-            warn!("SessionStore: failed to save session {}: {}", session.session_id, e);
+            warn!(
+                "SessionStore: failed to save session {}: {}",
+                session.session_id, e
+            );
         }
         if let Err(e) = self
             .client
-            .set::<(), _, _>(&ip_key, session.session_id.as_str(), Some(Expiration::EX(ttl_secs)), None, false)
+            .set::<(), _, _>(
+                &ip_key,
+                session.session_id.as_str(),
+                Some(Expiration::EX(ttl_secs)),
+                None,
+                false,
+            )
             .await
         {
-            warn!("SessionStore: failed to save IP index for {}: {}", session.client_ip, e);
+            warn!(
+                "SessionStore: failed to save IP index for {}: {}",
+                session.client_ip, e
+            );
         }
 
-        debug!("SessionStore: saved session {} (ttl={}s)", session.session_id, ttl_secs);
+        debug!(
+            "SessionStore: saved session {} (ttl={}s)",
+            session.session_id, ttl_secs
+        );
     }
 
     /// Remove both Redis keys for a session (called on stop/clear).
@@ -88,7 +108,10 @@ impl SessionStore {
         let ip_key = format!("gateway:ip:{}", client_ip);
 
         if let Err(e) = self.client.del::<(), _>(&[session_key, ip_key]).await {
-            warn!("SessionStore: failed to delete session {}: {}", session_id, e);
+            warn!(
+                "SessionStore: failed to delete session {}: {}",
+                session_id, e
+            );
         }
         debug!("SessionStore: deleted session {}", session_id);
     }
@@ -119,11 +142,17 @@ impl SessionStore {
 
         match serde_json::from_str::<PersistedSession>(&json) {
             Ok(s) => {
-                debug!("SessionStore: restored session {} for IP {}", session_id, client_ip);
+                debug!(
+                    "SessionStore: restored session {} for IP {}",
+                    session_id, client_ip
+                );
                 Some(s)
             }
             Err(e) => {
-                warn!("SessionStore: failed to deserialise session {}: {}", session_id, e);
+                warn!(
+                    "SessionStore: failed to deserialise session {}: {}",
+                    session_id, e
+                );
                 None
             }
         }
@@ -170,14 +199,20 @@ mod tests {
     #[test]
     fn session_ttl_reads_max_session_duration_secs() {
         let mut settings = HashMap::new();
-        settings.insert("other_plugin".to_string(), json!({"max_session_duration_secs": 7200}));
+        settings.insert(
+            "other_plugin".to_string(),
+            json!({"max_session_duration_secs": 7200}),
+        );
         assert_eq!(session_ttl(&settings), Duration::from_secs(7200));
     }
 
     #[test]
     fn session_ttl_ignores_non_u64_value() {
         let mut settings = HashMap::new();
-        settings.insert("other_plugin".to_string(), json!({"max_session_duration_secs": "not_a_number"}));
+        settings.insert(
+            "other_plugin".to_string(),
+            json!({"max_session_duration_secs": "not_a_number"}),
+        );
         assert_eq!(session_ttl(&settings), Duration::from_secs(3600));
     }
 }
