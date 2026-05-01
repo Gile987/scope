@@ -1617,7 +1617,7 @@ export function RunsList() {
               disabled={!activeCursors.next || isJumpingToLast}
               onClick={goToLastPage}
             >
-              Last {isJumpingToLast ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <ChevronsRight className="h-4 w-4 mr-1" />}
+              Last {isJumpingToLast ? <RefreshCw className="h-4 w-4 ml-1 animate-spin" /> : <ChevronsRight className="h-4 w-4 ml-1" />}
             </Button>
           </div>
         );
