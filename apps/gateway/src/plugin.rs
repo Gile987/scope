@@ -181,19 +181,19 @@ mod tests {
             "test"
         }
 
-        fn on_session_start(&self, _session_id: &SessionId, _settings: &Value) {
+        async fn on_session_start(&self, _session_id: &SessionId, _settings: &Value) {
             self.start_count.fetch_add(1, Ordering::SeqCst);
         }
 
-        fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange) {
+        async fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange) {
             self.exchange_count.fetch_add(1, Ordering::SeqCst);
         }
 
-        fn on_session_stop(&self, _session_id: &SessionId) {
+        async fn on_session_stop(&self, _session_id: &SessionId) {
             self.stop_count.fetch_add(1, Ordering::SeqCst);
         }
 
-        fn on_session_clear(&self, _session_id: &SessionId) {
+        async fn on_session_clear(&self, _session_id: &SessionId) {
             self.clear_count.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -217,33 +217,33 @@ mod tests {
         }
     }
 
-    #[test]
-    fn registry_broadcasts_to_all_plugins() {
+    #[tokio::test]
+    async fn registry_broadcasts_to_all_plugins() {
         let p1 = Arc::new(TestPlugin::new());
         let p2 = Arc::new(TestPlugin::new());
         let registry = PluginRegistry::new(vec![p1.clone(), p2.clone()]);
 
         let settings = HashMap::new();
-        registry.on_session_start(&"10.0.0.1".to_string(), &settings);
+        registry.on_session_start(&"10.0.0.1".to_string(), &settings).await;
         assert_eq!(p1.start_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.start_count.load(Ordering::SeqCst), 1);
 
         let exchange = make_exchange();
-        registry.on_exchange(&"10.0.0.1".to_string(), &exchange);
+        registry.on_exchange(&"10.0.0.1".to_string(), &exchange).await;
         assert_eq!(p1.exchange_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.exchange_count.load(Ordering::SeqCst), 1);
 
-        registry.on_session_stop(&"10.0.0.1".to_string());
+        registry.on_session_stop(&"10.0.0.1".to_string()).await;
         assert_eq!(p1.stop_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.stop_count.load(Ordering::SeqCst), 1);
 
-        registry.on_session_clear(&"10.0.0.1".to_string());
+        registry.on_session_clear(&"10.0.0.1".to_string()).await;
         assert_eq!(p1.clear_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.clear_count.load(Ordering::SeqCst), 1);
     }
 
-    #[test]
-    fn registry_passes_plugin_specific_settings() {
+    #[tokio::test]
+    async fn registry_passes_plugin_specific_settings() {
         use std::sync::Mutex;
 
         struct SettingsCapture {
@@ -255,12 +255,12 @@ mod tests {
             fn name(&self) -> &str {
                 "capture"
             }
-            fn on_session_start(&self, _session_id: &SessionId, settings: &Value) {
+            async fn on_session_start(&self, _session_id: &SessionId, settings: &Value) {
                 *self.captured.lock().unwrap() = Some(settings.clone());
             }
-            fn on_exchange(&self, _: &SessionId, _: &HttpExchange) {}
-            fn on_session_stop(&self, _: &SessionId) {}
-            fn on_session_clear(&self, _: &SessionId) {}
+            async fn on_exchange(&self, _: &SessionId, _: &HttpExchange) {}
+            async fn on_session_stop(&self, _: &SessionId) {}
+            async fn on_session_clear(&self, _: &SessionId) {}
         }
 
         let plugin = Arc::new(SettingsCapture {
@@ -273,14 +273,14 @@ mod tests {
             "capture".to_string(),
             serde_json::json!({"redactCredentials": false}),
         );
-        registry.on_session_start(&"10.0.0.1".to_string(), &settings);
+        registry.on_session_start(&"10.0.0.1".to_string(), &settings).await;
 
         let captured = plugin.captured.lock().unwrap().clone().unwrap();
         assert_eq!(captured["redactCredentials"], false);
     }
 
-    #[test]
-    fn registry_sends_empty_object_for_unconfigured_plugin() {
+    #[tokio::test]
+    async fn registry_sends_empty_object_for_unconfigured_plugin() {
         use std::sync::Mutex;
 
         struct SettingsCapture {
@@ -292,12 +292,12 @@ mod tests {
             fn name(&self) -> &str {
                 "nocfg"
             }
-            fn on_session_start(&self, _session_id: &SessionId, settings: &Value) {
+            async fn on_session_start(&self, _session_id: &SessionId, settings: &Value) {
                 *self.captured.lock().unwrap() = Some(settings.clone());
             }
-            fn on_exchange(&self, _: &SessionId, _: &HttpExchange) {}
-            fn on_session_stop(&self, _: &SessionId) {}
-            fn on_session_clear(&self, _: &SessionId) {}
+            async fn on_exchange(&self, _: &SessionId, _: &HttpExchange) {}
+            async fn on_session_stop(&self, _: &SessionId) {}
+            async fn on_session_clear(&self, _: &SessionId) {}
         }
 
         let plugin = Arc::new(SettingsCapture {
@@ -307,7 +307,7 @@ mod tests {
 
         // No settings for "nocfg" plugin
         let settings = HashMap::new();
-        registry.on_session_start(&"10.0.0.1".to_string(), &settings);
+        registry.on_session_start(&"10.0.0.1".to_string(), &settings).await;
 
         let captured = plugin.captured.lock().unwrap().clone().unwrap();
         assert!(captured.is_object());

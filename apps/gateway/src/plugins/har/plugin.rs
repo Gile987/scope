@@ -1,104 +1,96 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! HAR plugin implementation: records HTTP exchanges to append-only JSONL files
-//! during active sessions, then builds HAR 1.2 JSON on-demand from the JSONL
-//! when requested via the API.
+//! HAR plugin implementation: records HTTP exchanges via a pluggable `HarWriter`
+//! backend (local JSONL or Azure append blob), then serves HAR 1.2 JSON on
+//! demand via the API.
 //!
-//! Design: JSONL (one JSON object per line) avoids holding all entries in memory.
-//! Writes are append-only during the session; reads parse the file on each GET.
-//! This trades read latency for memory efficiency — suitable for long sessions
-//! with thousands of exchanges.
+//! The writer backend is selected at startup based on gateway config:
+//! - `har.blob` present → `BlobWriter` (streams to Azure append blob)
+//! - `har.blob` absent  → `LocalWriter` (JSONL on pod-local disk)
 
 use std::collections::HashMap;
-use std::io::{BufRead, Write};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::extract::{Path as AxumPath, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Json;
 use parking_lot::RwLock;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::plugin::{HttpExchange, ProxyPlugin, SessionId};
 
-use super::types::HarEntry;
+use super::storage::{BlobWriter, HarWriter, LocalWriter};
 use super::writer;
 
-/// Per-session state tracked by the HAR plugin.
+/// Per-session metadata kept in the plugin (writer holds all data).
 struct HarSession {
-    jsonl_path: PathBuf,
-    finalized: bool,
     redact: bool,
+    finalized: bool,
 }
 
-/// Shared interior state, cheaply cloneable via `Arc` so that the Axum route
-/// handler can hold a reference without requiring `Arc<HarPlugin>` from the
-/// outside. This lets `api_routes(&self)` work without `Arc<Self>`.
+/// Shared interior state cloned cheaply into Axum route handlers.
 struct HarInner {
-    har_dir: PathBuf,
     sessions: RwLock<HashMap<SessionId, HarSession>>,
+    writer: Arc<dyn HarWriter>,
 }
 
 impl HarInner {
-    fn jsonl_path(&self, session_id: &SessionId) -> PathBuf {
-        self.har_dir
-            .join(format!(".session-{}.jsonl", session_id.replace(':', "_")))
-    }
-
-    fn build_har_for_session(&self, session_id: &SessionId) -> Option<super::types::Har> {
-        let sessions = self.sessions.read();
-        let session = sessions.get(session_id)?;
-
-        let entries = self.read_jsonl_entries(&session.jsonl_path);
+    async fn build_har_for_session(&self, session_id: &SessionId) -> Option<super::types::Har> {
+        {
+            let sessions = self.sessions.read();
+            sessions.get(session_id)?;
+        }
+        let mut entries = self.writer.read_entries_async(session_id).await;
+        // Sort by startedDateTime so concurrent appends appear chronologically.
+        entries.sort_by(|a, b| a.started_date_time.cmp(&b.started_date_time));
         Some(writer::build_har(entries))
-    }
-
-    fn read_jsonl_entries(&self, path: &Path) -> Vec<HarEntry> {
-        let file = match std::fs::File::open(path) {
-            Ok(f) => f,
-            Err(_) => return Vec::new(),
-        };
-
-        std::io::BufReader::new(file)
-            .lines()
-            .filter_map(|line| {
-                let line = line.ok()?;
-                serde_json::from_str(&line).ok()
-            })
-            .collect()
     }
 }
 
-/// HAR plugin — records HTTP exchanges to JSONL, serves HAR via GET .../har.
+/// HAR plugin — records HTTP exchanges via `HarWriter`, serves HAR via GET .../har.
 pub struct HarPlugin {
     inner: Arc<HarInner>,
 }
 
 impl HarPlugin {
-    /// Create a new HAR plugin that stores JSONL files in `har_dir`.
-    pub fn new(har_dir: PathBuf) -> Self {
+    /// Create using a `LocalWriter` (default — no blob config required).
+    pub fn new(har_dir: std::path::PathBuf) -> Self {
+        let writer = Arc::new(LocalWriter::new(har_dir));
         Self {
             inner: Arc::new(HarInner {
-                har_dir,
                 sessions: RwLock::new(HashMap::new()),
+                writer,
+            }),
+        }
+    }
+
+    /// Create using a `BlobWriter`.
+    pub fn new_with_blob(
+        container_client: azure_storage_blobs::prelude::ContainerClient,
+    ) -> Self {
+        let writer = Arc::new(BlobWriter::new(container_client));
+        Self {
+            inner: Arc::new(HarInner {
+                sessions: RwLock::new(HashMap::new()),
+                writer,
             }),
         }
     }
 
     /// Extract HAR output directory from `defaultPluginSettings`.
     /// Falls back to `/tmp/scope-gateway/har-output` if not configured.
-    pub fn output_dir_from_settings(settings: &HashMap<String, serde_json::Value>) -> PathBuf {
+    pub fn output_dir_from_settings(
+        settings: &HashMap<String, serde_json::Value>,
+    ) -> std::path::PathBuf {
         settings
             .get("har")
             .and_then(|v| v.get("outputDir"))
             .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/tmp/scope-gateway/har-output"))
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("/tmp/scope-gateway/har-output"))
     }
 }
 
@@ -109,83 +101,52 @@ impl ProxyPlugin for HarPlugin {
     }
 
     async fn on_session_start(&self, session_id: &SessionId, settings: &serde_json::Value) {
-        // Default to redacting sensitive headers (Authorization, cookies, API keys).
-        // Callers must explicitly opt out with `"redactCredentials": false`.
         let redact = settings
             .get("redactCredentials")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let jsonl_path = self.inner.jsonl_path(session_id);
-
-        // Clean up any leftover JSONL from a prior crash or un-cleared session.
-        // Without this, a new session could inherit stale exchange data.
-        let _ = std::fs::remove_file(&jsonl_path);
-
-        // Create the har directory if needed
-        if let Some(parent) = jsonl_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-
-        // Create empty JSONL file
-        if let Err(e) = std::fs::File::create(&jsonl_path) {
-            warn!("Failed to create JSONL file {:?}: {}", jsonl_path, e);
-        }
+        self.inner.writer.init_session(session_id).await;
 
         let mut sessions = self.inner.sessions.write();
         sessions.insert(
             session_id.clone(),
             HarSession {
-                jsonl_path,
-                finalized: false,
                 redact,
+                finalized: false,
             },
         );
-
         debug!("HAR plugin: session started for {}", session_id);
     }
 
     async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
-        let sessions = self.inner.sessions.read();
-        let session = match sessions.get(session_id) {
-            Some(s) if !s.finalized => s,
-            // Finalized sessions still serve existing data via GET /har,
-            // but we stop appending new exchanges after stop is called.
-            _ => return,
+        let redact = {
+            let sessions = self.inner.sessions.read();
+            match sessions.get(session_id) {
+                Some(s) if !s.finalized => s.redact,
+                _ => return,
+            }
         };
 
-        let entry = writer::exchange_to_har_entry(exchange, session.redact);
-
-        // Append JSON line to JSONL file
-        match std::fs::OpenOptions::new()
-            .append(true)
-            .open(&session.jsonl_path)
-        {
-            Ok(mut file) => {
-                if let Ok(json) = serde_json::to_string(&entry) {
-                    let _ = writeln!(file, "{}", json);
-                }
-            }
-            Err(e) => {
-                warn!("Failed to append to JSONL {:?}: {}", session.jsonl_path, e);
-            }
-        }
+        let entry = super::writer::exchange_to_har_entry(exchange, redact);
+        self.inner.writer.append(session_id, &entry).await;
     }
 
     async fn on_session_stop(&self, session_id: &SessionId) {
         let mut sessions = self.inner.sessions.write();
         if let Some(session) = sessions.get_mut(session_id) {
             session.finalized = true;
-            debug!("HAR plugin: session finalized for {}", session_id);
+            debug!("HAR plugin: session finalised for {}", session_id);
         }
     }
 
     async fn on_session_clear(&self, session_id: &SessionId) {
-        let mut sessions = self.inner.sessions.write();
-        if let Some(session) = sessions.remove(session_id) {
-            let _ = std::fs::remove_file(&session.jsonl_path);
-            debug!("HAR plugin: session cleared for {}", session_id);
+        {
+            let mut sessions = self.inner.sessions.write();
+            sessions.remove(session_id);
         }
+        self.inner.writer.close_session(session_id);
+        debug!("HAR plugin: session cleared for {}", session_id);
     }
 
     fn api_routes(&self) -> Option<axum::Router> {
@@ -198,19 +159,30 @@ impl ProxyPlugin for HarPlugin {
     }
 }
 
-/// GET /api/v1/sessions/:id/har — build and return HAR from JSONL on the fly.
+/// GET /api/v1/sessions/:id/har — build and return HAR, with degraded indicator.
 async fn get_har(
     AxumPath(session_id): AxumPath<String>,
     State(inner): State<Arc<HarInner>>,
 ) -> impl IntoResponse {
-    match inner.build_har_for_session(&session_id) {
+    match inner.build_har_for_session(&session_id).await {
         Some(har) => {
+            let degraded = inner.writer.is_degraded(&session_id);
             let count = har.log.entries.len();
             debug!(
-                "HAR plugin: returning {} entries for session {}",
-                count, session_id
+                "HAR plugin: returning {} entries for session {} (degraded={})",
+                count, session_id, degraded
             );
-            Json(har).into_response()
+            let body = serde_json::to_vec(&har).unwrap_or_default();
+            let mut resp = axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap();
+            if degraded {
+                resp.headers_mut()
+                    .insert("x-har-incomplete", HeaderValue::from_static("true"));
+            }
+            resp.into_response()
         }
         None => {
             debug!("HAR plugin: no data for session {}", session_id);
@@ -246,50 +218,33 @@ mod tests {
         }
     }
 
-    #[test]
-    fn session_lifecycle() {
+    #[tokio::test]
+    async fn session_lifecycle() {
         let tmp = TempDir::new().unwrap();
         let plugin = HarPlugin::new(tmp.path().to_path_buf());
-
         let sid = "10.0.0.1".to_string();
-        let settings = serde_json::json!({});
 
-        // Start session
-        plugin.on_session_start(&sid, &settings);
-        assert!(plugin.inner.jsonl_path(&sid).exists());
+        plugin.on_session_start(&sid, &serde_json::json!({})).await;
+        plugin.on_exchange(&sid, &make_exchange()).await;
 
-        // Exchange
-        let exchange = make_exchange();
-        plugin.on_exchange(&sid, &exchange);
-
-        // HAR available while active (returns entries so far)
-        let har_active = plugin.inner.build_har_for_session(&sid).unwrap();
-        assert_eq!(har_active.log.entries.len(), 1);
-
-        // Stop session
-        plugin.on_session_stop(&sid);
-
-        // HAR still available after stop
-        let har = plugin.inner.build_har_for_session(&sid).unwrap();
+        let har = plugin.inner.build_har_for_session(&sid).await.unwrap();
         assert_eq!(har.log.entries.len(), 1);
 
-        // Idempotent — can read again
-        let har2 = plugin.inner.build_har_for_session(&sid).unwrap();
-        assert_eq!(har2.log.entries.len(), 1);
+        plugin.on_session_stop(&sid).await;
 
-        // Clear deletes JSONL
-        plugin.on_session_clear(&sid);
-        assert!(!plugin.inner.jsonl_path(&sid).exists());
-        assert!(plugin.inner.build_har_for_session(&sid).is_none());
+        let har = plugin.inner.build_har_for_session(&sid).await.unwrap();
+        assert_eq!(har.log.entries.len(), 1);
+
+        plugin.on_session_clear(&sid).await;
+        assert!(plugin.inner.build_har_for_session(&sid).await.is_none());
     }
 
-    #[test]
-    fn redacts_headers_by_default() {
+    #[tokio::test]
+    async fn redacts_headers_by_default() {
         let tmp = TempDir::new().unwrap();
         let plugin = HarPlugin::new(tmp.path().to_path_buf());
-
         let sid = "10.0.0.1".to_string();
-        plugin.on_session_start(&sid, &serde_json::json!({}));
+        plugin.on_session_start(&sid, &serde_json::json!({})).await;
 
         let mut req_headers = HeaderMap::new();
         req_headers.insert("authorization", "Bearer secret".parse().unwrap());
@@ -310,11 +265,10 @@ mod tests {
             wait_ms: 5,
             elapsed_ms: 10,
         };
+        plugin.on_exchange(&sid, &exchange).await;
+        plugin.on_session_stop(&sid).await;
 
-        plugin.on_exchange(&sid, &exchange);
-        plugin.on_session_stop(&sid);
-
-        let har = plugin.inner.build_har_for_session(&sid).unwrap();
+        let har = plugin.inner.build_har_for_session(&sid).await.unwrap();
         let auth = har.log.entries[0]
             .request
             .headers
@@ -324,13 +278,14 @@ mod tests {
         assert_eq!(auth.value, "[REDACTED]");
     }
 
-    #[test]
-    fn preserves_headers_when_configured() {
+    #[tokio::test]
+    async fn preserves_headers_when_configured() {
         let tmp = TempDir::new().unwrap();
         let plugin = HarPlugin::new(tmp.path().to_path_buf());
-
         let sid = "10.0.0.1".to_string();
-        plugin.on_session_start(&sid, &serde_json::json!({"redactCredentials": false}));
+        plugin
+            .on_session_start(&sid, &serde_json::json!({"redactCredentials": false}))
+            .await;
 
         let mut req_headers = HeaderMap::new();
         req_headers.insert("authorization", "Bearer secret".parse().unwrap());
@@ -351,11 +306,10 @@ mod tests {
             wait_ms: 5,
             elapsed_ms: 10,
         };
+        plugin.on_exchange(&sid, &exchange).await;
+        plugin.on_session_stop(&sid).await;
 
-        plugin.on_exchange(&sid, &exchange);
-        plugin.on_session_stop(&sid);
-
-        let har = plugin.inner.build_har_for_session(&sid).unwrap();
+        let har = plugin.inner.build_har_for_session(&sid).await.unwrap();
         let auth = har.log.entries[0]
             .request
             .headers
@@ -365,21 +319,30 @@ mod tests {
         assert_eq!(auth.value, "Bearer secret");
     }
 
-    #[test]
-    fn restart_clears_previous_session() {
+    #[tokio::test]
+    async fn restart_clears_previous_session() {
         let tmp = TempDir::new().unwrap();
         let plugin = HarPlugin::new(tmp.path().to_path_buf());
-
         let sid = "10.0.0.1".to_string();
-        plugin.on_session_start(&sid, &serde_json::json!({}));
-        plugin.on_exchange(&sid, &make_exchange());
-        plugin.on_session_stop(&sid);
 
-        // Restart — should clear previous
-        plugin.on_session_start(&sid, &serde_json::json!({}));
-        plugin.on_session_stop(&sid);
+        plugin.on_session_start(&sid, &serde_json::json!({})).await;
+        plugin.on_exchange(&sid, &make_exchange()).await;
+        plugin.on_session_stop(&sid).await;
 
-        let har = plugin.inner.build_har_for_session(&sid).unwrap();
-        assert_eq!(har.log.entries.len(), 0); // Previous entries cleared
+        // Restart — writer.init_session clears previous JSONL.
+        plugin.on_session_start(&sid, &serde_json::json!({})).await;
+        plugin.on_session_stop(&sid).await;
+
+        let har = plugin.inner.build_har_for_session(&sid).await.unwrap();
+        assert_eq!(har.log.entries.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn not_degraded_for_local_writer() {
+        let tmp = TempDir::new().unwrap();
+        let plugin = HarPlugin::new(tmp.path().to_path_buf());
+        let sid = "10.0.0.1".to_string();
+        plugin.on_session_start(&sid, &serde_json::json!({})).await;
+        assert!(!plugin.inner.writer.is_degraded(&sid));
     }
 }
