@@ -654,7 +654,7 @@ export function RunsList() {
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Worker:</span>
           <Select value={workerFilter} onValueChange={(v) => { setWorkerFilter(v); setTaskFilter("all"); resetCursor(); }}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="w-[200px]" disabled={isJumpingToLast}>
               <SelectValue placeholder="All workers" />
             </SelectTrigger>
             <SelectContent>
@@ -668,7 +668,7 @@ export function RunsList() {
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Status:</span>
           <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); resetCursor(); }}>
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-[160px]" disabled={isJumpingToLast}>
               <SelectValue placeholder="All statuses" />
             </SelectTrigger>
             <SelectContent>
@@ -682,7 +682,7 @@ export function RunsList() {
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Outcome:</span>
           <Select value={outcomeFilter} onValueChange={(v) => { setOutcomeFilter(v); resetCursor(); }}>
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-[160px]" disabled={isJumpingToLast}>
               <SelectValue placeholder="All outcomes" />
             </SelectTrigger>
             <SelectContent>
@@ -696,7 +696,7 @@ export function RunsList() {
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Task:</span>
           <Select value={taskFilter} onValueChange={(v) => { setTaskFilter(v); resetCursor(); }}>
-            <SelectTrigger className="w-[260px]">
+            <SelectTrigger className="w-[260px]" disabled={isJumpingToLast}>
               <SelectValue placeholder="All tasks" />
             </SelectTrigger>
             <SelectContent>
@@ -712,7 +712,7 @@ export function RunsList() {
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Group by:</span>
           <Select value={groupBy} onValueChange={(v) => { setGroupBy(v as GroupByKey); setExpandedGroups(new Set()); resetCursor(); }}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[180px]" disabled={isJumpingToLast}>
               <SelectValue placeholder="None" />
             </SelectTrigger>
             <SelectContent>
@@ -1617,7 +1617,7 @@ export function RunsList() {
             <Button
               variant="outline"
               size="sm"
-              disabled={!activeCursors.prev}
+              disabled={!activeCursors.prev || isJumpingToLast}
               onClick={resetCursor}
             >
               <ChevronsLeft className="h-4 w-4 mr-1" /> First
@@ -1625,7 +1625,7 @@ export function RunsList() {
             <Button
               variant="outline"
               size="sm"
-              disabled={!activeCursors.prev}
+              disabled={!activeCursors.prev || isJumpingToLast}
               onClick={() => { setCursor(activeCursors.prev!); setCursorDirection("before"); }}
             >
               <ChevronLeft className="h-4 w-4 mr-1" /> Previous
@@ -1633,7 +1633,7 @@ export function RunsList() {
             <Button
               variant="outline"
               size="sm"
-              disabled={!activeCursors.next}
+              disabled={!activeCursors.next || isJumpingToLast}
               onClick={() => { setCursor(activeCursors.next!); setCursorDirection("after"); }}
             >
               Next <ChevronRight className="h-4 w-4 ml-1" />
