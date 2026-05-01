@@ -127,8 +127,21 @@ export function RunsList() {
 
     setIsJumpingToLast(true);
     try {
-      let after: string | undefined;
-      const maxHops = 1000;
+      // When already paginating forward, start from the current cursor so users
+      // near the end skip already-seen pages. "before" cursors point backward and
+      // cannot be used as a forward starting point, so we always restart from the
+      // beginning in that case.
+      let after: string | undefined = cursorDirection === "after" ? cursor : undefined;
+
+      // Conservative initial bound; tightened after the first response using
+      // the API-reported estimatedTotal and page size.
+      let maxHops = 200;
+      // Buffer of 2 extra pages guards against new records arriving mid-traversal
+      // causing the real page count to exceed the estimate.
+      const traversalBufferPages = 2;
+      // Fall back to 50 if the server omits the page size (matches the API default).
+      const defaultPageSize = 50;
+      let estimatedTotalForDisplay: number | undefined;
 
       for (let i = 0; i < maxHops; i++) {
         const page = groupBy !== "none"
@@ -156,6 +169,15 @@ export function RunsList() {
             before: undefined,
           });
 
+        // On the first iteration, derive a tight hop bound from the response metadata.
+        if (i === 0) {
+          estimatedTotalForDisplay = page.estimatedTotal;
+          const pageSize = page.limit > 0 ? page.limit : defaultPageSize;
+          if (page.estimatedTotal > 0 && pageSize > 0) {
+            maxHops = Math.ceil(page.estimatedTotal / pageSize) + traversalBufferPages;
+          }
+        }
+
         const next = page.cursors?.next ?? null;
         if (!next) {
           if (after) {
@@ -170,8 +192,11 @@ export function RunsList() {
         after = next;
       }
 
+      const estimatedTotalMessage = estimatedTotalForDisplay != null && estimatedTotalForDisplay > 0
+        ? ` (estimated ${estimatedTotalForDisplay.toLocaleString()} total records)`
+        : "";
       toast.error("Unable to jump to last page", {
-        description: "Too many pages to traverse safely.",
+        description: `Too many pages to traverse safely${estimatedTotalMessage}. Try narrowing your filters.`,
       });
     } catch (error) {
       toast.error("Unable to jump to last page", {
@@ -182,6 +207,8 @@ export function RunsList() {
     }
   }, [
     isJumpingToLast,
+    cursor,
+    cursorDirection,
     groupBy,
     workerFilter,
     effectiveTaskPromptId,
