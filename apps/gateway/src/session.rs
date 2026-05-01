@@ -57,7 +57,7 @@ impl From<&Session> for SessionInfo {
 
 /// Manages UUID-keyed sessions with an IP→session reverse index for the proxy layer.
 pub struct SessionManager {
-    sessions: RwLock<HashMap<SessionId, Session>>,
+    sessions_lock: RwLock<HashMap<SessionId, Session>>,
     ip_index: RwLock<HashMap<IpAddr, SessionId>>,
     registry: Arc<PluginRegistry>,
     idle_timeout: Duration,
@@ -70,7 +70,7 @@ impl SessionManager {
     /// Create a new session manager without Redis persistence.
     pub fn new(registry: Arc<PluginRegistry>, idle_timeout: Duration, max_sessions: usize) -> Self {
         Self {
-            sessions: RwLock::new(HashMap::new()),
+            sessions_lock: RwLock::new(HashMap::new()),
             ip_index: RwLock::new(HashMap::new()),
             registry,
             idle_timeout,
@@ -87,7 +87,7 @@ impl SessionManager {
         store: SessionStore,
     ) -> Self {
         Self {
-            sessions: RwLock::new(HashMap::new()),
+            sessions_lock: RwLock::new(HashMap::new()),
             ip_index: RwLock::new(HashMap::new()),
             registry,
             idle_timeout,
@@ -111,7 +111,7 @@ impl SessionManager {
         if let Some(old_id) = old_id_to_clear {
             // Notify plugins before removing from maps.
             self.registry.on_session_clear(&old_id).await;
-            let mut sessions = self.sessions.write();
+            let mut sessions = self.sessions_lock.write();
             let mut ip_index = self.ip_index.write();
             sessions.remove(&old_id);
             ip_index.remove(&client_ip);
@@ -119,7 +119,7 @@ impl SessionManager {
 
         // Check capacity and assign ID under lock, then drop lock before awaiting.
         let session_id = {
-            let sessions = self.sessions.read();
+            let sessions = self.sessions_lock.read();
             if sessions.len() >= self.max_sessions {
                 return Err(SessionError::MaxSessionsReached);
             }
@@ -133,7 +133,7 @@ impl SessionManager {
 
         // Insert into maps inside a block so guards drop before any .await.
         {
-            let mut sessions = self.sessions.write();
+            let mut sessions = self.sessions_lock.write();
             let mut ip_index = self.ip_index.write();
             sessions.insert(
                 session_id.clone(),
@@ -168,7 +168,7 @@ impl SessionManager {
     pub async fn stop_session(&self, session_id: &SessionId) -> Result<(), SessionError> {
         // Validate and mark inactive under lock, then drop lock before awaiting.
         {
-            let mut sessions = self.sessions.write();
+            let mut sessions = self.sessions_lock.write();
             let session = sessions.get_mut(session_id).ok_or(SessionError::NotFound)?;
             if !session.active {
                 return Err(SessionError::NotActive);
@@ -180,7 +180,7 @@ impl SessionManager {
         // Delete from Redis on explicit stop.
         if let Some(store) = &self.store {
             let client_ip = {
-                let sessions = self.sessions.read();
+                let sessions = self.sessions_lock.read();
                 sessions.get(session_id).map(|s| s.client_ip)
             };
             if let Some(ip) = client_ip {
@@ -195,7 +195,7 @@ impl SessionManager {
     pub async fn delete_session(&self, session_id: &SessionId) -> Result<(), SessionError> {
         // Remove from maps under lock, then drop lock before awaiting.
         let client_ip = {
-            let mut sessions = self.sessions.write();
+            let mut sessions = self.sessions_lock.write();
             let mut ip_index = self.ip_index.write();
             let session = sessions.remove(session_id).ok_or(SessionError::NotFound)?;
             ip_index.remove(&session.client_ip);
@@ -215,7 +215,7 @@ impl SessionManager {
     pub fn session_id_for_ip(&self, ip: &IpAddr) -> Option<SessionId> {
         let ip_index = self.ip_index.read();
         let session_id = ip_index.get(ip)?;
-        let sessions = self.sessions.read();
+        let sessions = self.sessions_lock.read();
         let session = sessions.get(session_id)?;
         if session.active {
             Some(session_id.clone())
@@ -226,7 +226,7 @@ impl SessionManager {
 
     /// Check if a session is active (for proxy handler to decide intercept vs passthrough).
     pub fn is_active(&self, session_id: &SessionId) -> bool {
-        let sessions = self.sessions.read();
+        let sessions = self.sessions_lock.read();
         sessions.get(session_id).map(|s| s.active).unwrap_or(false)
     }
 
@@ -241,7 +241,7 @@ impl SessionManager {
 
         // Don't exceed max sessions.
         {
-            let sessions = self.sessions.read();
+            let sessions = self.sessions_lock.read();
             if sessions.len() >= self.max_sessions {
                 return None;
             }
@@ -254,7 +254,7 @@ impl SessionManager {
             .on_session_start(&session_id, &persisted.plugin_settings)
             .await;
 
-        let mut sessions = self.sessions.write();
+        let mut sessions = self.sessions_lock.write();
         let mut ip_index = self.ip_index.write();
         sessions.insert(
             session_id.clone(),
@@ -278,7 +278,7 @@ impl SessionManager {
 
     /// Touch a session to reset its idle timer.
     pub fn touch(&self, session_id: &SessionId) {
-        let mut sessions = self.sessions.write();
+        let mut sessions = self.sessions_lock.write();
         if let Some(session) = sessions.get_mut(session_id) {
             session.last_activity = Instant::now();
         }
@@ -286,13 +286,13 @@ impl SessionManager {
 
     /// Get session info by ID.
     pub fn get_session(&self, session_id: &SessionId) -> Option<SessionInfo> {
-        let sessions = self.sessions.read();
+        let sessions = self.sessions_lock.read();
         sessions.get(session_id).map(SessionInfo::from)
     }
 
     /// List all sessions.
     pub fn list_sessions(&self) -> Vec<SessionInfo> {
-        let sessions = self.sessions.read();
+        let sessions = self.sessions_lock.read();
         sessions.values().map(SessionInfo::from).collect()
     }
 
@@ -300,7 +300,7 @@ impl SessionManager {
     pub async fn reap_idle(&self) -> Vec<SessionId> {
         // Collect expired sessions under lock, then drop lock before awaiting.
         let reaped: Vec<SessionId> = {
-            let mut sessions = self.sessions.write();
+            let mut sessions = self.sessions_lock.write();
             let mut ip_index = self.ip_index.write();
             let now = Instant::now();
             let mut reaped = Vec::new();
@@ -323,7 +323,7 @@ impl SessionManager {
 
     /// Number of sessions.
     pub fn session_count(&self) -> usize {
-        self.sessions.read().len()
+        self.sessions_lock.read().len()
     }
 }
 
