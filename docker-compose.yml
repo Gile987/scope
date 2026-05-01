@@ -387,7 +387,7 @@ services:
       dockerfile: Dockerfile
     profiles: [gateway, vscode-electron-driver-ext]
     environment:
-      RUST_LOG: debug,gateway::internal=info
+      RUST_LOG: debug,gateway::internal=info,azure_core=info
       COPILOT_TOKEN_REFRESH_BUFFER_SECS: 120
       COPILOT_TOKEN_MINT_RETRIES: 3
       COPILOT_TOKEN_MINT_BACKOFF_MS: 500
@@ -395,6 +395,9 @@ services:
       AZURE_STORAGE_USE_EMULATOR: "true"
       AZURITE_BLOB_HOST: azurite
       AZURITE_BLOB_PORT: "10000"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
     ulimits:
       nofile:
         soft: 65536
@@ -413,6 +416,8 @@ services:
     depends_on:
       azurite-init:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   # Claude Code worker (via ACP)
   coder-acp-claude-code:
