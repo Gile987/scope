@@ -20,6 +20,8 @@ use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
+use azure_storage::{CloudLocation, StorageCredentials};
+use azure_storage_blobs::prelude::{BlobServiceClient, ClientBuilder};
 use gateway::api::routes::ApiState;
 use gateway::api::server::build_api_router;
 use gateway::ca::CertificateAuthority;
@@ -27,11 +29,9 @@ use gateway::config::{Cli, Config};
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
 use gateway::plugins::har::plugin::HarPlugin;
-use gateway::session_store::SessionStore;
-use azure_storage::{CloudLocation, StorageCredentials};
-use azure_storage_blobs::prelude::{BlobServiceClient, ClientBuilder};
 use gateway::proxy::handler::{handle_client, ProxyState};
 use gateway::session::SessionManager;
+use gateway::session_store::SessionStore;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -64,7 +64,8 @@ async fn main() -> anyhow::Result<()> {
     let url_filter = Arc::new(UrlFilter::new(&config.urls_to_watch)?);
 
     // Plugins — HAR writer backend selected from config
-    let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = if let Some(blob_cfg) = &config.har_blob {
+    let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = if let Some(blob_cfg) = &config.har_blob
+    {
         let use_emulator = std::env::var("AZURE_STORAGE_USE_EMULATOR")
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
@@ -73,8 +74,8 @@ async fn main() -> anyhow::Result<()> {
             // Azurite emulator: parse host/port from the storage account URL so
             // the same config works for both local Docker Compose and CI.
             // URL format: http://<host>:<port>/devstoreaccount1
-            let emulator_host = std::env::var("AZURITE_BLOB_HOST")
-                .unwrap_or_else(|_| "127.0.0.1".to_string());
+            let emulator_host =
+                std::env::var("AZURITE_BLOB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
             let emulator_port: u16 = std::env::var("AZURITE_BLOB_PORT")
                 .ok()
                 .and_then(|p| p.parse().ok())
