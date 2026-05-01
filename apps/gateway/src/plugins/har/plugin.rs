@@ -29,6 +29,9 @@ use super::writer;
 struct HarSession {
     redact: bool,
     finalized: bool,
+    /// Set to true when the writer reports a hard failure (blob unreachable).
+    /// The next `on_request` call will return an error, failing the run visibly.
+    failed: bool,
 }
 
 /// Shared interior state cloned cheaply into Axum route handlers.
@@ -68,8 +71,11 @@ impl HarPlugin {
     }
 
     /// Create using a `BlobWriter`.
-    pub fn new_with_blob(container_client: azure_storage_blobs::prelude::ContainerClient) -> Self {
-        let writer = Arc::new(BlobWriter::new(container_client));
+    pub fn new_with_blob(
+        container_client: azure_storage_blobs::prelude::ContainerClient,
+        append_timeout: std::time::Duration,
+    ) -> Self {
+        let writer = Arc::new(BlobWriter::new(container_client, append_timeout));
         Self {
             inner: Arc::new(HarInner {
                 sessions: RwLock::new(HashMap::new()),
@@ -99,6 +105,7 @@ impl ProxyPlugin for HarPlugin {
             HarSession {
                 redact,
                 finalized: false,
+                failed: false,
             },
         );
         debug!("HAR plugin: session started for {}", session_id);
@@ -115,6 +122,34 @@ impl ProxyPlugin for HarPlugin {
 
         let entry = super::writer::exchange_to_har_entry(exchange, redact);
         self.inner.writer.append(session_id, &entry).await;
+
+        // After the append, propagate a hard failure into the session so the
+        // next on_request call can reject the run.
+        if self.inner.writer.is_failed(session_id) {
+            let mut sessions = self.inner.sessions.write();
+            if let Some(s) = sessions.get_mut(session_id) {
+                s.failed = true;
+            }
+        }
+    }
+
+    async fn on_request(
+        &self,
+        session_id: &SessionId,
+        _uri: &http::Uri,
+        _headers: &mut http::HeaderMap,
+    ) -> anyhow::Result<()> {
+        let failed = {
+            let sessions = self.inner.sessions.read();
+            sessions.get(session_id).map(|s| s.failed).unwrap_or(false)
+        };
+        if failed {
+            anyhow::bail!(
+                "HAR storage failure: blob append timed out for session {}; run aborted",
+                session_id
+            );
+        }
+        Ok(())
     }
 
     async fn on_session_stop(&self, session_id: &SessionId) {
@@ -151,11 +186,11 @@ async fn get_har(
 ) -> impl IntoResponse {
     match inner.build_har_for_session(&session_id).await {
         Some(har) => {
-            let degraded = inner.writer.is_degraded(&session_id);
+            let failed = inner.writer.is_failed(&session_id);
             let count = har.log.entries.len();
             debug!(
-                "HAR plugin: returning {} entries for session {} (degraded={})",
-                count, session_id, degraded
+                "HAR plugin: returning {} entries for session {} (failed={})",
+                count, session_id, failed
             );
             let body = serde_json::to_vec(&har).unwrap_or_default();
             let mut resp = axum::response::Response::builder()
@@ -163,7 +198,7 @@ async fn get_har(
                 .header("content-type", "application/json")
                 .body(axum::body::Body::from(body))
                 .unwrap();
-            if degraded {
+            if failed {
                 resp.headers_mut()
                     .insert("x-har-incomplete", HeaderValue::from_static("true"));
             }
@@ -323,11 +358,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn not_degraded_for_local_writer() {
+    async fn not_failed_for_local_writer() {
         let tmp = TempDir::new().unwrap();
         let plugin = HarPlugin::new(tmp.path().to_path_buf());
         let sid = "10.0.0.1".to_string();
         plugin.on_session_start(&sid, &serde_json::json!({})).await;
-        assert!(!plugin.inner.writer.is_degraded(&sid));
+        assert!(!plugin.inner.writer.is_failed(&sid));
     }
 }

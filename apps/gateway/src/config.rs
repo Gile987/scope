@@ -57,12 +57,19 @@ pub struct HarPluginConfig {
     /// Directory for local JSONL output (used when `harBlob` is absent).
     #[serde(default = "default_har_output_dir")]
     pub output_dir: PathBuf,
+
+    /// Hard timeout (in seconds) for a single blob append attempt including all
+    /// retries. If the timeout fires, the session is marked hard-failed and the
+    /// next proxied request returns a 502. Default: 120 (2 minutes).
+    #[serde(default = "default_har_append_timeout_secs")]
+    pub append_timeout_secs: u64,
 }
 
 impl Default for HarPluginConfig {
     fn default() -> Self {
         Self {
             output_dir: default_har_output_dir(),
+            append_timeout_secs: default_har_append_timeout_secs(),
         }
     }
 }
@@ -152,6 +159,10 @@ fn default_log_level() -> String {
 
 fn default_har_output_dir() -> PathBuf {
     PathBuf::from("/tmp/scope-gateway/har-output")
+}
+
+fn default_har_append_timeout_secs() -> u64 {
+    120
 }
 
 impl Default for Config {
@@ -261,6 +272,7 @@ defaultSessionPluginSettings:
         assert_eq!(config.cert_dir, PathBuf::from("/tmp/certs"));
         assert_eq!(config.log_level, "debug");
         assert_eq!(config.plugins.har.output_dir, PathBuf::from("/tmp/har"));
+        assert_eq!(config.plugins.har.append_timeout_secs, 120); // default
         assert_eq!(
             config.default_session_plugin_settings["har"]["redactCredentials"],
             false

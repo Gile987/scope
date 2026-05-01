@@ -6,12 +6,15 @@
 //! `HarWriter` is the common async trait. `LocalWriter` is the original
 //! JSONL-on-disk implementation, refactored to use `tokio::fs` for non-blocking
 //! I/O. `BlobWriter` appends entries directly to an Azure append blob with
-//! exponential-backoff retries; failed retries set a per-session `degraded` flag
-//! surfaced via `GET /har` as `X-HAR-Incomplete: true`.
+//! exponential-backoff retries bounded by a configurable timeout; if all retries
+//! or the timeout fire, the session is marked hard-failed and the next proxied
+//! request returns a 502.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+use std::time::Duration;
 
 use async_trait::async_trait;
 use azure_storage_blobs::prelude::*;
@@ -39,9 +42,9 @@ pub trait HarWriter: Send + Sync {
         self.read_entries(session_id)
     }
 
-    /// Returns `true` if at least one append has permanently failed after
-    /// all retries — indicating the stored data may be incomplete.
-    fn is_degraded(&self, session_id: &str) -> bool;
+    /// Returns `true` if a blob append permanently failed after all retries /
+    /// timeout — the session is hard-failed and no further writes will succeed.
+    fn is_failed(&self, session_id: &str) -> bool;
 
     /// Called when a session starts. Implementations should initialise any
     /// per-session state (create the file / append blob).
@@ -143,8 +146,8 @@ impl HarWriter for LocalWriter {
         read_jsonl_entries_sync(&session.jsonl_path)
     }
 
-    fn is_degraded(&self, _session_id: &str) -> bool {
-        false // local writes either succeed or warn; no persistent degraded state
+    fn is_failed(&self, _session_id: &str) -> bool {
+        false // local writes either succeed or warn; no hard-failure state
     }
 
     fn close_session(&self, session_id: &str) {
@@ -177,8 +180,9 @@ pub fn read_jsonl_entries_sync(path: &Path) -> Vec<HarEntry> {
 struct BlobSession {
     /// Name of the append blob (e.g. `sessions/{sessionId}.jsonl`).
     blob_name: String,
-    /// Set to true once any append permanently fails after all retries.
-    degraded: Arc<AtomicBool>,
+    /// Set to true once an append permanently fails after all retries / timeout.
+    /// Once set, the HAR plugin will reject the next proxied request with a 502.
+    failed: Arc<AtomicBool>,
     finalized: bool,
 }
 
@@ -188,13 +192,16 @@ struct BlobSession {
 /// and safe to use concurrently across sessions / Tokio tasks.
 pub struct BlobWriter {
     container_client: ContainerClient,
+    /// Hard ceiling on how long a single append (including all retries) may take.
+    append_timeout: Duration,
     sessions: parking_lot::RwLock<std::collections::HashMap<String, BlobSession>>,
 }
 
 impl BlobWriter {
-    pub fn new(container_client: ContainerClient) -> Self {
+    pub fn new(container_client: ContainerClient, append_timeout: Duration) -> Self {
         Self {
             container_client,
+            append_timeout,
             sessions: parking_lot::RwLock::new(std::collections::HashMap::new()),
         }
     }
@@ -203,12 +210,12 @@ impl BlobWriter {
         format!("sessions/{}.jsonl", session_id)
     }
 
-    /// Append `line` to the blob with exponential-backoff retries.
-    /// Auth and not-found errors (401/403/404) are not retried.
-    /// Returns `false` if all retries are exhausted (caller should set degraded).
-    async fn append_with_retry(blob_client: &BlobClient, line: String) -> bool {
+    /// Append `line` to the blob with exponential-backoff retries, bounded by
+    /// `timeout`. Auth and not-found errors (401/403/404) are not retried.
+    /// Returns `false` if all retries are exhausted or the timeout fires.
+    async fn append_with_retry(blob_client: &BlobClient, line: String, timeout: Duration) -> bool {
         let bytes = bytes::Bytes::from(line);
-        let result = (|| async {
+        let retry_future = (|| async {
             blob_client
                 .append_block(bytes.clone())
                 .await
@@ -216,17 +223,20 @@ impl BlobWriter {
         })
         .retry(
             ExponentialBuilder::default()
-                .with_min_delay(std::time::Duration::from_millis(50))
-                .with_max_delay(std::time::Duration::from_millis(500))
-                .with_max_times(3),
+                .with_min_delay(Duration::from_millis(200))
+                .with_max_delay(Duration::from_secs(5))
+                .with_max_times(20),
         )
         .when(|e| {
             let msg = e.to_string();
             !msg.contains("401") && !msg.contains("403") && !msg.contains("404")
-        })
-        .await;
+        });
 
-        result.is_ok()
+        match tokio::time::timeout(timeout, retry_future).await {
+            Ok(Ok(_)) => true,
+            Ok(Err(_)) => false, // retries exhausted
+            Err(_) => false,     // timeout fired
+        }
     }
 }
 
@@ -253,7 +263,7 @@ impl HarWriter for BlobWriter {
             session_id.to_string(),
             BlobSession {
                 blob_name,
-                degraded: Arc::new(AtomicBool::new(false)),
+                failed: Arc::new(AtomicBool::new(false)),
                 finalized: false,
             },
         );
@@ -261,13 +271,18 @@ impl HarWriter for BlobWriter {
     }
 
     async fn append(&self, session_id: &str, entry: &HarEntry) {
-        let (blob_name, degraded) = {
+        let (blob_name, failed) = {
             let sessions = self.sessions.read();
             match sessions.get(session_id) {
-                Some(s) if !s.finalized => (s.blob_name.clone(), s.degraded.clone()),
+                Some(s) if !s.finalized => (s.blob_name.clone(), s.failed.clone()),
                 _ => return,
             }
         };
+
+        // If the session is already hard-failed, skip further appends.
+        if failed.load(Ordering::Relaxed) {
+            return;
+        }
 
         let Ok(json) = serde_json::to_string(entry) else {
             return;
@@ -275,12 +290,12 @@ impl HarWriter for BlobWriter {
         let line = format!("{}\n", json);
 
         let blob_client = self.container_client.blob_client(blob_name);
-        if !Self::append_with_retry(&blob_client, line).await {
+        if !Self::append_with_retry(&blob_client, line, self.append_timeout).await {
             warn!(
-                "HAR blob: all retries exhausted for session {}, marking degraded",
+                "HAR blob: all retries/timeout exhausted for session {}, marking hard-failed",
                 session_id
             );
-            degraded.store(true, Ordering::Relaxed);
+            failed.store(true, Ordering::Relaxed);
         }
     }
 
@@ -293,11 +308,11 @@ impl HarWriter for BlobWriter {
         self.read_blob_entries(session_id).await
     }
 
-    fn is_degraded(&self, session_id: &str) -> bool {
+    fn is_failed(&self, session_id: &str) -> bool {
         let sessions = self.sessions.read();
         sessions
             .get(session_id)
-            .map(|s| s.degraded.load(Ordering::Relaxed))
+            .map(|s| s.failed.load(Ordering::Relaxed))
             .unwrap_or(false)
     }
 
@@ -346,12 +361,12 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[tokio::test]
-    async fn local_writer_is_degraded_always_false() {
+    async fn local_writer_is_failed_always_false() {
         let dir = tempdir().unwrap();
         let writer = LocalWriter::new(dir.path().to_path_buf());
         writer.init_session("s1").await;
-        assert!(!writer.is_degraded("s1"));
-        assert!(!writer.is_degraded("unknown"));
+        assert!(!writer.is_failed("s1"));
+        assert!(!writer.is_failed("unknown"));
     }
 
     #[tokio::test]
@@ -422,31 +437,31 @@ mod tests {
             azure_storage::StorageCredentials::anonymous(),
         )
         .container_client("test");
-        BlobWriter::new(container_client)
+        BlobWriter::new(container_client, Duration::from_secs(120))
     }
 
     #[test]
     fn blob_writer_is_degraded_false_for_unknown_session() {
         let writer = fake_blob_writer();
-        assert!(!writer.is_degraded("nonexistent"));
+        assert!(!writer.is_failed("nonexistent"));
     }
 
     #[test]
     fn blob_writer_is_degraded_true_after_flag_set() {
         let writer = fake_blob_writer();
 
-        // Manually insert a session with degraded=true to verify is_degraded reads the flag.
-        let degraded_flag = Arc::new(AtomicBool::new(true));
+        // Manually insert a session with failed=true to verify is_failed reads the flag.
+        let failed_flag = Arc::new(AtomicBool::new(true));
         writer.sessions.write().insert(
             "s3".to_string(),
             BlobSession {
                 blob_name: "sessions/s3.jsonl".to_string(),
-                degraded: degraded_flag,
+                failed: failed_flag,
                 finalized: false,
             },
         );
 
-        assert!(writer.is_degraded("s3"));
+        assert!(writer.is_failed("s3"));
     }
 
     #[test]
@@ -457,12 +472,12 @@ mod tests {
             "s4".to_string(),
             BlobSession {
                 blob_name: "sessions/s4.jsonl".to_string(),
-                degraded: Arc::new(AtomicBool::new(false)),
+                failed: Arc::new(AtomicBool::new(false)),
                 finalized: false,
             },
         );
 
-        assert!(!writer.is_degraded("s4"));
+        assert!(!writer.is_failed("s4"));
     }
 
     #[test]
@@ -473,7 +488,7 @@ mod tests {
             "s5".to_string(),
             BlobSession {
                 blob_name: "sessions/s5.jsonl".to_string(),
-                degraded: Arc::new(AtomicBool::new(false)),
+                failed: Arc::new(AtomicBool::new(false)),
                 finalized: false,
             },
         );

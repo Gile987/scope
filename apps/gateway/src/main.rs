@@ -105,7 +105,10 @@ async fn main() -> anyhow::Result<()> {
             BlobServiceClient::new(&blob_cfg.storage_account_url, storage_creds)
                 .container_client(&blob_cfg.container_name)
         };
-        Arc::new(HarPlugin::new_with_blob(container_client))
+        Arc::new(HarPlugin::new_with_blob(
+            container_client,
+            std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
+        ))
     } else {
         let har_dir = config.plugins.har.output_dir.clone();
         info!("HAR plugin: using local filesystem backend ({:?})", har_dir);

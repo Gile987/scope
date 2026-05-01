@@ -10,6 +10,7 @@ logLevel: info
 plugins:
   har:
     outputDir: /tmp/scope-gateway/har-output
+    appendTimeoutSecs: 120
   copilotToken:
     tokenManagerUrl: ~
 defaultSessionPluginSettings:
