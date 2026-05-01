@@ -339,3 +339,150 @@ impl BlobWriter {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    // -----------------------------------------------------------------------
+    // LocalWriter tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn local_writer_is_degraded_always_false() {
+        let dir = tempdir().unwrap();
+        let writer = LocalWriter::new(dir.path().to_path_buf());
+        writer.init_session("s1").await;
+        assert!(!writer.is_degraded("s1"));
+        assert!(!writer.is_degraded("unknown"));
+    }
+
+    #[tokio::test]
+    async fn local_writer_round_trip() {
+        let dir = tempdir().unwrap();
+        let writer = LocalWriter::new(dir.path().to_path_buf());
+        writer.init_session("s2").await;
+
+        let entry = HarEntry {
+            started_date_time: "2024-01-01T00:00:00Z".to_string(),
+            time: 1.0,
+            request: crate::plugins::har::types::HarRequest {
+                method: "GET".to_string(),
+                url: "https://example.com".to_string(),
+                http_version: "HTTP/1.1".to_string(),
+                cookies: vec![],
+                headers: vec![],
+                query_string: vec![],
+                headers_size: -1,
+                body_size: 0,
+                post_data: None,
+            },
+            response: crate::plugins::har::types::HarResponse {
+                status: 200,
+                status_text: "OK".to_string(),
+                http_version: "HTTP/1.1".to_string(),
+                cookies: vec![],
+                headers: vec![],
+                content: crate::plugins::har::types::HarContent {
+                    size: 0,
+                    mime_type: "text/plain".to_string(),
+                    text: None,
+                    encoding: None,
+                },
+                headers_size: -1,
+                body_size: 0,
+                redirect_url: String::new(),
+            },
+            cache: crate::plugins::har::types::HarCache::default(),
+            timings: crate::plugins::har::types::HarTimings {
+                blocked: -1.0,
+                dns: -1.0,
+                connect: -1.0,
+                send: 0.0,
+                wait: 1.0,
+                receive: 0.0,
+                ssl: -1.0,
+            },
+        };
+
+        writer.append("s2", &entry).await;
+
+        let entries = writer.read_entries("s2");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].started_date_time, "2024-01-01T00:00:00Z");
+
+        writer.close_session("s2");
+        assert!(writer.read_entries("s2").is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // BlobWriter degraded flag tests (no real Azure endpoint needed)
+    // -----------------------------------------------------------------------
+
+    fn fake_blob_writer() -> BlobWriter {
+        let container_client = azure_storage_blobs::prelude::BlobServiceClient::new(
+            "https://fake.blob.core.windows.net",
+            azure_storage::StorageCredentials::anonymous(),
+        )
+        .container_client("test");
+        BlobWriter::new(container_client)
+    }
+
+    #[test]
+    fn blob_writer_is_degraded_false_for_unknown_session() {
+        let writer = fake_blob_writer();
+        assert!(!writer.is_degraded("nonexistent"));
+    }
+
+    #[test]
+    fn blob_writer_is_degraded_true_after_flag_set() {
+        let writer = fake_blob_writer();
+
+        // Manually insert a session with degraded=true to verify is_degraded reads the flag.
+        let degraded_flag = Arc::new(AtomicBool::new(true));
+        writer.sessions.write().insert(
+            "s3".to_string(),
+            BlobSession {
+                blob_name: "sessions/s3.jsonl".to_string(),
+                degraded: degraded_flag,
+                finalized: false,
+            },
+        );
+
+        assert!(writer.is_degraded("s3"));
+    }
+
+    #[test]
+    fn blob_writer_is_degraded_false_when_flag_not_set() {
+        let writer = fake_blob_writer();
+
+        writer.sessions.write().insert(
+            "s4".to_string(),
+            BlobSession {
+                blob_name: "sessions/s4.jsonl".to_string(),
+                degraded: Arc::new(AtomicBool::new(false)),
+                finalized: false,
+            },
+        );
+
+        assert!(!writer.is_degraded("s4"));
+    }
+
+    #[test]
+    fn blob_writer_close_session_removes_state() {
+        let writer = fake_blob_writer();
+
+        writer.sessions.write().insert(
+            "s5".to_string(),
+            BlobSession {
+                blob_name: "sessions/s5.jsonl".to_string(),
+                degraded: Arc::new(AtomicBool::new(false)),
+                finalized: false,
+            },
+        );
+
+        writer.close_session("s5");
+        assert!(writer.sessions.read().get("s5").is_none());
+    }
+}

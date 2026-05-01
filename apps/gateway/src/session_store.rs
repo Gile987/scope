@@ -141,3 +141,43 @@ pub fn session_ttl(plugin_settings: &HashMap<String, serde_json::Value>) -> Dura
         .map(Duration::from_secs)
         .unwrap_or(Duration::from_secs(3600))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn session_ttl_default_when_no_settings() {
+        let settings = HashMap::new();
+        assert_eq!(session_ttl(&settings), Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn session_ttl_default_when_other_plugin_missing() {
+        let mut settings = HashMap::new();
+        settings.insert("other_plugin".to_string(), json!({"some": "value"}));
+        assert_eq!(session_ttl(&settings), Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn session_ttl_default_when_field_missing_in_other_plugin() {
+        let mut settings = HashMap::new();
+        settings.insert("other_plugin".to_string(), json!({"other_field": 123}));
+        assert_eq!(session_ttl(&settings), Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn session_ttl_reads_max_session_duration_secs() {
+        let mut settings = HashMap::new();
+        settings.insert("other_plugin".to_string(), json!({"max_session_duration_secs": 7200}));
+        assert_eq!(session_ttl(&settings), Duration::from_secs(7200));
+    }
+
+    #[test]
+    fn session_ttl_ignores_non_u64_value() {
+        let mut settings = HashMap::new();
+        settings.insert("other_plugin".to_string(), json!({"max_session_duration_secs": "not_a_number"}));
+        assert_eq!(session_ttl(&settings), Duration::from_secs(3600));
+    }
+}

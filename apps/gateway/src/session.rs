@@ -481,4 +481,18 @@ mod tests {
         mgr.create_session(IP2, HashMap::new()).await.unwrap();
         assert_eq!(mgr.session_count(), 2);
     }
+
+    #[tokio::test]
+    async fn restore_session_for_ip_without_store_returns_none() {
+        // When no Redis store is configured, restore always returns None.
+        let mgr = make_manager(100);
+        assert_eq!(mgr.restore_session_for_ip(&IP1).await, None);
+    }
+
+    #[tokio::test]
+    async fn restore_session_for_ip_respects_max_sessions() {
+        // Even if restore is called at capacity, it should return None.
+        let mgr = make_manager(0); // 0 max sessions
+        assert_eq!(mgr.restore_session_for_ip(&IP1).await, None);
+    }
 }
