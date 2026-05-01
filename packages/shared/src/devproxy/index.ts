@@ -48,6 +48,7 @@ export function createProxyClient(): ProxyClient {
             tokenManagerUrl,
             capability: process.env.COPILOT_TOKEN_CAPABILITY || "generic",
             refreshBufferSecs: 120,
+            maxSessionDurationSecs: parseInt(process.env.COPILOT_MAX_SESSION_DURATION_SECS || "3600", 10),
             targetHosts: [
               "api.githubcopilot.com",
               "api.enterprise.githubcopilot.com",
