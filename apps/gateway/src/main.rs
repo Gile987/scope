@@ -107,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
         };
         Arc::new(HarPlugin::new_with_blob(container_client))
     } else {
-        let har_dir = config.har_output_dir.clone();
+        let har_dir = config.plugins.har.output_dir.clone();
         info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
         Arc::new(HarPlugin::new(har_dir))
     };

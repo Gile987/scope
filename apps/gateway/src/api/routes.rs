@@ -45,7 +45,7 @@ pub async fn post_create_session(
     Json(body): Json<SessionCreateRequest>,
 ) -> impl IntoResponse {
     let client_ip = addr.ip();
-    let plugin_settings = body.plugins.unwrap_or_default();
+    let plugin_settings = body.session_plugin_settings.unwrap_or_default();
 
     info!("Creating session for {}", client_ip);
 
@@ -66,7 +66,7 @@ pub async fn post_create_session(
 /// Request body for session creation.
 #[derive(Deserialize)]
 pub struct SessionCreateRequest {
-    pub plugins: Option<HashMap<String, serde_json::Value>>,
+    pub session_plugin_settings: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Response body after session creation.

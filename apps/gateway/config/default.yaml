@@ -7,8 +7,10 @@ urlsToWatch:
 port: 18000
 certDir: /tmp/scope-gateway/certs
 logLevel: info
-harOutputDir: /tmp/scope-gateway/har-output
-defaultPluginSettings:
+plugins:
+  har:
+    outputDir: /tmp/scope-gateway/har-output
+defaultSessionPluginSettings:
   har:
     redactCredentials: true
 harBlob:
