@@ -65,6 +65,7 @@ pub async fn post_create_session(
 
 /// Request body for session creation.
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionCreateRequest {
     pub session_plugin_settings: Option<HashMap<String, serde_json::Value>>,
 }

@@ -52,7 +52,7 @@ describe("GatewayClient", () => {
       expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/api/v1/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plugins: {} }),
+        body: JSON.stringify({ sessionPluginSettings: {} }),
       });
     });
 
@@ -70,7 +70,7 @@ describe("GatewayClient", () => {
       expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/api/v1/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plugins: { har: { captureHeaders: true } } }),
+        body: JSON.stringify({ sessionPluginSettings: { har: { captureHeaders: true } } }),
       });
     });
 

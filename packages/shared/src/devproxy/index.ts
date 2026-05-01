@@ -37,14 +37,14 @@ export function createProxyClient(): ProxyClient {
       downloadCertificate: (p) => gw.downloadCertificate(p),
       createCombinedCaBundle: (c, o) => gw.createCombinedCaBundle(c, o),
       startRecording: async () => {
-        const plugins: Record<string, unknown> = {};
+        const sessionPluginSettings: Record<string, unknown> = {};
 
         // Enable the copilot_token auto-refresh plugin when the gateway can
         // reach the Token Manager. The worker also mints a token at startup,
         // but the gateway plugin keeps it fresh throughout long-running sessions.
         const tokenManagerUrl = process.env.TOKEN_MANAGER_URL;
         if (tokenManagerUrl) {
-          plugins.copilot_token = {
+          sessionPluginSettings.copilot_token = {
             tokenManagerUrl,
             capability: process.env.COPILOT_TOKEN_CAPABILITY || "generic",
             refreshBufferSecs: 120,
@@ -57,7 +57,7 @@ export function createProxyClient(): ProxyClient {
           };
         }
 
-        await gw.startSession(plugins);
+        await gw.startSession(sessionPluginSettings);
       },
       stopAndCollectHar: async (log) => {
         try {
