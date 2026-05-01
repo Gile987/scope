@@ -136,6 +136,9 @@ The proxy core knows nothing about HAR, metrics, or any specific observation for
 pub trait ProxyPlugin: Send + Sync {
     fn name(&self) -> &str;
     fn on_session_start(&self, session_id: &SessionId, settings: &Value);
+    /// Called before each request is forwarded upstream. Plugins may mutate
+    /// headers (e.g. refresh/inject credentials). Default is a no-op.
+    async fn on_request(&self, session_id: &SessionId, uri: &Uri, headers: &mut HeaderMap) -> Result<()> { Ok(()) }
     fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange);
     fn on_session_stop(&self, session_id: &SessionId);
     fn on_session_clear(&self, session_id: &SessionId);
@@ -186,12 +189,86 @@ sequenceDiagram
     API-->>W: 204 No Content
 ```
 
-**Key behaviors:**
+**Key behaviors (HAR plugin):**
 
 - **Disk-based buffering**: Each session writes to a JSONL file (`.session-{id}.jsonl`), one JSON line per HTTP exchange. No in-memory accumulation.
 - **Sensitive header redaction**: When `redactCredentials` is `true` (default), headers like `authorization`, `x-github-token`, `x-api-key`, `cookie`, and `set-cookie` are redacted at write time. Secrets never touch disk.
 - **On-the-fly HAR assembly**: `GET /api/v1/sessions/{id}/har` reads the JSONL file and wraps the entries in a HAR 1.2 envelope. No separate `.har` file is stored.
 - **Idempotent reads**: The JSONL file can be read multiple times (safe for retries). It is deleted on session cleanup (`DELETE /api/v1/sessions/{id}` or idle reap).
+
+### Copilot Token Plugin
+
+The Copilot Token plugin (`plugins/copilot_token`) automatically mints and refreshes short-lived GitHub Copilot session tokens for each intercepted request, injecting them as `Authorization: Bearer <token>` headers before traffic reaches the upstream AI provider.
+
+**Lifecycle:**
+
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant API as Control API
+    participant CT as CopilotToken Plugin
+    participant TM as Token Manager
+    participant GH as api.github.com
+
+    W->>API: POST /api/v1/sessions {copilotToken: {tokenManagerUrl, ...}}
+    API->>CT: on_session_start(id, settings)
+    Note over CT: Store config, start session clock
+
+    W->>Proxy: CONNECT api.githubcopilot.com
+    Proxy->>CT: on_request(id, uri, headers)
+    Note over CT: Is token cached + valid?
+    CT->>TM: POST /api/v1/keys/acquire
+    TM-->>CT: GitHub OAuth scopeless token
+    CT->>GH: GET /copilot_internal/v2/token
+    GH-->>CT: {token, expires_at}
+    CT->>CT: Cache MintedToken
+    CT-->>Proxy: Inject Authorization: Bearer <token>
+    Proxy-->>W: Forward to upstream
+```
+
+**Session settings (passed under `"copilotToken"` key):**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `tokenManagerUrl` | string | — | URL of the Token Manager service |
+| `refreshBufferSecs` | int | `120` | Seconds before expiry to proactively refresh |
+| `targetHosts` | string[] | `["api.githubcopilot.com"]` | Hosts to inject token on |
+| `maxSessionDurationSecs` | int | `3600` | Max session lifetime; requests are rejected after this |
+
+**Key behaviors:**
+
+- **Lazy minting**: Token is only acquired on the first request to a target host — no prefetch on session start
+- **Cache with buffer**: A cached token is considered expired `refreshBufferSecs` before its actual expiry, ensuring a fresh token is always in flight
+- **Max session duration**: If the session age exceeds `maxSessionDurationSecs`, `on_request` returns a hard error (prevents indefinite token churn for stale sessions)
+- **Retry with backoff**: Both Token Manager and GitHub API calls are retried independently using exponential backoff. Defaults: 3 retries, 500ms initial backoff (configurable via `COPILOT_TOKEN_MINT_RETRIES`, `COPILOT_TOKEN_MINT_BACKOFF_MS`)
+- **Plugin-only**: The plugin is enabled per-session. Workers that don't pass `copilotToken` settings are unaffected
+
+**Example session create with token minting:**
+
+```json
+POST /api/v1/sessions
+{
+  "plugins": {
+    "har": { "redactCredentials": true },
+    "copilotToken": {
+      "tokenManagerUrl": "http://token-manager:3000",
+      "refreshBufferSecs": 120,
+      "targetHosts": ["api.githubcopilot.com"],
+      "maxSessionDurationSecs": 3600
+    }
+  }
+}
+```
+
+**Client module structure:**
+
+```
+clients/
+├── copilot_token/mod.rs   # mint_copilot_token() — calls api.github.com
+└── token_manager/mod.rs   # acquire_github_token() — calls Token Manager
+```
+
+Each client is a thin async function that accepts a `reqwest::Client` and a URL, returns an `anyhow::Result`, and is tested independently with wiremock. The minter (`plugins/copilot_token/minter.rs`) orchestrates the two-step flow and owns the retry logic.
 
 ### Timestamps
 
@@ -245,9 +322,15 @@ apps/gateway/
 │   │   └── routes.rs           # /health, /api/v1/sessions, /api/v1/cacert
 │   ├── ca/
 │   │   └── generator.rs        # CA key pair generation + leaf cert signing (rcgen)
+│   ├── clients/
+│   │   ├── copilot_token/mod.rs  # mint_copilot_token() — GitHub Copilot token API client
+│   │   └── token_manager/mod.rs  # acquire_github_token() — Token Manager API client
 │   ├── filters/
 │   │   └── url_matcher.rs      # Glob-based URL matching (urlsToWatch)
 │   ├── plugins/
+│   │   ├── copilot_token/
+│   │   │   ├── plugin.rs       # CopilotTokenPlugin: impl ProxyPlugin
+│   │   │   └── minter.rs       # Orchestrates token acquisition + retry logic
 │   │   └── har/
 │   │       ├── plugin.rs       # HarPlugin: impl ProxyPlugin
 │   │       ├── writer.rs       # HAR 1.2 JSON serializer
@@ -255,7 +338,7 @@ apps/gateway/
 │   └── proxy/
 │       ├── handler.rs          # CONNECT tunneling + plain HTTP forwarding
 │       └── tls.rs              # TLS interception, dynamic cert generation
-└── tests/                      # 44 unit + 14 integration tests
+└── tests/                      # 69 unit + 18 integration tests
 ```
 
 ## Configuration
@@ -316,12 +399,12 @@ env:
 
 ## Future Plugins
 
-| Phase | Plugin | Purpose |
-|-------|--------|---------|
-| 1.b | Copilot Token Refresh | Auto-refresh expired Copilot tokens (#669) |
-| 1.c | CAPI HMAC Signing | Sign requests with HMAC for Copilot API |
-| 2.b | Rate Limiting | Budget-aware rate limiting for Claude Code (#659) |
-| 3 | Metrics | Prometheus `/metrics` — request counts, latency, bytes, error rates |
+| Phase | Plugin | Status | Purpose |
+|-------|--------|--------|---------|
+| 1.b | Copilot Token Refresh | ✅ Shipped (#724) | Auto-mint and refresh Copilot session tokens |
+| 1.c | CAPI HMAC Signing | Planned | Sign requests with HMAC for Copilot API |
+| 2.b | Rate Limiting | Planned | Budget-aware rate limiting for Claude Code (#659) |
+| 3 | Metrics | Planned | Prometheus `/metrics` — request counts, latency, bytes, error rates |
 
 ## Migration Strategy
 
@@ -338,4 +421,4 @@ flowchart TD
     F --> G["Remove DevProxy sidecars + init containers"]
 ```
 
-**Current status (Phase 1):** VS Code Electron worker uses the gateway. Other workers (ACP Copilot, ACP Claude Code) still use DevProxy sidecars. Both paths converge on the same `extractHarMetadata()` pipeline, so HAR output is identical regardless of backend.
+**Current status (Phase 1.b):** VS Code Electron worker uses the gateway with Copilot token minting enabled (via `TOKEN_MANAGER_URL`). Other workers (ACP Copilot, ACP Claude Code) still use DevProxy sidecars. Both paths converge on the same `extractHarMetadata()` pipeline, so HAR output is identical regardless of backend.
