@@ -94,8 +94,7 @@ mod tests {
             .await;
 
         let client = reqwest::Client::new();
-        let result =
-            acquire_github_token(&client, &server.uri(), "generic-cap").await;
+        let result = acquire_github_token(&client, &server.uri(), "generic-cap").await;
 
         assert_eq!(result.unwrap(), "gh-oauth-token-abc");
     }
@@ -106,16 +105,13 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/api/v1/keys/acquire"))
-            .respond_with(
-                ResponseTemplate::new(503).set_body_string("Service Unavailable"),
-            )
+            .respond_with(ResponseTemplate::new(503).set_body_string("Service Unavailable"))
             .expect(1)
             .mount(&server)
             .await;
 
         let client = reqwest::Client::new();
-        let result =
-            acquire_github_token(&client, &server.uri(), "generic-cap").await;
+        let result = acquire_github_token(&client, &server.uri(), "generic-cap").await;
 
         let err = result.unwrap_err();
         assert!(err.to_string().contains("503"));
@@ -128,16 +124,13 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/api/v1/keys/acquire"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string("{invalid json}"),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string("{invalid json}"))
             .expect(1)
             .mount(&server)
             .await;
 
         let client = reqwest::Client::new();
-        let result =
-            acquire_github_token(&client, &server.uri(), "generic-cap").await;
+        let result = acquire_github_token(&client, &server.uri(), "generic-cap").await;
 
         let err = result.unwrap_err();
         assert!(err.to_string().contains("parse"));
@@ -147,8 +140,7 @@ mod tests {
     async fn acquire_unreachable_server_returns_error() {
         let client = reqwest::Client::new();
         let result =
-            acquire_github_token(&client, "http://127.0.0.1:1", "generic-cap")
-                .await;
+            acquire_github_token(&client, "http://127.0.0.1:1", "generic-cap").await;
 
         let err = result.unwrap_err();
         assert!(err.to_string().contains("Failed to reach"));
