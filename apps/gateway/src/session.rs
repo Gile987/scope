@@ -235,14 +235,26 @@ impl SessionManager {
     /// traffic from an IP with no active session (pod crash recovery).
     ///
     /// Returns the restored session ID if successful, `None` otherwise.
+    /// Skips restore if the session already exists in memory (e.g. it was
+    /// deliberately stopped or is being torn down).
     pub async fn restore_session_for_ip(&self, ip: &IpAddr) -> Option<SessionId> {
         let store = self.store.as_ref()?;
         let persisted = store.get_by_ip(ip).await?;
 
         // Don't exceed max sessions.
+        // Also skip restore if this session already exists in memory — it was
+        // deliberately managed (stopped / being deleted) and should not be
+        // resurrected from stale Redis state.
         {
             let sessions = self.sessions_lock.read();
             if sessions.len() >= self.max_sessions {
+                return None;
+            }
+            if sessions.contains_key(&persisted.session_id) {
+                tracing::debug!(
+                    "SessionManager: skipping restore for session {} — already in memory",
+                    persisted.session_id
+                );
                 return None;
             }
         }
