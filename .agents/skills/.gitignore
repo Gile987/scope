@@ -3,3 +3,6 @@
 !.gitignore
 !scope-cli/
 !scope-cli/**
+
+!tlaplus/
+!tlaplus/**

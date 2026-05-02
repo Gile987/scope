@@ -16,6 +16,12 @@
       "sourceType": "github",
       "computedHash": "e01994a9acea1f28cda08657f526ec0911d0a5b419d9ab8ff767cff66408b093"
     },
+    "tlaplus": {
+      "source": "jonmumm/skills",
+      "sourceType": "github",
+      "skillPath": "tlaplus/SKILL.md",
+      "computedHash": "713c72a9498fc3eb5b7c3b35b969f193ff6baa307cbad40ba232867b314c7d50"
+    },
     "wtm": {
       "source": "cedricvidal/coding-skills",
       "sourceType": "github",
