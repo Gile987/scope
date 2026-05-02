@@ -64,7 +64,10 @@ async fn main() -> anyhow::Result<()> {
     let url_filter = Arc::new(UrlFilter::new(&config.urls_to_watch)?);
 
     // Plugins — HAR writer backend selected from config
-    let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = if let Some(blob_cfg) = &config.har_blob
+    let (har_plugin, blob_container_client): (
+        Arc<dyn gateway::plugin::ProxyPlugin>,
+        Option<azure_storage_blobs::prelude::ContainerClient>,
+    ) = if let Some(blob_cfg) = &config.har_blob
     {
         let use_emulator = std::env::var("AZURE_STORAGE_USE_EMULATOR")
             .map(|v| v == "true" || v == "1")
@@ -109,48 +112,17 @@ async fn main() -> anyhow::Result<()> {
                 .container_client(&blob_cfg.container_name)
         };
 
-        // Ensure the HAR blob container exists before accepting traffic.
-        // This is fatal — there is no point running the gateway if blob
-        // storage is unreachable.
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            container_client.create(),
+        (
+            Arc::new(HarPlugin::new_with_blob(
+                container_client.clone(),
+                std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
+            )),
+            Some(container_client),
         )
-        .await
-        {
-            Ok(Ok(_)) => info!(
-                "HAR plugin: created blob container '{}'",
-                blob_cfg.container_name
-            ),
-            Ok(Err(e)) if e.to_string().contains("ContainerAlreadyExists") => {
-                info!(
-                    "HAR plugin: blob container '{}' already exists",
-                    blob_cfg.container_name
-                )
-            }
-            Ok(Err(e)) => {
-                return Err(anyhow::anyhow!(
-                    "HAR plugin: failed to create blob container '{}': {}",
-                    blob_cfg.container_name,
-                    e
-                ));
-            }
-            Err(_) => {
-                return Err(anyhow::anyhow!(
-                    "HAR plugin: timed out (10s) creating blob container '{}'",
-                    blob_cfg.container_name
-                ));
-            }
-        }
-
-        Arc::new(HarPlugin::new_with_blob(
-            container_client,
-            std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
-        ))
     } else {
         let har_dir = config.plugins.har.output_dir.clone();
         info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
-        Arc::new(HarPlugin::new(har_dir))
+        (Arc::new(HarPlugin::new(har_dir)), None)
     };
     let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
 
@@ -252,6 +224,7 @@ async fn main() -> anyhow::Result<()> {
     let api_state = Arc::new(ApiState {
         session_manager: session_manager.clone(),
         ca: ca.clone(),
+        blob_container_client: blob_container_client.clone(),
     });
     let plugin_routes: Vec<axum::Router> = registry
         .plugins()

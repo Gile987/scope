@@ -15,6 +15,7 @@ use axum::extract::{ConnectInfo, Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
+use azure_storage_blobs::prelude::ContainerClient;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -25,9 +26,48 @@ use crate::session::SessionManager;
 pub struct ApiState {
     pub session_manager: Arc<SessionManager>,
     pub ca: Arc<CertificateAuthority>,
+    pub blob_container_client: Option<ContainerClient>,
 }
 
-/// GET /health — liveness / readiness check
+/// GET /health/alive — liveness probe (always 200)
+pub async fn get_health_alive() -> impl IntoResponse {
+    Json(HealthResponse { status: "ok" })
+}
+
+/// GET /health/ready — readiness probe (checks blob storage reachability)
+pub async fn get_health_ready(State(state): State<Arc<ApiState>>) -> impl IntoResponse {
+    if let Some(client) = &state.blob_container_client {
+        match tokio::time::timeout(std::time::Duration::from_secs(3), client.exists()).await {
+            Ok(Ok(true)) => Json(HealthResponse { status: "ok" }).into_response(),
+            Ok(Ok(false)) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(HealthResponse {
+                    status: "blob container not found",
+                }),
+            )
+                .into_response(),
+            Ok(Err(_)) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(HealthResponse {
+                    status: "blob storage unreachable",
+                }),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(HealthResponse {
+                    status: "blob storage timeout",
+                }),
+            )
+                .into_response(),
+        }
+    } else {
+        // No blob backend configured — always ready
+        Json(HealthResponse { status: "ok" }).into_response()
+    }
+}
+
+/// GET /health — legacy endpoint (returns alive status)
 pub async fn get_health() -> impl IntoResponse {
     Json(HealthResponse { status: "ok" })
 }
