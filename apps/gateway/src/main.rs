@@ -67,8 +67,7 @@ async fn main() -> anyhow::Result<()> {
     let (har_plugin, blob_container_client): (
         Arc<dyn gateway::plugin::ProxyPlugin>,
         Option<azure_storage_blobs::prelude::ContainerClient>,
-    ) = if let Some(blob_cfg) = &config.har_blob
-    {
+    ) = if let Some(blob_cfg) = &config.har_blob {
         let use_emulator = std::env::var("AZURE_STORAGE_USE_EMULATOR")
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
