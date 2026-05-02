@@ -130,6 +130,8 @@ impl HarWriter for LocalWriter {
             Ok(mut file) => {
                 if let Err(e) = file.write_all(line.as_bytes()).await {
                     warn!("HAR local: failed to append to {:?}: {}", path, e);
+                } else if let Err(e) = file.sync_data().await {
+                    warn!("HAR local: failed to sync {:?}: {}", path, e);
                 }
             }
             Err(e) => {
