@@ -23,28 +23,39 @@ The Rust gateway replaces all of these with a **single shared service** (~23 MB 
 ```mermaid
 flowchart TB
     subgraph Workers["Worker Containers"]
-        W1["coder-vscode-electron<br/>172.18.0.7"]
-        W2["coder-acp-copilot<br/>172.18.0.5"]
-        W3["coder-acp-claude-code<br/>172.18.0.6"]
+        W1["coder-vscode-electron"]
+        W2["coder-acp-copilot"]
+        W3["coder-acp-claude-code"]
     end
 
     subgraph GW["AI Gateway (Rust)"]
         PX[":18000 Single Port<br/><i>CONNECT tunneling, TLS MITM,<br/>Control API (session mgmt, certs)</i>"]
-        SM["Session Manager<br/><i>source-IP keyed</i>"]
+        SM["Session Manager<br/><i>source-IP keyed, Redis-backed</i>"]
         PR["Plugin Registry"]
         HAR["HAR Plugin<br/><i>JSONL → HAR 1.2</i>"]
+        CT["CopilotToken Plugin<br/><i>token mint + refresh</i>"]
         CA["Certificate Authority<br/><i>dynamic leaf certs</i>"]
+    end
+
+    subgraph Storage["Storage"]
+        BLOB["Azure Blob Storage<br/><i>har container</i>"]
+        REDIS["Redis<br/><i>session persistence</i>"]
     end
 
     subgraph Upstream["AI Providers"]
         GH["api.githubcopilot.com"]
         AN["api.anthropic.com"]
+        TM["Token Manager<br/><i>TOKEN_MANAGER_URL</i>"]
     end
 
     W1 -->|"HTTP_PROXY +<br/>start/stop session,<br/>download cert/HAR"| PX
     PX --> SM
     SM --> PR
+    SM <-->|"session state"| REDIS
     PR --> HAR
+    PR --> CT
+    HAR -->|"append block"| BLOB
+    CT -->|"acquire OAuth token"| TM
     PX -->|"TLS intercept<br/>notify plugins"| PR
     PX -->|"upstream TLS"| GH
     PX -->|"upstream TLS"| AN
@@ -52,6 +63,7 @@ flowchart TB
 
     style PX fill:#f96,stroke:#333
     style HAR fill:#6cf,stroke:#333
+    style CT fill:#6cf,stroke:#333
 ```
 
 ## Session Identity
@@ -172,27 +184,27 @@ sequenceDiagram
     W->>API: POST /api/v1/sessions
     API->>SM: create_session(ip, settings)
     SM->>HAR: on_session_start(id, {har: ...})
-    Note over HAR: Create .session-{id}.jsonl
+    Note over HAR: Init writer<br/>(local file OR Azure append blob)
     API-->>W: 201 {id: "uuid"}
 
     W->>PX: CONNECT api.githubcopilot.com
     Note over PX: IP→session lookup, TLS intercept + relay
     PX->>HAR: on_exchange(id, exchange)
-    Note over HAR: Append JSON line to .jsonl
+    Note over HAR: Append JSON line<br/>(local OR blob PUT ?comp=appendblock)
 
     W->>API: POST /api/v1/sessions/{id}/stop
     API->>SM: stop_session(id)
     SM->>HAR: on_session_stop(id)
-    Note over HAR: Mark JSONL as finalized
+    Note over HAR: Finalize (mark done)
 
     W->>API: GET /api/v1/sessions/{id}/har
-    Note over HAR: Read JSONL, wrap in HAR 1.2 envelope
+    Note over HAR: Read JSONL (local file OR blob GET),<br/>wrap in HAR 1.2 envelope
     API-->>W: 200 application/json (HAR)
 
     W->>API: DELETE /api/v1/sessions/{id}
     API->>SM: delete_session(id)
     SM->>HAR: on_session_clear(id)
-    Note over HAR: Delete JSONL file
+    Note over HAR: Delete local file or blob
     API-->>W: 204 No Content
 ```
 
