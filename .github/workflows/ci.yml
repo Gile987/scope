@@ -451,10 +451,6 @@ jobs:
           name: ctrf-test-results-gateway
           path: ctrf/
 
-      - name: Build release binary
-        working-directory: apps/gateway
-        run: cargo build --release
-
   # ---------------------------------------------------------------------------
   # Detect which images changed (runs in parallel with CI jobs)
   # ---------------------------------------------------------------------------
