@@ -115,8 +115,15 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       if (options?.model) {
         env.ANTHROPIC_MODEL = options.model;
       }
-      // When DevProxy is active, ensure the subprocess routes through the proxy
-      if (devProxy) {
+      // When DevProxy is active, ensure the subprocess routes through the proxy.
+      // Proxy URL is set explicitly — NOT inherited from process.env — so the
+      // worker's own traffic (queue polling, blob storage) bypasses the proxy.
+      const proxyUrl = process.env.DEV_PROXY_URL;
+      if (devProxy && proxyUrl) {
+        env.HTTP_PROXY = proxyUrl;
+        env.HTTPS_PROXY = proxyUrl;
+        env.http_proxy = proxyUrl;
+        env.https_proxy = proxyUrl;
         const existingNodeOptions = process.env.NODE_OPTIONS || "";
         env.NODE_OPTIONS = [existingNodeOptions, "--use-env-proxy"].filter(Boolean).join(" ");
         env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -124,8 +131,8 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
         env.NO_PROXY = noProxy;
         env.no_proxy = noProxy;
-      } else if (!DevProxyClient.isEnabled()) {
-        // DevProxy not configured — clear proxy vars so subprocess makes direct calls
+      } else {
+        // DevProxy not configured or no proxy URL — clear proxy vars so subprocess makes direct calls
         env.HTTP_PROXY = "";
         env.HTTPS_PROXY = "";
         env.http_proxy = "";

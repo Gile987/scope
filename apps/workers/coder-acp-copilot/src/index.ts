@@ -11,7 +11,10 @@ dotenv.config();
  * Build the environment variables for the copilot subprocess.
  *
  * When DevProxy is active, configures proxy-related env vars so the subprocess
- * routes traffic through the DevProxy MITM proxy.
+ * routes traffic through the DevProxy MITM proxy. The proxy URL must be passed
+ * explicitly — it is NOT inherited from process.env because the worker process
+ * itself should not route its own traffic (queue polling, blob storage) through
+ * the proxy.
  * When DevProxy is disabled (or setup failed), strips proxy env vars and clears
  * NODE_EXTRA_CA_CERTS to prevent the subprocess from loading a non-existent cert.
  */
@@ -20,12 +23,17 @@ export function buildSubprocessEnv(
   devProxyEnabled: boolean,
   currentNodeOptions?: string,
   gatewayUrl?: string,
+  proxyUrl?: string,
 ): Record<string, string> {
   const gatewayHost = gatewayUrl ? new URL(gatewayUrl).hostname : null;
   const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
   return {
     GITHUB_TOKEN: githubToken,
-    ...(devProxyEnabled ? {
+    ...(devProxyEnabled && proxyUrl ? {
+      HTTP_PROXY: proxyUrl,
+      HTTPS_PROXY: proxyUrl,
+      http_proxy: proxyUrl,
+      https_proxy: proxyUrl,
       NODE_OPTIONS: [currentNodeOptions, "--use-env-proxy"].filter(Boolean).join(" "),
       NODE_TLS_REJECT_UNAUTHORIZED: "0",
       NO_PROXY: noProxy,
@@ -159,7 +167,7 @@ class CopilotProcessor implements WorkerProcessor {
       const result = await runACPSession(message, {
         command: "copilot",
         args,
-        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL),
+        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, process.env.DEV_PROXY_URL),
         cwd: this.workspacePath!,
         onLog: async (msg) => {
           await log("debug", msg);
