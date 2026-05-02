@@ -128,13 +128,25 @@ impl SessionStore {
     }
 
     /// Remove both Redis keys for a session (called on stop/clear).
+    ///
+    /// Keys are deleted individually rather than in a single multi-key DEL
+    /// because Azure Redis Cluster hashes them to different slots (CROSSSLOT).
+    /// The IP key is deleted first because it is the entry point for
+    /// `restore_session_for_ip()` — removing it immediately closes the
+    /// restore path even if the session key deletion fails.
     pub async fn delete(&self, session_id: &str, client_ip: &IpAddr) {
         let session_key = format!("gateway:session:{}", session_id);
         let ip_key = format!("gateway:ip:{}", client_ip);
 
-        if let Err(e) = self.client.del::<(), _>(&[session_key, ip_key]).await {
+        if let Err(e) = self.client.del::<(), _>(&ip_key).await {
             warn!(
-                "SessionStore: failed to delete session {}: {}",
+                "SessionStore: failed to delete IP key for {}: {}",
+                client_ip, e
+            );
+        }
+        if let Err(e) = self.client.del::<(), _>(&session_key).await {
+            warn!(
+                "SessionStore: failed to delete session key {}: {}",
                 session_id, e
             );
         }
