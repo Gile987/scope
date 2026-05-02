@@ -85,13 +85,10 @@ pub struct PluginsConfig {
 /// Azure Blob Storage config for HAR streaming (optional).
 /// When present, HAR entries are streamed to an Azure append blob instead of
 /// being written to the pod's local filesystem.
+/// The storage account URL is taken from the `BLOB_STORAGE_URL` env var.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HarBlobConfig {
-    /// Full URL of the Azure Storage account, e.g.
-    /// `https://<account>.blob.core.windows.net`
-    pub storage_account_url: String,
-
     /// Name of the blob container that holds HAR files (must already exist).
     pub container_name: String,
 }

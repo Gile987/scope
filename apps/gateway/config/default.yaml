@@ -11,11 +11,9 @@ plugins:
   har:
     outputDir: /tmp/scope-gateway/har-output
     appendTimeoutSecs: 120
-  copilotToken:
-    tokenManagerUrl: ~
+  copilotToken: {}
 defaultSessionPluginSettings:
   har:
     redactCredentials: true
 harBlob:
-  storageAccountUrl: "http://azurite:10000/devstoreaccount1"
   containerName: "har"

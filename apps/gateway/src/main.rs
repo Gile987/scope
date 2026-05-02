@@ -70,10 +70,8 @@ async fn main() -> anyhow::Result<()> {
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
 
-        // BLOB_STORAGE_URL env var overrides the config file value (used in K8s
-        // where FluxCD substitution cannot expand variables inside ConfigMap strings).
         let storage_account_url = std::env::var("BLOB_STORAGE_URL")
-            .unwrap_or_else(|_| blob_cfg.storage_account_url.clone());
+            .map_err(|_| anyhow::anyhow!("BLOB_STORAGE_URL env var is required when harBlob is configured"))?;
 
         let container_client = if use_emulator {
             // Azurite emulator: parse host/port from the storage account URL so
