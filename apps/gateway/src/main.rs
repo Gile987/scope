@@ -109,10 +109,9 @@ async fn main() -> anyhow::Result<()> {
                 .container_client(&blob_cfg.container_name)
         };
 
-        // Best-effort: ensure the container exists before sessions start.
-        // Failure is non-fatal — blob writes will degrade per-session rather
-        // than preventing startup (the gateway may not have direct egress to
-        // the storage endpoint at init time).
+        // Ensure the HAR blob container exists before accepting traffic.
+        // This is fatal — there is no point running the gateway if blob
+        // storage is unreachable.
         match tokio::time::timeout(
             std::time::Duration::from_secs(10),
             container_client.create(),
@@ -130,16 +129,17 @@ async fn main() -> anyhow::Result<()> {
                 )
             }
             Ok(Err(e)) => {
-                warn!(
-                    "HAR plugin: could not create blob container '{}': {} — continuing, writes will fail per-session",
-                    blob_cfg.container_name, e
-                )
+                return Err(anyhow::anyhow!(
+                    "HAR plugin: failed to create blob container '{}': {}",
+                    blob_cfg.container_name,
+                    e
+                ));
             }
             Err(_) => {
-                warn!(
-                    "HAR plugin: timed out creating blob container '{}' — continuing, writes will fail per-session",
+                return Err(anyhow::anyhow!(
+                    "HAR plugin: timed out (10s) creating blob container '{}'",
                     blob_cfg.container_name
-                )
+                ));
             }
         }
 
