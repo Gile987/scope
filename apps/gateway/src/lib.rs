@@ -11,3 +11,4 @@ pub mod plugins;
 pub mod proxy;
 pub mod session;
 pub mod session_store;
+pub mod storage;

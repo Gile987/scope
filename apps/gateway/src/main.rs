@@ -20,7 +20,7 @@ use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
-use azure_storage::{CloudLocation, ConnectionString, StorageCredentials};
+use azure_storage::{CloudLocation, StorageCredentials};
 use azure_storage_blobs::prelude::{BlobServiceClient, ClientBuilder};
 use gateway::api::routes::ApiState;
 use gateway::api::server::build_api_router;
@@ -99,18 +99,11 @@ async fn main() -> anyhow::Result<()> {
                     "STORAGE_CONNECTION_STRING env var is required when harBlob is configured"
                 )
             })?;
-            let parsed = ConnectionString::new(&conn_str)
-                .map_err(|e| anyhow::anyhow!("Invalid STORAGE_CONNECTION_STRING: {}", e))?;
-            let account_name = parsed.account_name.ok_or_else(|| {
-                anyhow::anyhow!("AccountName missing from STORAGE_CONNECTION_STRING")
-            })?;
-            let account_url = format!("https://{}.blob.core.windows.net", account_name);
-            let storage_creds = parsed
-                .storage_credentials()
-                .map_err(|e| anyhow::anyhow!("Failed to build storage credentials: {}", e))?;
+            let (account_url, storage_creds) =
+                gateway::storage::parse_connection_string(&conn_str)?;
             info!(
-                "HAR plugin: using Azure Blob Storage backend (account={}, container={})",
-                account_name, blob_cfg.container_name
+                "HAR plugin: using Azure Blob Storage backend (url={}, container={})",
+                account_url, blob_cfg.container_name
             );
             BlobServiceClient::new(&account_url, storage_creds)
                 .container_client(&blob_cfg.container_name)
