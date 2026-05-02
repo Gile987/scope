@@ -108,6 +108,30 @@ async fn main() -> anyhow::Result<()> {
             BlobServiceClient::new(&account_url, storage_creds)
                 .container_client(&blob_cfg.container_name)
         };
+
+        // Ensure the container exists before the plugin starts accepting sessions.
+        // This is idempotent — Azure returns 409 Conflict if it already exists,
+        // which the SDK surfaces as an "already exists" error we can ignore.
+        match container_client.create().await {
+            Ok(_) => info!(
+                "HAR plugin: created blob container '{}'",
+                blob_cfg.container_name
+            ),
+            Err(e) if e.to_string().contains("ContainerAlreadyExists") => {
+                info!(
+                    "HAR plugin: blob container '{}' already exists",
+                    blob_cfg.container_name
+                )
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "HAR plugin: failed to create blob container '{}': {}",
+                    blob_cfg.container_name,
+                    e
+                ))
+            }
+        }
+
         Arc::new(HarPlugin::new_with_blob(
             container_client,
             std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
