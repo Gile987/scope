@@ -70,8 +70,9 @@ async fn main() -> anyhow::Result<()> {
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
 
-        let storage_account_url = std::env::var("BLOB_STORAGE_URL")
-            .map_err(|_| anyhow::anyhow!("BLOB_STORAGE_URL env var is required when harBlob is configured"))?;
+        let storage_account_url = std::env::var("BLOB_STORAGE_URL").map_err(|_| {
+            anyhow::anyhow!("BLOB_STORAGE_URL env var is required when harBlob is configured")
+        })?;
 
         let container_client = if use_emulator {
             // Azurite emulator: parse host/port from the storage account URL so
