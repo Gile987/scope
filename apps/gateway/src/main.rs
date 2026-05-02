@@ -70,6 +70,11 @@ async fn main() -> anyhow::Result<()> {
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
 
+        // BLOB_STORAGE_URL env var overrides the config file value (used in K8s
+        // where FluxCD substitution cannot expand variables inside ConfigMap strings).
+        let storage_account_url = std::env::var("BLOB_STORAGE_URL")
+            .unwrap_or_else(|_| blob_cfg.storage_account_url.clone());
+
         let container_client = if use_emulator {
             // Azurite emulator: parse host/port from the storage account URL so
             // the same config works for both local Docker Compose and CI.
@@ -96,13 +101,13 @@ async fn main() -> anyhow::Result<()> {
         } else {
             info!(
                 "HAR plugin: using Azure Blob Storage backend (account={}, container={})",
-                blob_cfg.storage_account_url, blob_cfg.container_name
+                storage_account_url, blob_cfg.container_name
             );
             let credential = azure_identity::DefaultAzureCredentialBuilder::new()
                 .build()
                 .map_err(|e| anyhow::anyhow!("Failed to create Azure credential: {}", e))?;
             let storage_creds = StorageCredentials::token_credential(Arc::new(credential));
-            BlobServiceClient::new(&blob_cfg.storage_account_url, storage_creds)
+            BlobServiceClient::new(&storage_account_url, storage_creds)
                 .container_client(&blob_cfg.container_name)
         };
         Arc::new(HarPlugin::new_with_blob(
