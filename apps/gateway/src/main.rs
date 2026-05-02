@@ -20,7 +20,7 @@ use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
-use azure_storage::{CloudLocation, StorageCredentials};
+use azure_storage::{CloudLocation, ConnectionString, StorageCredentials};
 use azure_storage_blobs::prelude::{BlobServiceClient, ClientBuilder};
 use gateway::api::routes::ApiState;
 use gateway::api::server::build_api_router;
@@ -70,10 +70,6 @@ async fn main() -> anyhow::Result<()> {
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
 
-        let storage_account_url = std::env::var("BLOB_STORAGE_URL").map_err(|_| {
-            anyhow::anyhow!("BLOB_STORAGE_URL env var is required when harBlob is configured")
-        })?;
-
         let container_client = if use_emulator {
             // Azurite emulator: parse host/port from the storage account URL so
             // the same config works for both local Docker Compose and CI.
@@ -98,15 +94,25 @@ async fn main() -> anyhow::Result<()> {
             .blob_service_client()
             .container_client(&blob_cfg.container_name)
         } else {
+            let conn_str = std::env::var("STORAGE_CONNECTION_STRING").map_err(|_| {
+                anyhow::anyhow!(
+                    "STORAGE_CONNECTION_STRING env var is required when harBlob is configured"
+                )
+            })?;
+            let parsed = ConnectionString::new(&conn_str)
+                .map_err(|e| anyhow::anyhow!("Invalid STORAGE_CONNECTION_STRING: {}", e))?;
+            let account_name = parsed.account_name.ok_or_else(|| {
+                anyhow::anyhow!("AccountName missing from STORAGE_CONNECTION_STRING")
+            })?;
+            let account_url = format!("https://{}.blob.core.windows.net", account_name);
+            let storage_creds = parsed
+                .storage_credentials()
+                .map_err(|e| anyhow::anyhow!("Failed to build storage credentials: {}", e))?;
             info!(
                 "HAR plugin: using Azure Blob Storage backend (account={}, container={})",
-                storage_account_url, blob_cfg.container_name
+                account_name, blob_cfg.container_name
             );
-            let credential = azure_identity::DefaultAzureCredentialBuilder::new()
-                .build()
-                .map_err(|e| anyhow::anyhow!("Failed to create Azure credential: {}", e))?;
-            let storage_creds = StorageCredentials::token_credential(Arc::new(credential));
-            BlobServiceClient::new(&storage_account_url, storage_creds)
+            BlobServiceClient::new(&account_url, storage_creds)
                 .container_client(&blob_cfg.container_name)
         };
         Arc::new(HarPlugin::new_with_blob(
