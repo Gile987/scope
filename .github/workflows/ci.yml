@@ -379,7 +379,7 @@ jobs:
         run: pnpm build
 
   gateway:
-    name: Gateway (Rust)
+    name: "Gateway: lint, test & build"
     needs: [detect-changes]
     if: >
       github.event_name == 'workflow_dispatch' ||
@@ -435,12 +435,12 @@ jobs:
       - name: Generate GitHub test summary from CTRF
         if: always()
         run: |
-          npx github-actions-ctrf "ctrf/gateway-ctrf-report.json" --title "Gateway Tests (Rust)"
+          npx github-actions-ctrf "ctrf/gateway-ctrf-report.json" --title "Gateway: lint, test & build"
 
       - name: Post test results to Pull Request
         if: always() && github.event_name == 'pull_request'
         run: |
-          npx github-actions-ctrf pull-request "ctrf/gateway-ctrf-report.json" --title "Gateway Tests (Rust)" || {
+          npx github-actions-ctrf pull-request "ctrf/gateway-ctrf-report.json" --title "Gateway: lint, test & build" || {
             echo "⚠️ Failed to post PR comment (may be due to permissions)"
             exit 0
           }
