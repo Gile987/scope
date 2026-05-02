@@ -101,13 +101,13 @@ async fn main() -> anyhow::Result<()> {
                     "STORAGE_CONNECTION_STRING env var is required when harBlob is configured"
                 )
             })?;
-            let (account_url, storage_creds) =
+            let (account_name, storage_creds) =
                 gateway::storage::parse_connection_string(&conn_str)?;
             info!(
-                "HAR plugin: using Azure Blob Storage backend (url={}, container={})",
-                account_url, blob_cfg.container_name
+                "HAR plugin: using Azure Blob Storage backend (account={}, container={})",
+                account_name, blob_cfg.container_name
             );
-            BlobServiceClient::new(&account_url, storage_creds)
+            BlobServiceClient::new(&account_name, storage_creds)
                 .container_client(&blob_cfg.container_name)
         };
 

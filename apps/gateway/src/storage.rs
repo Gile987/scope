@@ -4,20 +4,23 @@
 use anyhow::anyhow;
 use azure_storage::{ConnectionString, StorageCredentials};
 
-/// Parses an Azure Storage connection string and returns the blob service
-/// endpoint URL (`https://<account>.blob.core.windows.net`) together with
-/// the matching [`StorageCredentials`].
+/// Parses an Azure Storage connection string and returns the account name
+/// together with the matching [`StorageCredentials`].
+///
+/// The account name (not the full URL) is returned because
+/// [`BlobServiceClient::new`] expects just the account name and constructs
+/// the endpoint URL internally.
 pub fn parse_connection_string(conn_str: &str) -> anyhow::Result<(String, StorageCredentials)> {
     let parsed = ConnectionString::new(conn_str)
         .map_err(|e| anyhow!("Invalid STORAGE_CONNECTION_STRING: {}", e))?;
     let account_name = parsed
         .account_name
-        .ok_or_else(|| anyhow!("AccountName missing from STORAGE_CONNECTION_STRING"))?;
-    let account_url = format!("https://{}.blob.core.windows.net", account_name);
+        .ok_or_else(|| anyhow!("AccountName missing from STORAGE_CONNECTION_STRING"))?
+        .to_string();
     let storage_creds = parsed
         .storage_credentials()
         .map_err(|e| anyhow!("Failed to build storage credentials: {}", e))?;
-    Ok((account_url, storage_creds))
+    Ok((account_name, storage_creds))
 }
 
 #[cfg(test)]
@@ -29,8 +32,8 @@ mod tests {
 
     #[test]
     fn parses_valid_connection_string() {
-        let (url, _creds) = parse_connection_string(VALID_CONN_STR).unwrap();
-        assert_eq!(url, "https://myaccount.blob.core.windows.net");
+        let (account, _creds) = parse_connection_string(VALID_CONN_STR).unwrap();
+        assert_eq!(account, "myaccount");
     }
 
     #[test]
