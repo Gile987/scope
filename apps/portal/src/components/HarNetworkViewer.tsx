@@ -61,6 +61,19 @@ function formatMs(ms: number): string {
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
+function formatStarted(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    const ms = String(d.getMilliseconds()).padStart(3, "0");
+    return `${hh}:${mm}:${ss}.${ms}`;
+  } catch {
+    return iso;
+  }
+}
+
 function methodColor(method: string): string {
   switch (method.toUpperCase()) {
     case "GET": return "text-emerald-600 bg-emerald-500/10";
@@ -243,6 +256,7 @@ export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
                 <thead>
                   <tr className="border-b bg-muted/50 text-left">
                     <th className="p-2 pl-3 font-medium w-[60px]">Method</th>
+                    <th className="p-2 font-medium w-[100px]">Started</th>
                     <th className="p-2 font-medium">URL</th>
                     <th className="p-2 font-medium w-[60px]">Status</th>
                     <th className="p-2 font-medium w-[60px]">Type</th>
@@ -264,6 +278,9 @@ export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
                         <span className={cn("font-mono text-xs font-semibold px-1.5 py-0.5 rounded", methodColor(entry.request.method))}>
                           {entry.request.method}
                         </span>
+                      </td>
+                      <td className="p-2 text-xs text-muted-foreground tabular-nums" title={`UTC: ${new Date(entry.startedDateTime).toISOString()}\nLocal: ${new Date(entry.startedDateTime).toString()}`}>
+                        {formatStarted(entry.startedDateTime)}
                       </td>
                       <td className="p-2 truncate max-w-[400px]">
                         <span className="font-mono text-xs" title={entry.request.url}>
