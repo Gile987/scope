@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 
+use backon::{ExponentialBuilder, Retryable};
 use fred::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
@@ -47,8 +48,9 @@ impl SessionStore {
         Self { client }
     }
 
-    /// Persist a session to Redis with a TTL.
-    /// Both the session record and the IP→sessionId index are written atomically.
+    /// Persist a session to Redis with a TTL, retrying with exponential backoff.
+    /// Both the session record and the IP→sessionId index are written.
+    /// Logs a warning and gives up if all retries are exhausted.
     pub async fn save(&self, session: &PersistedSession, ttl: Duration) {
         let ttl_secs = ttl.as_secs() as i64;
         let session_key = format!("gateway:session:{}", session.session_id);
@@ -62,38 +64,61 @@ impl SessionStore {
             return;
         };
 
-        // SET key value EX ttl
-        if let Err(e) = self
-            .client
-            .set::<(), _, _>(
-                &session_key,
-                json.as_str(),
-                Some(Expiration::EX(ttl_secs)),
-                None,
-                false,
-            )
-            .await
-        {
+        let retry = ExponentialBuilder::default()
+            .with_min_delay(Duration::from_millis(200))
+            .with_max_delay(Duration::from_secs(5))
+            .with_max_times(10);
+
+        let client = self.client.clone();
+        let sk = session_key.clone();
+        let jv = json.clone();
+        let result = (|| async {
+            client
+                .set::<(), _, _>(
+                    &sk,
+                    jv.as_str(),
+                    Some(Expiration::EX(ttl_secs)),
+                    None,
+                    false,
+                )
+                .await
+                .map_err(anyhow::Error::from)
+        })
+        .retry(retry.clone())
+        .await;
+
+        if let Err(e) = result {
             warn!(
-                "SessionStore: failed to save session {}: {}",
+                "SessionStore: failed to save session {} after retries: {}",
                 session.session_id, e
             );
+            return;
         }
-        if let Err(e) = self
-            .client
-            .set::<(), _, _>(
-                &ip_key,
-                session.session_id.as_str(),
-                Some(Expiration::EX(ttl_secs)),
-                None,
-                false,
-            )
-            .await
-        {
+
+        let client = self.client.clone();
+        let ik = ip_key.clone();
+        let sid = session.session_id.clone();
+        let result = (|| async {
+            client
+                .set::<(), _, _>(
+                    &ik,
+                    sid.as_str(),
+                    Some(Expiration::EX(ttl_secs)),
+                    None,
+                    false,
+                )
+                .await
+                .map_err(anyhow::Error::from)
+        })
+        .retry(retry)
+        .await;
+
+        if let Err(e) = result {
             warn!(
-                "SessionStore: failed to save IP index for {}: {}",
+                "SessionStore: failed to save IP index for {} after retries: {}",
                 session.client_ip, e
             );
+            return;
         }
 
         debug!(
