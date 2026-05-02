@@ -64,8 +64,10 @@ async fn main() -> anyhow::Result<()> {
     let url_filter = Arc::new(UrlFilter::new(&config.urls_to_watch)?);
 
     // Plugins — HAR writer backend selected from config
-    let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = if let Some(blob_cfg) = &config.har_blob
-    {
+    let (har_plugin, blob_container_client): (
+        Arc<dyn gateway::plugin::ProxyPlugin>,
+        Option<azure_storage_blobs::prelude::ContainerClient>,
+    ) = if let Some(blob_cfg) = &config.har_blob {
         let use_emulator = std::env::var("AZURE_STORAGE_USE_EMULATOR")
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
@@ -109,37 +111,17 @@ async fn main() -> anyhow::Result<()> {
                 .container_client(&blob_cfg.container_name)
         };
 
-        // Ensure the container exists before the plugin starts accepting sessions.
-        // This is idempotent — Azure returns 409 Conflict if it already exists,
-        // which the SDK surfaces as an "already exists" error we can ignore.
-        match container_client.create().await {
-            Ok(_) => info!(
-                "HAR plugin: created blob container '{}'",
-                blob_cfg.container_name
-            ),
-            Err(e) if e.to_string().contains("ContainerAlreadyExists") => {
-                info!(
-                    "HAR plugin: blob container '{}' already exists",
-                    blob_cfg.container_name
-                )
-            }
-            Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "HAR plugin: failed to create blob container '{}': {}",
-                    blob_cfg.container_name,
-                    e
-                ))
-            }
-        }
-
-        Arc::new(HarPlugin::new_with_blob(
-            container_client,
-            std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
-        ))
+        (
+            Arc::new(HarPlugin::new_with_blob(
+                container_client.clone(),
+                std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
+            )),
+            Some(container_client),
+        )
     } else {
         let har_dir = config.plugins.har.output_dir.clone();
         info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
-        Arc::new(HarPlugin::new(har_dir))
+        (Arc::new(HarPlugin::new(har_dir)), None)
     };
     let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
 
@@ -241,6 +223,7 @@ async fn main() -> anyhow::Result<()> {
     let api_state = Arc::new(ApiState {
         session_manager: session_manager.clone(),
         ca: ca.clone(),
+        blob_container_client: blob_container_client.clone(),
     });
     let plugin_routes: Vec<axum::Router> = registry
         .plugins()
