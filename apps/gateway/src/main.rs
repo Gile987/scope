@@ -109,26 +109,37 @@ async fn main() -> anyhow::Result<()> {
                 .container_client(&blob_cfg.container_name)
         };
 
-        // Ensure the container exists before the plugin starts accepting sessions.
-        // This is idempotent — Azure returns 409 Conflict if it already exists,
-        // which the SDK surfaces as an "already exists" error we can ignore.
-        match container_client.create().await {
-            Ok(_) => info!(
+        // Best-effort: ensure the container exists before sessions start.
+        // Failure is non-fatal — blob writes will degrade per-session rather
+        // than preventing startup (the gateway may not have direct egress to
+        // the storage endpoint at init time).
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            container_client.create(),
+        )
+        .await
+        {
+            Ok(Ok(_)) => info!(
                 "HAR plugin: created blob container '{}'",
                 blob_cfg.container_name
             ),
-            Err(e) if e.to_string().contains("ContainerAlreadyExists") => {
+            Ok(Err(e)) if e.to_string().contains("ContainerAlreadyExists") => {
                 info!(
                     "HAR plugin: blob container '{}' already exists",
                     blob_cfg.container_name
                 )
             }
-            Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "HAR plugin: failed to create blob container '{}': {}",
-                    blob_cfg.container_name,
-                    e
-                ))
+            Ok(Err(e)) => {
+                warn!(
+                    "HAR plugin: could not create blob container '{}': {} — continuing, writes will fail per-session",
+                    blob_cfg.container_name, e
+                )
+            }
+            Err(_) => {
+                warn!(
+                    "HAR plugin: timed out creating blob container '{}' — continuing, writes will fail per-session",
+                    blob_cfg.container_name
+                )
             }
         }
 
