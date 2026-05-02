@@ -395,6 +395,7 @@ services:
       AZURE_STORAGE_USE_EMULATOR: "true"
       AZURITE_BLOB_HOST: azurite
       AZURITE_BLOB_PORT: "10000"
+      BLOB_STORAGE_URL: "http://azurite:10000/devstoreaccount1"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ""
