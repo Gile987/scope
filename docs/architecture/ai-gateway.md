@@ -150,7 +150,14 @@ Plugins are registered in `main.rs` at startup. The `PluginRegistry` broadcasts 
 
 ### HAR Plugin
 
-The HAR plugin is the first built-in plugin. It captures HTTP traffic as HAR 1.2 files using disk-based buffering.
+The HAR plugin captures HTTP traffic as HAR 1.2 files. It supports two storage backends selected at gateway startup:
+
+| Backend | Condition | Storage |
+|---------|-----------|--------|
+| **Local** (`LocalWriter`) | `harBlob` absent from config | JSONL file on pod-local disk (`outputDir`) |
+| **Blob** (`BlobWriter`) | `harBlob` section present + `BLOB_STORAGE_URL` env var set | Azure append blob in configured container |
+
+In Kubernetes the blob backend is always used (workload identity credentials, `BLOB_STORAGE_URL` set by FluxCD substitution). In Docker Compose, `AZURE_STORAGE_USE_EMULATOR=true` + `BLOB_STORAGE_URL=http://azurite:10000/devstoreaccount1` point at the Azurite sidecar.
 
 **Lifecycle:**
 
@@ -191,10 +198,11 @@ sequenceDiagram
 
 **Key behaviors (HAR plugin):**
 
-- **Disk-based buffering**: Each session writes to a JSONL file (`.session-{id}.jsonl`), one JSON line per HTTP exchange. No in-memory accumulation.
-- **Sensitive header redaction**: When `redactCredentials` is `true` (default), headers like `authorization`, `x-github-token`, `x-api-key`, `cookie`, and `set-cookie` are redacted at write time. Secrets never touch disk.
-- **On-the-fly HAR assembly**: `GET /api/v1/sessions/{id}/har` reads the JSONL file and wraps the entries in a HAR 1.2 envelope. No separate `.har` file is stored.
-- **Idempotent reads**: The JSONL file can be read multiple times (safe for retries). It is deleted on session cleanup (`DELETE /api/v1/sessions/{id}` or idle reap).
+- **JSONL buffering**: Each session writes one JSON line per HTTP exchange — either to a local file or an Azure append blob depending on the configured backend.
+- **Blob retry**: `BlobWriter` retries append operations up to 20× with exponential backoff, with a per-operation timeout controlled by `plugins.har.appendTimeoutSecs` (default 120 s). If the timeout fires, the session is marked hard-failed and subsequent proxied requests receive a 502.
+- **Sensitive header redaction**: When `redactCredentials` is `true` (default), headers like `authorization`, `x-github-token`, `x-api-key`, `cookie`, and `set-cookie` are redacted at write time. Secrets never reach storage.
+- **On-the-fly HAR assembly**: `GET /api/v1/sessions/{id}/har` reads the JSONL source (local file or blob download) and wraps entries in a HAR 1.2 envelope. No separate `.har` file is stored.
+- **Idempotent reads**: The JSONL source can be read multiple times (safe for retries). It is deleted on session cleanup (`DELETE /api/v1/sessions/{id}` or idle reap).
 
 ### Copilot Token Plugin
 
@@ -210,7 +218,7 @@ sequenceDiagram
     participant TM as Token Manager
     participant GH as api.github.com
 
-    W->>API: POST /api/v1/sessions {copilotToken: {tokenManagerUrl, ...}}
+    W->>API: POST /api/v1/sessions {copilotToken: {capability, ...}}
     API->>CT: on_session_start(id, settings)
     Note over CT: Store config, start session clock
 
@@ -230,10 +238,11 @@ sequenceDiagram
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `tokenManagerUrl` | string | — | URL of the Token Manager service |
-| `refreshBufferSecs` | int | `120` | Seconds before expiry to proactively refresh |
-| `targetHosts` | string[] | `["api.githubcopilot.com"]` | Hosts to inject token on |
-| `maxSessionDurationSecs` | int | `3600` | Max session lifetime; requests are rejected after this |
+| `refreshBufferSecs` | int | `120` (env: `COPILOT_TOKEN_REFRESH_BUFFER_SECS`) | Seconds before expiry to proactively refresh |
+| `targetHosts` | string[] | `["api.githubcopilot.com", ...]` | Hosts to inject token on |
+| `maxSessionDurationSecs` | int | `3600` (env: `COPILOT_MAX_SESSION_DURATION_SECS`) | Max session lifetime; requests are rejected after this |
+
+The Token Manager URL is **not** a session setting — it comes from the `TOKEN_MANAGER_URL` environment variable (set in the gateway deployment, not per-session).
 
 **Key behaviors:**
 
@@ -251,7 +260,6 @@ POST /api/v1/sessions
   "plugins": {
     "har": { "redactCredentials": true },
     "copilotToken": {
-      "tokenManagerUrl": "http://token-manager:3000",
       "refreshBufferSecs": 120,
       "targetHosts": ["api.githubcopilot.com"],
       "maxSessionDurationSecs": 3600
@@ -333,12 +341,13 @@ apps/gateway/
 │   │   │   └── minter.rs       # Orchestrates token acquisition + retry logic
 │   │   └── har/
 │   │       ├── plugin.rs       # HarPlugin: impl ProxyPlugin
+│   │       ├── storage.rs      # LocalWriter (disk JSONL) + BlobWriter (Azure append blob)
 │   │       ├── writer.rs       # HAR 1.2 JSON serializer
 │   │       └── types.rs        # HAR data model (serde)
 │   └── proxy/
 │       ├── handler.rs          # CONNECT tunneling + plain HTTP forwarding
 │       └── tls.rs              # TLS interception, dynamic cert generation
-└── tests/                      # 69 unit + 18 integration tests
+└── tests/                      # 90 unit + 18 integration tests
 ```
 
 ## Configuration
@@ -350,11 +359,29 @@ urlsToWatch:
 port: 18000
 certDir: /tmp/scope-gateway/certs
 logLevel: info
-defaultPluginSettings:
+plugins:
   har:
-    outputDir: /tmp/scope-gateway/har-output
+    outputDir: /tmp/scope-gateway/har-output   # used by LocalWriter only
+    appendTimeoutSecs: 120                     # BlobWriter hard timeout
+  copilotToken: {}                             # gateway-level config (token URL via env)
+defaultSessionPluginSettings:
+  har:
     redactCredentials: true
+# When present, enables BlobWriter for HAR storage.
+# BLOB_STORAGE_URL env var must also be set.
+harBlob:
+  containerName: "har"
 ```
+
+**Environment variables consumed by the gateway:**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `BLOB_STORAGE_URL` | When `harBlob` is configured | Full URL of the Azure Storage account (e.g. `https://<account>.blob.core.windows.net`) |
+| `TOKEN_MANAGER_URL` | For Copilot token injection | URL of the Token Manager service |
+| `AZURE_STORAGE_USE_EMULATOR` | Docker Compose only | Set to `true` to use Azurite instead of Azure |
+| `AZURITE_BLOB_HOST` / `AZURITE_BLOB_PORT` | Docker Compose only | Azurite host and port |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | When Redis session persistence is wanted | Session store connection details |
 
 ## Docker Compose
 
