@@ -84,7 +84,7 @@ impl SessionStore {
                 .await
                 .map_err(anyhow::Error::from)
         })
-        .retry(retry.clone())
+        .retry(retry)
         .await;
 
         if let Err(e) = result {
