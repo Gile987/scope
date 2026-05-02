@@ -21,6 +21,16 @@
  *   Liveness (under fairness):
  *     - Gateway eventually becomes live after boot
  *     - Every idle session is eventually reaped
+ *
+ * Actors:
+ *   | Actor          | Reads                    | Writes                   | Actions                          |
+ *   |----------------|--------------------------|--------------------------|----------------------------------|
+ *   | API client     | sessions                 | sessions                 | CreateSession, StopSession, etc. |
+ *   | Proxy client   | sessions, HAR state      | HAR entries, lastActivity | ProxyRequest, ProxyRequestFailed |
+ *   | Idle reaper    | sessions, tick            | sessions                 | ReapIdle                         |
+ *   | Blob storage   | -                        | blobUp                   | BlobBecomesAvailable/Unavailable |
+ *   | Gateway proc   | gwPhase                  | gwPhase, all slots        | StartupComplete, Crash           |
+ *   | Clock          | tick                     | tick                     | Tick                             |
  *)
 
 EXTENDS Integers, FiniteSets
@@ -144,6 +154,27 @@ BlobBecomesUnavailable ==
                    slotState, slotIP, slotHar, slotLastActivity, slotHasEntries, tick>>
 
 -----------------------------------------------------------------------------
+(* Action: Gateway process crashes — pod restart *)
+(*
+ * Maps to: OOM kill, panic, node eviction, etc.
+ * All in-memory state is lost. Gateway restarts from Booting.
+ * If Redis was up, sessions can be recovered on next request
+ * (modeled by RedisUp preserving the possibility of restore).
+ * If Redis was down, all sessions are lost.
+ *)
+
+GatewayCrash ==
+    /\ gwPhase = Live
+    /\ gwPhase' = Booting
+    \* All in-memory session state is lost
+    /\ slotState' = [s \in SessionSlots |-> Free]
+    /\ slotIP' = [s \in SessionSlots |-> NULL]
+    /\ slotHar' = [s \in SessionSlots |-> HarNone]
+    /\ slotLastActivity' = [s \in SessionSlots |-> 0]
+    /\ slotHasEntries' = [s \in SessionSlots |-> FALSE]
+    /\ UNCHANGED <<blobUp, blobConfigured, redisUp, tick>>
+
+-----------------------------------------------------------------------------
 (* Action: Create session — POST /api/v1/sessions *)
 
 CreateSession(ip) ==
@@ -252,6 +283,7 @@ Next ==
     \/ StartupComplete
     \/ BlobBecomesAvailable
     \/ BlobBecomesUnavailable
+    \/ GatewayCrash
     \/ \E ip \in ClientIPs : CreateSession(ip)
     \/ \E ip \in ClientIPs : ProxyRequest(ip)
     \/ \E ip \in ClientIPs : ProxyRequestFailed(ip)
@@ -318,6 +350,19 @@ ReadyImpliesBlob ==
 \* A live gateway stays live regardless of blob status
 LivenessIndependentOfBlob ==
     (gwPhase = Live) => IsAlive
+
+\* S11: blobConfigured never changes after init
+\* (enforced structurally — no action modifies it — but explicit for clarity)
+BlobConfigImmutable ==
+    [][blobConfigured' = blobConfigured]_vars
+
+\* S12: After crash, all slots are clean (no leaked sessions)
+CrashCleansSlots ==
+    (gwPhase = Booting) =>
+        \A s \in SessionSlots :
+            /\ slotState[s] = Free
+            /\ slotIP[s] = NULL
+            /\ slotHar[s] = HarNone
 
 -----------------------------------------------------------------------------
 (* LIVENESS *)
