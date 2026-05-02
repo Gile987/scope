@@ -1,44 +1,51 @@
 ------------------------------ MODULE Gateway ------------------------------
 (*
- * TLA+ Specification for the Scope MT Gateway
+ * TLA+ Specification for the Scope MT Gateway (Multi-Replica)
  *
- * Models the gateway startup sequence, readiness/liveness probes,
- * blob storage availability, session lifecycle, HAR recording,
- * idle reaper, proxy request handling, and capacity constraints.
+ * Models a pair of gateway replicas behind a Kubernetes Service with
+ * ClientIP session affinity, shared Redis for crash recovery, and
+ * shared Azure Blob Storage for HAR recording.
  *
- * Design: Uses a fixed pool of session slots (SessionSlots) and boolean
- * abstractions to keep the state space finite and tractable for TLC.
+ * Design: Each replica has its own fixed pool of session slots and
+ * independent lifecycle (Booting/Live). A shared Redis layer persists
+ * session-to-IP mappings so a crashed replica can be restored. When
+ * ClientIP affinity breaks, a request may land on the "wrong" replica,
+ * which restores the session from Redis — producing dual ownership.
  *
  * Key properties verified:
  *   Safety:
- *     - No sessions created before gateway is ready
- *     - Readiness requires blob storage (when configured)
- *     - No two active sessions share the same client IP
- *     - HAR entries are only appended to active, non-failed sessions
- *     - Session capacity is never exceeded
- *     - Slot cleanup is complete (free slots have no residual state)
- *     - Active sessions always have valid HAR state
+ *     - Per-replica: unique IP per session, capacity, slot hygiene
+ *     - Cross-replica: HAR blob append safety (both can write)
+ *     - Redis consistency: persisted sessions match in-memory state
+ *     - After crash: in-memory state is clean, Redis retains sessions
  *   Liveness (under fairness):
- *     - Gateway eventually becomes live after boot
+ *     - Each replica eventually becomes live after boot
  *     - Every idle session is eventually reaped
+ *   Known design limitations (verified reachable, not invariants):
+ *     - Dual ownership: two replicas can hold active sessions for same IP
+ *     - Reaper doesn't clean Redis: reaped sessions can be re-restored
  *
  * Actors:
- *   | Actor          | Reads                    | Writes                   | Actions                          |
- *   |----------------|--------------------------|--------------------------|----------------------------------|
- *   | API client     | sessions                 | sessions                 | CreateSession, StopSession, etc. |
- *   | Proxy client   | sessions, HAR state      | HAR entries, lastActivity | ProxyRequest, ProxyRequestFailed |
- *   | Idle reaper    | sessions, tick            | sessions                 | ReapIdle                         |
- *   | Blob storage   | -                        | blobUp                   | BlobBecomesAvailable/Unavailable |
- *   | Gateway proc   | gwPhase                  | gwPhase, all slots        | StartupComplete, Crash           |
- *   | Clock          | tick                     | tick                     | Tick                             |
+ *   | Actor           | Reads                       | Writes                          | Actions                              |
+ *   |-----------------|-----------------------------|---------------------------------|--------------------------------------|
+ *   | API client      | replica sessions            | replica sessions, Redis         | CreateSession, StopSession, Delete   |
+ *   | Proxy client    | replica sessions, HAR       | HAR entries, lastActivity       | ProxyRequest, ProxyRequestFailed     |
+ *   | K8s Service     | ClientIP affinity table      | routes request to replica       | (implicit in action guards)          |
+ *   | Redis           | -                           | session persistence             | (written by Create/Stop/Restore)     |
+ *   | Idle reaper     | replica sessions, tick       | replica sessions                | ReapIdle                             |
+ *   | Blob storage    | -                           | blobUp                          | BlobBecomesAvailable/Unavailable     |
+ *   | Gateway proc    | gwPhase[r]                  | gwPhase[r], slots[r]            | StartupComplete, Crash               |
+ *   | Affinity break  | Redis                       | replica sessions                | RestoreFromRedis (affinity failure)  |
+ *   | Clock           | tick                        | tick                            | Tick                                 |
  *)
 
 EXTENDS Integers, FiniteSets
 
 CONSTANTS
+    Replicas,          \* Set of gateway replica IDs (e.g., {r1, r2})
     ClientIPs,         \* Set of possible client IP addresses
-    SessionSlots,      \* Fixed pool of session slot IDs
-    MaxSessions,       \* Maximum number of concurrent active sessions
+    SessionSlots,      \* Fixed pool of session slot IDs (per replica)
+    MaxSessions,       \* Maximum concurrent active sessions per replica
     IdleTimeoutTicks,  \* Ticks before idle reaper clears a session
     MaxTicks           \* Bound on time for model checking
 
@@ -51,221 +58,269 @@ CONSTANTS NULL
 CONSTANTS Booting, Live
 
 VARIABLES
-    \* Gateway-level state
-    gwPhase,           \* {Booting, Live} — gateway process lifecycle
-    blobUp,            \* BOOLEAN — blob storage reachable right now
-    blobConfigured,    \* BOOLEAN — blob storage is configured (constant per run)
-    redisUp,           \* BOOLEAN — Redis reachable at startup (affects persistence)
+    \* Per-replica gateway state
+    gwPhase,           \* Replicas -> {Booting, Live}
+    redisUp,           \* BOOLEAN — Redis reachable (shared)
 
-    \* Per-slot state
-    slotState,         \* SessionSlots -> {Free, Active, Stopped}
-    slotIP,            \* SessionSlots -> ClientIPs \cup {NULL}
-    slotHar,           \* SessionSlots -> {HarNone, Recording, Finalized, HarFailed}
-    slotLastActivity,  \* SessionSlots -> 0..MaxTicks
-    slotHasEntries,    \* SessionSlots -> BOOLEAN (at least one HAR entry recorded)
+    \* Shared infrastructure
+    blobUp,            \* BOOLEAN — blob storage reachable
+    blobConfigured,    \* BOOLEAN — blob storage configured (constant per run)
+
+    \* Per-replica, per-slot state (functions: Replicas -> SessionSlots -> value)
+    slotState,         \* [Replicas][SessionSlots] -> {Free, Active, Stopped}
+    slotIP,            \* [Replicas][SessionSlots] -> ClientIPs \cup {NULL}
+    slotHar,           \* [Replicas][SessionSlots] -> {HarNone, Recording, Finalized, HarFailed}
+    slotLastActivity,  \* [Replicas][SessionSlots] -> 0..MaxTicks
+    slotHasEntries,    \* [Replicas][SessionSlots] -> BOOLEAN
+
+    \* Shared Redis state: which IPs have persisted sessions
+    redisSession,      \* ClientIPs -> BOOLEAN (session persisted in Redis)
+
     tick               \* Global clock tick
 
-vars == <<gwPhase, blobUp, blobConfigured, redisUp,
-          slotState, slotIP, slotHar, slotLastActivity, slotHasEntries, tick>>
+vars == <<gwPhase, redisUp, blobUp, blobConfigured,
+          slotState, slotIP, slotHar, slotLastActivity, slotHasEntries,
+          redisSession, tick>>
 
-gwVars == <<gwPhase, blobUp, blobConfigured, redisUp>>
-slotVars == <<slotState, slotIP, slotHar, slotLastActivity, slotHasEntries>>
+-----------------------------------------------------------------------------
+(* Helpers *)
 
-\* Active slot for a given IP (unique by invariant)
-ActiveSlotForIP(ip) ==
-    IF \E s \in SessionSlots : slotState[s] = Active /\ slotIP[s] = ip
-    THEN CHOOSE s \in SessionSlots : slotState[s] = Active /\ slotIP[s] = ip
+\* Active slot for a given IP on a specific replica
+ActiveSlotForIP(r, ip) ==
+    IF \E s \in SessionSlots : slotState[r][s] = Active /\ slotIP[r][s] = ip
+    THEN CHOOSE s \in SessionSlots : slotState[r][s] = Active /\ slotIP[r][s] = ip
     ELSE NULL
 
-\* Count of non-free slots
-AllocatedCount == Cardinality({s \in SessionSlots : slotState[s] # Free})
+\* Count of non-free slots on a replica
+AllocatedCount(r) == Cardinality({s \in SessionSlots : slotState[r][s] # Free})
 
 \* Readiness: live + blob reachable (or blob not configured)
-IsReady == gwPhase = Live /\ (blobUp \/ ~blobConfigured)
+IsReady(r) == gwPhase[r] = Live /\ (blobUp \/ ~blobConfigured)
 
 \* Liveness: process is running and listening
-IsAlive == gwPhase = Live
+IsAlive(r) == gwPhase[r] = Live
+
+\* Helper: reset all slots on a replica to clean state
+CleanSlots(r) ==
+    /\ slotState' = [slotState EXCEPT ![r] = [s \in SessionSlots |-> Free]]
+    /\ slotIP' = [slotIP EXCEPT ![r] = [s \in SessionSlots |-> NULL]]
+    /\ slotHar' = [slotHar EXCEPT ![r] = [s \in SessionSlots |-> HarNone]]
+    /\ slotLastActivity' = [slotLastActivity EXCEPT ![r] = [s \in SessionSlots |-> 0]]
+    /\ slotHasEntries' = [slotHasEntries EXCEPT ![r] = [s \in SessionSlots |-> FALSE]]
 
 -----------------------------------------------------------------------------
 (* Type invariant *)
 
 TypeOK ==
-    /\ gwPhase \in {Booting, Live}
+    /\ gwPhase \in [Replicas -> {Booting, Live}]
+    /\ redisUp \in BOOLEAN
     /\ blobUp \in BOOLEAN
     /\ blobConfigured \in BOOLEAN
-    /\ redisUp \in BOOLEAN
-    /\ slotState \in [SessionSlots -> {Free, Active, Stopped}]
-    /\ slotIP \in [SessionSlots -> ClientIPs \cup {NULL}]
-    /\ slotHar \in [SessionSlots -> {HarNone, Recording, Finalized, HarFailed}]
-    /\ slotLastActivity \in [SessionSlots -> 0..MaxTicks]
-    /\ slotHasEntries \in [SessionSlots -> BOOLEAN]
+    /\ slotState \in [Replicas -> [SessionSlots -> {Free, Active, Stopped}]]
+    /\ slotIP \in [Replicas -> [SessionSlots -> ClientIPs \cup {NULL}]]
+    /\ slotHar \in [Replicas -> [SessionSlots -> {HarNone, Recording, Finalized, HarFailed}]]
+    /\ slotLastActivity \in [Replicas -> [SessionSlots -> 0..MaxTicks]]
+    /\ slotHasEntries \in [Replicas -> [SessionSlots -> BOOLEAN]]
+    /\ redisSession \in [ClientIPs -> BOOLEAN]
     /\ tick \in 0..MaxTicks
 
 -----------------------------------------------------------------------------
 (* Initial state *)
 
 Init ==
-    /\ gwPhase = Booting
-    /\ blobUp \in BOOLEAN              \* Blob may or may not be up at boot
-    /\ blobConfigured \in BOOLEAN      \* Whether blob is configured (fixed for run)
-    /\ redisUp \in BOOLEAN             \* Redis may or may not be up at boot
-    /\ slotState = [s \in SessionSlots |-> Free]
-    /\ slotIP = [s \in SessionSlots |-> NULL]
-    /\ slotHar = [s \in SessionSlots |-> HarNone]
-    /\ slotLastActivity = [s \in SessionSlots |-> 0]
-    /\ slotHasEntries = [s \in SessionSlots |-> FALSE]
+    /\ gwPhase = [r \in Replicas |-> Booting]
+    /\ blobUp \in BOOLEAN
+    /\ blobConfigured \in BOOLEAN
+    /\ redisUp \in BOOLEAN
+    /\ slotState = [r \in Replicas |-> [s \in SessionSlots |-> Free]]
+    /\ slotIP = [r \in Replicas |-> [s \in SessionSlots |-> NULL]]
+    /\ slotHar = [r \in Replicas |-> [s \in SessionSlots |-> HarNone]]
+    /\ slotLastActivity = [r \in Replicas |-> [s \in SessionSlots |-> 0]]
+    /\ slotHasEntries = [r \in Replicas |-> [s \in SessionSlots |-> FALSE]]
+    /\ redisSession = [ip \in ClientIPs |-> FALSE]
     /\ tick = 0
 
 -----------------------------------------------------------------------------
-(* Action: Gateway completes startup — transitions from Booting to Live *)
-(*
- * Maps to: main.rs initialization sequence completes, TcpListener::bind
- * succeeds, server starts accepting connections.
- * Redis failure is non-fatal (logs warning, falls back to in-memory).
- * Blob storage is not checked at startup — only at readiness probe time.
- *)
+(* Action: Gateway replica completes startup *)
 
-StartupComplete ==
-    /\ gwPhase = Booting
-    /\ gwPhase' = Live
+StartupComplete(r) ==
+    /\ gwPhase[r] = Booting
+    /\ gwPhase' = [gwPhase EXCEPT ![r] = Live]
     /\ UNCHANGED <<blobUp, blobConfigured, redisUp,
-                   slotState, slotIP, slotHar, slotLastActivity, slotHasEntries, tick>>
+                   slotState, slotIP, slotHar, slotLastActivity, slotHasEntries,
+                   redisSession, tick>>
 
 -----------------------------------------------------------------------------
 (* Action: Blob storage becomes available or unavailable *)
-(*
- * Maps to: Azure Blob Storage or Azurite becomes reachable/unreachable.
- * The /health/ready endpoint checks blob with a 3s timeout.
- * This affects readiness but not liveness.
- *)
 
 BlobBecomesAvailable ==
     /\ blobConfigured
     /\ ~blobUp
     /\ blobUp' = TRUE
     /\ UNCHANGED <<gwPhase, blobConfigured, redisUp,
-                   slotState, slotIP, slotHar, slotLastActivity, slotHasEntries, tick>>
+                   slotState, slotIP, slotHar, slotLastActivity, slotHasEntries,
+                   redisSession, tick>>
 
 BlobBecomesUnavailable ==
     /\ blobConfigured
     /\ blobUp
     /\ blobUp' = FALSE
     /\ UNCHANGED <<gwPhase, blobConfigured, redisUp,
-                   slotState, slotIP, slotHar, slotLastActivity, slotHasEntries, tick>>
+                   slotState, slotIP, slotHar, slotLastActivity, slotHasEntries,
+                   redisSession, tick>>
 
 -----------------------------------------------------------------------------
-(* Action: Gateway process crashes — pod restart *)
+(* Action: A single gateway replica crashes — pod restart *)
 (*
- * Maps to: OOM kill, panic, node eviction, etc.
- * All in-memory state is lost. Gateway restarts from Booting.
- * If Redis was up, sessions can be recovered on next request
- * (modeled by RedisUp preserving the possibility of restore).
- * If Redis was down, all sessions are lost.
+ * Only the crashing replica loses in-memory state.
+ * Redis retains all persisted sessions.
+ * The other replica is unaffected.
  *)
 
-GatewayCrash ==
-    /\ gwPhase = Live
-    /\ gwPhase' = Booting
-    \* All in-memory session state is lost
-    /\ slotState' = [s \in SessionSlots |-> Free]
-    /\ slotIP' = [s \in SessionSlots |-> NULL]
-    /\ slotHar' = [s \in SessionSlots |-> HarNone]
-    /\ slotLastActivity' = [s \in SessionSlots |-> 0]
-    /\ slotHasEntries' = [s \in SessionSlots |-> FALSE]
-    /\ UNCHANGED <<blobUp, blobConfigured, redisUp, tick>>
+GatewayCrash(r) ==
+    /\ gwPhase[r] = Live
+    /\ gwPhase' = [gwPhase EXCEPT ![r] = Booting]
+    /\ CleanSlots(r)
+    \* Redis and other replica are unaffected
+    /\ UNCHANGED <<blobUp, blobConfigured, redisUp, redisSession, tick>>
 
 -----------------------------------------------------------------------------
-(* Action: Create session — POST /api/v1/sessions *)
+(* Action: Create session on replica r for client ip *)
+(*
+ * The API request is routed to replica r by the K8s Service.
+ * On success, if Redis is up, the session is persisted.
+ *)
 
-CreateSession(ip) ==
-    /\ IsReady                 \* Gateway must be ready to accept sessions
+CreateSession(r, ip) ==
+    /\ IsReady(r)
     /\ tick < MaxTicks
-    /\ LET existing == ActiveSlotForIP(ip)
+    /\ LET existing == ActiveSlotForIP(r, ip)
        IN
        IF existing # NULL
-       \* IP conflict: clear old session data, reuse slot
-       THEN /\ slotHar' = [slotHar EXCEPT ![existing] = Recording]
-            /\ slotLastActivity' = [slotLastActivity EXCEPT ![existing] = tick]
-            /\ slotHasEntries' = [slotHasEntries EXCEPT ![existing] = FALSE]
+       \* IP conflict on this replica: reset the slot
+       THEN /\ slotHar' = [slotHar EXCEPT ![r][existing] = Recording]
+            /\ slotLastActivity' = [slotLastActivity EXCEPT ![r][existing] = tick]
+            /\ slotHasEntries' = [slotHasEntries EXCEPT ![r][existing] = FALSE]
             /\ UNCHANGED <<slotState, slotIP>>
        \* Allocate a new free slot
-       ELSE /\ AllocatedCount < MaxSessions
+       ELSE /\ AllocatedCount(r) < MaxSessions
             /\ \E slot \in SessionSlots :
-                  /\ slotState[slot] = Free
-                  /\ slotState' = [slotState EXCEPT ![slot] = Active]
-                  /\ slotIP' = [slotIP EXCEPT ![slot] = ip]
-                  /\ slotHar' = [slotHar EXCEPT ![slot] = Recording]
-                  /\ slotLastActivity' = [slotLastActivity EXCEPT ![slot] = tick]
-                  /\ slotHasEntries' = [slotHasEntries EXCEPT ![slot] = FALSE]
+                  /\ slotState[r][slot] = Free
+                  /\ slotState' = [slotState EXCEPT ![r][slot] = Active]
+                  /\ slotIP' = [slotIP EXCEPT ![r][slot] = ip]
+                  /\ slotHar' = [slotHar EXCEPT ![r][slot] = Recording]
+                  /\ slotLastActivity' = [slotLastActivity EXCEPT ![r][slot] = tick]
+                  /\ slotHasEntries' = [slotHasEntries EXCEPT ![r][slot] = FALSE]
+    \* Persist to Redis if available
+    /\ redisSession' = IF redisUp THEN [redisSession EXCEPT ![ip] = TRUE]
+                        ELSE redisSession
     /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp, tick>>
 
 -----------------------------------------------------------------------------
-(* Action: Proxy request — CONNECT / plain HTTP from active session *)
+(* Action: Proxy request on replica r — normal path *)
 
-ProxyRequest(ip) ==
-    /\ IsAlive                 \* Must be live to proxy
-    /\ LET slot == ActiveSlotForIP(ip)
+ProxyRequest(r, ip) ==
+    /\ IsAlive(r)
+    /\ LET slot == ActiveSlotForIP(r, ip)
        IN /\ slot # NULL
-          /\ slotHar[slot] = Recording        \* Not failed
-          /\ slotLastActivity' = [slotLastActivity EXCEPT ![slot] = tick]
-          /\ slotHasEntries' = [slotHasEntries EXCEPT ![slot] = TRUE]
-    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp, slotState, slotIP, slotHar, tick>>
+          /\ slotHar[r][slot] = Recording
+          /\ slotLastActivity' = [slotLastActivity EXCEPT ![r][slot] = tick]
+          /\ slotHasEntries' = [slotHasEntries EXCEPT ![r][slot] = TRUE]
+    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp,
+                   slotState, slotIP, slotHar, redisSession, tick>>
 
 -----------------------------------------------------------------------------
 (* Action: Proxy request to failed session — returns 502 *)
 
-ProxyRequestFailed(ip) ==
-    /\ IsAlive
-    /\ LET slot == ActiveSlotForIP(ip)
+ProxyRequestFailed(r, ip) ==
+    /\ IsAlive(r)
+    /\ LET slot == ActiveSlotForIP(r, ip)
        IN /\ slot # NULL
-          /\ slotHar[slot] = HarFailed
-          /\ slotLastActivity' = [slotLastActivity EXCEPT ![slot] = tick]
-    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp, slotState, slotIP, slotHar, slotHasEntries, tick>>
+          /\ slotHar[r][slot] = HarFailed
+          /\ slotLastActivity' = [slotLastActivity EXCEPT ![r][slot] = tick]
+    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp,
+                   slotState, slotIP, slotHar, slotHasEntries, redisSession, tick>>
 
 -----------------------------------------------------------------------------
-(* Action: HAR blob write failure *)
+(* Action: Restore session from Redis after affinity break *)
+(*
+ * Models: request from ip lands on replica r which has no in-memory session.
+ * The replica queries Redis, finds a persisted session, and restores it.
+ * This is the key multi-replica concern: the OTHER replica may still have
+ * the session in memory → dual ownership.
+ *)
 
-HarWriteFail(slot) ==
-    /\ slotState[slot] = Active
-    /\ slotHar[slot] = Recording
-    /\ slotHar' = [slotHar EXCEPT ![slot] = HarFailed]
-    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp, slotState, slotIP, slotLastActivity, slotHasEntries, tick>>
+RestoreFromRedis(r, ip) ==
+    /\ IsAlive(r)
+    /\ redisUp
+    /\ redisSession[ip] = TRUE
+    \* This replica does NOT have a session for this IP
+    /\ ActiveSlotForIP(r, ip) = NULL
+    \* Allocate a slot and restore
+    /\ AllocatedCount(r) < MaxSessions
+    /\ \E slot \in SessionSlots :
+          /\ slotState[r][slot] = Free
+          /\ slotState' = [slotState EXCEPT ![r][slot] = Active]
+          /\ slotIP' = [slotIP EXCEPT ![r][slot] = ip]
+          \* Restored session resumes recording (re-opens blob append)
+          /\ slotHar' = [slotHar EXCEPT ![r][slot] = Recording]
+          /\ slotLastActivity' = [slotLastActivity EXCEPT ![r][slot] = tick]
+          /\ slotHasEntries' = [slotHasEntries EXCEPT ![r][slot] = FALSE]
+    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp, redisSession, tick>>
 
 -----------------------------------------------------------------------------
-(* Action: Stop session — POST /api/v1/sessions/{id}/stop *)
+(* Action: HAR blob write failure on replica r *)
 
-StopSession(slot) ==
-    /\ slotState[slot] = Active
-    /\ slotState' = [slotState EXCEPT ![slot] = Stopped]
-    /\ slotHar' = [slotHar EXCEPT ![slot] = IF slotHar[slot] = HarFailed
-                                             THEN HarFailed
-                                             ELSE Finalized]
-    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp, slotIP, slotLastActivity, slotHasEntries, tick>>
+HarWriteFail(r, slot) ==
+    /\ slotState[r][slot] = Active
+    /\ slotHar[r][slot] = Recording
+    /\ slotHar' = [slotHar EXCEPT ![r][slot] = HarFailed]
+    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp,
+                   slotState, slotIP, slotLastActivity, slotHasEntries, redisSession, tick>>
 
 -----------------------------------------------------------------------------
-(* Action: Delete session — DELETE /api/v1/sessions/{id} *)
+(* Action: Stop session on replica r *)
 
-DeleteSession(slot) ==
-    /\ slotState[slot] = Stopped
-    /\ slotState' = [slotState EXCEPT ![slot] = Free]
-    /\ slotIP' = [slotIP EXCEPT ![slot] = NULL]
-    /\ slotHar' = [slotHar EXCEPT ![slot] = HarNone]
-    /\ slotLastActivity' = [slotLastActivity EXCEPT ![slot] = 0]
-    /\ slotHasEntries' = [slotHasEntries EXCEPT ![slot] = FALSE]
+StopSession(r, slot) ==
+    /\ slotState[r][slot] = Active
+    /\ slotState' = [slotState EXCEPT ![r][slot] = Stopped]
+    /\ slotHar' = [slotHar EXCEPT ![r][slot] = IF slotHar[r][slot] = HarFailed
+                                                THEN HarFailed
+                                                ELSE Finalized]
+    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp,
+                   slotIP, slotLastActivity, slotHasEntries, redisSession, tick>>
+
+-----------------------------------------------------------------------------
+(* Action: Delete session on replica r *)
+
+DeleteSession(r, slot) ==
+    /\ slotState[r][slot] = Stopped
+    /\ slotState' = [slotState EXCEPT ![r][slot] = Free]
+    /\ slotIP' = [slotIP EXCEPT ![r][slot] = NULL]
+    /\ slotHar' = [slotHar EXCEPT ![r][slot] = HarNone]
+    /\ slotLastActivity' = [slotLastActivity EXCEPT ![r][slot] = 0]
+    /\ slotHasEntries' = [slotHasEntries EXCEPT ![r][slot] = FALSE]
+    \* Remove from Redis when deleted
+    /\ LET ip == slotIP[r][slot]
+       IN redisSession' = IF redisUp /\ ip # NULL
+                           THEN [redisSession EXCEPT ![ip] = FALSE]
+                           ELSE redisSession
     /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp, tick>>
 
 -----------------------------------------------------------------------------
-(* Action: Idle reaper clears stale session *)
+(* Action: Idle reaper on replica r *)
 
-ReapIdle(slot) ==
-    /\ slotState[slot] = Active
-    /\ tick - slotLastActivity[slot] >= IdleTimeoutTicks
-    /\ slotState' = [slotState EXCEPT ![slot] = Free]
-    /\ slotIP' = [slotIP EXCEPT ![slot] = NULL]
-    /\ slotHar' = [slotHar EXCEPT ![slot] = HarNone]
-    /\ slotLastActivity' = [slotLastActivity EXCEPT ![slot] = 0]
-    /\ slotHasEntries' = [slotHasEntries EXCEPT ![slot] = FALSE]
-    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp, tick>>
+ReapIdle(r, slot) ==
+    /\ slotState[r][slot] = Active
+    /\ tick - slotLastActivity[r][slot] >= IdleTimeoutTicks
+    /\ slotState' = [slotState EXCEPT ![r][slot] = Free]
+    /\ slotIP' = [slotIP EXCEPT ![r][slot] = NULL]
+    /\ slotHar' = [slotHar EXCEPT ![r][slot] = HarNone]
+    /\ slotLastActivity' = [slotLastActivity EXCEPT ![r][slot] = 0]
+    /\ slotHasEntries' = [slotHasEntries EXCEPT ![r][slot] = FALSE]
+    \* NOTE: Reaper does NOT clean Redis — this is a known design gap.
+    \* A reaped session can be re-restored from Redis on another replica.
+    /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp, redisSession, tick>>
 
 -----------------------------------------------------------------------------
 (* Action: Time advances *)
@@ -274,113 +329,154 @@ Tick ==
     /\ tick < MaxTicks
     /\ tick' = tick + 1
     /\ UNCHANGED <<gwPhase, blobUp, blobConfigured, redisUp,
-                   slotState, slotIP, slotHar, slotLastActivity, slotHasEntries>>
+                   slotState, slotIP, slotHar, slotLastActivity, slotHasEntries,
+                   redisSession>>
 
 -----------------------------------------------------------------------------
 (* Next-state relation *)
 
 Next ==
-    \/ StartupComplete
+    \/ \E r \in Replicas : StartupComplete(r)
     \/ BlobBecomesAvailable
     \/ BlobBecomesUnavailable
-    \/ GatewayCrash
-    \/ \E ip \in ClientIPs : CreateSession(ip)
-    \/ \E ip \in ClientIPs : ProxyRequest(ip)
-    \/ \E ip \in ClientIPs : ProxyRequestFailed(ip)
-    \/ \E s \in SessionSlots : HarWriteFail(s)
-    \/ \E s \in SessionSlots : StopSession(s)
-    \/ \E s \in SessionSlots : DeleteSession(s)
-    \/ \E s \in SessionSlots : ReapIdle(s)
+    \/ \E r \in Replicas : GatewayCrash(r)
+    \/ \E r \in Replicas, ip \in ClientIPs : CreateSession(r, ip)
+    \/ \E r \in Replicas, ip \in ClientIPs : ProxyRequest(r, ip)
+    \/ \E r \in Replicas, ip \in ClientIPs : ProxyRequestFailed(r, ip)
+    \/ \E r \in Replicas, ip \in ClientIPs : RestoreFromRedis(r, ip)
+    \/ \E r \in Replicas, s \in SessionSlots : HarWriteFail(r, s)
+    \/ \E r \in Replicas, s \in SessionSlots : StopSession(r, s)
+    \/ \E r \in Replicas, s \in SessionSlots : DeleteSession(r, s)
+    \/ \E r \in Replicas, s \in SessionSlots : ReapIdle(r, s)
     \/ Tick
 
 Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
-(* SAFETY INVARIANTS *)
+(* SAFETY INVARIANTS — Per-replica *)
 
-\* No two active sessions share the same client IP
-UniqueIPPerSession ==
-    \A s1, s2 \in SessionSlots :
-        (s1 # s2 /\ slotState[s1] = Active /\ slotState[s2] = Active)
-        => slotIP[s1] # slotIP[s2]
+\* No two active sessions on the SAME replica share a client IP
+UniqueIPPerReplica ==
+    \A r \in Replicas :
+        \A s1, s2 \in SessionSlots :
+            (s1 # s2 /\ slotState[r][s1] = Active /\ slotState[r][s2] = Active)
+            => slotIP[r][s1] # slotIP[r][s2]
 
-\* Session capacity never exceeded
+\* Session capacity never exceeded on any replica
 CapacityRespected ==
-    AllocatedCount <= MaxSessions
+    \A r \in Replicas : AllocatedCount(r) <= MaxSessions
 
 \* HAR entries only exist for sessions that were recording
 HarOnlyWhenRecording ==
-    \A s \in SessionSlots :
-        slotHasEntries[s] => slotHar[s] \in {Recording, Finalized, HarFailed}
+    \A r \in Replicas, s \in SessionSlots :
+        slotHasEntries[r][s] => slotHar[r][s] \in {Recording, Finalized, HarFailed}
 
 \* Stopped sessions have finalized or failed HAR
 StoppedImpliesFinalized ==
-    \A s \in SessionSlots :
-        (slotState[s] = Stopped) => slotHar[s] \in {Finalized, HarFailed}
+    \A r \in Replicas, s \in SessionSlots :
+        (slotState[r][s] = Stopped) => slotHar[r][s] \in {Finalized, HarFailed}
 
 \* Free slots are fully clean
 FreeSlotClean ==
-    \A s \in SessionSlots :
-        (slotState[s] = Free) =>
-            /\ slotIP[s] = NULL
-            /\ slotHar[s] = HarNone
-            /\ slotHasEntries[s] = FALSE
+    \A r \in Replicas, s \in SessionSlots :
+        (slotState[r][s] = Free) =>
+            /\ slotIP[r][s] = NULL
+            /\ slotHar[r][s] = HarNone
+            /\ slotHasEntries[r][s] = FALSE
 
 \* Active/stopped slots have an IP
 AllocatedHasIP ==
-    \A s \in SessionSlots :
-        (slotState[s] \in {Active, Stopped}) => slotIP[s] # NULL
+    \A r \in Replicas, s \in SessionSlots :
+        (slotState[r][s] \in {Active, Stopped}) => slotIP[r][s] # NULL
 
 \* Active slots are recording or failed (never finalized while active)
 ActiveHarState ==
-    \A s \in SessionSlots :
-        (slotState[s] = Active) => slotHar[s] \in {Recording, HarFailed}
+    \A r \in Replicas, s \in SessionSlots :
+        (slotState[r][s] = Active) => slotHar[r][s] \in {Recording, HarFailed}
 
-\* S8: No sessions created before gateway is live
+\* No sessions before gateway is live (per replica)
 NoSessionsBeforeLive ==
-    (gwPhase = Booting) =>
-        \A s \in SessionSlots : slotState[s] = Free
+    \A r \in Replicas :
+        (gwPhase[r] = Booting) =>
+            \A s \in SessionSlots : slotState[r][s] = Free
 
-\* S9: Readiness requires blob storage when configured
-\* If gateway is ready and blob is configured, blob must be up
+\* Readiness requires blob when configured (per replica)
 ReadyImpliesBlob ==
-    (IsReady /\ blobConfigured) => blobUp
+    \A r \in Replicas :
+        (IsReady(r) /\ blobConfigured) => blobUp
 
-\* S10: Liveness is independent of blob storage
-\* A live gateway stays live regardless of blob status
+\* Liveness is independent of blob (per replica)
 LivenessIndependentOfBlob ==
-    (gwPhase = Live) => IsAlive
+    \A r \in Replicas :
+        (gwPhase[r] = Live) => IsAlive(r)
 
-\* S11: blobConfigured never changes after init
-\* (enforced structurally — no action modifies it — but explicit for clarity)
+\* blobConfigured never changes after init
 BlobConfigImmutable ==
     [][blobConfigured' = blobConfigured]_vars
 
-\* S12: After crash, all slots are clean (no leaked sessions)
+\* After crash, replica's slots are clean
 CrashCleansSlots ==
-    (gwPhase = Booting) =>
-        \A s \in SessionSlots :
-            /\ slotState[s] = Free
-            /\ slotIP[s] = NULL
-            /\ slotHar[s] = HarNone
+    \A r \in Replicas :
+        (gwPhase[r] = Booting) =>
+            \A s \in SessionSlots :
+                /\ slotState[r][s] = Free
+                /\ slotIP[r][s] = NULL
+                /\ slotHar[r][s] = HarNone
+
+-----------------------------------------------------------------------------
+(* SAFETY INVARIANTS — Cross-replica *)
+
+\* Redis is consistent: if a session is persisted, at least one replica
+\* has (or had) an active/stopped session for that IP.
+\* NOTE: This is NOT an invariant — the reaper can free a slot without
+\* cleaning Redis, leaving a "ghost" entry. We verify this is reachable
+\* by checking its negation is NOT an invariant (see DualOwnerPossible).
+
+\* HAR blob safety: Azure append blobs support concurrent appends.
+\* Two replicas writing to the same blob produce interleaved but valid JSONL.
+\* This is safe by construction (append blob semantics), not by mutual exclusion.
+\* We document it rather than try to prevent it.
+
+\* The global unique-IP-per-session property does NOT hold across replicas.
+\* After an affinity break + Redis restore, two replicas can own the same IP.
+\* This is a KNOWN DESIGN LIMITATION. We verify it is reachable:
+DualOwnerReachable ==
+    \* This is expected to be VIOLATED — proving dual ownership is possible.
+    \* To use: add as INVARIANT in cfg; TLC will show a counterexample trace.
+    ~(\E ip \in ClientIPs, r1, r2 \in Replicas :
+        r1 # r2
+        /\ ActiveSlotForIP(r1, ip) # NULL
+        /\ ActiveSlotForIP(r2, ip) # NULL)
+
+\* Ghost restore: a reaped session can be restored from Redis.
+\* This is also a KNOWN DESIGN LIMITATION.
+GhostRestoreReachable ==
+    \* Expected to be VIOLATED — proving ghost restore is possible.
+    ~(\E r \in Replicas, ip \in ClientIPs :
+        /\ ActiveSlotForIP(r, ip) # NULL
+        /\ redisSession[ip] = TRUE
+        /\ \A r2 \in Replicas \ {r} : ActiveSlotForIP(r2, ip) = NULL
+        \* The session exists only because of a restore, not a create
+        )
 
 -----------------------------------------------------------------------------
 (* LIVENESS *)
 
-\* Gateway eventually becomes live after booting
+\* Each replica eventually becomes live after booting
 EventuallyLive ==
-    (gwPhase = Booting) ~> (gwPhase = Live)
+    \A r \in Replicas :
+        (gwPhase[r] = Booting) ~> (gwPhase[r] = Live)
 
-\* Every idle session is eventually reaped
+\* Every idle session on any replica is eventually reaped
 IdleSessionsEventuallyReaped ==
-    \A s \in SessionSlots :
-        (slotState[s] = Active /\ tick - slotLastActivity[s] >= IdleTimeoutTicks)
-        ~> (slotState[s] # Active)
+    \A r \in Replicas, s \in SessionSlots :
+        (slotState[r][s] = Active /\ tick - slotLastActivity[r][s] >= IdleTimeoutTicks)
+        ~> (slotState[r][s] # Active)
 
 FairSpec ==
     /\ Spec
-    /\ WF_vars(StartupComplete)
+    /\ \A r \in Replicas : WF_vars(StartupComplete(r))
     /\ WF_vars(Tick)
-    /\ \A s \in SessionSlots : WF_vars(ReapIdle(s))
+    /\ \A r \in Replicas, s \in SessionSlots : WF_vars(ReapIdle(r, s))
 
 =============================================================================
