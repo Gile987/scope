@@ -21,6 +21,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::plugin::{PluginRegistry, SessionId};
+use crate::session_store::{session_ttl, PersistedSession, SessionStore};
 
 /// State of a single session.
 #[derive(Debug)]
@@ -56,96 +57,157 @@ impl From<&Session> for SessionInfo {
 
 /// Manages UUID-keyed sessions with an IP→session reverse index for the proxy layer.
 pub struct SessionManager {
-    sessions: RwLock<HashMap<SessionId, Session>>,
+    sessions_lock: RwLock<HashMap<SessionId, Session>>,
     ip_index: RwLock<HashMap<IpAddr, SessionId>>,
     registry: Arc<PluginRegistry>,
     idle_timeout: Duration,
     max_sessions: usize,
+    /// Optional Redis-backed persistence for crash recovery.
+    store: Option<SessionStore>,
 }
 
 impl SessionManager {
-    /// Create a new session manager.
-    ///
-    /// * `registry` — plugin registry to notify on lifecycle events
-    /// * `idle_timeout` — how long before an inactive session is reaped
-    /// * `max_sessions` — upper bound on concurrent sessions
+    /// Create a new session manager without Redis persistence.
     pub fn new(registry: Arc<PluginRegistry>, idle_timeout: Duration, max_sessions: usize) -> Self {
         Self {
-            sessions: RwLock::new(HashMap::new()),
+            sessions_lock: RwLock::new(HashMap::new()),
             ip_index: RwLock::new(HashMap::new()),
             registry,
             idle_timeout,
             max_sessions,
+            store: None,
+        }
+    }
+
+    /// Create a session manager with Redis-backed session persistence.
+    pub fn new_with_store(
+        registry: Arc<PluginRegistry>,
+        idle_timeout: Duration,
+        max_sessions: usize,
+        store: SessionStore,
+    ) -> Self {
+        Self {
+            sessions_lock: RwLock::new(HashMap::new()),
+            ip_index: RwLock::new(HashMap::new()),
+            registry,
+            idle_timeout,
+            max_sessions,
+            store: Some(store),
         }
     }
 
     /// Create and start a session for the given client IP. Returns the new session ID.
-    pub fn create_session(
+    pub async fn create_session(
         &self,
         client_ip: IpAddr,
         plugin_settings: HashMap<String, Value>,
     ) -> Result<SessionId, SessionError> {
-        let mut sessions = self.sessions.write();
-        let mut ip_index = self.ip_index.write();
+        // Collect any old session ID to clear — drop locks before awaiting.
+        let old_id_to_clear = {
+            let ip_index = self.ip_index.read();
+            ip_index.get(&client_ip).cloned()
+        };
 
-        // If this IP already has an active session, tear it down first.
-        // This handles agent container restarts — the new session replaces the
-        // stale one without hitting the max_sessions cap.
-        if let Some(old_id) = ip_index.get(&client_ip) {
-            let old_id = old_id.clone();
-            self.registry.on_session_clear(&old_id);
+        if let Some(old_id) = old_id_to_clear {
+            // Notify plugins before removing from maps.
+            self.registry.on_session_clear(&old_id).await;
+            let mut sessions = self.sessions_lock.write();
+            let mut ip_index = self.ip_index.write();
             sessions.remove(&old_id);
             ip_index.remove(&client_ip);
         }
 
-        // Check capacity
-        if sessions.len() >= self.max_sessions {
-            return Err(SessionError::MaxSessionsReached);
+        // Check capacity and assign ID under lock, then drop lock before awaiting.
+        let session_id = {
+            let sessions = self.sessions_lock.read();
+            if sessions.len() >= self.max_sessions {
+                return Err(SessionError::MaxSessionsReached);
+            }
+            Uuid::new_v4().to_string()
+        };
+
+        // Notify plugins before inserting — they set up per-session state.
+        self.registry
+            .on_session_start(&session_id, &plugin_settings)
+            .await;
+
+        // Insert into maps inside a block so guards drop before any .await.
+        {
+            let mut sessions = self.sessions_lock.write();
+            let mut ip_index = self.ip_index.write();
+            sessions.insert(
+                session_id.clone(),
+                Session {
+                    id: session_id.clone(),
+                    client_ip,
+                    active: true,
+                    plugin_settings: plugin_settings.clone(),
+                    started_at: chrono::Utc::now(),
+                    last_activity: Instant::now(),
+                },
+            );
+            ip_index.insert(client_ip, session_id.clone());
         }
 
-        let session_id = Uuid::new_v4().to_string();
-
-        self.registry
-            .on_session_start(&session_id, &plugin_settings);
-
-        sessions.insert(
-            session_id.clone(),
-            Session {
-                id: session_id.clone(),
+        // Persist to Redis so a replacement pod can restore the session.
+        if let Some(store) = &self.store {
+            let persisted = PersistedSession {
+                session_id: session_id.clone(),
                 client_ip,
-                active: true,
-                plugin_settings,
+                plugin_settings: plugin_settings.clone(),
                 started_at: chrono::Utc::now(),
-                last_activity: Instant::now(),
-            },
-        );
-        ip_index.insert(client_ip, session_id.clone());
+            };
+            let ttl = session_ttl(&plugin_settings);
+            store.save(&persisted, ttl).await;
+        }
 
         Ok(session_id)
     }
 
     /// Stop a session. Notifies plugins to finalize.
-    pub fn stop_session(&self, session_id: &SessionId) -> Result<(), SessionError> {
-        let mut sessions = self.sessions.write();
-        let session = sessions.get_mut(session_id).ok_or(SessionError::NotFound)?;
+    pub async fn stop_session(&self, session_id: &SessionId) -> Result<(), SessionError> {
+        // Validate and mark inactive under lock, then drop lock before awaiting.
+        {
+            let mut sessions = self.sessions_lock.write();
+            let session = sessions.get_mut(session_id).ok_or(SessionError::NotFound)?;
+            if !session.active {
+                return Err(SessionError::NotActive);
+            }
+            session.active = false;
+        }
+        self.registry.on_session_stop(session_id).await;
 
-        if !session.active {
-            return Err(SessionError::NotActive);
+        // Delete from Redis on explicit stop.
+        if let Some(store) = &self.store {
+            let client_ip = {
+                let sessions = self.sessions_lock.read();
+                sessions.get(session_id).map(|s| s.client_ip)
+            };
+            if let Some(ip) = client_ip {
+                store.delete(session_id, &ip).await;
+            }
         }
 
-        session.active = false;
-        self.registry.on_session_stop(session_id);
         Ok(())
     }
 
     /// Delete a session entirely — clears plugin data and removes from both maps.
-    pub fn delete_session(&self, session_id: &SessionId) -> Result<(), SessionError> {
-        let mut sessions = self.sessions.write();
-        let mut ip_index = self.ip_index.write();
+    pub async fn delete_session(&self, session_id: &SessionId) -> Result<(), SessionError> {
+        // Remove from maps under lock, then drop lock before awaiting.
+        let client_ip = {
+            let mut sessions = self.sessions_lock.write();
+            let mut ip_index = self.ip_index.write();
+            let session = sessions.remove(session_id).ok_or(SessionError::NotFound)?;
+            ip_index.remove(&session.client_ip);
+            session.client_ip
+        };
+        self.registry.on_session_clear(session_id).await;
 
-        let session = sessions.remove(session_id).ok_or(SessionError::NotFound)?;
-        ip_index.remove(&session.client_ip);
-        self.registry.on_session_clear(session_id);
+        // Delete from Redis on explicit clear.
+        if let Some(store) = &self.store {
+            store.delete(session_id, &client_ip).await;
+        }
+
         Ok(())
     }
 
@@ -153,7 +215,7 @@ impl SessionManager {
     pub fn session_id_for_ip(&self, ip: &IpAddr) -> Option<SessionId> {
         let ip_index = self.ip_index.read();
         let session_id = ip_index.get(ip)?;
-        let sessions = self.sessions.read();
+        let sessions = self.sessions_lock.read();
         let session = sessions.get(session_id)?;
         if session.active {
             Some(session_id.clone())
@@ -164,13 +226,60 @@ impl SessionManager {
 
     /// Check if a session is active (for proxy handler to decide intercept vs passthrough).
     pub fn is_active(&self, session_id: &SessionId) -> bool {
-        let sessions = self.sessions.read();
+        let sessions = self.sessions_lock.read();
         sessions.get(session_id).map(|s| s.active).unwrap_or(false)
+    }
+
+    /// Attempt to restore a session from Redis for a client IP that has no
+    /// in-memory session. Called by the proxy handler when it encounters
+    /// traffic from an IP with no active session (pod crash recovery).
+    ///
+    /// Returns the restored session ID if successful, `None` otherwise.
+    pub async fn restore_session_for_ip(&self, ip: &IpAddr) -> Option<SessionId> {
+        let store = self.store.as_ref()?;
+        let persisted = store.get_by_ip(ip).await?;
+
+        // Don't exceed max sessions.
+        {
+            let sessions = self.sessions_lock.read();
+            if sessions.len() >= self.max_sessions {
+                return None;
+            }
+        }
+
+        let session_id = persisted.session_id.clone();
+
+        // Notify plugins to restore session state (e.g. re-attach blob writer).
+        self.registry
+            .on_session_start(&session_id, &persisted.plugin_settings)
+            .await;
+
+        let mut sessions = self.sessions_lock.write();
+        let mut ip_index = self.ip_index.write();
+        sessions.insert(
+            session_id.clone(),
+            Session {
+                id: session_id.clone(),
+                client_ip: *ip,
+                active: true,
+                plugin_settings: persisted.plugin_settings,
+                started_at: persisted.started_at,
+                last_activity: Instant::now(),
+            },
+        );
+        ip_index.insert(*ip, session_id.clone());
+
+        tracing::info!(
+            "SessionManager: restored session {} for IP {} from Redis",
+            session_id,
+            ip
+        );
+        Some(session_id)
     }
 
     /// Touch a session to reset its idle timer.
     pub fn touch(&self, session_id: &SessionId) {
-        let mut sessions = self.sessions.write();
+        let mut sessions = self.sessions_lock.write();
         if let Some(session) = sessions.get_mut(session_id) {
             session.last_activity = Instant::now();
         }
@@ -178,40 +287,44 @@ impl SessionManager {
 
     /// Get session info by ID.
     pub fn get_session(&self, session_id: &SessionId) -> Option<SessionInfo> {
-        let sessions = self.sessions.read();
+        let sessions = self.sessions_lock.read();
         sessions.get(session_id).map(SessionInfo::from)
     }
 
     /// List all sessions.
     pub fn list_sessions(&self) -> Vec<SessionInfo> {
-        let sessions = self.sessions.read();
+        let sessions = self.sessions_lock.read();
         sessions.values().map(SessionInfo::from).collect()
     }
 
     /// Reap idle sessions. Called periodically.
-    pub fn reap_idle(&self) -> Vec<SessionId> {
-        let mut sessions = self.sessions.write();
-        let mut ip_index = self.ip_index.write();
-        let now = Instant::now();
-        let mut reaped = Vec::new();
-
-        sessions.retain(|id, session| {
-            if now.duration_since(session.last_activity) > self.idle_timeout {
-                self.registry.on_session_clear(id);
-                ip_index.remove(&session.client_ip);
-                reaped.push(id.clone());
-                false
-            } else {
-                true
-            }
-        });
-
+    pub async fn reap_idle(&self) -> Vec<SessionId> {
+        // Collect expired sessions under lock, then drop lock before awaiting.
+        let reaped: Vec<SessionId> = {
+            let mut sessions = self.sessions_lock.write();
+            let mut ip_index = self.ip_index.write();
+            let now = Instant::now();
+            let mut reaped = Vec::new();
+            sessions.retain(|id, session| {
+                if now.duration_since(session.last_activity) > self.idle_timeout {
+                    ip_index.remove(&session.client_ip);
+                    reaped.push(id.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            reaped
+        };
+        for id in &reaped {
+            self.registry.on_session_clear(id).await;
+        }
         reaped
     }
 
     /// Number of sessions.
     pub fn session_count(&self) -> usize {
-        self.sessions.read().len()
+        self.sessions_lock.read().len()
     }
 }
 
@@ -240,100 +353,100 @@ mod tests {
         SessionManager::new(registry, Duration::from_secs(300), max)
     }
 
-    #[test]
-    fn create_and_stop_session() {
+    #[tokio::test]
+    async fn create_and_stop_session() {
         let mgr = make_manager(100);
-        let id = mgr.create_session(IP1, HashMap::new()).unwrap();
+        let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
         assert!(mgr.is_active(&id));
 
-        mgr.stop_session(&id).unwrap();
+        mgr.stop_session(&id).await.unwrap();
         assert!(!mgr.is_active(&id));
     }
 
-    #[test]
-    fn stop_nonexistent_returns_error() {
+    #[tokio::test]
+    async fn stop_nonexistent_returns_error() {
         let mgr = make_manager(100);
         assert!(matches!(
-            mgr.stop_session(&"nonexistent".into()),
+            mgr.stop_session(&"nonexistent".into()).await,
             Err(SessionError::NotFound)
         ));
     }
 
-    #[test]
-    fn stop_already_stopped_returns_error() {
+    #[tokio::test]
+    async fn stop_already_stopped_returns_error() {
         let mgr = make_manager(100);
-        let id = mgr.create_session(IP1, HashMap::new()).unwrap();
-        mgr.stop_session(&id).unwrap();
+        let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
+        mgr.stop_session(&id).await.unwrap();
         assert!(matches!(
-            mgr.stop_session(&id),
+            mgr.stop_session(&id).await,
             Err(SessionError::NotActive)
         ));
     }
 
-    #[test]
-    fn max_sessions_enforced() {
+    #[tokio::test]
+    async fn max_sessions_enforced() {
         let mgr = make_manager(2);
-        mgr.create_session(IP1, HashMap::new()).unwrap();
-        mgr.create_session(IP2, HashMap::new()).unwrap();
+        mgr.create_session(IP1, HashMap::new()).await.unwrap();
+        mgr.create_session(IP2, HashMap::new()).await.unwrap();
         assert!(matches!(
-            mgr.create_session(IP3, HashMap::new()),
+            mgr.create_session(IP3, HashMap::new()).await,
             Err(SessionError::MaxSessionsReached)
         ));
     }
 
-    #[test]
-    fn restart_same_ip_replaces_session() {
+    #[tokio::test]
+    async fn restart_same_ip_replaces_session() {
         let mgr = make_manager(1);
-        let id1 = mgr.create_session(IP1, HashMap::new()).unwrap();
+        let id1 = mgr.create_session(IP1, HashMap::new()).await.unwrap();
         // Same IP — should replace, not exceed max
-        let id2 = mgr.create_session(IP1, HashMap::new()).unwrap();
+        let id2 = mgr.create_session(IP1, HashMap::new()).await.unwrap();
         assert_ne!(id1, id2);
         assert!(!mgr.is_active(&id1)); // old session gone
         assert!(mgr.is_active(&id2));
         assert_eq!(mgr.session_count(), 1);
     }
 
-    #[test]
-    fn session_id_for_ip_returns_active_only() {
+    #[tokio::test]
+    async fn session_id_for_ip_returns_active_only() {
         let mgr = make_manager(100);
-        let id = mgr.create_session(IP1, HashMap::new()).unwrap();
+        let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
         assert_eq!(mgr.session_id_for_ip(&IP1), Some(id.clone()));
 
-        mgr.stop_session(&id).unwrap();
+        mgr.stop_session(&id).await.unwrap();
         assert_eq!(mgr.session_id_for_ip(&IP1), None);
     }
 
-    #[test]
-    fn delete_session_removes_entirely() {
+    #[tokio::test]
+    async fn delete_session_removes_entirely() {
         let mgr = make_manager(100);
-        let id = mgr.create_session(IP1, HashMap::new()).unwrap();
-        mgr.delete_session(&id).unwrap();
+        let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
+        mgr.delete_session(&id).await.unwrap();
         assert_eq!(mgr.session_count(), 0);
         assert_eq!(mgr.session_id_for_ip(&IP1), None);
         assert!(mgr.get_session(&id).is_none());
     }
 
-    #[test]
-    fn delete_nonexistent_returns_error() {
+    #[tokio::test]
+    async fn delete_nonexistent_returns_error() {
         let mgr = make_manager(100);
         assert!(matches!(
-            mgr.delete_session(&"nonexistent".into()),
+            mgr.delete_session(&"nonexistent".into()).await,
             Err(SessionError::NotFound)
         ));
     }
 
-    #[test]
-    fn list_sessions_returns_all() {
+    #[tokio::test]
+    async fn list_sessions_returns_all() {
         let mgr = make_manager(100);
-        mgr.create_session(IP1, HashMap::new()).unwrap();
-        mgr.create_session(IP2, HashMap::new()).unwrap();
+        mgr.create_session(IP1, HashMap::new()).await.unwrap();
+        mgr.create_session(IP2, HashMap::new()).await.unwrap();
         assert_eq!(mgr.list_sessions().len(), 2);
     }
 
-    #[test]
-    fn get_session_returns_info() {
+    #[tokio::test]
+    async fn get_session_returns_info() {
         let mgr = make_manager(100);
-        let id = mgr.create_session(IP1, HashMap::new()).unwrap();
+        let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
         let info = mgr.get_session(&id).unwrap();
         assert_eq!(info.id, id);
         assert!(info.active);
@@ -345,28 +458,42 @@ mod tests {
         assert!(!mgr.is_active(&"nonexistent".into()));
     }
 
-    #[test]
-    fn idle_reaping() {
+    #[tokio::test]
+    async fn idle_reaping() {
         let registry = Arc::new(PluginRegistry::new(vec![]));
         let mgr = SessionManager::new(registry, Duration::from_millis(0), 100);
-        mgr.create_session(IP1, HashMap::new()).unwrap();
+        mgr.create_session(IP1, HashMap::new()).await.unwrap();
 
         // With 0ms timeout, everything should be reaped immediately
-        let reaped = mgr.reap_idle();
+        let reaped = mgr.reap_idle().await;
         assert_eq!(reaped.len(), 1);
         assert_eq!(mgr.session_count(), 0);
         assert_eq!(mgr.session_id_for_ip(&IP1), None);
     }
 
-    #[test]
-    fn session_count_tracks_correctly() {
+    #[tokio::test]
+    async fn session_count_tracks_correctly() {
         let mgr = make_manager(100);
         assert_eq!(mgr.session_count(), 0);
 
-        mgr.create_session(IP1, HashMap::new()).unwrap();
+        mgr.create_session(IP1, HashMap::new()).await.unwrap();
         assert_eq!(mgr.session_count(), 1);
 
-        mgr.create_session(IP2, HashMap::new()).unwrap();
+        mgr.create_session(IP2, HashMap::new()).await.unwrap();
         assert_eq!(mgr.session_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn restore_session_for_ip_without_store_returns_none() {
+        // When no Redis store is configured, restore always returns None.
+        let mgr = make_manager(100);
+        assert_eq!(mgr.restore_session_for_ip(&IP1).await, None);
+    }
+
+    #[tokio::test]
+    async fn restore_session_for_ip_respects_max_sessions() {
+        // Even if restore is called at capacity, it should return None.
+        let mgr = make_manager(0); // 0 max sessions
+        assert_eq!(mgr.restore_session_for_ip(&IP1).await, None);
     }
 }

@@ -52,6 +52,7 @@ pub async fn post_create_session(
     match state
         .session_manager
         .create_session(client_ip, plugin_settings)
+        .await
     {
         Ok(session_id) => (
             StatusCode::CREATED,
@@ -98,7 +99,7 @@ pub async fn post_stop_session(
 ) -> impl IntoResponse {
     info!("Stopping session {}", session_id);
 
-    match state.session_manager.stop_session(&session_id) {
+    match state.session_manager.stop_session(&session_id).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(crate::session::SessionError::NotFound) => {
             (StatusCode::NOT_FOUND, "No session found").into_response()
@@ -117,7 +118,7 @@ pub async fn delete_session(
 ) -> impl IntoResponse {
     info!("Deleting session {}", session_id);
 
-    match state.session_manager.delete_session(&session_id) {
+    match state.session_manager.delete_session(&session_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(crate::session::SessionError::NotFound) => {
             (StatusCode::NOT_FOUND, "No session found").into_response()

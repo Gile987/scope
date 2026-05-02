@@ -9,7 +9,7 @@ tokio = { version = "1", features = ["full"] }
 hyper = { version = "1", features = ["http1", "http2", "server", "client"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1", "http2", "client-legacy"] }
 http-body-util = "0.1"
-axum = "0.8"
+axum = { version = "0.8", features = ["macros"] }
 tower = { version = "0.5", features = ["util"] }
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 rustls-pemfile = "2"
@@ -36,6 +36,10 @@ parking_lot = "0.12"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 backon = "1"
+azure_storage = { version = "0.21", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"] }
+azure_storage_blobs = { version = "0.21", default-features = false, features = ["enable_reqwest_rustls"] }
+azure_identity = { version = "0.21", default-features = false, features = ["enable_reqwest_rustls"] }
+fred = { version = "10", features = ["tracing", "enable-rustls"] }
 
 [dev-dependencies]
 futures-util = "0.3"

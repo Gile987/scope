@@ -6,7 +6,11 @@
 //!
 //! Uses serde for YAML deserialization with `#[serde(default)]` to fill
 //! missing fields from compiled defaults, so partial config files work.
-//! Plugin-specific settings live under `defaultPluginSettings.<pluginName>`.
+//!
+//! Two categories of plugin settings:
+//! - `plugins.<name>` — gateway-level only; cannot be overridden per session
+//! - `defaultSessionPluginSettings.<name>` — defaults that callers may override
+//!   when creating a session via `POST /api/v1/sessions`
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -46,6 +50,49 @@ pub struct Cli {
     pub additional_ca_certs: Vec<PathBuf>,
 }
 
+/// Gateway-level HAR plugin settings (not overridable per session).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarPluginConfig {
+    /// Directory for local JSONL output (used when `harBlob` is absent).
+    #[serde(default = "default_har_output_dir")]
+    pub output_dir: PathBuf,
+
+    /// Hard timeout (in seconds) for a single blob append attempt including all
+    /// retries. If the timeout fires, the session is marked hard-failed and the
+    /// next proxied request returns a 502. Default: 120 (2 minutes).
+    #[serde(default = "default_har_append_timeout_secs")]
+    pub append_timeout_secs: u64,
+}
+
+impl Default for HarPluginConfig {
+    fn default() -> Self {
+        Self {
+            output_dir: default_har_output_dir(),
+            append_timeout_secs: default_har_append_timeout_secs(),
+        }
+    }
+}
+
+/// Gateway-level plugin config (not overridable per session).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginsConfig {
+    #[serde(default)]
+    pub har: HarPluginConfig,
+}
+
+/// Azure Blob Storage config for HAR streaming (optional).
+/// When present, HAR entries are streamed to an Azure append blob instead of
+/// being written to the pod's local filesystem.
+/// The storage account URL is taken from the `BLOB_STORAGE_URL` env var.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarBlobConfig {
+    /// Name of the blob container that holds HAR files (must already exist).
+    pub container_name: String,
+}
+
 /// Gateway configuration loaded from YAML, with defaults and CLI overrides.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,8 +112,14 @@ pub struct Config {
     #[serde(default = "default_log_level")]
     pub log_level: String,
 
+    /// Default per-session plugin settings; callers may override these when
+    /// creating a session via `POST /api/v1/sessions`.
     #[serde(default)]
-    pub default_plugin_settings: HashMap<String, serde_json::Value>,
+    pub default_session_plugin_settings: HashMap<String, serde_json::Value>,
+
+    /// Gateway-level plugin config (cannot be overridden per session).
+    #[serde(default)]
+    pub plugins: PluginsConfig,
 
     /// Paths to PEM files with additional CA certificates trusted for upstream
     /// TLS connections. Each file may contain one or more PEM-encoded certs.
@@ -74,6 +127,11 @@ pub struct Config {
     /// with TLS inspection proxies.
     #[serde(default)]
     pub additional_ca_certs: Vec<PathBuf>,
+
+    /// Optional Azure Blob Storage config for HAR streaming.
+    /// When absent, HAR entries are written to local JSONL files (default).
+    #[serde(default)]
+    pub har_blob: Option<HarBlobConfig>,
 }
 
 fn default_urls_to_watch() -> Vec<String> {
@@ -96,6 +154,14 @@ fn default_log_level() -> String {
     "info".to_string()
 }
 
+fn default_har_output_dir() -> PathBuf {
+    PathBuf::from("/tmp/scope-gateway/har-output")
+}
+
+fn default_har_append_timeout_secs() -> u64 {
+    120
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -104,8 +170,10 @@ impl Default for Config {
             api_port: default_api_port(),
             cert_dir: default_cert_dir(),
             log_level: default_log_level(),
-            default_plugin_settings: HashMap::new(),
+            default_session_plugin_settings: HashMap::new(),
+            plugins: PluginsConfig::default(),
             additional_ca_certs: Vec::new(),
+            har_blob: None,
         }
     }
 }
@@ -187,9 +255,11 @@ port: 9000
 apiPort: 9001
 certDir: /tmp/certs
 logLevel: debug
-defaultPluginSettings:
+plugins:
   har:
     outputDir: /tmp/har
+defaultSessionPluginSettings:
+  har:
     redactCredentials: false
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
@@ -198,8 +268,10 @@ defaultPluginSettings:
         assert_eq!(config.urls_to_watch.len(), 2);
         assert_eq!(config.cert_dir, PathBuf::from("/tmp/certs"));
         assert_eq!(config.log_level, "debug");
+        assert_eq!(config.plugins.har.output_dir, PathBuf::from("/tmp/har"));
+        assert_eq!(config.plugins.har.append_timeout_secs, 120); // default
         assert_eq!(
-            config.default_plugin_settings["har"]["redactCredentials"],
+            config.default_session_plugin_settings["har"]["redactCredentials"],
             false
         );
     }

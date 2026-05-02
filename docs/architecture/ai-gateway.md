@@ -23,28 +23,39 @@ The Rust gateway replaces all of these with a **single shared service** (~23 MB 
 ```mermaid
 flowchart TB
     subgraph Workers["Worker Containers"]
-        W1["coder-vscode-electron<br/>172.18.0.7"]
-        W2["coder-acp-copilot<br/>172.18.0.5"]
-        W3["coder-acp-claude-code<br/>172.18.0.6"]
+        W1["coder-vscode-electron"]
+        W2["coder-acp-copilot"]
+        W3["coder-acp-claude-code"]
     end
 
     subgraph GW["AI Gateway (Rust)"]
         PX[":18000 Single Port<br/><i>CONNECT tunneling, TLS MITM,<br/>Control API (session mgmt, certs)</i>"]
-        SM["Session Manager<br/><i>source-IP keyed</i>"]
+        SM["Session Manager<br/><i>source-IP keyed, Redis-backed</i>"]
         PR["Plugin Registry"]
         HAR["HAR Plugin<br/><i>JSONL → HAR 1.2</i>"]
+        CT["CopilotToken Plugin<br/><i>token mint + refresh</i>"]
         CA["Certificate Authority<br/><i>dynamic leaf certs</i>"]
+    end
+
+    subgraph Storage["Storage"]
+        BLOB["Azure Blob Storage<br/><i>har container</i>"]
+        REDIS["Redis<br/><i>session persistence</i>"]
     end
 
     subgraph Upstream["AI Providers"]
         GH["api.githubcopilot.com"]
         AN["api.anthropic.com"]
+        TM["Token Manager<br/><i>TOKEN_MANAGER_URL</i>"]
     end
 
     W1 -->|"HTTP_PROXY +<br/>start/stop session,<br/>download cert/HAR"| PX
     PX --> SM
     SM --> PR
+    SM <-->|"session state"| REDIS
     PR --> HAR
+    PR --> CT
+    HAR -->|"append block"| BLOB
+    CT -->|"acquire OAuth token"| TM
     PX -->|"TLS intercept<br/>notify plugins"| PR
     PX -->|"upstream TLS"| GH
     PX -->|"upstream TLS"| AN
@@ -52,6 +63,7 @@ flowchart TB
 
     style PX fill:#f96,stroke:#333
     style HAR fill:#6cf,stroke:#333
+    style CT fill:#6cf,stroke:#333
 ```
 
 ## Session Identity
@@ -150,7 +162,14 @@ Plugins are registered in `main.rs` at startup. The `PluginRegistry` broadcasts 
 
 ### HAR Plugin
 
-The HAR plugin is the first built-in plugin. It captures HTTP traffic as HAR 1.2 files using disk-based buffering.
+The HAR plugin captures HTTP traffic as HAR 1.2 files. It supports two storage backends selected at gateway startup:
+
+| Backend | Condition | Storage |
+|---------|-----------|--------|
+| **Local** (`LocalWriter`) | `harBlob` absent from config | JSONL file on pod-local disk (`outputDir`) |
+| **Blob** (`BlobWriter`) | `harBlob` section present + `BLOB_STORAGE_URL` env var set | Azure append blob in configured container |
+
+In Kubernetes the blob backend is always used (workload identity credentials, `BLOB_STORAGE_URL` set by FluxCD substitution). In Docker Compose, `AZURE_STORAGE_USE_EMULATOR=true` + `BLOB_STORAGE_URL=http://azurite:10000/devstoreaccount1` point at the Azurite sidecar.
 
 **Lifecycle:**
 
@@ -165,36 +184,37 @@ sequenceDiagram
     W->>API: POST /api/v1/sessions
     API->>SM: create_session(ip, settings)
     SM->>HAR: on_session_start(id, {har: ...})
-    Note over HAR: Create .session-{id}.jsonl
+    Note over HAR: Init writer<br/>(local file OR Azure append blob)
     API-->>W: 201 {id: "uuid"}
 
     W->>PX: CONNECT api.githubcopilot.com
     Note over PX: IP→session lookup, TLS intercept + relay
     PX->>HAR: on_exchange(id, exchange)
-    Note over HAR: Append JSON line to .jsonl
+    Note over HAR: Append JSON line<br/>(local OR blob PUT ?comp=appendblock)
 
     W->>API: POST /api/v1/sessions/{id}/stop
     API->>SM: stop_session(id)
     SM->>HAR: on_session_stop(id)
-    Note over HAR: Mark JSONL as finalized
+    Note over HAR: Finalize (mark done)
 
     W->>API: GET /api/v1/sessions/{id}/har
-    Note over HAR: Read JSONL, wrap in HAR 1.2 envelope
+    Note over HAR: Read JSONL (local file OR blob GET),<br/>wrap in HAR 1.2 envelope
     API-->>W: 200 application/json (HAR)
 
     W->>API: DELETE /api/v1/sessions/{id}
     API->>SM: delete_session(id)
     SM->>HAR: on_session_clear(id)
-    Note over HAR: Delete JSONL file
+    Note over HAR: Delete local file or blob
     API-->>W: 204 No Content
 ```
 
 **Key behaviors (HAR plugin):**
 
-- **Disk-based buffering**: Each session writes to a JSONL file (`.session-{id}.jsonl`), one JSON line per HTTP exchange. No in-memory accumulation.
-- **Sensitive header redaction**: When `redactCredentials` is `true` (default), headers like `authorization`, `x-github-token`, `x-api-key`, `cookie`, and `set-cookie` are redacted at write time. Secrets never touch disk.
-- **On-the-fly HAR assembly**: `GET /api/v1/sessions/{id}/har` reads the JSONL file and wraps the entries in a HAR 1.2 envelope. No separate `.har` file is stored.
-- **Idempotent reads**: The JSONL file can be read multiple times (safe for retries). It is deleted on session cleanup (`DELETE /api/v1/sessions/{id}` or idle reap).
+- **JSONL buffering**: Each session writes one JSON line per HTTP exchange — either to a local file or an Azure append blob depending on the configured backend.
+- **Blob retry**: `BlobWriter` retries append operations up to 20× with exponential backoff, with a per-operation timeout controlled by `plugins.har.appendTimeoutSecs` (default 120 s). If the timeout fires, the session is marked hard-failed and subsequent proxied requests receive a 502.
+- **Sensitive header redaction**: When `redactCredentials` is `true` (default), headers like `authorization`, `x-github-token`, `x-api-key`, `cookie`, and `set-cookie` are redacted at write time. Secrets never reach storage.
+- **On-the-fly HAR assembly**: `GET /api/v1/sessions/{id}/har` reads the JSONL source (local file or blob download) and wraps entries in a HAR 1.2 envelope. No separate `.har` file is stored.
+- **Idempotent reads**: The JSONL source can be read multiple times (safe for retries). It is deleted on session cleanup (`DELETE /api/v1/sessions/{id}` or idle reap).
 
 ### Copilot Token Plugin
 
@@ -210,7 +230,7 @@ sequenceDiagram
     participant TM as Token Manager
     participant GH as api.github.com
 
-    W->>API: POST /api/v1/sessions {copilotToken: {tokenManagerUrl, ...}}
+    W->>API: POST /api/v1/sessions {copilotToken: {capability, ...}}
     API->>CT: on_session_start(id, settings)
     Note over CT: Store config, start session clock
 
@@ -230,10 +250,11 @@ sequenceDiagram
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `tokenManagerUrl` | string | — | URL of the Token Manager service |
-| `refreshBufferSecs` | int | `120` | Seconds before expiry to proactively refresh |
-| `targetHosts` | string[] | `["api.githubcopilot.com"]` | Hosts to inject token on |
-| `maxSessionDurationSecs` | int | `3600` | Max session lifetime; requests are rejected after this |
+| `refreshBufferSecs` | int | `120` (env: `COPILOT_TOKEN_REFRESH_BUFFER_SECS`) | Seconds before expiry to proactively refresh |
+| `targetHosts` | string[] | `["api.githubcopilot.com", ...]` | Hosts to inject token on |
+| `maxSessionDurationSecs` | int | `3600` (env: `COPILOT_MAX_SESSION_DURATION_SECS`) | Max session lifetime; requests are rejected after this |
+
+The Token Manager URL is **not** a session setting — it comes from the `TOKEN_MANAGER_URL` environment variable (set in the gateway deployment, not per-session).
 
 **Key behaviors:**
 
@@ -251,7 +272,6 @@ POST /api/v1/sessions
   "plugins": {
     "har": { "redactCredentials": true },
     "copilotToken": {
-      "tokenManagerUrl": "http://token-manager:3000",
       "refreshBufferSecs": 120,
       "targetHosts": ["api.githubcopilot.com"],
       "maxSessionDurationSecs": 3600
@@ -333,12 +353,13 @@ apps/gateway/
 │   │   │   └── minter.rs       # Orchestrates token acquisition + retry logic
 │   │   └── har/
 │   │       ├── plugin.rs       # HarPlugin: impl ProxyPlugin
+│   │       ├── storage.rs      # LocalWriter (disk JSONL) + BlobWriter (Azure append blob)
 │   │       ├── writer.rs       # HAR 1.2 JSON serializer
 │   │       └── types.rs        # HAR data model (serde)
 │   └── proxy/
 │       ├── handler.rs          # CONNECT tunneling + plain HTTP forwarding
 │       └── tls.rs              # TLS interception, dynamic cert generation
-└── tests/                      # 69 unit + 18 integration tests
+└── tests/                      # 90 unit + 18 integration tests
 ```
 
 ## Configuration
@@ -350,11 +371,29 @@ urlsToWatch:
 port: 18000
 certDir: /tmp/scope-gateway/certs
 logLevel: info
-defaultPluginSettings:
+plugins:
   har:
-    outputDir: /tmp/scope-gateway/har-output
+    outputDir: /tmp/scope-gateway/har-output   # used by LocalWriter only
+    appendTimeoutSecs: 120                     # BlobWriter hard timeout
+  copilotToken: {}                             # gateway-level config (token URL via env)
+defaultSessionPluginSettings:
+  har:
     redactCredentials: true
+# When present, enables BlobWriter for HAR storage.
+# BLOB_STORAGE_URL env var must also be set.
+harBlob:
+  containerName: "har"
 ```
+
+**Environment variables consumed by the gateway:**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `BLOB_STORAGE_URL` | When `harBlob` is configured | Full URL of the Azure Storage account (e.g. `https://<account>.blob.core.windows.net`) |
+| `TOKEN_MANAGER_URL` | For Copilot token injection | URL of the Token Manager service |
+| `AZURE_STORAGE_USE_EMULATOR` | Docker Compose only | Set to `true` to use Azurite instead of Azure |
+| `AZURITE_BLOB_HOST` / `AZURITE_BLOB_PORT` | Docker Compose only | Azurite host and port |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | When Redis session persistence is wanted | Session store connection details |
 
 ## Docker Compose
 

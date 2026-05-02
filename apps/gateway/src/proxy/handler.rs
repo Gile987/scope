@@ -79,8 +79,20 @@ pub async fn handle_client(
             io,
             service_fn(move |req| {
                 let state = state_clone.clone();
-                let session_id = state.session_manager.session_id_for_ip(&client_ip);
-                async move { handle_request(req, session_id, state, peer_addr).await }
+                async move {
+                    // Fast path: session already in memory.
+                    let session_id = match state.session_manager.session_id_for_ip(&client_ip) {
+                        Some(id) => Some(id),
+                        None => {
+                            // Slow path: pod may have restarted — try Redis restore.
+                            state
+                                .session_manager
+                                .restore_session_for_ip(&client_ip)
+                                .await
+                        }
+                    };
+                    handle_request(req, session_id, state, peer_addr).await
+                }
             }),
         )
         .with_upgrades()

@@ -49,7 +49,11 @@ jobs:
   # CI Jobs — test, lint, build (run in parallel)
   # ---------------------------------------------------------------------------
   test:
-    name: Unit Tests
+    name: Unit Tests (${{ matrix.node-version }})
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.typescript == 'true'
     runs-on: ubuntu-latest
 
     strategy:
@@ -312,6 +316,10 @@ jobs:
 
   lint:
     name: Lint Code
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.typescript == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -341,6 +349,10 @@ jobs:
 
   build:
     name: Build Applications
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.typescript == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -368,6 +380,10 @@ jobs:
 
   gateway:
     name: Gateway (Rust)
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.gateway == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -459,6 +475,7 @@ jobs:
       shared: ${{ steps.changes.outputs.shared }}
       gateway: ${{ steps.changes.outputs.gateway }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
+      typescript: ${{ steps.changes.outputs.typescript }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -500,6 +517,15 @@ jobs:
               - 'packages/db-migrations/**'
             gateway:
               - 'apps/gateway/**'
+            typescript:
+              - 'apps/**'
+              - '!apps/gateway/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'tsconfig.base.json'
+              - 'vitest.config.ts'
+              - 'vitest.integration.config.ts'
 
   # ---------------------------------------------------------------------------
   # Build container images — gated on CI passing
@@ -510,8 +536,8 @@ jobs:
       always() &&
       !cancelled() &&
       github.repository == 'growth-ecosystems/scope-core' &&
-      needs.test.result == 'success' &&
-      needs.build.result == 'success' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
       (needs.gateway.result == 'success' || needs.gateway.result == 'skipped') &&
       (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped') &&
       (

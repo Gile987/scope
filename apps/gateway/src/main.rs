@@ -18,8 +18,10 @@ use http_body_util::Full;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
+use azure_storage::{CloudLocation, StorageCredentials};
+use azure_storage_blobs::prelude::{BlobServiceClient, ClientBuilder};
 use gateway::api::routes::ApiState;
 use gateway::api::server::build_api_router;
 use gateway::ca::CertificateAuthority;
@@ -29,6 +31,7 @@ use gateway::plugin::PluginRegistry;
 use gateway::plugins::har::plugin::HarPlugin;
 use gateway::proxy::handler::{handle_client, ProxyState};
 use gateway::session::SessionManager;
+use gateway::session_store::SessionStore;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -60,9 +63,156 @@ async fn main() -> anyhow::Result<()> {
     // URL filter
     let url_filter = Arc::new(UrlFilter::new(&config.urls_to_watch)?);
 
-    // Plugins
-    let har_dir = HarPlugin::output_dir_from_settings(&config.default_plugin_settings);
-    let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = Arc::new(HarPlugin::new(har_dir));
+    // Plugins — HAR writer backend selected from config
+    let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = if let Some(blob_cfg) = &config.har_blob
+    {
+        let use_emulator = std::env::var("AZURE_STORAGE_USE_EMULATOR")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+
+        let storage_account_url = std::env::var("BLOB_STORAGE_URL").map_err(|_| {
+            anyhow::anyhow!("BLOB_STORAGE_URL env var is required when harBlob is configured")
+        })?;
+
+        let container_client = if use_emulator {
+            // Azurite emulator: parse host/port from the storage account URL so
+            // the same config works for both local Docker Compose and CI.
+            // URL format: http://<host>:<port>/devstoreaccount1
+            let emulator_host =
+                std::env::var("AZURITE_BLOB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+            let emulator_port: u16 = std::env::var("AZURITE_BLOB_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(10000);
+            info!(
+                "HAR plugin: using Azurite emulator backend ({}:{}, container={})",
+                emulator_host, emulator_port, blob_cfg.container_name
+            );
+            ClientBuilder::with_location(
+                CloudLocation::Emulator {
+                    address: emulator_host,
+                    port: emulator_port,
+                },
+                StorageCredentials::emulator(),
+            )
+            .blob_service_client()
+            .container_client(&blob_cfg.container_name)
+        } else {
+            info!(
+                "HAR plugin: using Azure Blob Storage backend (account={}, container={})",
+                storage_account_url, blob_cfg.container_name
+            );
+            let credential = azure_identity::DefaultAzureCredentialBuilder::new()
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to create Azure credential: {}", e))?;
+            let storage_creds = StorageCredentials::token_credential(Arc::new(credential));
+            BlobServiceClient::new(&storage_account_url, storage_creds)
+                .container_client(&blob_cfg.container_name)
+        };
+        Arc::new(HarPlugin::new_with_blob(
+            container_client,
+            std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
+        ))
+    } else {
+        let har_dir = config.plugins.har.output_dir.clone();
+        info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
+        Arc::new(HarPlugin::new(har_dir))
+    };
+    let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
+
+    // Session manager — wire Redis store when env vars are present.
+    let session_manager = {
+        let redis_host = std::env::var("REDIS_HOST").ok();
+        if let Some(host) = redis_host {
+            let port: u16 = std::env::var("REDIS_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(6380);
+            let password = std::env::var("REDIS_PASSWORD").ok();
+            // Use TLS only when REDIS_TLS=true is explicitly set.
+            let tls = if std::env::var("REDIS_TLS")
+                .map(|v| v == "true")
+                .unwrap_or(false)
+            {
+                fred::types::config::TlsConnector::default_rustls()
+                    .ok()
+                    .map(Into::into)
+            } else {
+                None
+            };
+            let redis_config = fred::types::config::Config {
+                server: fred::types::config::ServerConfig::new_centralized(host.as_str(), port),
+                password,
+                tls,
+                ..Default::default()
+            };
+            match fred::types::Builder::from_config(redis_config).build() {
+                Ok(client) => {
+                    use fred::interfaces::ClientLike;
+                    match client.init().await {
+                        Ok(_) => {
+                            info!("Session store: connected to Redis at {}:{}", host, port);
+                            let store = SessionStore::new(client);
+                            Arc::new(SessionManager::new_with_store(
+                                registry.clone(),
+                                Duration::from_secs(300),
+                                100,
+                                store,
+                            ))
+                        }
+                        Err(e) => {
+                            warn!("Session store: Redis connect failed, running without persistence: {}", e);
+                            Arc::new(SessionManager::new(
+                                registry.clone(),
+                                Duration::from_secs(300),
+                                100,
+                            ))
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Session store: Redis config error, running without persistence: {}",
+                        e
+                    );
+                    Arc::new(SessionManager::new(
+                        registry.clone(),
+                        Duration::from_secs(300),
+                        100,
+                    ))
+                }
+            }
+        } else {
+            info!("Session store: REDIS_HOST not set, running without persistence");
+            Arc::new(SessionManager::new(
+                registry.clone(),
+                Duration::from_secs(300),
+                100,
+            ))
+        }
+    };
+
+    // Shared HTTP/1.1 connection pool for plain (non-CONNECT) forwarding.
+    // A single client avoids per-request connection setup and enables keepalive reuse.
+    let http_client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new())
+        .pool_idle_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(4)
+        .build_http();
+
+    // Pre-built TLS config for upstream connections (MITM relay).
+    // Contains Mozilla roots + any additional CA certs from config.
+    let upstream_root_store = config.upstream_root_store()?;
+    let upstream_tls_config = Arc::new(
+        rustls::ClientConfig::builder()
+            .with_root_certificates(upstream_root_store)
+            .with_no_client_auth(),
+    );
+    if !config.additional_ca_certs.is_empty() {
+        info!(
+            "Loaded additional CA certs from {:?}",
+            config.additional_ca_certs
+        );
+    }
 
     // API state & router (served on the same port as proxy traffic)
     let api_state = Arc::new(ApiState {
@@ -93,7 +243,7 @@ async fn main() -> anyhow::Result<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
-            let reaped = reaper_session_mgr.reap_idle();
+            let reaped = reaper_session_mgr.reap_idle().await;
             if !reaped.is_empty() {
                 info!("Reaped {} idle sessions", reaped.len());
             }
