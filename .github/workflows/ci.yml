@@ -419,7 +419,7 @@ jobs:
 
       - name: Clippy
         working-directory: apps/gateway
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Run tests (nextest + JUnit XML)
         working-directory: apps/gateway
@@ -553,7 +553,6 @@ jobs:
           needs.detect-changes.outputs.report-generator == 'true' ||
           needs.detect-changes.outputs.scheduler == 'true' ||
           needs.detect-changes.outputs.db-migrations == 'true' ||
-          needs.detect-changes.outputs.gateway == 'true' ||
           needs.detect-changes.outputs.shared == 'true' ||
           needs.detect-changes.outputs.model-scanning == 'true'
         ))
@@ -598,11 +597,6 @@ jobs:
           - name: db-migrations
             dockerfile: packages/db-migrations/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
-          - name: gateway
-            dockerfile: apps/gateway/Dockerfile
-            context: apps/gateway
-            target: runtime
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.gateway == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: "false"
@@ -705,6 +699,75 @@ jobs:
             ${{ matrix.image.target && format('--target {0}', matrix.image.target) || '' }} \
             --file "${{ matrix.image.dockerfile }}" \
             ${{ matrix.image.context || '.' }}
+
+  # ---------------------------------------------------------------------------
+  # Build gateway image — uses docker/build-push-action with GHA layer cache
+  # ---------------------------------------------------------------------------
+  build-gateway-image:
+    name: "Build image: gateway"
+    if: >-
+      always() &&
+      !cancelled() &&
+      github.repository == 'growth-ecosystems/scope-core' &&
+      (needs.gateway.result == 'success') &&
+      (
+        (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || contains(github.event.inputs.images, 'gateway'))) ||
+        ((github.event_name == 'push' || github.event_name == 'pull_request') && needs.detect-changes.outputs.gateway == 'true')
+      )
+    needs: [gateway, detect-changes]
+    runs-on: ubuntu-latest
+    environment: integration
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name "${{ vars.ACR_NAME }}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          ACR_LOGIN_SERVER=$(az acr show --name "${{ vars.ACR_NAME }}" --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" --query loginServer -o tsv)
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            GIT_SHA="${{ github.event.pull_request.head.sha }}"
+            TAGS="${ACR_LOGIN_SERVER}/scoped/gateway:${GIT_SHA}"
+            TAGS="${TAGS},${ACR_LOGIN_SERVER}/scoped/gateway:pr-${{ github.event.pull_request.number }}-latest"
+          else
+            GIT_SHA="${{ github.sha }}"
+            SHORT_SHA="${GIT_SHA:0:7}"
+            TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+            TAGS="${ACR_LOGIN_SERVER}/scoped/gateway:${GIT_SHA}"
+            TAGS="${TAGS},${ACR_LOGIN_SERVER}/scoped/gateway:${TIMESTAMP}-${SHORT_SHA}"
+          fi
+
+          echo "git_sha=${GIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/gateway
+          file: apps/gateway/Dockerfile
+          target: runtime
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            GIT_COMMIT=${{ steps.tags.outputs.git_sha }}
+            BUILD_TIME=${{ steps.tags.outputs.build_time }}
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
 
   # ---------------------------------------------------------------------------
   # Summary
