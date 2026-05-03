@@ -131,18 +131,21 @@ impl SessionManager {
             );
         }
 
-        // Persist to Redis so a replacement pod can restore the session.
-        if let Some(store) = &self.store {
+        // Persist to Redis (SET NX) — returns false if session already exists
+        // on another replica. This is the cross-replica idempotency check.
+        let is_new = if let Some(store) = &self.store {
             let persisted = PersistedSession {
                 session_id: session_id.clone(),
                 plugin_settings: plugin_settings.clone(),
                 started_at: chrono::Utc::now(),
             };
             let ttl = session_ttl(&plugin_settings);
-            store.save(&persisted, ttl).await;
-        }
+            store.save(&persisted, ttl).await
+        } else {
+            true
+        };
 
-        Ok(true)
+        Ok(is_new)
     }
 
     /// Stop a session. Notifies plugins to finalize.

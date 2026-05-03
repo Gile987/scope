@@ -44,9 +44,12 @@ impl SessionStore {
         Self { client }
     }
 
-    /// Persist a session to Redis with a TTL, retrying with exponential backoff.
-    /// Logs a warning and gives up if all retries are exhausted.
-    pub async fn save(&self, session: &PersistedSession, ttl: Duration) {
+    /// Persist a session to Redis with a TTL using SET NX (set-if-not-exists).
+    ///
+    /// Returns `true` if the key was newly created, `false` if it already existed
+    /// (idempotent retry from another replica). Retries with exponential backoff
+    /// on transient failures.
+    pub async fn save(&self, session: &PersistedSession, ttl: Duration) -> bool {
         let ttl_secs = ttl.as_secs() as i64;
         let session_key = format!("gateway:session:{}", session.session_id);
 
@@ -55,7 +58,7 @@ impl SessionStore {
                 "SessionStore: failed to serialise session {}",
                 session.session_id
             );
-            return;
+            return false;
         };
 
         let retry = ExponentialBuilder::default()
@@ -68,11 +71,11 @@ impl SessionStore {
         let jv = json.clone();
         let result = (|| async {
             client
-                .set::<(), _, _>(
+                .set::<Option<String>, _, _>(
                     &sk,
                     jv.as_str(),
                     Some(Expiration::EX(ttl_secs)),
-                    None,
+                    Some(SetOptions::NX),
                     false,
                 )
                 .await
@@ -81,18 +84,30 @@ impl SessionStore {
         .retry(retry)
         .await;
 
-        if let Err(e) = result {
-            warn!(
-                "SessionStore: failed to save session {} after retries: {}",
-                session.session_id, e
-            );
-            return;
+        match result {
+            Ok(Some(_)) => {
+                debug!(
+                    "SessionStore: saved session {} (ttl={}s)",
+                    session.session_id, ttl_secs
+                );
+                true
+            }
+            Ok(None) => {
+                // SET NX returned nil — key already existed.
+                debug!(
+                    "SessionStore: session {} already exists in Redis (idempotent)",
+                    session.session_id
+                );
+                false
+            }
+            Err(e) => {
+                warn!(
+                    "SessionStore: failed to save session {} after retries: {}",
+                    session.session_id, e
+                );
+                false
+            }
         }
-
-        debug!(
-            "SessionStore: saved session {} (ttl={}s)",
-            session.session_id, ttl_secs
-        );
     }
 
     /// Remove the Redis key for a session (called on stop/clear).
