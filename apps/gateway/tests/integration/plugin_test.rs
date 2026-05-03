@@ -78,7 +78,7 @@ async fn har_plugin_lifecycle() {
 
     // Get HAR
     let resp = client
-        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har?iteration=1", session_id)))
         .send()
         .await
         .unwrap();
