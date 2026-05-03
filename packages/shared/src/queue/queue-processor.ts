@@ -278,136 +278,136 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       currentPopReceipt, this.workerName,
     );
 
-    await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
-      criteria: requestDoc.scenario.criteria,
-      maxIterations: requestDoc.maxIterations,
-    });
-
     try {
-    // Only create JudgeClient when criteria exist and judge will actually be called
-    const judgeClient = hasCriteria && judgeServiceUrl ? new JudgeClient(judgeServiceUrl) : undefined;
-    const blobStorage = new BlobStorage({
-      storageAccountName: this.config.storageAccountName,
-      storageConnectionString: this.config.storageConnectionString,
-    });
+      await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
+        criteria: requestDoc.scenario.criteria,
+        maxIterations: requestDoc.maxIterations,
+      });
 
-    const maxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
+      // Only create JudgeClient when criteria exist and judge will actually be called
+      const judgeClient = hasCriteria && judgeServiceUrl ? new JudgeClient(judgeServiceUrl) : undefined;
+      const blobStorage = new BlobStorage({
+        storageAccountName: this.config.storageAccountName,
+        storageConnectionString: this.config.storageConnectionString,
+      });
 
-    // Setup: create workspace, extract skills, upload setup videos
-    if (this.processor.setup) {
-      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
+      const maxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
 
-      if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
-        try {
-          const setupVideoUrls: string[] = [];
-          for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
-            const videoBlobName = `${requestId}/runs/${runId}/setup/video-${i}.webm`;
-            const videoUrl = await blobStorage.uploadFile(
-              setupResult.videoFilePaths[i],
-              videoBlobName,
-              "video/webm"
-            );
-            setupVideoUrls.push(videoUrl);
+      // Setup: create workspace, extract skills, upload setup videos
+      if (this.processor.setup) {
+        const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
+
+        if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
+          try {
+            const setupVideoUrls: string[] = [];
+            for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
+              const videoBlobName = `${requestId}/runs/${runId}/setup/video-${i}.webm`;
+              const videoUrl = await blobStorage.uploadFile(
+                setupResult.videoFilePaths[i],
+                videoBlobName,
+                "video/webm"
+              );
+              setupVideoUrls.push(videoUrl);
+            }
+            await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
+            if (setupVideoUrls.length > 0) {
+              await withRetry(() => this.collection.updateOne(
+                { _id: requestId },
+                { $set: { "run.setupVideoUrls": setupVideoUrls, "run.updatedAt": new Date(), updatedAt: new Date() } }
+              ));
+            }
+          } catch (uploadError) {
+            const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+            await log("warn", `Failed to upload setup video files: ${msg}`);
           }
-          await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
-          if (setupVideoUrls.length > 0) {
-            await withRetry(() => this.collection.updateOne(
-              { _id: requestId },
-              { $set: { "run.setupVideoUrls": setupVideoUrls, "run.updatedAt": new Date(), updatedAt: new Date() } }
-            ));
-          }
-        } catch (uploadError) {
-          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-          await log("warn", `Failed to upload setup video files: ${msg}`);
         }
       }
-    }
 
-    // Extract skills to the workspace (after setup so workspacePath is resolved)
-    if (skillConfigs) {
-      await this.extractSkills(requestDoc, skillConfigs, log);
-    }
+      // Extract skills to the workspace (after setup so workspacePath is resolved)
+      if (skillConfigs) {
+        await this.extractSkills(requestDoc, skillConfigs, log);
+      }
 
-    // Resolve workspace path after setup
-    const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+      // Resolve workspace path after setup
+      const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
 
-    let result;
-    try {
-      result = await runMultiTurnLoop({
-        processor: this.processor,
-        task: requestDoc.scenario.task,
-        criteria: requestDoc.scenario.criteria,
-        maxIterations,
-        workspacePath,
-        judgeClient,
-        blobStorage,
-        requestId,
-        runId,
-        log,
-        personaInstructions: requestDoc.personaInstructions,
-        model: requestDoc.model,
-        mcpServerConfigs,
-        skillConfigs,
-        extensionConfigs,
-        onTurnComplete: async (turn: ConversationTurn) => {
-          // Persist each turn incrementally to MongoDB (retry on CosmosDB 429).
-          // Push to run.turns (run-retry-attempts shape).
-          await withRetry(() => this.collection.updateOne(
-            { _id: requestId },
-            {
-              $push: { "run.turns": turn },
-              $set: { "run.updatedAt": new Date(), updatedAt: new Date() },
-            } as any
-          ));
-        },
+      let result;
+      try {
+        result = await runMultiTurnLoop({
+          processor: this.processor,
+          task: requestDoc.scenario.task,
+          criteria: requestDoc.scenario.criteria,
+          maxIterations,
+          workspacePath,
+          judgeClient,
+          blobStorage,
+          requestId,
+          runId,
+          log,
+          personaInstructions: requestDoc.personaInstructions,
+          model: requestDoc.model,
+          mcpServerConfigs,
+          skillConfigs,
+          extensionConfigs,
+          onTurnComplete: async (turn: ConversationTurn) => {
+            // Persist each turn incrementally to MongoDB (retry on CosmosDB 429).
+            // Push to run.turns (run-retry-attempts shape).
+            await withRetry(() => this.collection.updateOne(
+              { _id: requestId },
+              {
+                $push: { "run.turns": turn },
+                $set: { "run.updatedAt": new Date(), updatedAt: new Date() },
+              } as any
+            ));
+          },
+        });
+      } finally {
+        // Lifecycle: always call teardown() if setup() exists, even on error
+        if (this.processor.teardown) {
+          await this.processor.teardown(log);
+        }
+      }
+
+      const finalStatus = "done";
+      const finalOutcome = result.passed
+        ? "succeeded"
+        : result.hadError
+          ? "failed"
+          : result.turns.length >= maxIterations
+            ? "finished"
+            : "failed";
+      await log("info", `Multi-turn processing ${finalOutcome}`, {
+        passed: result.passed,
+        totalIterations: result.turns.length,
+        final: true,
       });
-    } finally {
-      // Lifecycle: always call teardown() if setup() exists, even on error
-      if (this.processor.teardown) {
-        await this.processor.teardown(log);
-      }
-    }
 
-    const finalStatus = "done";
-    const finalOutcome = result.passed
-      ? "succeeded"
-      : result.hadError
-        ? "failed"
-        : result.turns.length >= maxIterations
-          ? "finished"
-          : "failed";
-    await log("info", `Multi-turn processing ${finalOutcome}`, {
-      passed: result.passed,
-      totalIterations: result.turns.length,
-      final: true,
-    });
+      const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
 
-    const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
+      await withRetry(() => this.collection.updateOne(
+        { _id: requestId },
+        {
+          $set: {
+            "run.status": finalStatus,
+            "run.outcome": finalOutcome,
+            "run.result": result.finalResult,
+            "run.finishedAt": new Date(),
+            "run.updatedAt": new Date(),
+            updatedAt: new Date(),
+            ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
+            ...(result.passed ? {} : { "run.error": result.finalResult }),
+          },
+        }
+      ));
 
-    await withRetry(() => this.collection.updateOne(
-      { _id: requestId },
-      {
-        $set: {
-          "run.status": finalStatus,
-          "run.outcome": finalOutcome,
-          "run.result": result.finalResult,
-          "run.finishedAt": new Date(),
-          "run.updatedAt": new Date(),
-          updatedAt: new Date(),
-          ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
-          ...(result.passed ? {} : { "run.error": result.finalResult }),
-        },
-      }
-    ));
+      console.log(
+        `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
+      );
 
-    console.log(
-      `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
-    );
+      // Fire-and-forget report generation
+      await this.triggerReportGeneration(requestId);
 
-    // Fire-and-forget report generation
-    await this.triggerReportGeneration(requestId);
-
-    await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
     } finally {
       heartbeat.stop();
     }
