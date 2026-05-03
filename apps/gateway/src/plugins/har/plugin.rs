@@ -23,6 +23,7 @@ use tracing::debug;
 
 use crate::plugin::{HttpExchange, ProxyPlugin, SessionId};
 
+use super::iteration_store::IterationStore;
 use super::storage::{BlobWriter, HarWriter, LocalWriter};
 use super::writer;
 
@@ -41,6 +42,9 @@ struct HarSession {
 struct HarInner {
     sessions: RwLock<HashMap<SessionId, HarSession>>,
     writer: Arc<dyn HarWriter>,
+    /// When set, the iteration counter is authoritative in Redis.
+    /// When `None` (no Redis), falls back to local-only `HarSession.current_iteration`.
+    iteration_store: Option<Arc<dyn IterationStore>>,
 }
 
 impl HarInner {
@@ -69,6 +73,22 @@ impl HarPlugin {
             inner: Arc::new(HarInner {
                 sessions: RwLock::new(HashMap::new()),
                 writer,
+                iteration_store: None,
+            }),
+        }
+    }
+
+    /// Create using a `LocalWriter` with a Redis-backed iteration store.
+    pub fn new_with_redis(
+        har_dir: std::path::PathBuf,
+        iteration_store: Arc<dyn IterationStore>,
+    ) -> Self {
+        let writer = Arc::new(LocalWriter::new(har_dir));
+        Self {
+            inner: Arc::new(HarInner {
+                sessions: RwLock::new(HashMap::new()),
+                writer,
+                iteration_store: Some(iteration_store),
             }),
         }
     }
@@ -83,6 +103,23 @@ impl HarPlugin {
             inner: Arc::new(HarInner {
                 sessions: RwLock::new(HashMap::new()),
                 writer,
+                iteration_store: None,
+            }),
+        }
+    }
+
+    /// Create using a `BlobWriter` with a Redis-backed iteration store.
+    pub fn new_with_blob_and_redis(
+        container_client: azure_storage_blobs::prelude::ContainerClient,
+        append_timeout: std::time::Duration,
+        iteration_store: Arc<dyn IterationStore>,
+    ) -> Self {
+        let writer = Arc::new(BlobWriter::new(container_client, append_timeout));
+        Self {
+            inner: Arc::new(HarInner {
+                sessions: RwLock::new(HashMap::new()),
+                writer,
+                iteration_store: Some(iteration_store),
             }),
         }
     }
@@ -102,6 +139,11 @@ impl ProxyPlugin for HarPlugin {
 
         self.inner.writer.init_session(session_id).await;
 
+        // Initialise the Redis iteration counter (if Redis is available).
+        if let Some(store) = &self.inner.iteration_store {
+            store.init(session_id, 3600).await;
+        }
+
         let mut sessions = self.inner.sessions.write();
         sessions.insert(
             session_id.clone(),
@@ -116,12 +158,28 @@ impl ProxyPlugin for HarPlugin {
     }
 
     async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
-        let (redact, iteration) = {
+        let redact = {
             let sessions = self.inner.sessions.read();
             match sessions.get(session_id) {
-                Some(s) if !s.finalized => (s.redact, s.current_iteration),
+                Some(s) if !s.finalized => s.redact,
                 _ => return,
             }
+        };
+
+        // Read the authoritative iteration from Redis when available;
+        // fall back to local state when Redis is not configured.
+        let iteration = if let Some(store) = &self.inner.iteration_store {
+            match store.get(session_id).await {
+                Some(v) => v,
+                None => {
+                    // Key missing — session may have expired in Redis.
+                    let sessions = self.inner.sessions.read();
+                    sessions.get(session_id).map(|s| s.current_iteration).unwrap_or(1)
+                }
+            }
+        } else {
+            let sessions = self.inner.sessions.read();
+            sessions.get(session_id).map(|s| s.current_iteration).unwrap_or(1)
         };
 
         let entry = super::writer::exchange_to_har_entry(exchange, redact);
@@ -170,6 +228,12 @@ impl ProxyPlugin for HarPlugin {
             sessions.remove(session_id);
         }
         self.inner.writer.close_session(session_id);
+
+        // Clean up Redis iteration key.
+        if let Some(store) = &self.inner.iteration_store {
+            store.delete(session_id).await;
+        }
+
         debug!("HAR plugin: session cleared for {}", session_id);
     }
 
@@ -242,54 +306,107 @@ struct RotateResponse {
 /// CAS semantics: if the session's current_iteration == expected, bump to
 /// expected+1, init the new iteration file, and return 200 with the new
 /// iteration number. If there's a mismatch, return 409 with the actual value.
+///
+/// When Redis is available the CAS is performed atomically in Redis (Lua
+/// script) so that any replica can serve the request correctly.
 async fn post_rotate_har(
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<RotateQuery>,
     State(inner): State<Arc<HarInner>>,
 ) -> impl IntoResponse {
-    let current = {
+    // Ensure the session exists locally (we need it for the writer).
+    {
         let sessions = inner.sessions.read();
-        match sessions.get(&session_id) {
-            Some(s) => s.current_iteration,
-            None => return StatusCode::NOT_FOUND.into_response(),
+        if !sessions.contains_key(&session_id) {
+            return StatusCode::NOT_FOUND.into_response();
         }
-    };
+    }
 
-    if current != query.expected {
-        let body = serde_json::to_vec(&RotateResponse { iteration: current }).unwrap_or_default();
-        return axum::response::Response::builder()
-            .status(StatusCode::CONFLICT)
+    if let Some(store) = &inner.iteration_store {
+        // --- Redis-backed CAS ---
+        use super::iteration_store::CasResult;
+        match store.compare_and_swap(&session_id, query.expected).await {
+            CasResult::Ok(new_iteration) => {
+                inner.writer.init_iteration(&session_id, new_iteration).await;
+
+                // Update local cache so co-located on_exchange reads are fast.
+                {
+                    let mut sessions = inner.sessions.write();
+                    if let Some(s) = sessions.get_mut(&session_id) {
+                        s.current_iteration = new_iteration;
+                    }
+                }
+
+                debug!(
+                    "HAR plugin: rotated session {} from iter {} to {} (redis)",
+                    session_id, query.expected, new_iteration
+                );
+
+                let body =
+                    serde_json::to_vec(&RotateResponse { iteration: new_iteration }).unwrap_or_default();
+                axum::response::Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap()
+                    .into_response()
+            }
+            CasResult::Conflict(actual) => {
+                let body =
+                    serde_json::to_vec(&RotateResponse { iteration: actual }).unwrap_or_default();
+                axum::response::Response::builder()
+                    .status(StatusCode::CONFLICT)
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap()
+                    .into_response()
+            }
+        }
+    } else {
+        // --- Local-only CAS (single-replica / no Redis) ---
+        let current = {
+            let sessions = inner.sessions.read();
+            match sessions.get(&session_id) {
+                Some(s) => s.current_iteration,
+                None => return StatusCode::NOT_FOUND.into_response(),
+            }
+        };
+
+        if current != query.expected {
+            let body =
+                serde_json::to_vec(&RotateResponse { iteration: current }).unwrap_or_default();
+            return axum::response::Response::builder()
+                .status(StatusCode::CONFLICT)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap()
+                .into_response();
+        }
+
+        let new_iteration = query.expected + 1;
+        inner.writer.init_iteration(&session_id, new_iteration).await;
+
+        {
+            let mut sessions = inner.sessions.write();
+            if let Some(s) = sessions.get_mut(&session_id) {
+                s.current_iteration = new_iteration;
+            }
+        }
+
+        debug!(
+            "HAR plugin: rotated session {} from iter {} to {}",
+            session_id, query.expected, new_iteration
+        );
+
+        let body =
+            serde_json::to_vec(&RotateResponse { iteration: new_iteration }).unwrap_or_default();
+        axum::response::Response::builder()
+            .status(StatusCode::OK)
             .header("content-type", "application/json")
             .body(axum::body::Body::from(body))
             .unwrap()
-            .into_response();
+            .into_response()
     }
-
-    let new_iteration = query.expected + 1;
-
-    // Init the new iteration file before updating the counter so writes
-    // that arrive after the counter flip find the file ready.
-    inner.writer.init_iteration(&session_id, new_iteration).await;
-
-    {
-        let mut sessions = inner.sessions.write();
-        if let Some(s) = sessions.get_mut(&session_id) {
-            s.current_iteration = new_iteration;
-        }
-    }
-
-    debug!(
-        "HAR plugin: rotated session {} from iter {} to {}",
-        session_id, query.expected, new_iteration
-    );
-
-    let body = serde_json::to_vec(&RotateResponse { iteration: new_iteration }).unwrap_or_default();
-    axum::response::Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "application/json")
-        .body(axum::body::Body::from(body))
-        .unwrap()
-        .into_response()
 }
 
 #[cfg(test)]
@@ -445,5 +562,42 @@ mod tests {
         let sid = "10.0.0.1".to_string();
         plugin.on_session_start(&sid, &serde_json::json!({})).await;
         assert!(!plugin.inner.writer.is_failed(&sid));
+    }
+
+    #[tokio::test]
+    async fn on_exchange_reads_iteration_from_store() {
+        use super::super::iteration_store::tests::MockIterationStore;
+
+        let tmp = TempDir::new().unwrap();
+        let store = Arc::new(MockIterationStore::new());
+        let plugin = HarPlugin::new_with_redis(tmp.path().to_path_buf(), store.clone());
+        let sid = "10.0.0.1".to_string();
+
+        // Start session — sets store to iteration 1.
+        plugin.on_session_start(&sid, &serde_json::json!({})).await;
+        assert_eq!(store.get(&sid).await, Some(1));
+
+        // Exchange lands in iter-1.
+        plugin.on_exchange(&sid, &make_exchange()).await;
+        let har1 = plugin.inner.build_har_for_session(&sid, 1).await.unwrap();
+        assert_eq!(har1.log.entries.len(), 1);
+
+        // Simulate external rotation (another replica bumped the store).
+        let cas = store.compare_and_swap(&sid, 1).await;
+        assert!(matches!(cas, super::super::iteration_store::CasResult::Ok(2)));
+        // Must also init the file so the writer can append.
+        plugin.inner.writer.init_iteration(&sid, 2).await;
+
+        // Next exchange reads store → gets 2 → appends to iter-2.
+        plugin.on_exchange(&sid, &make_exchange()).await;
+        let har2 = plugin.inner.build_har_for_session(&sid, 2).await.unwrap();
+        assert_eq!(har2.log.entries.len(), 1);
+        // iter-1 still has 1.
+        let har1_after = plugin.inner.build_har_for_session(&sid, 1).await.unwrap();
+        assert_eq!(har1_after.log.entries.len(), 1);
+
+        // Clear cleans up the store.
+        plugin.on_session_clear(&sid).await;
+        assert_eq!(store.get(&sid).await, None);
     }
 }

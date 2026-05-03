@@ -28,6 +28,7 @@ use gateway::ca::CertificateAuthority;
 use gateway::config::{Cli, Config};
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
+use gateway::plugins::har::iteration_store::RedisIterationStore;
 use gateway::plugins::har::plugin::HarPlugin;
 use gateway::proxy::handler::{handle_client, ProxyState};
 use gateway::session::SessionManager;
@@ -63,6 +64,71 @@ async fn main() -> anyhow::Result<()> {
     // URL filter
     let url_filter = Arc::new(UrlFilter::new(&config.urls_to_watch)?);
 
+    // Redis client — shared between session store and HAR iteration store.
+    let redis_client: Option<fred::prelude::Client> = {
+        let redis_host = std::env::var("REDIS_HOST").ok();
+        if let Some(host) = redis_host {
+            let port: u16 = std::env::var("REDIS_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(6380);
+            let password = std::env::var("REDIS_PASSWORD").ok();
+            let tls = if std::env::var("REDIS_TLS")
+                .map(|v| v == "true")
+                .unwrap_or(false)
+            {
+                fred::types::config::TlsConnector::default_rustls()
+                    .ok()
+                    .map(Into::into)
+            } else {
+                None
+            };
+            let use_cluster = std::env::var("REDIS_CLUSTER")
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let server = if use_cluster {
+                fred::types::config::ServerConfig::new_clustered(vec![(host.as_str(), port)])
+            } else {
+                fred::types::config::ServerConfig::new_centralized(host.as_str(), port)
+            };
+            let redis_config = fred::types::config::Config {
+                server,
+                password,
+                tls,
+                ..Default::default()
+            };
+            match fred::types::Builder::from_config(redis_config).build() {
+                Ok(client) => {
+                    use fred::interfaces::ClientLike;
+                    match client.init().await {
+                        Ok(_) => {
+                            info!("Redis: connected to {}:{}", host, port);
+                            Some(client)
+                        }
+                        Err(e) => {
+                            warn!("Redis: connect failed, running without persistence: {}", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Redis: config error, running without persistence: {}", e);
+                    None
+                }
+            }
+        } else {
+            info!("Redis: REDIS_HOST not set, running without persistence");
+            None
+        }
+    };
+
+    // HAR iteration store — backed by Redis when available.
+    let iteration_store: Option<Arc<dyn gateway::plugins::har::iteration_store::IterationStore>> =
+        redis_client.as_ref().map(|c| {
+            Arc::new(RedisIterationStore::new(c.clone()))
+                as Arc<dyn gateway::plugins::har::iteration_store::IterationStore>
+        });
+
     // Plugins — HAR writer backend selected from config
     let (har_plugin, blob_container_client): (
         Arc<dyn gateway::plugin::ProxyPlugin>,
@@ -73,9 +139,6 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or(false);
 
         let container_client = if use_emulator {
-            // Azurite emulator: parse host/port from the storage account URL so
-            // the same config works for both local Docker Compose and CI.
-            // URL format: http://<host>:<port>/devstoreaccount1
             let emulator_host =
                 std::env::var("AZURITE_BLOB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
             let emulator_port: u16 = std::env::var("AZURITE_BLOB_PORT")
@@ -111,99 +174,45 @@ async fn main() -> anyhow::Result<()> {
                 .container_client(&blob_cfg.container_name)
         };
 
-        (
-            Arc::new(HarPlugin::new_with_blob(
+        let plugin: Arc<dyn gateway::plugin::ProxyPlugin> = match iteration_store.clone() {
+            Some(store) => Arc::new(HarPlugin::new_with_blob_and_redis(
+                container_client.clone(),
+                std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
+                store,
+            )),
+            None => Arc::new(HarPlugin::new_with_blob(
                 container_client.clone(),
                 std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
             )),
-            Some(container_client),
-        )
+        };
+        (plugin, Some(container_client))
     } else {
         let har_dir = config.plugins.har.output_dir.clone();
         info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
-        (Arc::new(HarPlugin::new(har_dir)), None)
+        let plugin: Arc<dyn gateway::plugin::ProxyPlugin> = match iteration_store.clone() {
+            Some(store) => Arc::new(HarPlugin::new_with_redis(har_dir, store)),
+            None => Arc::new(HarPlugin::new(har_dir)),
+        };
+        (plugin, None)
     };
     let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
 
-    // Session manager — wire Redis store when env vars are present.
-    let session_manager = {
-        let redis_host = std::env::var("REDIS_HOST").ok();
-        if let Some(host) = redis_host {
-            let port: u16 = std::env::var("REDIS_PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(6380);
-            let password = std::env::var("REDIS_PASSWORD").ok();
-            // Use TLS only when REDIS_TLS=true is explicitly set.
-            let tls = if std::env::var("REDIS_TLS")
-                .map(|v| v == "true")
-                .unwrap_or(false)
-            {
-                fred::types::config::TlsConnector::default_rustls()
-                    .ok()
-                    .map(Into::into)
-            } else {
-                None
-            };
-            // Azure Redis Enterprise uses cluster protocol; local dev uses standalone.
-            let use_cluster = std::env::var("REDIS_CLUSTER")
-                .map(|v| v == "true")
-                .unwrap_or(false);
-            let server = if use_cluster {
-                fred::types::config::ServerConfig::new_clustered(vec![(host.as_str(), port)])
-            } else {
-                fred::types::config::ServerConfig::new_centralized(host.as_str(), port)
-            };
-            let redis_config = fred::types::config::Config {
-                server,
-                password,
-                tls,
-                ..Default::default()
-            };
-            match fred::types::Builder::from_config(redis_config).build() {
-                Ok(client) => {
-                    use fred::interfaces::ClientLike;
-                    match client.init().await {
-                        Ok(_) => {
-                            info!("Session store: connected to Redis at {}:{}", host, port);
-                            let store = SessionStore::new(client);
-                            Arc::new(SessionManager::new_with_store(
-                                registry.clone(),
-                                Duration::from_secs(300),
-                                100,
-                                store,
-                            ))
-                        }
-                        Err(e) => {
-                            warn!("Session store: Redis connect failed, running without persistence: {}", e);
-                            Arc::new(SessionManager::new(
-                                registry.clone(),
-                                Duration::from_secs(300),
-                                100,
-                            ))
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Session store: Redis config error, running without persistence: {}",
-                        e
-                    );
-                    Arc::new(SessionManager::new(
-                        registry.clone(),
-                        Duration::from_secs(300),
-                        100,
-                    ))
-                }
-            }
-        } else {
-            info!("Session store: REDIS_HOST not set, running without persistence");
-            Arc::new(SessionManager::new(
+    // Session manager — wire Redis store when a client is available.
+    let session_manager = match redis_client {
+        Some(client) => {
+            let store = SessionStore::new(client);
+            Arc::new(SessionManager::new_with_store(
                 registry.clone(),
                 Duration::from_secs(300),
                 100,
+                store,
             ))
         }
+        None => Arc::new(SessionManager::new(
+            registry.clone(),
+            Duration::from_secs(300),
+            100,
+        )),
     };
 
     // Shared HTTP/1.1 connection pool for plain (non-CONNECT) forwarding.
