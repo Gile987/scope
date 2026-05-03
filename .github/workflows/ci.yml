@@ -425,15 +425,6 @@ jobs:
         working-directory: apps/gateway
         run: cargo nextest run --profile ci
 
-      - name: Verify TLA+ specification
-        working-directory: apps/gateway
-        run: |
-          curl -fsSL -o /tmp/tla2tools.jar \
-            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
-          java -XX:+UseParallelGC -jar /tmp/tla2tools.jar \
-            -config tlaplus/Gateway.cfg -workers auto tlaplus/Gateway.tla \
-            | tee /dev/stderr | grep -q 'Model checking completed. No error has been found.'
-
       - name: Convert JUnit XML to CTRF
         if: always()
         run: |
@@ -462,6 +453,36 @@ jobs:
         with:
           name: ctrf-test-results-gateway
           path: ctrf/
+
+  # ---------------------------------------------------------------------------
+  # Gateway TLA+ formal verification (runs in parallel with gateway build)
+  # ---------------------------------------------------------------------------
+  gateway-tlaplus:
+    name: "Gateway: TLA+ model checking"
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.gateway == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Verify TLA+ specification
+        working-directory: apps/gateway
+        run: |
+          curl -fsSL -o /tmp/tla2tools.jar \
+            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+          java -XX:+UseParallelGC -jar /tmp/tla2tools.jar \
+            -config tlaplus/Gateway.cfg -workers auto tlaplus/Gateway.tla \
+            | tee /dev/stderr | grep -q 'Model checking completed. No error has been found.'
 
   # ---------------------------------------------------------------------------
   # Detect which images changed (runs in parallel with CI jobs)
@@ -721,7 +742,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [test, integration-test, lint, build, gateway]
+    needs: [test, integration-test, lint, build, gateway, gateway-tlaplus]
     if: always()
 
     steps:
@@ -731,7 +752,8 @@ jobs:
              [ "${{ needs.integration-test.result }}" = "success" -o "${{ needs.integration-test.result }}" = "skipped" ] && \
              [ "${{ needs.lint.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ] && \
-             [ "${{ needs.gateway.result }}" = "success" -o "${{ needs.gateway.result }}" = "skipped" ]; then
+             [ "${{ needs.gateway.result }}" = "success" -o "${{ needs.gateway.result }}" = "skipped" ] && \
+             [ "${{ needs.gateway-tlaplus.result }}" = "success" -o "${{ needs.gateway-tlaplus.result }}" = "skipped" ]; then
             echo "✅ All checks passed!"
             exit 0
           else
@@ -741,5 +763,6 @@ jobs:
             echo "  Lint: ${{ needs.lint.result }}"
             echo "  Build: ${{ needs.build.result }}"
             echo "  Gateway: ${{ needs.gateway.result }}"
+            echo "  Gateway TLA+: ${{ needs.gateway-tlaplus.result }}"
             exit 1
           fi
