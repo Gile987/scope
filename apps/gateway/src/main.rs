@@ -145,8 +145,17 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
+            // Azure Redis Enterprise uses cluster protocol; local dev uses standalone.
+            let use_cluster = std::env::var("REDIS_CLUSTER")
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let server = if use_cluster {
+                fred::types::config::ServerConfig::new_clustered(vec![(host.as_str(), port)])
+            } else {
+                fred::types::config::ServerConfig::new_centralized(host.as_str(), port)
+            };
             let redis_config = fred::types::config::Config {
-                server: fred::types::config::ServerConfig::new_centralized(host.as_str(), port),
+                server,
                 password,
                 tls,
                 ..Default::default()
