@@ -307,71 +307,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
     }
   }
 
-  // ── Visibility heartbeat ──────────────────────────────────────────────────
-
-  /** How often to extend message visibility (ms). */
-  static readonly HEARTBEAT_INTERVAL_MS = 30_000;
-  /** Each heartbeat extends visibility by this many seconds. */
-  static readonly HEARTBEAT_VISIBILITY_SECONDS = 120;
-
-  /**
-   * Start a background loop that periodically extends a message's visibility
-   * timeout via `updateMessage`. This keeps the message hidden from other
-   * workers as long as this worker is alive. If the worker crashes, the
-   * heartbeat dies and the message reappears after at most
-   * {@link HEARTBEAT_VISIBILITY_SECONDS} (default 2 min) instead of the
-   * previous 35-minute single-shot extension.
-   *
-   * @returns A handle to stop the heartbeat and retrieve the latest pop receipt.
-   */
-  protected startVisibilityHeartbeat(
-    messageId: string,
-    messageText: string,
-    initialPopReceipt: string,
-    intervalMs: number = BaseQueueProcessor.HEARTBEAT_INTERVAL_MS,
-    visibilityTimeoutSeconds: number = BaseQueueProcessor.HEARTBEAT_VISIBILITY_SECONDS,
-  ): VisibilityHeartbeat {
-    let popReceipt = initialPopReceipt;
-    const abort = new AbortController();
-
-    const loop = async () => {
-      while (!abort.signal.aborted) {
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, intervalMs);
-          abort.signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
-        });
-        if (abort.signal.aborted) break;
-        try {
-          const response = await this.queueClient.updateMessage(
-            messageId, popReceipt, messageText, visibilityTimeoutSeconds,
-          );
-          popReceipt = response.popReceipt!;
-        } catch (error) {
-          if (abort.signal.aborted) break;
-          console.warn(`[${this.workerName}] Visibility heartbeat failed:`, error);
-        }
-      }
-    };
-
-    loop().catch(() => {}); // fire-and-forget
-
-    return {
-      stop: () => { abort.abort(); return popReceipt; },
-      get popReceipt() { return popReceipt; },
-    };
-  }
-
   protected sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
-}
-
-/**
- * Handle returned by {@link BaseQueueProcessor.startVisibilityHeartbeat}.
- */
-export interface VisibilityHeartbeat {
-  /** Stop the heartbeat and return the latest pop receipt. Idempotent. */
-  stop(): string;
-  /** Current pop receipt (updated by each heartbeat tick). */
-  readonly popReceipt: string;
 }

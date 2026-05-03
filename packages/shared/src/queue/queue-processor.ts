@@ -16,6 +16,7 @@ import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
+import { startVisibilityHeartbeat } from "./visibility-heartbeat.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
@@ -272,8 +273,9 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // If the worker crashes, the heartbeat dies and the message reappears
     // after at most ~2 min instead of the previous 35-minute single-shot
     // extension.
-    const heartbeat = this.startVisibilityHeartbeat(
-      message.messageId, message.messageText, currentPopReceipt,
+    const heartbeat = startVisibilityHeartbeat(
+      this.queueClient, message.messageId, message.messageText,
+      currentPopReceipt, this.workerName,
     );
 
     await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
