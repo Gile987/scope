@@ -16,7 +16,7 @@ The platform previously used [Microsoft DevProxy](https://github.com/dotnet/dev-
 | **Control API surface** | Only exposes start/stop recording + cert download; no hooks for real-time inspection |
 | **Opacity** | Closed-source plugin model (HarGeneratorPlugin DLL); hard to extend or debug |
 
-The Rust gateway replaces all of these with a **single shared service** (~23 MB alpine image, no init containers), using source-IP-based sessions to isolate traffic per worker.
+The Rust gateway replaces all of these with a **single shared service** (~23 MB alpine image, no init containers), using Proxy-Authorization-based sessions to isolate traffic per worker.
 
 ## Architecture
 
@@ -30,7 +30,7 @@ flowchart TB
 
     subgraph GW["AI Gateway (Rust)"]
         PX[":18000 Single Port<br/><i>CONNECT tunneling, TLS MITM,<br/>Control API (session mgmt, certs)</i>"]
-        SM["Session Manager<br/><i>source-IP keyed, Redis-backed</i>"]
+        SM["Session Manager<br/><i>UUID-keyed, Redis-backed</i>"]
         PR["Plugin Registry"]
         HAR["HAR Plugin<br/><i>JSONL → HAR 1.2</i>"]
         CT["CopilotToken Plugin<br/><i>token mint + refresh</i>"]
@@ -48,7 +48,7 @@ flowchart TB
         TM["Token Manager<br/><i>TOKEN_MANAGER_URL</i>"]
     end
 
-    W1 -->|"HTTP_PROXY +<br/>start/stop session,<br/>download cert/HAR"| PX
+    W1 -->|"HTTP_PROXY (session ID in userinfo) +<br/>start/stop session,<br/>download cert/HAR"| PX
     PX --> SM
     SM --> PR
     SM <-->|"session state"| REDIS
@@ -68,11 +68,29 @@ flowchart TB
 
 ## Session Identity
 
-Sessions are keyed by **source IP** (`peer_addr.ip()`). Each worker container has a unique IP on the Docker/Kubernetes network, so the gateway automatically associates both API calls and proxy traffic with the correct session.
+Sessions are identified by a **client-provided UUID** embedded in the proxy URL's **userinfo** field:
 
-- **Docker Compose**: each container gets a unique IP on the bridge network
-- **Kubernetes**: each pod gets a unique IP
-- **No custom headers needed** — source IP is used everywhere
+```
+HTTP_PROXY=http://<sessionId>@gateway:18000
+```
+
+HTTP clients send a `Proxy-Authorization: Basic <base64(sessionId:)>` header on every proxy request. The gateway decodes this header to resolve the session — no IP-based lookup.
+
+### Client Proxy Authentication Behavior
+
+| Client | Runtime | Auth Behavior | 407 Round-Trip? |
+|--------|---------|---------------|------------------|
+| ACP Copilot worker | Node.js (undici) | Sends `Proxy-Authorization` **preemptively** from userinfo | No |
+| ACP Claude Code worker | Node.js (undici) | Same — undici parses userinfo immediately | No |
+| VS Code Electron worker | Chromium network stack | Requires `407 Proxy Authentication Required` challenge first | Yes — one per connection |
+
+Proxy requests without valid `Proxy-Authorization` receive a `407` response with `Proxy-Authenticate: Basic realm="gateway"`. This is standard HTTP proxy auth per RFC 7235.
+
+### Idempotent Session Creation
+
+Workers generate the session UUID client-side (`crypto.randomUUID()`) and pass it in the `POST /api/v1/sessions` body. If the request is retried (network blip, response lost), the same UUID hits the same session — returning `200 OK` instead of creating a duplicate.
+
+Cross-replica idempotency is enforced via Redis `SET NX`: if two replicas race to create the same session ID, only one wins the SET NX — the other returns `Ok(false)`. The API returns `201 Created` for new sessions and `200 OK` for idempotent retries.
 
 ## Control API
 
@@ -82,27 +100,28 @@ The REST API is served on the same port as the proxy (**18000**) and provides se
 |----------|--------|---------|
 | `/health` | `GET` | K8s liveness/readiness health check |
 | `/api/v1/cacert` | `GET` | Download the CA certificate (PEM) |
-| `/api/v1/sessions` | `POST` | Create a session → returns `{ id }` |
+| `/api/v1/sessions` | `POST` | Create a session (client-provided UUID) → `201 Created` or `200 OK` (idempotent) |
 | `/api/v1/sessions` | `GET` | List all sessions |
 | `/api/v1/sessions/{id}` | `GET` | Session status |
 | `/api/v1/sessions/{id}/stop` | `POST` | Stop recording, finalize plugin data |
 | `/api/v1/sessions/{id}/har` | `GET` | Download the HAR file |
 | `/api/v1/sessions/{id}` | `DELETE` | Delete session and clean up |
 
-Sessions are identified by a **UUID** returned from `POST /api/v1/sessions`. The gateway also maintains a reverse index from source IP to session ID, so the proxy data plane can associate traffic with the correct session without custom headers.
+Sessions are identified by a **client-provided UUID** sent in the `POST /api/v1/sessions` body. The proxy data plane resolves sessions from the `Proxy-Authorization: Basic` header (session ID embedded in proxy URL userinfo).
 
 ### Session Create
 
 ```json
 POST /api/v1/sessions
 {
+  "id": "550e8400-e29b-41d4-a716-446655440000",
   "plugins": {
     "har": {
       "redactCredentials": true
     }
   }
 }
-→ 201 Created
+→ 201 Created  (or 200 OK if session already exists — idempotent)
 {
   "id": "550e8400-e29b-41d4-a716-446655440000"
 }
@@ -114,13 +133,16 @@ Each key under `plugins` maps to a registered plugin name. The value is passed t
 
 The proxy runs on port **18000** and handles three types of traffic:
 
-1. **CONNECT tunneling with TLS interception** — for HTTPS traffic matching URL filters. The proxy accepts the CONNECT request, performs a TLS handshake with the client using a dynamically generated leaf certificate, connects to the upstream with real TLS, and relays traffic bidirectionally while notifying plugins of each exchange.
+1. **CONNECT tunneling with TLS interception** — for HTTPS traffic matching URL filters and with a valid session (via `Proxy-Authorization`). The proxy accepts the CONNECT request, performs a TLS handshake with the client using a dynamically generated leaf certificate, connects to the upstream with real TLS, and relays traffic bidirectionally while notifying plugins of each exchange.
 2. **CONNECT passthrough** — for HTTPS traffic not matching URL filters, or when no session is active. Traffic is tunneled without interception.
 3. **Plain HTTP forwarding** — for unencrypted HTTP requests (rare in production).
+4. **407 Proxy Authentication Required** — proxy requests without a valid `Proxy-Authorization` header receive a 407 challenge. Chromium/Electron resends with credentials; Node.js (undici) sends preemptively.
 
 ```mermaid
 flowchart LR
-    A["Client CONNECT"] --> B{"Active session?"}
+    A["Client CONNECT"] --> AA{"Proxy-Authorization?"}
+    AA -->|No| AAA["407 Challenge<br/><i>Proxy-Authenticate: Basic</i>"]
+    AA -->|Yes| B{"Active session?"}
     B -->|No| C["Tunnel passthrough<br/><i>no interception</i>"]
     B -->|Yes| D{"URL matches filter?"}
     D -->|No| C
@@ -181,14 +203,15 @@ sequenceDiagram
     participant HAR as HAR Plugin
     participant PX as Proxy
 
-    W->>API: POST /api/v1/sessions
-    API->>SM: create_session(ip, settings)
+    W->>API: POST /api/v1/sessions {id: "uuid", plugins: {...}}
+    API->>SM: create_session(id, settings)
     SM->>HAR: on_session_start(id, {har: ...})
     Note over HAR: Init writer<br/>(local file OR Azure append blob)
     API-->>W: 201 {id: "uuid"}
+    Note over W: HTTP_PROXY=http://uuid@gateway:18000
 
-    W->>PX: CONNECT api.githubcopilot.com
-    Note over PX: IP→session lookup, TLS intercept + relay
+    W->>PX: CONNECT api.githubcopilot.com<br/>(Proxy-Authorization: Basic)
+    Note over PX: Decode Proxy-Auth → session ID,<br/>TLS intercept + relay
     PX->>HAR: on_exchange(id, exchange)
     Note over HAR: Append JSON line<br/>(local OR blob PUT ?comp=appendblock)
 
@@ -230,11 +253,11 @@ sequenceDiagram
     participant TM as Token Manager
     participant GH as api.github.com
 
-    W->>API: POST /api/v1/sessions {copilotToken: {capability, ...}}
+    W->>API: POST /api/v1/sessions {id: "uuid", copilotToken: {...}}
     API->>CT: on_session_start(id, settings)
     Note over CT: Store config, start session clock
 
-    W->>Proxy: CONNECT api.githubcopilot.com
+    W->>Proxy: CONNECT api.githubcopilot.com<br/>(Proxy-Authorization: Basic)
     Proxy->>CT: on_request(id, uri, headers)
     Note over CT: Is token cached + valid?
     CT->>TM: POST /api/v1/keys/acquire
@@ -269,6 +292,7 @@ The Token Manager URL is **not** a session setting — it comes from the `TOKEN_
 ```json
 POST /api/v1/sessions
 {
+  "id": "550e8400-e29b-41d4-a716-446655440000",
   "plugins": {
     "har": { "redactCredentials": true },
     "copilotToken": {
@@ -307,11 +331,12 @@ RFC 3339 is a strict subset of ISO 8601 — the key difference is that RFC 3339 
 
 | Event | Trigger | What happens |
 |-------|---------|--------------|
-| **Create** | `POST /api/v1/sessions` | Assign UUID, clear any existing session for this IP, create new session, notify plugins |
-| **Active** | Proxy traffic from session IP | IP→session lookup, TLS interception + plugin `on_exchange()` |
-| **Stop** | `POST /api/v1/sessions/{id}/stop` | Mark session inactive, notify plugins to finalize |
-| **Delete** | `DELETE /api/v1/sessions/{id}` or idle timeout | Delete session state, notify plugins to clean up temp files |
-| **Passthrough** | Traffic from IP with no active session | Forward directly, no interception, no plugin notification |
+| **Create** | `POST /api/v1/sessions` with `{ id: "uuid" }` | Validate UUID, create session (idempotent if ID exists), persist to Redis via SET NX, notify plugins. Returns 201 (new) or 200 (existing). |
+| **Active** | Proxy traffic with `Proxy-Authorization` | Decode session ID from header, TLS interception + plugin `on_exchange()` |
+| **407 Challenge** | Proxy traffic without `Proxy-Authorization` | Return 407 with `Proxy-Authenticate: Basic realm="gateway"` — Chromium resends with credentials |
+| **Stop** | `POST /api/v1/sessions/{id}/stop` | Mark session inactive, notify plugins to finalize, delete Redis key |
+| **Delete** | `DELETE /api/v1/sessions/{id}` or idle timeout | Delete session state and Redis key, notify plugins to clean up temp files |
+| **Passthrough** | Traffic with session ID but URL not in filter | Forward directly, no interception, no plugin notification |
 
 Idle sessions are reaped after a configurable timeout (default: 5 minutes). Max concurrent sessions: 100.
 
@@ -335,7 +360,7 @@ apps/gateway/
 ├── src/
 │   ├── main.rs                 # Entry point, CLI args, signal handling
 │   ├── config.rs               # Configuration (ports, URL filters, cert paths)
-│   ├── session.rs              # Source-IP session manager
+│   ├── session.rs              # UUID-keyed session manager (Proxy-Auth based)
 │   ├── plugin.rs               # ProxyPlugin trait + PluginRegistry
 │   ├── api/
 │   │   ├── server.rs           # Axum REST API (same port as proxy)
@@ -359,7 +384,7 @@ apps/gateway/
 │   └── proxy/
 │       ├── handler.rs          # CONNECT tunneling + plain HTTP forwarding
 │       └── tls.rs              # TLS interception, dynamic cert generation
-└── tests/                      # 90 unit + 18 integration tests
+└── tests/                      # 119 unit + 18 integration tests
 ```
 
 ## Configuration
@@ -412,14 +437,14 @@ gateway:
     retries: 10
 ```
 
-Workers connect via `HTTP_PROXY=http://gateway:18000` and `DEV_PROXY_API_URL=http://gateway:18000`.
+Workers connect via `HTTP_PROXY=http://<sessionId>@gateway:18000` (session ID embedded as userinfo) and `DEV_PROXY_API_URL=http://gateway:18000`.
 
 ## Kubernetes Deployment
 
 The gateway runs as a standalone Deployment (not a sidecar) in the `scoped` namespace:
 
 - **2 replicas** for high availability
-- **Service** with `sessionAffinity: ClientIP` (10 min timeout) — ensures a worker's API calls and proxy traffic hit the same gateway pod
+- **Service** with `sessionAffinity: ClientIP` (10 min timeout) — performance optimization: keeps a worker's connections pinned to one replica for in-memory cache hits (not required for correctness — sessions are resolved via Proxy-Authorization, not IP)
 - **Resources**: 100m CPU / 128Mi memory (requests), 500m CPU / 512Mi memory (limits) per pod
 
 Workers that use the gateway (currently VS Code Electron) have their DevProxy sidecar **removed entirely**. The worker pod drops from 3 containers to 1, and proxy URLs point to the gateway Service:
@@ -431,7 +456,7 @@ env:
   - name: DEV_PROXY_API_URL
     value: "http://gateway-service.scoped.svc.cluster.local:18000"
   - name: HTTP_PROXY
-    value: "http://gateway-service.scoped.svc.cluster.local:18000"
+    value: "http://<sessionId>@gateway-service.scoped.svc.cluster.local:18000"
 ```
 
 **Manifests:** [`deploy/base/gateway.yaml`](../../deploy/base/gateway.yaml), [`deploy/base/gateway-config.yaml`](../../deploy/base/gateway-config.yaml)
