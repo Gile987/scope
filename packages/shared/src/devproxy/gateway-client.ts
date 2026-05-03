@@ -92,13 +92,13 @@ export class GatewayClient {
     }
   }
 
-  async downloadHar(): Promise<HarFile | null> {
+  async downloadHar(iteration: number): Promise<HarFile | null> {
     const id = this.sessionId;
     if (!id) return null;
     try {
       return await withRetry(
         async () => {
-          const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}/har`);
+          const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}/har?iteration=${iteration}`);
           if (!response.ok) {
             throw new Error(`HAR download failed: ${response.status} ${response.statusText}`);
           }
@@ -117,6 +117,29 @@ export class GatewayClient {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Rotate the HAR iteration: CAS-guarded bump from `expected` to `expected+1`.
+   * Returns the new iteration number on success.
+   * Throws on 409 (iteration mismatch) or other errors.
+   */
+  async rotateHar(expected: number): Promise<number> {
+    const id = this.requireSessionId();
+    const response = await fetch(
+      `${this.apiUrl}/api/v1/sessions/${id}/har/rotate?expected=${expected}`,
+      { method: "POST" },
+    );
+    const body = (await response.json()) as { iteration: number };
+    if (response.status === 409) {
+      throw new Error(
+        `HAR rotate conflict: expected iteration ${expected}, server has ${body.iteration}`,
+      );
+    }
+    if (!response.ok) {
+      throw new Error(`HAR rotate failed: ${response.status} ${response.statusText}`);
+    }
+    return body.iteration;
   }
 
   async deleteSession(): Promise<void> {

@@ -173,17 +173,17 @@ describe("GatewayClient", () => {
 
       const client = new GatewayClient("http://test:18897");
       await client.startSession();
-      const result = await client.downloadHar();
+      const result = await client.downloadHar(1);
 
       expect(result).toEqual(mockHar);
       expect(fetch).toHaveBeenCalledWith(
-        `http://test:18897/api/v1/sessions/${SESSION_ID}/har`,
+        `http://test:18897/api/v1/sessions/${SESSION_ID}/har?iteration=1`,
       );
     });
 
     it("returns null when no session started", async () => {
       const client = new GatewayClient("http://test:18897");
-      expect(await client.downloadHar()).toBeNull();
+      expect(await client.downloadHar(1)).toBeNull();
     });
 
     it("returns null on 404", async () => {
@@ -198,7 +198,7 @@ describe("GatewayClient", () => {
 
       const client = new GatewayClient("http://test:18897");
       await client.startSession();
-      expect(await client.downloadHar()).toBeNull();
+      expect(await client.downloadHar(1)).toBeNull();
     });
 
     it("returns null on network error", async () => {
@@ -213,7 +213,7 @@ describe("GatewayClient", () => {
 
       const client = new GatewayClient("http://test:18897");
       await client.startSession();
-      expect(await client.downloadHar()).toBeNull();
+      expect(await client.downloadHar(1)).toBeNull();
     });
   });
 
@@ -291,6 +291,59 @@ describe("GatewayClient", () => {
       expect(client.proxyUrl).toContain(SESSION_ID);
       await client.deleteSession();
       expect(client.proxyUrl).toBe("http://gateway:18000");
+    });
+  });
+
+  describe("rotateHar", () => {
+    it("calls POST /har/rotate with expected param and returns new iteration", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ iteration: 2 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+
+      const client = new GatewayClient("http://test:18897");
+      await client.startSession();
+      const newIter = await client.rotateHar(1);
+
+      expect(newIter).toBe(2);
+      expect(fetch).toHaveBeenCalledWith(
+        `http://test:18897/api/v1/sessions/${SESSION_ID}/har/rotate?expected=1`,
+        { method: "POST" },
+      );
+    });
+
+    it("throws on 409 conflict", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ iteration: 3 }), {
+            status: 409,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+
+      const client = new GatewayClient("http://test:18897");
+      await client.startSession();
+      await expect(client.rotateHar(1)).rejects.toThrow("HAR rotate conflict");
+    });
+
+    it("throws if no session started", async () => {
+      const client = new GatewayClient("http://test:18897");
+      await expect(client.rotateHar(1)).rejects.toThrow("No active gateway session");
     });
   });
 });
