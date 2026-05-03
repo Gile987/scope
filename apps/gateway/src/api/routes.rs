@@ -406,7 +406,7 @@ mod tests {
         let app = test_router(state);
         let resp = app
             .oneshot(
-                Request::get(&format!("/api/v1/sessions/{}", id))
+                Request::get(format!("/api/v1/sessions/{}", id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -422,7 +422,7 @@ mod tests {
         let app = test_router(test_state());
         let resp = app
             .oneshot(
-                Request::get(&format!("/api/v1/sessions/{}", uuid::Uuid::new_v4()))
+                Request::get(format!("/api/v1/sessions/{}", uuid::Uuid::new_v4()))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -479,7 +479,7 @@ mod tests {
         let app = test_router(state);
         let resp = app
             .oneshot(
-                Request::post(&format!("/api/v1/sessions/{}/stop", id))
+                Request::post(format!("/api/v1/sessions/{}/stop", id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -493,7 +493,7 @@ mod tests {
         let app = test_router(test_state());
         let resp = app
             .oneshot(
-                Request::post(&format!("/api/v1/sessions/{}/stop", uuid::Uuid::new_v4()))
+                Request::post(format!("/api/v1/sessions/{}/stop", uuid::Uuid::new_v4()))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -516,7 +516,7 @@ mod tests {
         let app = test_router(state);
         let resp = app
             .oneshot(
-                Request::post(&format!("/api/v1/sessions/{}/stop", id))
+                Request::post(format!("/api/v1/sessions/{}/stop", id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -540,7 +540,7 @@ mod tests {
         let app = test_router(state);
         let resp = app
             .oneshot(
-                Request::delete(&format!("/api/v1/sessions/{}", id))
+                Request::delete(format!("/api/v1/sessions/{}", id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -554,7 +554,7 @@ mod tests {
         let app = test_router(test_state());
         let resp = app
             .oneshot(
-                Request::delete(&format!("/api/v1/sessions/{}", uuid::Uuid::new_v4()))
+                Request::delete(format!("/api/v1/sessions/{}", uuid::Uuid::new_v4()))
                     .body(Body::empty())
                     .unwrap(),
             )
