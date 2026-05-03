@@ -57,15 +57,16 @@ async fn har_plugin_lifecycle() {
     let client = reqwest::Client::new();
 
     // Create session with HAR settings
+    let session_id = uuid::Uuid::new_v4().to_string();
     let resp = client
         .post(gw.api_url("/api/v1/sessions"))
-        .json(&serde_json::json!({"plugins": {"har": {"redactCredentials": true}}}))
+        .json(
+            &serde_json::json!({"id": session_id, "plugins": {"har": {"redactCredentials": true}}}),
+        )
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 201);
-    let body: serde_json::Value = resp.json().await.unwrap();
-    let session_id = body["id"].as_str().unwrap().to_string();
 
     // Stop session
     let resp = client

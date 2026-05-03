@@ -4,14 +4,12 @@
 //! REST API route handlers for session CRUD, health checks, and CA certificate retrieval.
 //!
 //! All session mutations go through `SessionManager`, which handles plugin
-//! lifecycle notifications. The client IP is extracted from the TCP connection
-//! (via Axum's `ConnectInfo`) and used as the session binding key.
+//! lifecycle notifications. Session IDs are client-provided UUIDs.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::{ConnectInfo, Path, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -80,22 +78,31 @@ pub struct HealthResponse {
 
 /// POST /api/v1/sessions — create a new session
 pub async fn post_create_session(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<ApiState>>,
     Json(body): Json<SessionCreateRequest>,
 ) -> impl IntoResponse {
-    let client_ip = addr.ip();
+    let session_id = body.id;
+
+    if uuid::Uuid::parse_str(&session_id).is_err() {
+        return (StatusCode::BAD_REQUEST, "id must be a valid UUID").into_response();
+    }
+
     let plugin_settings = body.plugins.unwrap_or_default();
 
-    info!("Creating session for {}", client_ip);
+    info!("Creating session {}", session_id);
 
     match state
         .session_manager
-        .create_session(client_ip, plugin_settings)
+        .create_session(session_id.clone(), plugin_settings)
         .await
     {
-        Ok(session_id) => (
+        Ok(true) => (
             StatusCode::CREATED,
+            Json(SessionCreatedResponse { id: session_id }),
+        )
+            .into_response(),
+        Ok(false) => (
+            StatusCode::OK,
             Json(SessionCreatedResponse { id: session_id }),
         )
             .into_response(),
@@ -106,6 +113,7 @@ pub async fn post_create_session(
 /// Request body for session creation.
 #[derive(Deserialize)]
 pub struct SessionCreateRequest {
+    pub id: String,
     pub plugins: Option<HashMap<String, serde_json::Value>>,
 }
 
@@ -175,4 +183,405 @@ pub async fn get_cacert(State(state): State<Arc<ApiState>>) -> impl IntoResponse
         [(axum::http::header::CONTENT_TYPE, "application/x-pem-file")],
         pem,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::routing::{delete, get, post};
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    use crate::ca::CertificateAuthority;
+    use crate::plugin::PluginRegistry;
+    use crate::session::SessionManager;
+
+    /// Build a minimal test router with the session and health routes.
+    fn test_router(state: Arc<ApiState>) -> Router {
+        let session_routes = Router::new()
+            .route("/", get(get_session))
+            .route("/stop", post(post_stop_session))
+            .route("/", delete(delete_session))
+            .with_state(state.clone());
+
+        Router::new()
+            .route("/health", get(get_health))
+            .route("/health/alive", get(get_health_alive))
+            .route("/health/ready", get(get_health_ready))
+            .route(
+                "/api/v1/sessions",
+                post(post_create_session).get(get_list_sessions),
+            )
+            .route("/api/v1/cacert", get(get_cacert))
+            .with_state(state.clone())
+            .nest("/api/v1/sessions/{id}", session_routes)
+    }
+
+    fn test_state() -> Arc<ApiState> {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ca = Arc::new(CertificateAuthority::new(tmp.path(), 10).unwrap());
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = Arc::new(SessionManager::new(
+            registry,
+            std::time::Duration::from_secs(300),
+            100,
+        ));
+        // Leak the TempDir so the CA directory lives for the test duration.
+        // This is fine for tests — the OS cleans up on process exit.
+        std::mem::forget(tmp);
+        Arc::new(ApiState {
+            session_manager: mgr,
+            ca,
+            blob_container_client: None,
+        })
+    }
+
+    async fn body_string(resp: axum::response::Response) -> String {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    // --- Health endpoints ---
+
+    #[tokio::test]
+    async fn health_returns_ok() {
+        let app = test_router(test_state());
+        let resp = app
+            .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn health_alive_returns_ok() {
+        let app = test_router(test_state());
+        let resp = app
+            .oneshot(Request::get("/health/alive").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn health_ready_no_blob_returns_ok() {
+        let app = test_router(test_state());
+        let resp = app
+            .oneshot(Request::get("/health/ready").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    // --- Create session ---
+
+    #[tokio::test]
+    async fn create_session_valid_uuid_returns_201() {
+        let app = test_router(test_state());
+        let id = uuid::Uuid::new_v4().to_string();
+        let resp = app
+            .oneshot(
+                Request::post("/api/v1/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"id":"{}"}}"#, id)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 201);
+        let body = body_string(resp).await;
+        assert!(body.contains(&id));
+    }
+
+    #[tokio::test]
+    async fn create_session_invalid_uuid_returns_400() {
+        let app = test_router(test_state());
+        let resp = app
+            .oneshot(
+                Request::post("/api/v1/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"id":"not-a-uuid"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 400);
+        let body = body_string(resp).await;
+        assert!(body.contains("UUID"));
+    }
+
+    #[tokio::test]
+    async fn create_session_idempotent_returns_200() {
+        let state = test_state();
+        let id = uuid::Uuid::new_v4().to_string();
+
+        // First create → 201
+        let app = test_router(state.clone());
+        let resp = app
+            .oneshot(
+                Request::post("/api/v1/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"id":"{}"}}"#, id)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 201);
+
+        // Second create same ID → 200
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::post("/api/v1/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"id":"{}"}}"#, id)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn create_session_max_reached_returns_503() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ca = Arc::new(CertificateAuthority::new(tmp.path(), 10).unwrap());
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = Arc::new(SessionManager::new(
+            registry,
+            std::time::Duration::from_secs(300),
+            1, // max 1 session
+        ));
+        std::mem::forget(tmp);
+        let state = Arc::new(ApiState {
+            session_manager: mgr,
+            ca,
+            blob_container_client: None,
+        });
+
+        // Fill up the single slot
+        let id1 = uuid::Uuid::new_v4().to_string();
+        let app = test_router(state.clone());
+        let resp = app
+            .oneshot(
+                Request::post("/api/v1/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"id":"{}"}}"#, id1)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 201);
+
+        // Second different ID → 503
+        let id2 = uuid::Uuid::new_v4().to_string();
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::post("/api/v1/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"id":"{}"}}"#, id2)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 503);
+    }
+
+    // --- Get session ---
+
+    #[tokio::test]
+    async fn get_session_found_returns_200() {
+        let state = test_state();
+        let id = uuid::Uuid::new_v4().to_string();
+        state
+            .session_manager
+            .create_session(id.clone(), HashMap::new())
+            .await
+            .unwrap();
+
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::get(format!("/api/v1/sessions/{}", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let body = body_string(resp).await;
+        assert!(body.contains(&id));
+    }
+
+    #[tokio::test]
+    async fn get_session_not_found_returns_404() {
+        let app = test_router(test_state());
+        let resp = app
+            .oneshot(
+                Request::get(format!("/api/v1/sessions/{}", uuid::Uuid::new_v4()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 404);
+    }
+
+    // --- List sessions ---
+
+    #[tokio::test]
+    async fn list_sessions_returns_all() {
+        let state = test_state();
+        let id1 = uuid::Uuid::new_v4().to_string();
+        let id2 = uuid::Uuid::new_v4().to_string();
+        state
+            .session_manager
+            .create_session(id1, HashMap::new())
+            .await
+            .unwrap();
+        state
+            .session_manager
+            .create_session(id2, HashMap::new())
+            .await
+            .unwrap();
+
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::get("/api/v1/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let body = body_string(resp).await;
+        let arr: Vec<serde_json::Value> = serde_json::from_str(&body).unwrap();
+        assert_eq!(arr.len(), 2);
+    }
+
+    // --- Stop session ---
+
+    #[tokio::test]
+    async fn stop_session_returns_200() {
+        let state = test_state();
+        let id = uuid::Uuid::new_v4().to_string();
+        state
+            .session_manager
+            .create_session(id.clone(), HashMap::new())
+            .await
+            .unwrap();
+
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/api/v1/sessions/{}/stop", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn stop_session_not_found_returns_404() {
+        let app = test_router(test_state());
+        let resp = app
+            .oneshot(
+                Request::post(format!("/api/v1/sessions/{}/stop", uuid::Uuid::new_v4()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn stop_session_already_stopped_returns_409() {
+        let state = test_state();
+        let id = uuid::Uuid::new_v4().to_string();
+        state
+            .session_manager
+            .create_session(id.clone(), HashMap::new())
+            .await
+            .unwrap();
+        state.session_manager.stop_session(&id).await.unwrap();
+
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/api/v1/sessions/{}/stop", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 409);
+    }
+
+    // --- Delete session ---
+
+    #[tokio::test]
+    async fn delete_session_returns_204() {
+        let state = test_state();
+        let id = uuid::Uuid::new_v4().to_string();
+        state
+            .session_manager
+            .create_session(id.clone(), HashMap::new())
+            .await
+            .unwrap();
+
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::delete(format!("/api/v1/sessions/{}", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 204);
+    }
+
+    #[tokio::test]
+    async fn delete_session_not_found_returns_404() {
+        let app = test_router(test_state());
+        let resp = app
+            .oneshot(
+                Request::delete(format!("/api/v1/sessions/{}", uuid::Uuid::new_v4()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 404);
+    }
+
+    // --- CA cert ---
+
+    #[tokio::test]
+    async fn cacert_returns_pem() {
+        let app = test_router(test_state());
+        let resp = app
+            .oneshot(Request::get("/api/v1/cacert").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        assert_eq!(
+            resp.headers()
+                .get("content-type")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "application/x-pem-file"
+        );
+        let body = body_string(resp).await;
+        assert!(body.starts_with("-----BEGIN CERTIFICATE-----"));
+    }
 }

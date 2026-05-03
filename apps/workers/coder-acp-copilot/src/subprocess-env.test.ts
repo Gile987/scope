@@ -23,12 +23,21 @@ describe("buildSubprocessEnv", () => {
       expect(env.NODE_TLS_REJECT_UNAUTHORIZED).toBe("0");
     });
 
-    it("does not clear proxy env vars", () => {
+    it("does not set proxy env vars without proxyUrl", () => {
       const env = buildSubprocessEnv(token, true);
       expect(env).not.toHaveProperty("HTTP_PROXY");
       expect(env).not.toHaveProperty("HTTPS_PROXY");
       expect(env).not.toHaveProperty("http_proxy");
       expect(env).not.toHaveProperty("https_proxy");
+    });
+
+    it("sets proxy env vars when proxyUrl is provided", () => {
+      const proxyUrl = "http://session-123@gateway:18000";
+      const env = buildSubprocessEnv(token, true, undefined, undefined, proxyUrl);
+      expect(env.HTTP_PROXY).toBe(proxyUrl);
+      expect(env.HTTPS_PROXY).toBe(proxyUrl);
+      expect(env.http_proxy).toBe(proxyUrl);
+      expect(env.https_proxy).toBe(proxyUrl);
     });
 
     it("does not set NODE_EXTRA_CA_CERTS (inherits from process.env)", () => {
