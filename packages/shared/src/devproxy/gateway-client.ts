@@ -69,17 +69,17 @@ export class GatewayClient {
   }
 
   async startSession(plugins: Record<string, unknown> = {}): Promise<string> {
+    const id = this.sessionId ?? crypto.randomUUID();
     const response = await fetch(`${this.apiUrl}/api/v1/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plugins }),
+      body: JSON.stringify({ id, plugins }),
     });
     if (!response.ok) {
       throw new Error(`Failed to create gateway session: ${response.status} ${response.statusText}`);
     }
-    const body = (await response.json()) as { id: string };
-    this.sessionId = body.id;
-    return body.id;
+    this.sessionId = id;
+    return id;
   }
 
   async stopSession(): Promise<void> {

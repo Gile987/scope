@@ -8,7 +8,6 @@
 //! by a background reaper task.
 
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,7 +16,6 @@ use std::time::{Duration, Instant};
 use parking_lot::RwLock;
 use serde::Serialize;
 use serde_json::Value;
-use uuid::Uuid;
 
 use crate::plugin::{PluginRegistry, SessionId};
 use crate::session_store::{session_ttl, PersistedSession, SessionStore};
@@ -26,7 +24,6 @@ use crate::session_store::{session_ttl, PersistedSession, SessionStore};
 #[derive(Debug)]
 pub struct Session {
     pub id: SessionId,
-    pub client_ip: IpAddr,
     pub active: bool,
     pub plugin_settings: HashMap<String, Value>,
     pub started_at: chrono::DateTime<chrono::Utc>,
@@ -54,10 +51,9 @@ impl From<&Session> for SessionInfo {
     }
 }
 
-/// Manages UUID-keyed sessions with an IP→session index for deduplication.
+/// Manages UUID-keyed sessions.
 pub struct SessionManager {
     sessions_lock: RwLock<HashMap<SessionId, Session>>,
-    ip_index: RwLock<HashMap<IpAddr, SessionId>>,
     registry: Arc<PluginRegistry>,
     idle_timeout: Duration,
     max_sessions: usize,
@@ -70,7 +66,6 @@ impl SessionManager {
     pub fn new(registry: Arc<PluginRegistry>, idle_timeout: Duration, max_sessions: usize) -> Self {
         Self {
             sessions_lock: RwLock::new(HashMap::new()),
-            ip_index: RwLock::new(HashMap::new()),
             registry,
             idle_timeout,
             max_sessions,
@@ -87,7 +82,6 @@ impl SessionManager {
     ) -> Self {
         Self {
             sessions_lock: RwLock::new(HashMap::new()),
-            ip_index: RwLock::new(HashMap::new()),
             registry,
             idle_timeout,
             max_sessions,
@@ -95,57 +89,46 @@ impl SessionManager {
         }
     }
 
-    /// Create and start a session for the given client IP. Returns the new session ID.
+    /// Create and start a session with the given client-provided ID.
+    ///
+    /// If a session with that ID already exists and is active, returns
+    /// `Ok(false)` (idempotent). Returns `Ok(true)` when newly created.
     pub async fn create_session(
         &self,
-        client_ip: IpAddr,
+        session_id: SessionId,
         plugin_settings: HashMap<String, Value>,
-    ) -> Result<SessionId, SessionError> {
-        // Collect any old session ID to clear — drop locks before awaiting.
-        let old_id_to_clear = {
-            let ip_index = self.ip_index.read();
-            ip_index.get(&client_ip).cloned()
-        };
-
-        if let Some(old_id) = old_id_to_clear {
-            // Notify plugins before removing from maps.
-            self.registry.on_session_clear(&old_id).await;
-            let mut sessions = self.sessions_lock.write();
-            let mut ip_index = self.ip_index.write();
-            sessions.remove(&old_id);
-            ip_index.remove(&client_ip);
-        }
-
-        // Check capacity and assign ID under lock, then drop lock before awaiting.
-        let session_id = {
+    ) -> Result<bool, SessionError> {
+        // If session already exists and is active, return idempotent success.
+        {
             let sessions = self.sessions_lock.read();
+            if let Some(session) = sessions.get(&session_id) {
+                if session.active {
+                    return Ok(false);
+                }
+            }
             if sessions.len() >= self.max_sessions {
                 return Err(SessionError::MaxSessionsReached);
             }
-            Uuid::new_v4().to_string()
-        };
+        }
 
         // Notify plugins before inserting — they set up per-session state.
         self.registry
             .on_session_start(&session_id, &plugin_settings)
             .await;
 
-        // Insert into maps inside a block so guards drop before any .await.
+        // Insert into map.
         {
             let mut sessions = self.sessions_lock.write();
-            let mut ip_index = self.ip_index.write();
             sessions.insert(
                 session_id.clone(),
                 Session {
                     id: session_id.clone(),
-                    client_ip,
                     active: true,
                     plugin_settings: plugin_settings.clone(),
                     started_at: chrono::Utc::now(),
                     last_activity: Instant::now(),
                 },
             );
-            ip_index.insert(client_ip, session_id.clone());
         }
 
         // Persist to Redis so a replacement pod can restore the session.
@@ -159,7 +142,7 @@ impl SessionManager {
             store.save(&persisted, ttl).await;
         }
 
-        Ok(session_id)
+        Ok(true)
     }
 
     /// Stop a session. Notifies plugins to finalize.
@@ -183,14 +166,11 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Delete a session entirely — clears plugin data and removes from both maps.
+    /// Delete a session entirely — clears plugin data and removes from the map.
     pub async fn delete_session(&self, session_id: &SessionId) -> Result<(), SessionError> {
-        // Remove from maps under lock, then drop lock before awaiting.
         {
             let mut sessions = self.sessions_lock.write();
-            let mut ip_index = self.ip_index.write();
-            let session = sessions.remove(session_id).ok_or(SessionError::NotFound)?;
-            ip_index.remove(&session.client_ip);
+            sessions.remove(session_id).ok_or(SessionError::NotFound)?;
         }
         self.registry.on_session_clear(session_id).await;
 
@@ -230,15 +210,12 @@ impl SessionManager {
 
     /// Reap idle sessions. Called periodically.
     pub async fn reap_idle(&self) -> Vec<SessionId> {
-        // Collect expired sessions under lock, then drop lock before awaiting.
         let reaped: Vec<SessionId> = {
             let mut sessions = self.sessions_lock.write();
-            let mut ip_index = self.ip_index.write();
             let now = Instant::now();
             let mut reaped = Vec::new();
             sessions.retain(|id, session| {
                 if now.duration_since(session.last_activity) > self.idle_timeout {
-                    ip_index.remove(&session.client_ip);
                     reaped.push(id.clone());
                     false
                 } else {
@@ -273,11 +250,6 @@ pub enum SessionError {
 mod tests {
     use super::*;
     use crate::plugin::PluginRegistry;
-    use std::net::{IpAddr, Ipv4Addr};
-
-    const IP1: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
-    const IP2: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
-    const IP3: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3));
 
     fn make_manager(max: usize) -> SessionManager {
         let registry = Arc::new(PluginRegistry::new(vec![]));
@@ -287,11 +259,32 @@ mod tests {
     #[tokio::test]
     async fn create_and_stop_session() {
         let mgr = make_manager(100);
-        let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
-        assert!(mgr.is_active(&id));
+        let created = mgr
+            .create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        assert!(created);
+        assert!(mgr.is_active(&"s1".into()));
 
-        mgr.stop_session(&id).await.unwrap();
-        assert!(!mgr.is_active(&id));
+        mgr.stop_session(&"s1".into()).await.unwrap();
+        assert!(!mgr.is_active(&"s1".into()));
+    }
+
+    #[tokio::test]
+    async fn create_same_id_is_idempotent() {
+        let mgr = make_manager(100);
+        let first = mgr
+            .create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        assert!(first); // newly created
+
+        let second = mgr
+            .create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        assert!(!second); // already existed
+        assert_eq!(mgr.session_count(), 1);
     }
 
     #[tokio::test]
@@ -306,10 +299,12 @@ mod tests {
     #[tokio::test]
     async fn stop_already_stopped_returns_error() {
         let mgr = make_manager(100);
-        let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
-        mgr.stop_session(&id).await.unwrap();
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        mgr.stop_session(&"s1".into()).await.unwrap();
         assert!(matches!(
-            mgr.stop_session(&id).await,
+            mgr.stop_session(&"s1".into()).await,
             Err(SessionError::NotActive)
         ));
     }
@@ -317,33 +312,41 @@ mod tests {
     #[tokio::test]
     async fn max_sessions_enforced() {
         let mgr = make_manager(2);
-        mgr.create_session(IP1, HashMap::new()).await.unwrap();
-        mgr.create_session(IP2, HashMap::new()).await.unwrap();
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        mgr.create_session("s2".into(), HashMap::new())
+            .await
+            .unwrap();
         assert!(matches!(
-            mgr.create_session(IP3, HashMap::new()).await,
+            mgr.create_session("s3".into(), HashMap::new()).await,
             Err(SessionError::MaxSessionsReached)
         ));
     }
 
     #[tokio::test]
-    async fn restart_same_ip_replaces_session() {
+    async fn idempotent_create_does_not_count_against_max() {
         let mgr = make_manager(1);
-        let id1 = mgr.create_session(IP1, HashMap::new()).await.unwrap();
-        // Same IP — should replace, not exceed max
-        let id2 = mgr.create_session(IP1, HashMap::new()).await.unwrap();
-        assert_ne!(id1, id2);
-        assert!(!mgr.is_active(&id1)); // old session gone
-        assert!(mgr.is_active(&id2));
-        assert_eq!(mgr.session_count(), 1);
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        // Retry same ID — should succeed even though max=1
+        let second = mgr
+            .create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        assert!(!second);
     }
 
     #[tokio::test]
     async fn delete_session_removes_entirely() {
         let mgr = make_manager(100);
-        let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
-        mgr.delete_session(&id).await.unwrap();
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        mgr.delete_session(&"s1".into()).await.unwrap();
         assert_eq!(mgr.session_count(), 0);
-        assert!(mgr.get_session(&id).is_none());
+        assert!(mgr.get_session(&"s1".into()).is_none());
     }
 
     #[tokio::test]
@@ -358,17 +361,23 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_returns_all() {
         let mgr = make_manager(100);
-        mgr.create_session(IP1, HashMap::new()).await.unwrap();
-        mgr.create_session(IP2, HashMap::new()).await.unwrap();
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        mgr.create_session("s2".into(), HashMap::new())
+            .await
+            .unwrap();
         assert_eq!(mgr.list_sessions().len(), 2);
     }
 
     #[tokio::test]
     async fn get_session_returns_info() {
         let mgr = make_manager(100);
-        let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
-        let info = mgr.get_session(&id).unwrap();
-        assert_eq!(info.id, id);
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        let info = mgr.get_session(&"s1".into()).unwrap();
+        assert_eq!(info.id, "s1");
         assert!(info.active);
     }
 
@@ -382,9 +391,10 @@ mod tests {
     async fn idle_reaping() {
         let registry = Arc::new(PluginRegistry::new(vec![]));
         let mgr = SessionManager::new(registry, Duration::from_millis(0), 100);
-        mgr.create_session(IP1, HashMap::new()).await.unwrap();
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
 
-        // With 0ms timeout, everything should be reaped immediately
         let reaped = mgr.reap_idle().await;
         assert_eq!(reaped.len(), 1);
         assert_eq!(mgr.session_count(), 0);
@@ -395,10 +405,14 @@ mod tests {
         let mgr = make_manager(100);
         assert_eq!(mgr.session_count(), 0);
 
-        mgr.create_session(IP1, HashMap::new()).await.unwrap();
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
         assert_eq!(mgr.session_count(), 1);
 
-        mgr.create_session(IP2, HashMap::new()).await.unwrap();
+        mgr.create_session("s2".into(), HashMap::new())
+            .await
+            .unwrap();
         assert_eq!(mgr.session_count(), 2);
     }
 }

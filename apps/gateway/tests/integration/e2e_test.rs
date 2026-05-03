@@ -29,17 +29,19 @@ fn proxy_client(
         .unwrap()
 }
 
-/// Helper: create a session, return session ID.
+/// Helper: create a session with a client-generated ID, return it.
 async fn create_session(api_client: &reqwest::Client, gw: &TestGateway) -> String {
+    let session_id = uuid::Uuid::new_v4().to_string();
     let resp = api_client
         .post(gw.api_url("/api/v1/sessions"))
-        .json(&serde_json::json!({}))
+        .json(&serde_json::json!({ "id": session_id }))
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 201);
     let body: serde_json::Value = resp.json().await.unwrap();
-    body["id"].as_str().unwrap().to_string()
+    assert_eq!(body["id"].as_str().unwrap(), session_id);
+    session_id
 }
 
 /// Helper: stop a session.

@@ -4,14 +4,12 @@
 //! REST API route handlers for session CRUD, health checks, and CA certificate retrieval.
 //!
 //! All session mutations go through `SessionManager`, which handles plugin
-//! lifecycle notifications. The client IP is extracted from the TCP connection
-//! (via Axum's `ConnectInfo`) and used as the session binding key.
+//! lifecycle notifications. Session IDs are client-provided UUIDs.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::{ConnectInfo, Path, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -80,22 +78,26 @@ pub struct HealthResponse {
 
 /// POST /api/v1/sessions — create a new session
 pub async fn post_create_session(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<ApiState>>,
     Json(body): Json<SessionCreateRequest>,
 ) -> impl IntoResponse {
-    let client_ip = addr.ip();
+    let session_id = body.id;
     let plugin_settings = body.plugins.unwrap_or_default();
 
-    info!("Creating session for {}", client_ip);
+    info!("Creating session {}", session_id);
 
     match state
         .session_manager
-        .create_session(client_ip, plugin_settings)
+        .create_session(session_id.clone(), plugin_settings)
         .await
     {
-        Ok(session_id) => (
+        Ok(true) => (
             StatusCode::CREATED,
+            Json(SessionCreatedResponse { id: session_id }),
+        )
+            .into_response(),
+        Ok(false) => (
+            StatusCode::OK,
             Json(SessionCreatedResponse { id: session_id }),
         )
             .into_response(),
@@ -106,6 +108,7 @@ pub async fn post_create_session(
 /// Request body for session creation.
 #[derive(Deserialize)]
 pub struct SessionCreateRequest {
+    pub id: String,
     pub plugins: Option<HashMap<String, serde_json::Value>>,
 }
 

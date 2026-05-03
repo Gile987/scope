@@ -11,6 +11,7 @@ describe("GatewayClient", () => {
   beforeEach(() => {
     originalEnv = { ...process.env };
     vi.restoreAllMocks();
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(SESSION_ID as `${string}-${string}-${string}-${string}-${string}`);
   });
 
   afterEach(() => {
@@ -52,7 +53,7 @@ describe("GatewayClient", () => {
       expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/api/v1/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plugins: {} }),
+        body: JSON.stringify({ id: SESSION_ID, plugins: {} }),
       });
     });
 
@@ -70,7 +71,7 @@ describe("GatewayClient", () => {
       expect(fetchSpy).toHaveBeenCalledWith("http://test:18897/api/v1/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plugins: { har: { captureHeaders: true } } }),
+        body: JSON.stringify({ id: SESSION_ID, plugins: { har: { captureHeaders: true } } }),
       });
     });
 
@@ -81,6 +82,31 @@ describe("GatewayClient", () => {
 
       const client = new GatewayClient("http://test:18897");
       await expect(client.startSession()).rejects.toThrow("Failed to create gateway session: 500");
+    });
+
+    it("retries with same session ID (idempotent)", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+
+      const client = new GatewayClient("http://test:18897");
+      const first = await client.startSession();
+      const second = await client.startSession();
+      expect(first).toBe(second);
+      // Both calls should use the same session ID in the body
+      const firstBody = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
+      const secondBody = JSON.parse(fetchSpy.mock.calls[1][1]!.body as string);
+      expect(firstBody.id).toBe(secondBody.id);
     });
   });
 
