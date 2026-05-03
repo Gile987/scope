@@ -1,12 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Session lifecycle manager with UUID-keyed sessions and an IP→session reverse index.
+//! Session lifecycle manager with UUID-keyed sessions.
 //!
-//! The proxy layer resolves client IPs to session IDs on every request, so each
-//! coding-agent container automatically gets its own recording session without
-//! client-side session tracking. Sessions have an idle timeout enforced by a
-//! background reaper task.
+//! Workers identify themselves via Proxy-Authorization headers (session ID
+//! embedded in the proxy URL userinfo). Sessions have an idle timeout enforced
+//! by a background reaper task.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -55,7 +54,7 @@ impl From<&Session> for SessionInfo {
     }
 }
 
-/// Manages UUID-keyed sessions with an IP→session reverse index for the proxy layer.
+/// Manages UUID-keyed sessions with an IP→session index for deduplication.
 pub struct SessionManager {
     sessions_lock: RwLock<HashMap<SessionId, Session>>,
     ip_index: RwLock<HashMap<IpAddr, SessionId>>,
@@ -153,7 +152,6 @@ impl SessionManager {
         if let Some(store) = &self.store {
             let persisted = PersistedSession {
                 session_id: session_id.clone(),
-                client_ip,
                 plugin_settings: plugin_settings.clone(),
                 started_at: chrono::Utc::now(),
             };
@@ -179,13 +177,7 @@ impl SessionManager {
 
         // Delete from Redis on explicit stop.
         if let Some(store) = &self.store {
-            let client_ip = {
-                let sessions = self.sessions_lock.read();
-                sessions.get(session_id).map(|s| s.client_ip)
-            };
-            if let Some(ip) = client_ip {
-                store.delete(session_id, &ip).await;
-            }
+            store.delete(session_id).await;
         }
 
         Ok(())
@@ -194,99 +186,26 @@ impl SessionManager {
     /// Delete a session entirely — clears plugin data and removes from both maps.
     pub async fn delete_session(&self, session_id: &SessionId) -> Result<(), SessionError> {
         // Remove from maps under lock, then drop lock before awaiting.
-        let client_ip = {
+        {
             let mut sessions = self.sessions_lock.write();
             let mut ip_index = self.ip_index.write();
             let session = sessions.remove(session_id).ok_or(SessionError::NotFound)?;
             ip_index.remove(&session.client_ip);
-            session.client_ip
-        };
+        }
         self.registry.on_session_clear(session_id).await;
 
         // Delete from Redis on explicit clear.
         if let Some(store) = &self.store {
-            store.delete(session_id, &client_ip).await;
+            store.delete(session_id).await;
         }
 
         Ok(())
-    }
-
-    /// Look up the active session ID for a client IP (used by proxy handler).
-    pub fn session_id_for_ip(&self, ip: &IpAddr) -> Option<SessionId> {
-        let ip_index = self.ip_index.read();
-        let session_id = ip_index.get(ip)?;
-        let sessions = self.sessions_lock.read();
-        let session = sessions.get(session_id)?;
-        if session.active {
-            Some(session_id.clone())
-        } else {
-            None
-        }
     }
 
     /// Check if a session is active (for proxy handler to decide intercept vs passthrough).
     pub fn is_active(&self, session_id: &SessionId) -> bool {
         let sessions = self.sessions_lock.read();
         sessions.get(session_id).map(|s| s.active).unwrap_or(false)
-    }
-
-    /// Attempt to restore a session from Redis for a client IP that has no
-    /// in-memory session. Called by the proxy handler when it encounters
-    /// traffic from an IP with no active session (pod crash recovery).
-    ///
-    /// Returns the restored session ID if successful, `None` otherwise.
-    /// Skips restore if the session already exists in memory (e.g. it was
-    /// deliberately stopped or is being torn down).
-    pub async fn restore_session_for_ip(&self, ip: &IpAddr) -> Option<SessionId> {
-        let store = self.store.as_ref()?;
-        let persisted = store.get_by_ip(ip).await?;
-
-        // Don't exceed max sessions.
-        // Also skip restore if this session already exists in memory — it was
-        // deliberately managed (stopped / being deleted) and should not be
-        // resurrected from stale Redis state.
-        {
-            let sessions = self.sessions_lock.read();
-            if sessions.len() >= self.max_sessions {
-                return None;
-            }
-            if sessions.contains_key(&persisted.session_id) {
-                tracing::debug!(
-                    "SessionManager: skipping restore for session {} — already in memory",
-                    persisted.session_id
-                );
-                return None;
-            }
-        }
-
-        let session_id = persisted.session_id.clone();
-
-        // Notify plugins to restore session state (e.g. re-attach blob writer).
-        self.registry
-            .on_session_start(&session_id, &persisted.plugin_settings)
-            .await;
-
-        let mut sessions = self.sessions_lock.write();
-        let mut ip_index = self.ip_index.write();
-        sessions.insert(
-            session_id.clone(),
-            Session {
-                id: session_id.clone(),
-                client_ip: *ip,
-                active: true,
-                plugin_settings: persisted.plugin_settings,
-                started_at: persisted.started_at,
-                last_activity: Instant::now(),
-            },
-        );
-        ip_index.insert(*ip, session_id.clone());
-
-        tracing::info!(
-            "SessionManager: restored session {} for IP {} from Redis",
-            session_id,
-            ip
-        );
-        Some(session_id)
     }
 
     /// Touch a session to reset its idle timer.
@@ -419,22 +338,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_id_for_ip_returns_active_only() {
-        let mgr = make_manager(100);
-        let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
-        assert_eq!(mgr.session_id_for_ip(&IP1), Some(id.clone()));
-
-        mgr.stop_session(&id).await.unwrap();
-        assert_eq!(mgr.session_id_for_ip(&IP1), None);
-    }
-
-    #[tokio::test]
     async fn delete_session_removes_entirely() {
         let mgr = make_manager(100);
         let id = mgr.create_session(IP1, HashMap::new()).await.unwrap();
         mgr.delete_session(&id).await.unwrap();
         assert_eq!(mgr.session_count(), 0);
-        assert_eq!(mgr.session_id_for_ip(&IP1), None);
         assert!(mgr.get_session(&id).is_none());
     }
 
@@ -480,7 +388,6 @@ mod tests {
         let reaped = mgr.reap_idle().await;
         assert_eq!(reaped.len(), 1);
         assert_eq!(mgr.session_count(), 0);
-        assert_eq!(mgr.session_id_for_ip(&IP1), None);
     }
 
     #[tokio::test]
@@ -493,19 +400,5 @@ mod tests {
 
         mgr.create_session(IP2, HashMap::new()).await.unwrap();
         assert_eq!(mgr.session_count(), 2);
-    }
-
-    #[tokio::test]
-    async fn restore_session_for_ip_without_store_returns_none() {
-        // When no Redis store is configured, restore always returns None.
-        let mgr = make_manager(100);
-        assert_eq!(mgr.restore_session_for_ip(&IP1).await, None);
-    }
-
-    #[tokio::test]
-    async fn restore_session_for_ip_respects_max_sessions() {
-        // Even if restore is called at capacity, it should return None.
-        let mgr = make_manager(0); // 0 max sessions
-        assert_eq!(mgr.restore_session_for_ip(&IP1).await, None);
     }
 }
