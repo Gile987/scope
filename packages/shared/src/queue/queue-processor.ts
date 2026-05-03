@@ -269,9 +269,9 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     ));
 
     // Start a visibility heartbeat that keeps the message hidden while we
-    // process.  Every 30 s the heartbeat extends the visibility by 2 min.
+    // process.  Every 15 s the heartbeat extends the visibility by 30 s.
     // If the worker crashes, the heartbeat dies and the message reappears
-    // after at most ~2 min instead of the previous 35-minute single-shot
+    // after at most ~30 s instead of the previous 35-minute single-shot
     // extension.
     const heartbeat = startVisibilityHeartbeat(
       this.queueClient, message.messageId, message.messageText,

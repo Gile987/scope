@@ -4,9 +4,9 @@
 import type { QueueClient } from "@azure/storage-queue";
 
 /** How often to extend message visibility (ms). */
-export const HEARTBEAT_INTERVAL_MS = 30_000;
+export const HEARTBEAT_INTERVAL_MS = 15_000;
 /** Each heartbeat extends visibility by this many seconds. */
-export const HEARTBEAT_VISIBILITY_SECONDS = 120;
+export const HEARTBEAT_VISIBILITY_SECONDS = 30;
 
 /**
  * Handle returned by {@link startVisibilityHeartbeat}.

@@ -122,7 +122,7 @@ describe("visibility heartbeat", () => {
   });
 
   it("exports correct default constants", () => {
-    expect(HEARTBEAT_INTERVAL_MS).toBe(30_000);
-    expect(HEARTBEAT_VISIBILITY_SECONDS).toBe(120);
+    expect(HEARTBEAT_INTERVAL_MS).toBe(15_000);
+    expect(HEARTBEAT_VISIBILITY_SECONDS).toBe(30);
   });
 });
