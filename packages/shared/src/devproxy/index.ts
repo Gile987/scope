@@ -33,6 +33,7 @@ export function createProxyClient(): ProxyClient {
     return {
       backend: "gateway",
       apiUrl: gw.apiUrl,
+      get proxyUrl() { return gw.proxyUrl; },
       waitForReady: (t) => gw.waitForReady(t),
       downloadCertificate: (p) => gw.downloadCertificate(p),
       createCombinedCaBundle: (c, o) => gw.createCombinedCaBundle(c, o),
@@ -88,6 +89,7 @@ export function createProxyClient(): ProxyClient {
   return {
     backend: "devproxy",
     apiUrl,
+    proxyUrl: apiUrl,
     waitForReady: (t) => dp.waitForReady(t),
     downloadCertificate: (p) => dp.downloadCertificate(p),
     createCombinedCaBundle: (c, o) => dp.createCombinedCaBundle(c, o),

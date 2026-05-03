@@ -39,6 +39,14 @@ export interface ProxyClient {
   /** Start recording / session. */
   startRecording(): Promise<void>;
 
+  /**
+   * The proxy URL to use for HTTP_PROXY / HTTPS_PROXY.
+   * For the gateway backend, this includes the session ID in the userinfo field
+   * after startRecording() is called (e.g. `http://<sessionId>@host:port`).
+   * For other backends, returns the base apiUrl.
+   */
+  readonly proxyUrl: string;
+
   /** Stop recording / session, collect HAR, extract metadata. */
   stopAndCollectHar(log: WorkerLogFn): Promise<HarCollectionResult>;
 }

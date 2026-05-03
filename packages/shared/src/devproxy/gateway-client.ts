@@ -40,6 +40,22 @@ export class GatewayClient {
     return `${this.apiUrl}/mcp`;
   }
 
+  /**
+   * Proxy URL with the session ID embedded in the userinfo field.
+   * HTTP clients will send this as a `Proxy-Authorization: Basic` header,
+   * allowing the gateway to resolve the session directly without IP lookup.
+   *
+   * Returns the bare apiUrl if no session has been started yet.
+   */
+  get proxyUrl(): string {
+    if (!this.sessionId) {
+      return this.apiUrl;
+    }
+    const url = new URL(this.apiUrl);
+    url.username = this.sessionId;
+    return url.toString().replace(/\/$/, "");
+  }
+
   async waitForReady(timeoutMs?: number): Promise<void> {
     return waitForProxyReady(this.apiUrl, timeoutMs);
   }

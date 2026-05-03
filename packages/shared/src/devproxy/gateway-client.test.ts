@@ -217,4 +217,54 @@ describe("GatewayClient", () => {
       await expect(client.deleteSession()).rejects.toThrow("No active gateway session");
     });
   });
+
+  describe("proxyUrl", () => {
+    it("returns bare apiUrl before session is started", () => {
+      const client = new GatewayClient("http://gateway:18000");
+      expect(client.proxyUrl).toBe("http://gateway:18000");
+    });
+
+    it("embeds session ID as userinfo after startSession", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: SESSION_ID }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const client = new GatewayClient("http://gateway:18000");
+      await client.startSession();
+      expect(client.proxyUrl).toBe(`http://${SESSION_ID}@gateway:18000`);
+    });
+
+    it("handles localhost URL", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: SESSION_ID }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const client = new GatewayClient("http://localhost:18000");
+      await client.startSession();
+      expect(client.proxyUrl).toBe(`http://${SESSION_ID}@localhost:18000`);
+    });
+
+    it("reverts to bare apiUrl after deleteSession", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+      const client = new GatewayClient("http://gateway:18000");
+      await client.startSession();
+      expect(client.proxyUrl).toContain(SESSION_ID);
+      await client.deleteSession();
+      expect(client.proxyUrl).toBe("http://gateway:18000");
+    });
+  });
 });
