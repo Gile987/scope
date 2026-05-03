@@ -16,12 +16,14 @@ fn init_tracing() {
 /// Build a reqwest client that uses the proxy and trusts the gateway's CA.
 /// The session_id is sent as proxy basic auth (username) so the gateway can
 /// resolve the session from the Proxy-Authorization header.
-fn proxy_client(proxy_addr: std::net::SocketAddr, ca_pem: &str, session_id: &str) -> reqwest::Client {
+fn proxy_client(
+    proxy_addr: std::net::SocketAddr,
+    ca_pem: &str,
+    session_id: &str,
+) -> reqwest::Client {
     let ca_cert = reqwest::tls::Certificate::from_pem(ca_pem.as_bytes()).unwrap();
     reqwest::Client::builder()
-        .proxy(
-            reqwest::Proxy::all(format!("http://{}@{}", session_id, proxy_addr)).unwrap(),
-        )
+        .proxy(reqwest::Proxy::all(format!("http://{}@{}", session_id, proxy_addr)).unwrap())
         .add_root_certificate(ca_cert)
         .build()
         .unwrap()
@@ -251,9 +253,7 @@ async fn plain_http_forwarding_records_har() {
 
     // Plain HTTP through the proxy (no CONNECT, direct forwarding)
     let client = reqwest::Client::builder()
-        .proxy(
-            reqwest::Proxy::http(format!("http://{}@{}", session_id, gw.proxy_addr)).unwrap(),
-        )
+        .proxy(reqwest::Proxy::http(format!("http://{}@{}", session_id, gw.proxy_addr)).unwrap())
         .build()
         .unwrap();
 

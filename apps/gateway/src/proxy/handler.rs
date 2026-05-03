@@ -477,7 +477,10 @@ mod tests {
         Request::builder()
             .method("CONNECT")
             .uri("example.com:443")
-            .header(http::header::PROXY_AUTHORIZATION, format!("Basic {}", encoded))
+            .header(
+                http::header::PROXY_AUTHORIZATION,
+                format!("Basic {}", encoded),
+            )
             .body(())
             .unwrap()
     }
@@ -504,7 +507,10 @@ mod tests {
         let req = Request::builder()
             .method("CONNECT")
             .uri("example.com:443")
-            .header(http::header::PROXY_AUTHORIZATION, format!("Basic {}", encoded))
+            .header(
+                http::header::PROXY_AUTHORIZATION,
+                format!("Basic {}", encoded),
+            )
             .body(())
             .unwrap();
         assert_eq!(extract_session_from_proxy_auth(&req), None);
