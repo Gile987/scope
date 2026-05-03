@@ -37,7 +37,10 @@ export function startVisibilityHeartbeat(
   visibilityTimeoutSeconds: number = HEARTBEAT_VISIBILITY_SECONDS,
 ): VisibilityHeartbeat {
   let popReceipt = initialPopReceipt;
+  let tickCount = 0;
   const abort = new AbortController();
+
+  console.log(`[${workerName}] Visibility heartbeat started (every ${intervalMs / 1000}s, extending by ${visibilityTimeoutSeconds}s)`);
 
   const loop = async () => {
     while (!abort.signal.aborted) {
@@ -51,6 +54,7 @@ export function startVisibilityHeartbeat(
           messageId, popReceipt, undefined, visibilityTimeoutSeconds,
         );
         popReceipt = response.popReceipt!;
+        tickCount++;
       } catch (error) {
         if (abort.signal.aborted) break;
         console.warn(`[${workerName}] Visibility heartbeat failed:`, error);
@@ -61,7 +65,11 @@ export function startVisibilityHeartbeat(
   loop().catch(() => {}); // fire-and-forget
 
   return {
-    stop: () => { abort.abort(); return popReceipt; },
+    stop: () => {
+      abort.abort();
+      console.log(`[${workerName}] Visibility heartbeat stopped after ${tickCount} tick(s)`);
+      return popReceipt;
+    },
     get popReceipt() { return popReceipt; },
   };
 }

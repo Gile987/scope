@@ -125,4 +125,24 @@ describe("visibility heartbeat", () => {
     expect(HEARTBEAT_INTERVAL_MS).toBe(15_000);
     expect(HEARTBEAT_VISIBILITY_SECONDS).toBe(30);
   });
+
+  it("logs start and stop with tick count", async () => {
+    const qc = createMockQueueClient();
+    (qc.updateMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ popReceipt: "receipt-1" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Visibility heartbeat started"),
+    );
+
+    await vi.advanceTimersByTimeAsync(150);
+    hb.stop();
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Visibility heartbeat stopped after 1 tick(s)"),
+    );
+
+    logSpy.mockRestore();
+  });
 });
