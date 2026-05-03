@@ -39,7 +39,7 @@
  *   | Clock           | tick                        | tick                            | Tick                                 |
  *)
 
-EXTENDS Integers, FiniteSets
+EXTENDS Integers, FiniteSets, TLC
 
 CONSTANTS
     Replicas,          \* Set of gateway replica IDs (e.g., {r1, r2})
@@ -81,6 +81,10 @@ VARIABLES
 vars == <<gwPhase, redisUp, blobUp, blobConfigured,
           slotState, slotIP, slotHar, slotLastActivity, slotHasEntries,
           redisSession, tick>>
+
+\* Symmetry set for TLC: IPs, slots, and replicas are interchangeable
+Symmetry == Permutations(ClientIPs) \union Permutations(SessionSlots)
+              \union Permutations(Replicas)
 
 -----------------------------------------------------------------------------
 (* Helpers *)
