@@ -127,7 +127,7 @@ export class GatewayClient {
   async rotateHar(expected: number): Promise<number> {
     const id = this.requireSessionId();
     const response = await fetch(
-      `${this.apiUrl}/api/v1/sessions/${id}/har/rotate?expected=${expected}`,
+      `${this.apiUrl}/api/v1/sessions/${id}/rotate?expected=${expected}`,
       { method: "POST" },
     );
     const body = (await response.json()) as { iteration: number };

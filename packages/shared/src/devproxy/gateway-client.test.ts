@@ -316,7 +316,7 @@ describe("GatewayClient", () => {
 
       expect(newIter).toBe(2);
       expect(fetch).toHaveBeenCalledWith(
-        `http://test:18897/api/v1/sessions/${SESSION_ID}/har/rotate?expected=1`,
+        `http://test:18897/api/v1/sessions/${SESSION_ID}/rotate?expected=1`,
         { method: "POST" },
       );
     });

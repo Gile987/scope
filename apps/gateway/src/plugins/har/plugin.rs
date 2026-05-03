@@ -178,7 +178,7 @@ impl ProxyPlugin for HarPlugin {
         Some(
             axum::Router::new()
                 .route("/har", get(get_har))
-                .route("/har/rotate", post(post_rotate_har))
+                .route("/rotate", post(post_rotate_har))
                 .with_state(inner),
         )
     }
@@ -237,7 +237,7 @@ struct RotateResponse {
     iteration: u32,
 }
 
-/// POST /api/v1/sessions/:id/har/rotate?expected=N — rotate to a new iteration.
+/// POST /api/v1/sessions/:id/rotate?expected=N — rotate to a new iteration.
 ///
 /// CAS semantics: if the session's current_iteration == expected, bump to
 /// expected+1, init the new iteration file, and return 200 with the new
