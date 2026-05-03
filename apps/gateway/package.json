@@ -13,7 +13,7 @@
     "fmt:check": "cargo fmt --check",
     "check": "cargo check",
     "clean": "cargo clean",
-    "tla:check": "java -XX:+UseParallelGC -jar ~/tla2tools.jar -config tlaplus/Gateway.cfg -workers auto tlaplus/Gateway.tla",
+    "tla:check": "java -XX:+UseParallelGC -Xmx8g -jar ~/tla2tools.jar -config tlaplus/Gateway.cfg -workers auto tlaplus/Gateway.tla",
     "tla:install": "test -f ~/tla2tools.jar || curl -L -o ~/tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar"
   }
 }

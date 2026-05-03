@@ -480,7 +480,7 @@ jobs:
         run: |
           curl -fsSL -o /tmp/tla2tools.jar \
             https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
-          java -XX:+UseParallelGC -jar /tmp/tla2tools.jar \
+          java -XX:+UseParallelGC -Xmx6g -jar /tmp/tla2tools.jar \
             -config tlaplus/Gateway.cfg -workers auto tlaplus/Gateway.tla \
             | tee /dev/stderr | grep -q 'Model checking completed. No error has been found.'
 
