@@ -66,8 +66,6 @@ pub async fn handle_client(
     peer_addr: std::net::SocketAddr,
     state: Arc<ProxyState>,
 ) -> anyhow::Result<()> {
-    let client_ip = peer_addr.ip();
-
     let io = TokioIo::new(stream);
     let state_clone = state.clone();
 
@@ -81,33 +79,13 @@ pub async fn handle_client(
             service_fn(move |req| {
                 let state = state_clone.clone();
                 async move {
-                    // Prefer session ID from Proxy-Authorization header (set when
-                    // workers embed the session ID in the proxy URL userinfo).
-                    // Fall back to IP-based lookup for backward compatibility.
+                    // Resolve session ID from Proxy-Authorization header.
+                    // Workers embed the session ID in the proxy URL userinfo;
+                    // HTTP clients send it as Proxy-Authorization: Basic.
+                    // Chromium/Electron requires a 407 challenge before sending
+                    // the header, so proxy requests without valid auth get a 407.
                     let session_id = extract_session_from_proxy_auth(&req)
-                        .and_then(|id| {
-                            if state.session_manager.is_active(&id) {
-                                Some(id)
-                            } else {
-                                debug!("Proxy-Authorization session {} is not active, falling back to IP lookup", id);
-                                None
-                            }
-                        })
-                        .or_else(|| {
-                            // Fast path: session already in memory.
-                            state.session_manager.session_id_for_ip(&client_ip)
-                        });
-
-                    // Slow path: pod may have restarted — try Redis restore.
-                    let session_id = match session_id {
-                        Some(id) => Some(id),
-                        None => {
-                            state
-                                .session_manager
-                                .restore_session_for_ip(&client_ip)
-                                .await
-                        }
-                    };
+                        .filter(|id| state.session_manager.is_active(id));
                     handle_request(req, session_id, state, peer_addr).await
                 }
             }),
@@ -168,6 +146,20 @@ async fn handle_request(
             debug!(target: "gateway::internal", "{} {} from {}", req.method(), req.uri(), peer_addr.ip());
         }
         return Ok(dispatch_to_api(req, state, peer_addr).await);
+    }
+
+    // Proxy requests require a valid session via Proxy-Authorization.
+    // Chromium/Electron doesn't send credentials preemptively — it needs a
+    // 407 challenge first, then resends with Proxy-Authorization: Basic.
+    if session_id.is_none() {
+        debug!(target: "gateway::proxy", "407 challenge for {} {} from {} (no valid Proxy-Authorization)", req.method(), req.uri(), peer_addr.ip());
+        return Ok(hyper::Response::builder()
+            .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
+            .header(http::header::PROXY_AUTHENTICATE, "Basic realm=\"gateway\"")
+            .body(StreamingBody::Buffered(Full::new(Bytes::from(
+                "Proxy authentication required",
+            ))))
+            .unwrap());
     }
 
     debug!(target: "gateway::proxy", "{} {} from {} session={:?}", req.method(), req.uri(), peer_addr.ip(), session_id);

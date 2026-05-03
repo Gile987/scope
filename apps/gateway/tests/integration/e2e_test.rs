@@ -14,10 +14,14 @@ fn init_tracing() {
 }
 
 /// Build a reqwest client that uses the proxy and trusts the gateway's CA.
-fn proxy_client(proxy_addr: std::net::SocketAddr, ca_pem: &str) -> reqwest::Client {
+/// The session_id is sent as proxy basic auth (username) so the gateway can
+/// resolve the session from the Proxy-Authorization header.
+fn proxy_client(proxy_addr: std::net::SocketAddr, ca_pem: &str, session_id: &str) -> reqwest::Client {
     let ca_cert = reqwest::tls::Certificate::from_pem(ca_pem.as_bytes()).unwrap();
     reqwest::Client::builder()
-        .proxy(reqwest::Proxy::all(format!("http://{}", proxy_addr)).unwrap())
+        .proxy(
+            reqwest::Proxy::all(format!("http://{}@{}", session_id, proxy_addr)).unwrap(),
+        )
         .add_root_certificate(ca_cert)
         .build()
         .unwrap()
@@ -115,7 +119,7 @@ async fn https_intercept_captures_har() {
     let session_id = create_session(&api_client, &gw).await;
 
     // Request through the proxy (CONNECT → TLS MITM → backend)
-    let client = proxy_client(gw.proxy_addr, &gw.ca.ca_cert_pem());
+    let client = proxy_client(gw.proxy_addr, &gw.ca.ca_cert_pem(), &session_id);
     let resp = client
         .get(format!(
             "https://localhost:{}/api/test",
@@ -159,7 +163,7 @@ async fn sse_streaming_not_buffered() {
     let api_client = reqwest::Client::new();
     let session_id = create_session(&api_client, &gw).await;
 
-    let client = proxy_client(gw.proxy_addr, &gw.ca.ca_cert_pem());
+    let client = proxy_client(gw.proxy_addr, &gw.ca.ca_cert_pem(), &session_id);
     let resp = client
         .get(format!("https://localhost:{}/events", backend.addr.port()))
         .send()
@@ -247,7 +251,9 @@ async fn plain_http_forwarding_records_har() {
 
     // Plain HTTP through the proxy (no CONNECT, direct forwarding)
     let client = reqwest::Client::builder()
-        .proxy(reqwest::Proxy::http(format!("http://{}", gw.proxy_addr)).unwrap())
+        .proxy(
+            reqwest::Proxy::http(format!("http://{}@{}", session_id, gw.proxy_addr)).unwrap(),
+        )
         .build()
         .unwrap();
 
@@ -300,7 +306,7 @@ async fn large_response_streams_without_timeout() {
     let api_client = reqwest::Client::new();
     let session_id = create_session(&api_client, &gw).await;
 
-    let client = proxy_client(gw.proxy_addr, &gw.ca.ca_cert_pem());
+    let client = proxy_client(gw.proxy_addr, &gw.ca.ca_cert_pem(), &session_id);
     let resp = client
         .get(format!("https://localhost:{}/large", backend.addr.port()))
         .timeout(Duration::from_secs(10))
