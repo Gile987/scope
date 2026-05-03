@@ -82,6 +82,11 @@ pub async fn post_create_session(
     Json(body): Json<SessionCreateRequest>,
 ) -> impl IntoResponse {
     let session_id = body.id;
+
+    if uuid::Uuid::parse_str(&session_id).is_err() {
+        return (StatusCode::BAD_REQUEST, "id must be a valid UUID").into_response();
+    }
+
     let plugin_settings = body.plugins.unwrap_or_default();
 
     info!("Creating session {}", session_id);
