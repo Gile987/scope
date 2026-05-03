@@ -83,6 +83,7 @@ async fn main() -> anyhow::Result<()> {
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(10000);
             info!(
+                target: "gateway::plugins::har::plugin",
                 "HAR plugin: using Azurite emulator backend ({}:{}, container={})",
                 emulator_host, emulator_port, blob_cfg.container_name
             );
@@ -104,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
             let (account_name, storage_creds) =
                 gateway::storage::parse_connection_string(&conn_str)?;
             info!(
+                target: "gateway::plugins::har::plugin",
                 "HAR plugin: using Azure Blob Storage backend (account={}, container={})",
                 account_name, blob_cfg.container_name
             );
@@ -120,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
         )
     } else {
         let har_dir = config.plugins.har.output_dir.clone();
-        info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
+        info!(target: "gateway::plugins::har::plugin", "HAR plugin: using local filesystem backend ({:?})", har_dir);
         (Arc::new(HarPlugin::new(har_dir)), None)
     };
     let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
