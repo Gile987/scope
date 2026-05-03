@@ -267,26 +267,21 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
     ));
 
-    // Extend queue message visibility for long-running multi-turn.
-    // updateMessage returns a new pop receipt that must be used for subsequent operations.
-    const visibilityTimeout = MULTI_TURN_DEFAULTS.VISIBILITY_TIMEOUT_SECONDS;
-    try {
-      const updateResponse = await this.queueClient.updateMessage(
-        message.messageId,
-        currentPopReceipt,
-        message.messageText,
-        visibilityTimeout
-      );
-      currentPopReceipt = updateResponse.popReceipt!;
-    } catch (error) {
-      console.warn(`[${this.workerName}] Failed to extend message visibility: ${error}`);
-    }
+    // Start a visibility heartbeat that keeps the message hidden while we
+    // process.  Every 30 s the heartbeat extends the visibility by 2 min.
+    // If the worker crashes, the heartbeat dies and the message reappears
+    // after at most ~2 min instead of the previous 35-minute single-shot
+    // extension.
+    const heartbeat = this.startVisibilityHeartbeat(
+      message.messageId, message.messageText, currentPopReceipt,
+    );
 
     await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
       criteria: requestDoc.scenario.criteria,
       maxIterations: requestDoc.maxIterations,
     });
 
+    try {
     // Only create JudgeClient when criteria exist and judge will actually be called
     const judgeClient = hasCriteria && judgeServiceUrl ? new JudgeClient(judgeServiceUrl) : undefined;
     const blobStorage = new BlobStorage({
@@ -410,6 +405,9 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // Fire-and-forget report generation
     await this.triggerReportGeneration(requestId);
 
-    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+    } finally {
+      heartbeat.stop();
+    }
   }
 }
