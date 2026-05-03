@@ -23,7 +23,7 @@ export interface VisibilityHeartbeat {
  * visibility timeout via `QueueClient.updateMessage`. This keeps the message
  * hidden from other workers as long as this process is alive. If the worker
  * crashes, the heartbeat dies and the message reappears after at most
- * {@link HEARTBEAT_VISIBILITY_SECONDS} (default 2 min) instead of the
+ * {@link HEARTBEAT_VISIBILITY_SECONDS} (default 30 s) instead of the
  * previous 35-minute single-shot extension.
  *
  * @returns A handle to stop the heartbeat and retrieve the latest pop receipt.
@@ -31,7 +31,6 @@ export interface VisibilityHeartbeat {
 export function startVisibilityHeartbeat(
   queueClient: QueueClient,
   messageId: string,
-  messageText: string,
   initialPopReceipt: string,
   workerName: string,
   intervalMs: number = HEARTBEAT_INTERVAL_MS,
@@ -49,7 +48,7 @@ export function startVisibilityHeartbeat(
       if (abort.signal.aborted) break;
       try {
         const response = await queueClient.updateMessage(
-          messageId, popReceipt, messageText, visibilityTimeoutSeconds,
+          messageId, popReceipt, undefined, visibilityTimeoutSeconds,
         );
         popReceipt = response.popReceipt!;
       } catch (error) {

@@ -274,7 +274,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // after at most ~30 s instead of the previous 35-minute single-shot
     // extension.
     const heartbeat = startVisibilityHeartbeat(
-      this.queueClient, message.messageId, message.messageText,
+      this.queueClient, message.messageId,
       currentPopReceipt, this.workerName,
     );
 

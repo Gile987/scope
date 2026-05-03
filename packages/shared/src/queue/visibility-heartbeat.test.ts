@@ -32,7 +32,7 @@ describe("visibility heartbeat", () => {
 
   it("returns the initial pop receipt before any tick", () => {
     const qc = createMockQueueClient();
-    const hb = startVisibilityHeartbeat(qc, "msg-1", "text", "receipt-0", "test-worker", 30_000, 120);
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 30_000, 120);
     expect(hb.popReceipt).toBe("receipt-0");
     hb.stop();
   });
@@ -41,13 +41,13 @@ describe("visibility heartbeat", () => {
     const qc = createMockQueueClient();
     (qc.updateMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ popReceipt: "receipt-1" });
 
-    const hb = startVisibilityHeartbeat(qc, "msg-1", "text", "receipt-0", "test-worker", 100, 120);
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120);
 
     // Advance past one interval
     await vi.advanceTimersByTimeAsync(150);
 
     expect(qc.updateMessage).toHaveBeenCalledTimes(1);
-    expect(qc.updateMessage).toHaveBeenCalledWith("msg-1", "receipt-0", "text", 120);
+    expect(qc.updateMessage).toHaveBeenCalledWith("msg-1", "receipt-0", undefined, 120);
     expect(hb.popReceipt).toBe("receipt-1");
 
     hb.stop();
@@ -61,17 +61,17 @@ describe("visibility heartbeat", () => {
       return Promise.resolve({ popReceipt: `receipt-${callCount}` });
     });
 
-    const hb = startVisibilityHeartbeat(qc, "msg-1", "text", "receipt-0", "test-worker", 100, 120);
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120);
 
     // Tick 1
     await vi.advanceTimersByTimeAsync(150);
     expect(hb.popReceipt).toBe("receipt-1");
-    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-0", "text", 120);
+    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-0", undefined, 120);
 
     // Tick 2
     await vi.advanceTimersByTimeAsync(100);
     expect(hb.popReceipt).toBe("receipt-2");
-    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-1", "text", 120);
+    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-1", undefined, 120);
 
     hb.stop();
   });
@@ -80,7 +80,7 @@ describe("visibility heartbeat", () => {
     const qc = createMockQueueClient();
     (qc.updateMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ popReceipt: "receipt-1" });
 
-    const hb = startVisibilityHeartbeat(qc, "msg-1", "text", "receipt-0", "test-worker", 100, 120);
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120);
 
     await vi.advanceTimersByTimeAsync(150);
     const first = hb.stop();
@@ -93,7 +93,7 @@ describe("visibility heartbeat", () => {
     const qc = createMockQueueClient();
     (qc.updateMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ popReceipt: "receipt-1" });
 
-    const hb = startVisibilityHeartbeat(qc, "msg-1", "text", "receipt-0", "test-worker", 100, 120);
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120);
     hb.stop();
 
     await vi.advanceTimersByTimeAsync(500);
@@ -106,7 +106,7 @@ describe("visibility heartbeat", () => {
       .mockRejectedValueOnce(new Error("transient 409"))
       .mockResolvedValueOnce({ popReceipt: "receipt-2" });
 
-    const hb = startVisibilityHeartbeat(qc, "msg-1", "text", "receipt-0", "test-worker", 100, 120);
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120);
 
     // Tick 1 — fails, pop receipt stays at receipt-0
     await vi.advanceTimersByTimeAsync(150);
@@ -115,7 +115,7 @@ describe("visibility heartbeat", () => {
     // Tick 2 — succeeds with the same receipt-0 (since tick 1 failed)
     await vi.advanceTimersByTimeAsync(100);
     expect(qc.updateMessage).toHaveBeenCalledTimes(2);
-    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-0", "text", 120);
+    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-0", undefined, 120);
     expect(hb.popReceipt).toBe("receipt-2");
 
     hb.stop();
