@@ -18,7 +18,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::plugin::{PluginRegistry, SessionId};
-use crate::session_store::{session_ttl, PersistedSession, SessionStore};
+use crate::session_store::{session_ttl, PersistedSession, SessionPersistence};
 
 /// State of a single session.
 #[derive(Debug)]
@@ -57,8 +57,8 @@ pub struct SessionManager {
     registry: Arc<PluginRegistry>,
     idle_timeout: Duration,
     max_sessions: usize,
-    /// Optional Redis-backed persistence for crash recovery.
-    store: Option<SessionStore>,
+    /// Optional persistence backend (Redis in production, mock in tests).
+    store: Option<Box<dyn SessionPersistence>>,
 }
 
 impl SessionManager {
@@ -73,19 +73,19 @@ impl SessionManager {
         }
     }
 
-    /// Create a session manager with Redis-backed session persistence.
+    /// Create a session manager with a persistence backend.
     pub fn new_with_store(
         registry: Arc<PluginRegistry>,
         idle_timeout: Duration,
         max_sessions: usize,
-        store: SessionStore,
+        store: impl SessionPersistence + 'static,
     ) -> Self {
         Self {
             sessions_lock: RwLock::new(HashMap::new()),
             registry,
             idle_timeout,
             max_sessions,
-            store: Some(store),
+            store: Some(Box::new(store)),
         }
     }
 
@@ -253,10 +253,48 @@ pub enum SessionError {
 mod tests {
     use super::*;
     use crate::plugin::PluginRegistry;
+    use crate::session_store::SessionPersistence;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn make_manager(max: usize) -> SessionManager {
         let registry = Arc::new(PluginRegistry::new(vec![]));
         SessionManager::new(registry, Duration::from_secs(300), max)
+    }
+
+    /// In-memory mock that records calls and returns configurable results.
+    struct MockStore {
+        /// Controls what `save()` returns: `true` = new, `false` = already exists.
+        save_returns_new: bool,
+        save_calls: Arc<AtomicUsize>,
+        delete_calls: Arc<AtomicUsize>,
+    }
+
+    impl MockStore {
+        fn new(save_returns_new: bool) -> (Self, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+            let save_calls = Arc::new(AtomicUsize::new(0));
+            let delete_calls = Arc::new(AtomicUsize::new(0));
+            (
+                Self {
+                    save_returns_new,
+                    save_calls: save_calls.clone(),
+                    delete_calls: delete_calls.clone(),
+                },
+                save_calls,
+                delete_calls,
+            )
+        }
+    }
+
+    #[async_trait]
+    impl SessionPersistence for MockStore {
+        async fn save(&self, _session: &PersistedSession, _ttl: Duration) -> bool {
+            self.save_calls.fetch_add(1, Ordering::Relaxed);
+            self.save_returns_new
+        }
+        async fn delete(&self, _session_id: &str) {
+            self.delete_calls.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     #[tokio::test]
@@ -417,5 +455,110 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(mgr.session_count(), 2);
+    }
+
+    // --- Tests with MockStore ---
+
+    #[tokio::test]
+    async fn create_session_calls_store_save() {
+        let (mock, save_calls, _delete_calls) = MockStore::new(true);
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+
+        let result = mgr
+            .create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        assert!(result); // store returned true → new
+        assert_eq!(save_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn create_session_returns_false_when_store_says_existing() {
+        let (mock, save_calls, _) = MockStore::new(false); // store says "already exists"
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+
+        let result = mgr
+            .create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        assert!(!result); // cross-replica idempotent
+        assert_eq!(save_calls.load(Ordering::Relaxed), 1);
+        // Session should still be in-memory even though Redis had it
+        assert!(mgr.is_active(&"s1".into()));
+    }
+
+    #[tokio::test]
+    async fn idempotent_create_skips_store_on_second_call() {
+        let (mock, save_calls, _) = MockStore::new(true);
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        // Second call with same ID — early return from in-memory check
+        let second = mgr
+            .create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        assert!(!second);
+        // Store should only have been called once (first create)
+        assert_eq!(save_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn stop_session_calls_store_delete() {
+        let (mock, _, delete_calls) = MockStore::new(true);
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        mgr.stop_session(&"s1".into()).await.unwrap();
+        assert_eq!(delete_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn delete_session_calls_store_delete() {
+        let (mock, _, delete_calls) = MockStore::new(true);
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        mgr.delete_session(&"s1".into()).await.unwrap();
+        assert_eq!(delete_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn stop_nonexistent_does_not_call_store_delete() {
+        let (mock, _, delete_calls) = MockStore::new(true);
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+
+        let _ = mgr.stop_session(&"nonexistent".into()).await;
+        assert_eq!(delete_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn create_session_with_store_uses_custom_ttl() {
+        // Verify save is called (TTL correctness is a store concern, but we
+        // confirm the path through session_ttl → store.save is exercised).
+        let (mock, save_calls, _) = MockStore::new(true);
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+
+        let mut settings = HashMap::new();
+        settings.insert(
+            "plugin".to_string(),
+            serde_json::json!({"max_session_duration_secs": 7200}),
+        );
+        let result = mgr.create_session("s1".into(), settings).await.unwrap();
+        assert!(result);
+        assert_eq!(save_calls.load(Ordering::Relaxed), 1);
     }
 }

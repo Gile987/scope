@@ -18,6 +18,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use backon::{ExponentialBuilder, Retryable};
 use fred::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,17 @@ pub struct PersistedSession {
     pub session_id: String,
     pub plugin_settings: HashMap<String, serde_json::Value>,
     pub started_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Trait for session persistence backends (Redis, mocks, etc.).
+#[async_trait]
+pub trait SessionPersistence: Send + Sync {
+    /// Persist a session. Returns `true` if newly created, `false` if it
+    /// already existed (idempotent retry).
+    async fn save(&self, session: &PersistedSession, ttl: Duration) -> bool;
+
+    /// Delete a session from the store.
+    async fn delete(&self, session_id: &str);
 }
 
 /// Redis-backed store for session persistence across pod restarts.
@@ -43,13 +55,15 @@ impl SessionStore {
     pub fn new(client: Client) -> Self {
         Self { client }
     }
+}
 
-    /// Persist a session to Redis with a TTL using SET NX (set-if-not-exists).
+#[async_trait]
+impl SessionPersistence for SessionStore {
     ///
     /// Returns `true` if the key was newly created, `false` if it already existed
     /// (idempotent retry from another replica). Retries with exponential backoff
     /// on transient failures.
-    pub async fn save(&self, session: &PersistedSession, ttl: Duration) -> bool {
+    async fn save(&self, session: &PersistedSession, ttl: Duration) -> bool {
         let ttl_secs = ttl.as_secs() as i64;
         let session_key = format!("gateway:session:{}", session.session_id);
 
@@ -111,7 +125,7 @@ impl SessionStore {
     }
 
     /// Remove the Redis key for a session (called on stop/clear).
-    pub async fn delete(&self, session_id: &str) {
+    async fn delete(&self, session_id: &str) {
         let session_key = format!("gateway:session:{}", session_id);
 
         if let Err(e) = self.client.del::<(), _>(&session_key).await {
