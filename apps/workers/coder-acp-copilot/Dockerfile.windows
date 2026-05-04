@@ -15,7 +15,7 @@ RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
 
 # Install Node.js 24 via direct MSI download (nodejs-lts 24.x not yet on Chocolatey)
 RUN Invoke-WebRequest -Uri 'https://nodejs.org/dist/v24.0.0/node-v24.0.0-x64.msi' \
-      -OutFile C:\node.msi; \
+    -OutFile C:\node.msi; \
     Start-Process msiexec.exe -ArgumentList '/i', 'C:\node.msi', '/quiet', '/norestart' -Wait; \
     Remove-Item C:\node.msi
 
@@ -26,12 +26,12 @@ RUN choco install -y git; \
 # Install pnpm as a standalone executable to a known location
 RUN New-Item -ItemType Directory -Force -Path C:\tools | Out-Null; \
     Invoke-WebRequest -Uri 'https://github.com/pnpm/pnpm/releases/download/v10.29.1/pnpm-win-x64.exe' \
-      -OutFile 'C:\tools\pnpm.exe'
+    -OutFile 'C:\tools\pnpm.exe'
 
 # Install uv (Python package manager) for Windows
 RUN $env:UV_VERSION = '0.10.0'; \
     Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/download/${env:UV_VERSION}/uv-x86_64-pc-windows-msvc.zip" \
-      -OutFile C:\uv.zip; \
+    -OutFile C:\uv.zip; \
     Expand-Archive -Path C:\uv.zip -DestinationPath C:\uv; \
     Remove-Item C:\uv.zip
 
@@ -60,7 +60,8 @@ RUN C:\tools\pnpm.exe --filter shared build; C:\tools\pnpm.exe --filter coder-ac
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
 ARG COPILOT_CLI_VERSION
-RUN npm install -g @github/copilot@${COPILOT_CLI_VERSION}
+# Install copilot to C:\tools so it lands on PATH (default AppData\Roaming\npm is not in PATH)
+RUN npm install -g --prefix C:\tools @github/copilot@${COPILOT_CLI_VERSION}
 
 RUN New-Item -ItemType Directory -Force -Path C:\workspace
 
@@ -78,7 +79,8 @@ FROM base AS production
 SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
 
 ARG COPILOT_CLI_VERSION
-RUN npm install -g @github/copilot@${COPILOT_CLI_VERSION}
+# Install copilot to C:\tools so it lands on PATH (default AppData\Roaming\npm is not in PATH)
+RUN npm install -g --prefix C:\tools @github/copilot@${COPILOT_CLI_VERSION}
 
 WORKDIR C:/app
 
