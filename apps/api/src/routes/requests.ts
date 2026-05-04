@@ -843,7 +843,7 @@ apiRoute(ctx.app, ctx.registry, {
     let needsReverse = false;
 
     if (lastParam) {
-      // O(1) jump to last page: scan from oldest, then reverse for normal UI ordering.
+      // Jump to the last page by querying from oldest first, then reverse for normal UI ordering.
       sort = { createdAt: 1, _id: 1 };
       needsReverse = true;
     } else if (afterCursor) {
