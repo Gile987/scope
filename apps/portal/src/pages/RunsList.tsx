@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -95,7 +95,7 @@ export function RunsList() {
   const [priorityDialogOpen, setPriorityDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
-  const [cursorDirection, setCursorDirection] = useState<"after" | "before" | undefined>(undefined);
+  const [cursorDirection, setCursorDirection] = useState<"after" | "before" | "last" | undefined>(undefined);
   const [isJumpingToLast, setIsJumpingToLast] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(loadHiddenColumns);
   const queryClient = useQueryClient();
@@ -122,109 +122,12 @@ export function RunsList() {
   const effectiveStatus = statusFilter !== "all" ? statusFilter : undefined;
   const effectiveOutcome = outcomeFilter !== "all" ? outcomeFilter : undefined;
 
-  const goToLastPage = useCallback(async () => {
+  const goToLastPage = useCallback(() => {
     if (isJumpingToLast) return;
-
     setIsJumpingToLast(true);
-    try {
-      // When already paginating forward, start from the current cursor so users
-      // near the end skip already-seen pages. "before" cursors point backward and
-      // cannot be used as a forward starting point, so we always restart from the
-      // beginning in that case.
-      let after: string | undefined = cursorDirection === "after" ? cursor : undefined;
-
-      // Hard upper bound on sequential API requests regardless of dataset size.
-      const maxHopsAbsolute = 500;
-      // Conservative initial bound; tightened after the first response using
-      // the API-reported estimatedTotal and page size, but never above the hard cap.
-      let maxHops = maxHopsAbsolute;
-      // Buffer of 2 extra pages guards against new records arriving mid-traversal
-      // causing the real page count to exceed the estimate.
-      const traversalBufferPages = 2;
-      // Fall back to 50 if the server omits the page size (matches the API default).
-      const defaultPageSize = 50;
-      let estimatedTotalForDisplay: number | undefined;
-
-      for (let i = 0; i < maxHops; i++) {
-        const page = groupBy !== "none"
-          ? await api.listRunGroups({
-            groupBy: groupBy as "task" | "submissionId" | "profile",
-            worker: workerFilter === "all" ? undefined : workerFilter,
-            taskPromptId: effectiveTaskPromptId,
-            status: effectiveStatus,
-            outcome: effectiveOutcome,
-            criteria: criteriaState,
-            submissionId,
-            limit,
-            after,
-            before: undefined,
-          })
-          : await api.listRuns({
-            worker: workerFilter === "all" ? undefined : workerFilter,
-            taskPromptId: effectiveTaskPromptId,
-            status: effectiveStatus,
-            outcome: effectiveOutcome,
-            criteria: criteriaState,
-            submissionId,
-            limit,
-            after,
-            before: undefined,
-          });
-
-        // On the first iteration, derive a tight hop bound from the response metadata,
-        // but never exceed the hard absolute cap.
-        if (i === 0) {
-          estimatedTotalForDisplay = page.estimatedTotal;
-          const pageSize = page.limit > 0 ? page.limit : defaultPageSize;
-          if (page.estimatedTotal > 0 && pageSize > 0) {
-            maxHops = Math.min(
-              Math.ceil(page.estimatedTotal / pageSize) + traversalBufferPages,
-              maxHopsAbsolute,
-            );
-          }
-        }
-
-        const next = page.cursors?.next ?? null;
-        if (!next) {
-          if (after) {
-            setCursor(after);
-            setCursorDirection("after");
-          } else {
-            resetCursor();
-          }
-          return;
-        }
-
-        after = next;
-      }
-
-      const estimatedTotalMessage = estimatedTotalForDisplay != null && estimatedTotalForDisplay > 0
-        ? ` (estimated ${estimatedTotalForDisplay.toLocaleString()} total records)`
-        : "";
-      toast.error("Unable to jump to last page", {
-        description: `Too many pages to traverse safely${estimatedTotalMessage}. Try narrowing your filters.`,
-      });
-    } catch (error) {
-      toast.error("Unable to jump to last page", {
-        description: error instanceof Error ? error.message : "Unknown error",
-      });
-    } finally {
-      setIsJumpingToLast(false);
-    }
-  }, [
-    isJumpingToLast,
-    cursor,
-    cursorDirection,
-    groupBy,
-    workerFilter,
-    effectiveTaskPromptId,
-    effectiveStatus,
-    effectiveOutcome,
-    criteriaState,
-    submissionId,
-    limit,
-    resetCursor,
-  ]);
+    setCursor(undefined);
+    setCursorDirection("last");
+  }, [isJumpingToLast]);
 
   const { data: runsResponse, isLoading, isRefetching } = useQuery({
     queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
@@ -236,6 +139,7 @@ export function RunsList() {
       criteria: criteriaState,
       submissionId,
       limit: limit,
+      last: cursorDirection === "last",
       after: cursorDirection === "after" ? cursor : undefined,
       before: cursorDirection === "before" ? cursor : undefined,
     }),
@@ -257,6 +161,7 @@ export function RunsList() {
       criteria: criteriaState,
       submissionId,
       limit: limit,
+      last: cursorDirection === "last",
       after: cursorDirection === "after" ? cursor : undefined,
       before: cursorDirection === "before" ? cursor : undefined,
     }),
@@ -619,6 +524,16 @@ export function RunsList() {
 
   const allSelected = runs.length > 0 && runs.every((r) => selectedIds.has(r._id));
   const someSelected = runs.some((r) => selectedIds.has(r._id));
+
+  useEffect(() => {
+    if (!isJumpingToLast) return;
+    const done = groupBy === "none"
+      ? !isLoading && !isRefetching
+      : !isGroupsLoading && !isGroupsRefetching;
+    if (done) {
+      setIsJumpingToLast(false);
+    }
+  }, [isJumpingToLast, groupBy, isLoading, isRefetching, isGroupsLoading, isGroupsRefetching]);
 
   const toggleSelectAll = () => {
     if (allSelected) {

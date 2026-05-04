@@ -651,9 +651,14 @@ apiRoute(ctx.app, ctx.registry, {
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
     const afterParam = req.query.after as string | undefined;
     const beforeParam = req.query.before as string | undefined;
+    const lastParam = req.query.last === "true";
 
     if (afterParam && beforeParam) {
       res.status(400).json({ error: "Cannot specify both 'after' and 'before'" });
+      return;
+    }
+    if (lastParam && (afterParam || beforeParam)) {
+      res.status(400).json({ error: "Cannot combine 'last=true' with 'after' or 'before'" });
       return;
     }
     
@@ -735,15 +740,18 @@ apiRoute(ctx.app, ctx.registry, {
         { $group: { _id: groupByAggField } },
         { $sort: { _id: 1 } },
       ];
-      if (afterKey !== undefined) {
+      if (lastParam) {
+        // O(1) jump to last page: fetch the final keys directly.
+        keyPipeline.push({ $sort: { _id: -1 } });
+      } else if (afterKey !== undefined) {
         keyPipeline.push({ $match: { _id: { $gt: afterKey } } });
       }
-      if (beforeKey !== undefined) {
+      if (!lastParam && beforeKey !== undefined) {
         keyPipeline.push({ $match: { _id: { $lt: beforeKey } } });
       }
 
       // For backward: sort descending, take limit, then reverse
-      if (beforeKey !== undefined) {
+      if (!lastParam && beforeKey !== undefined) {
         keyPipeline.push({ $sort: { _id: -1 } });
       }
       keyPipeline.push({ $limit: limit });
@@ -751,7 +759,7 @@ apiRoute(ctx.app, ctx.registry, {
       const keyResults = await ctx.requestCollection.aggregate(keyPipeline).toArray();
 
       // Reverse results for backward pagination
-      if (beforeKey !== undefined) {
+      if (lastParam || beforeKey !== undefined) {
         keyResults.reverse();
       }
 
@@ -774,28 +782,40 @@ apiRoute(ctx.app, ctx.registry, {
       const lastKey = pageKeys[pageKeys.length - 1];
 
       // Check if there are more results in each direction
-      const hasMoreAfter = await ctx.requestCollection.aggregate([
-        { $match: filter },
-        { $group: { _id: groupByAggField } },
-        { $sort: { _id: 1 } },
-        { $match: { _id: { $gt: lastKey } } },
-        { $limit: 1 },
-      ]).toArray();
-
-      const hasMoreBefore = await ctx.requestCollection.aggregate([
-        { $match: filter },
-        { $group: { _id: groupByAggField } },
-        { $sort: { _id: 1 } },
-        { $match: { _id: { $lt: firstKey } } },
-        { $limit: 1 },
-      ]).toArray();
+      const [hasMoreAfter, hasMoreBefore] = lastParam
+        ? await Promise.all([
+            Promise.resolve([] as Record<string, unknown>[]),
+            ctx.requestCollection.aggregate([
+              { $match: filter },
+              { $group: { _id: groupByAggField } },
+              { $sort: { _id: 1 } },
+              { $match: { _id: { $lt: firstKey } } },
+              { $limit: 1 },
+            ]).toArray(),
+          ])
+        : await Promise.all([
+            ctx.requestCollection.aggregate([
+              { $match: filter },
+              { $group: { _id: groupByAggField } },
+              { $sort: { _id: 1 } },
+              { $match: { _id: { $gt: lastKey } } },
+              { $limit: 1 },
+            ]).toArray(),
+            ctx.requestCollection.aggregate([
+              { $match: filter },
+              { $group: { _id: groupByAggField } },
+              { $sort: { _id: 1 } },
+              { $match: { _id: { $lt: firstKey } } },
+              { $limit: 1 },
+            ]).toArray(),
+          ]);
 
       res.json({
         data: groups,
         limit,
         estimatedTotal,
         cursors: {
-          next: hasMoreAfter.length > 0 ? encodeCursor({ [groupByField]: lastKey }) : null,
+          next: lastParam ? null : hasMoreAfter.length > 0 ? encodeCursor({ [groupByField]: lastKey }) : null,
           prev: hasMoreBefore.length > 0 ? encodeCursor({ [groupByField]: firstKey }) : null,
         },
       });
@@ -821,7 +841,11 @@ apiRoute(ctx.app, ctx.registry, {
     let sort: Record<string, 1 | -1> = { createdAt: -1, _id: -1 };
     let needsReverse = false;
 
-    if (afterCursor) {
+    if (lastParam) {
+      // O(1) jump to last page: scan from oldest, then reverse for normal UI ordering.
+      sort = { createdAt: 1, _id: 1 };
+      needsReverse = true;
+    } else if (afterCursor) {
       // Forward: items after this cursor (older, since sort is descending)
       cursorFilter.$or = [
         { createdAt: { $lt: new Date(afterCursor.createdAt) } },
@@ -859,29 +883,40 @@ apiRoute(ctx.app, ctx.registry, {
     const lastId = String(last._id);
 
     // Check if there are more results in each direction
-    const [hasMoreAfter, hasMoreBefore] = await Promise.all([
-      ctx.requestCollection.find({
-        ...filter,
-        $or: [
-          { createdAt: { $lt: new Date(lastCreatedAt) } },
-          { createdAt: new Date(lastCreatedAt), _id: { $lt: lastId } },
-        ],
-      }).sort({ createdAt: -1, _id: -1 }).limit(1).toArray(),
-      ctx.requestCollection.find({
-        ...filter,
-        $or: [
-          { createdAt: { $gt: new Date(firstCreatedAt) } },
-          { createdAt: new Date(firstCreatedAt), _id: { $gt: firstId } },
-        ],
-      }).sort({ createdAt: 1, _id: 1 }).limit(1).toArray(),
-    ]);
+    const [hasMoreAfter, hasMoreBefore] = lastParam
+      ? await Promise.all([
+          Promise.resolve([] as Record<string, unknown>[]),
+          ctx.requestCollection.find({
+            ...filter,
+            $or: [
+              { createdAt: { $gt: new Date(firstCreatedAt) } },
+              { createdAt: new Date(firstCreatedAt), _id: { $gt: firstId } },
+            ],
+          }).sort({ createdAt: 1, _id: 1 }).limit(1).toArray(),
+        ])
+      : await Promise.all([
+          ctx.requestCollection.find({
+            ...filter,
+            $or: [
+              { createdAt: { $lt: new Date(lastCreatedAt) } },
+              { createdAt: new Date(lastCreatedAt), _id: { $lt: lastId } },
+            ],
+          }).sort({ createdAt: -1, _id: -1 }).limit(1).toArray(),
+          ctx.requestCollection.find({
+            ...filter,
+            $or: [
+              { createdAt: { $gt: new Date(firstCreatedAt) } },
+              { createdAt: new Date(firstCreatedAt), _id: { $gt: firstId } },
+            ],
+          }).sort({ createdAt: 1, _id: 1 }).limit(1).toArray(),
+        ]);
 
     res.json({
       data,
       limit,
       estimatedTotal,
       cursors: {
-        next: hasMoreAfter.length > 0 ? encodeCursor({ createdAt: lastCreatedAt, id: lastId }) : null,
+        next: lastParam ? null : hasMoreAfter.length > 0 ? encodeCursor({ createdAt: lastCreatedAt, id: lastId }) : null,
         prev: hasMoreBefore.length > 0 ? encodeCursor({ createdAt: firstCreatedAt, id: firstId }) : null,
       },
     });
