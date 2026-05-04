@@ -28,7 +28,7 @@ use gateway::ca::CertificateAuthority;
 use gateway::config::{Cli, Config};
 use gateway::filters::UrlFilter;
 use gateway::plugin::PluginRegistry;
-use gateway::plugins::har::iteration_store::RedisIterationStore;
+use gateway::iteration_store::{IterationStore, LocalIterationStore, RedisIterationStore};
 use gateway::plugins::har::plugin::HarPlugin;
 use gateway::proxy::handler::{handle_client, ProxyState};
 use gateway::session::SessionManager;
@@ -122,12 +122,11 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // HAR iteration store — backed by Redis when available.
-    let iteration_store: Option<Arc<dyn gateway::plugins::har::iteration_store::IterationStore>> =
-        redis_client.as_ref().map(|c| {
-            Arc::new(RedisIterationStore::new(c.clone()))
-                as Arc<dyn gateway::plugins::har::iteration_store::IterationStore>
-        });
+    // Iteration store — backed by Redis when available, in-memory otherwise.
+    let iteration_store: Arc<dyn IterationStore> = match redis_client.as_ref() {
+        Some(c) => Arc::new(RedisIterationStore::new(c.clone())),
+        None => Arc::new(LocalIterationStore::new()),
+    };
 
     // Plugins — HAR writer backend selected from config
     let (har_plugin, blob_container_client): (
@@ -175,13 +174,12 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let plugin: Arc<dyn gateway::plugin::ProxyPlugin> = {
-            let iteration_store = iteration_store.clone().expect(
-                "Redis is required when harBlob is configured (blob + redis must both be present)",
-            );
-            Arc::new(HarPlugin::new_with_blob_and_redis(
+            if redis_client.is_none() {
+                panic!("Redis is required when harBlob is configured (blob + redis must both be present)");
+            }
+            Arc::new(HarPlugin::new_with_blob(
                 container_client.clone(),
                 std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
-                iteration_store,
             ))
         };
         (plugin, Some(container_client))
@@ -202,12 +200,14 @@ async fn main() -> anyhow::Result<()> {
                 Duration::from_secs(300),
                 100,
                 store,
+                iteration_store,
             ))
         }
         None => Arc::new(SessionManager::new(
             registry.clone(),
             Duration::from_secs(300),
             100,
+            iteration_store,
         )),
     };
 

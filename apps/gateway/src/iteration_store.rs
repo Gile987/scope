@@ -1,12 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Redis-backed iteration counter for multi-replica consistency.
+//! Session-level iteration counter for multi-replica consistency.
 //!
 //! Each gateway session has a mutable iteration counter that is bumped by the
-//! `POST /rotate` endpoint. Because session affinity is best-effort (not
-//! guaranteed), the authoritative counter lives in Redis so that any replica
-//! can read the current value or perform a compare-and-swap rotation.
+//! `POST /api/v1/sessions/:id/rotate` endpoint. Because session affinity is
+//! best-effort (not guaranteed), the authoritative counter lives in Redis so
+//! that any replica can read the current value or perform a compare-and-swap
+//! rotation.
 //!
 //! Redis key: `gateway:session:{sessionId}:iteration`
 //!

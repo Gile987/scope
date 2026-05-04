@@ -28,6 +28,7 @@ pub fn build_api_router(state: Arc<ApiState>, plugin_session_routes: Vec<Router>
     let session_routes = Router::new()
         .route("/", get(routes::get_session))
         .route("/stop", post(routes::post_stop_session))
+        .route("/rotate", post(routes::post_rotate))
         .route("/", delete(routes::delete_session))
         .with_state(state.clone());
 

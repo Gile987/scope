@@ -198,6 +198,59 @@ pub async fn get_cacert(State(state): State<Arc<ApiState>>) -> impl IntoResponse
     )
 }
 
+/// Query parameters for `POST /api/v1/sessions/:id/rotate`.
+#[derive(Deserialize)]
+pub struct RotateQuery {
+    /// Expected current iteration (CAS guard).
+    pub expected: u32,
+}
+
+/// JSON response for rotate.
+#[derive(Serialize)]
+pub struct RotateResponse {
+    pub iteration: u32,
+}
+
+/// POST /api/v1/sessions/:id/rotate?expected=N — rotate to a new iteration.
+///
+/// CAS semantics: if the session's current iteration == expected, bump to
+/// expected+1 and return 200 with the new iteration number. If there's a
+/// mismatch, return 409 with the actual value.
+pub async fn post_rotate(
+    Path(session_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<RotateQuery>,
+    State(state): State<Arc<ApiState>>,
+) -> impl IntoResponse {
+    use crate::iteration_store::CasResult;
+
+    match state.session_manager.rotate(&session_id, query.expected).await {
+        Ok(CasResult::Ok(new_iteration)) => {
+            info!(
+                "Session {} rotated from iter {} to {}",
+                session_id, query.expected, new_iteration
+            );
+            (
+                StatusCode::OK,
+                Json(RotateResponse {
+                    iteration: new_iteration,
+                }),
+            )
+                .into_response()
+        }
+        Ok(CasResult::Conflict(actual)) => {
+            (
+                StatusCode::CONFLICT,
+                Json(RotateResponse { iteration: actual }),
+            )
+                .into_response()
+        }
+        Err(crate::session::SessionError::NotFound) => {
+            StatusCode::NOT_FOUND.into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,6 +262,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::ca::CertificateAuthority;
+    use crate::iteration_store::LocalIterationStore;
     use crate::plugin::PluginRegistry;
     use crate::session::SessionManager;
 
@@ -237,10 +291,12 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let ca = Arc::new(CertificateAuthority::new(tmp.path(), 10).unwrap());
         let registry = Arc::new(PluginRegistry::new(vec![]));
+        let iteration_store = Arc::new(LocalIterationStore::new()) as Arc<dyn crate::iteration_store::IterationStore>;
         let mgr = Arc::new(SessionManager::new(
             registry,
             std::time::Duration::from_secs(300),
             100,
+            iteration_store,
         ));
         // Leak the TempDir so the CA directory lives for the test duration.
         // This is fine for tests — the OS cleans up on process exit.
@@ -363,10 +419,12 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let ca = Arc::new(CertificateAuthority::new(tmp.path(), 10).unwrap());
         let registry = Arc::new(PluginRegistry::new(vec![]));
+        let iteration_store = Arc::new(LocalIterationStore::new()) as Arc<dyn crate::iteration_store::IterationStore>;
         let mgr = Arc::new(SessionManager::new(
             registry,
             std::time::Duration::from_secs(300),
             1, // max 1 session
+            iteration_store,
         ));
         std::mem::forget(tmp);
         let state = Arc::new(ApiState {

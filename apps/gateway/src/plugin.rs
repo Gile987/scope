@@ -72,7 +72,7 @@ pub trait ProxyPlugin: Send + Sync {
     }
 
     /// Called for each intercepted request/response pair.
-    async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange);
+    async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange, iteration: u32);
 
     /// Called when a session stops (POST /session/stop).
     async fn on_session_stop(&self, session_id: &SessionId);
@@ -108,24 +108,12 @@ impl PluginRegistry {
         session_id: &SessionId,
         plugin_settings: &HashMap<String, Value>,
     ) {
-        use crate::session_store::session_ttl;
-        let ttl_secs = session_ttl(plugin_settings).as_secs();
-
         // Plugins that aren't mentioned in the session's pluginSettings get an
         // empty JSON object, so they can apply their own defaults without None checks.
         let empty = Value::Object(serde_json::Map::new());
         for plugin in &self.plugins {
-            let base = plugin_settings.get(plugin.name()).unwrap_or(&empty);
-            // Inject the shared session TTL so plugins that create Redis keys
-            // can use the same expiration as the session record.
-            let mut settings = base.clone();
-            if let Value::Object(ref mut map) = settings {
-                map.insert(
-                    "_sessionTtlSecs".to_string(),
-                    Value::Number(serde_json::Number::from(ttl_secs)),
-                );
-            }
-            plugin.on_session_start(session_id, &settings).await;
+            let settings = plugin_settings.get(plugin.name()).unwrap_or(&empty);
+            plugin.on_session_start(session_id, settings).await;
         }
     }
 
@@ -143,9 +131,9 @@ impl PluginRegistry {
     }
 
     /// Broadcast a captured exchange to all plugins.
-    pub async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
+    pub async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange, iteration: u32) {
         for plugin in &self.plugins {
-            plugin.on_exchange(session_id, exchange).await;
+            plugin.on_exchange(session_id, exchange, iteration).await;
         }
     }
 
@@ -197,7 +185,7 @@ mod tests {
             self.start_count.fetch_add(1, Ordering::SeqCst);
         }
 
-        async fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange) {
+        async fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange, _iteration: u32) {
             self.exchange_count.fetch_add(1, Ordering::SeqCst);
         }
 
@@ -244,7 +232,7 @@ mod tests {
 
         let exchange = make_exchange();
         registry
-            .on_exchange(&"10.0.0.1".to_string(), &exchange)
+            .on_exchange(&"10.0.0.1".to_string(), &exchange, 1)
             .await;
         assert_eq!(p1.exchange_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.exchange_count.load(Ordering::SeqCst), 1);
@@ -274,7 +262,7 @@ mod tests {
             async fn on_session_start(&self, _session_id: &SessionId, settings: &Value) {
                 *self.captured.lock().unwrap() = Some(settings.clone());
             }
-            async fn on_exchange(&self, _: &SessionId, _: &HttpExchange) {}
+            async fn on_exchange(&self, _: &SessionId, _: &HttpExchange, _iteration: u32) {}
             async fn on_session_stop(&self, _: &SessionId) {}
             async fn on_session_clear(&self, _: &SessionId) {}
         }
@@ -313,7 +301,7 @@ mod tests {
             async fn on_session_start(&self, _session_id: &SessionId, settings: &Value) {
                 *self.captured.lock().unwrap() = Some(settings.clone());
             }
-            async fn on_exchange(&self, _: &SessionId, _: &HttpExchange) {}
+            async fn on_exchange(&self, _: &SessionId, _: &HttpExchange, _iteration: u32) {}
             async fn on_session_stop(&self, _: &SessionId) {}
             async fn on_session_clear(&self, _: &SessionId) {}
         }
@@ -331,8 +319,7 @@ mod tests {
 
         let captured = plugin.captured.lock().unwrap().clone().unwrap();
         assert!(captured.is_object());
-        // The only key should be _sessionTtlSecs (injected by PluginRegistry).
-        assert_eq!(captured.as_object().unwrap().len(), 1);
-        assert_eq!(captured["_sessionTtlSecs"], 3600);
+        // Unconfigured plugins get an empty JSON object.
+        assert_eq!(captured.as_object().unwrap().len(), 0);
     }
 }
