@@ -174,25 +174,21 @@ async fn main() -> anyhow::Result<()> {
                 .container_client(&blob_cfg.container_name)
         };
 
-        let plugin: Arc<dyn gateway::plugin::ProxyPlugin> = match iteration_store.clone() {
-            Some(store) => Arc::new(HarPlugin::new_with_blob_and_redis(
+        let plugin: Arc<dyn gateway::plugin::ProxyPlugin> = {
+            let iteration_store = iteration_store.clone().expect(
+                "Redis is required when harBlob is configured (blob + redis must both be present)",
+            );
+            Arc::new(HarPlugin::new_with_blob_and_redis(
                 container_client.clone(),
                 std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
-                store,
-            )),
-            None => Arc::new(HarPlugin::new_with_blob(
-                container_client.clone(),
-                std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
-            )),
+                iteration_store,
+            ))
         };
         (plugin, Some(container_client))
     } else {
         let har_dir = config.plugins.har.output_dir.clone();
         info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
-        let plugin: Arc<dyn gateway::plugin::ProxyPlugin> = match iteration_store.clone() {
-            Some(store) => Arc::new(HarPlugin::new_with_redis(har_dir, store)),
-            None => Arc::new(HarPlugin::new(har_dir)),
-        };
+        let plugin: Arc<dyn gateway::plugin::ProxyPlugin> = Arc::new(HarPlugin::new(har_dir));
         (plugin, None)
     };
     let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));

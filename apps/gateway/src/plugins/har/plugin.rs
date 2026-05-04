@@ -66,7 +66,7 @@ pub struct HarPlugin {
 }
 
 impl HarPlugin {
-    /// Create using a `LocalWriter` (default — no blob config required).
+    /// Create using a `LocalWriter` (tests / local dev — no blob or Redis).
     pub fn new(har_dir: std::path::PathBuf) -> Self {
         let writer = Arc::new(LocalWriter::new(har_dir));
         Self {
@@ -78,8 +78,9 @@ impl HarPlugin {
         }
     }
 
-    /// Create using a `LocalWriter` with a Redis-backed iteration store.
-    pub fn new_with_redis(
+    /// Test-only: local writer + iteration store (for testing Redis code paths).
+    #[cfg(test)]
+    pub(crate) fn new_with_iteration_store(
         har_dir: std::path::PathBuf,
         iteration_store: Arc<dyn IterationStore>,
     ) -> Self {
@@ -93,22 +94,7 @@ impl HarPlugin {
         }
     }
 
-    /// Create using a `BlobWriter`.
-    pub fn new_with_blob(
-        container_client: azure_storage_blobs::prelude::ContainerClient,
-        append_timeout: std::time::Duration,
-    ) -> Self {
-        let writer = Arc::new(BlobWriter::new(container_client, append_timeout));
-        Self {
-            inner: Arc::new(HarInner {
-                sessions: RwLock::new(HashMap::new()),
-                writer,
-                iteration_store: None,
-            }),
-        }
-    }
-
-    /// Create using a `BlobWriter` with a Redis-backed iteration store.
+    /// Create using a `BlobWriter` with a Redis-backed iteration store (production).
     pub fn new_with_blob_and_redis(
         container_client: azure_storage_blobs::prelude::ContainerClient,
         append_timeout: std::time::Duration,
@@ -170,11 +156,29 @@ impl ProxyPlugin for HarPlugin {
         // fall back to local state when Redis is not configured.
         let iteration = if let Some(store) = &self.inner.iteration_store {
             match store.get(session_id).await {
-                Some(v) => v,
-                None => {
+                Ok(Some(v)) => v,
+                Ok(None) => {
                     // Key missing — session may have expired in Redis.
-                    let sessions = self.inner.sessions.read();
-                    sessions.get(session_id).map(|s| s.current_iteration).unwrap_or(1)
+                    tracing::error!(
+                        "HAR plugin: Redis iteration key missing for session {}",
+                        session_id
+                    );
+                    let mut sessions = self.inner.sessions.write();
+                    if let Some(s) = sessions.get_mut(session_id) {
+                        s.failed = true;
+                    }
+                    return;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "HAR plugin: Redis iteration read failed for session {}: {}",
+                        session_id, e
+                    );
+                    let mut sessions = self.inner.sessions.write();
+                    if let Some(s) = sessions.get_mut(session_id) {
+                        s.failed = true;
+                    }
+                    return;
                 }
             }
         } else {
@@ -328,14 +332,6 @@ async fn post_rotate_har(
         match store.compare_and_swap(&session_id, query.expected).await {
             CasResult::Ok(new_iteration) => {
                 inner.writer.init_iteration(&session_id, new_iteration).await;
-
-                // Update local cache so co-located on_exchange reads are fast.
-                {
-                    let mut sessions = inner.sessions.write();
-                    if let Some(s) = sessions.get_mut(&session_id) {
-                        s.current_iteration = new_iteration;
-                    }
-                }
 
                 debug!(
                     "HAR plugin: rotated session {} from iter {} to {} (redis)",
@@ -570,12 +566,12 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let store = Arc::new(MockIterationStore::new());
-        let plugin = HarPlugin::new_with_redis(tmp.path().to_path_buf(), store.clone());
+        let plugin = HarPlugin::new_with_iteration_store(tmp.path().to_path_buf(), store.clone());
         let sid = "10.0.0.1".to_string();
 
         // Start session — sets store to iteration 1.
         plugin.on_session_start(&sid, &serde_json::json!({})).await;
-        assert_eq!(store.get(&sid).await, Some(1));
+        assert_eq!(store.get(&sid).await.unwrap(), Some(1));
 
         // Exchange lands in iter-1.
         plugin.on_exchange(&sid, &make_exchange()).await;
@@ -598,6 +594,6 @@ mod tests {
 
         // Clear cleans up the store.
         plugin.on_session_clear(&sid).await;
-        assert_eq!(store.get(&sid).await, None);
+        assert_eq!(store.get(&sid).await.unwrap(), None);
     }
 }

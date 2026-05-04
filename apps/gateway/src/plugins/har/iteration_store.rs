@@ -29,8 +29,10 @@ pub trait IterationStore: Send + Sync {
     /// Initialise the counter for a new session (sets it to 1).
     async fn init(&self, session_id: &str, ttl_secs: i64);
 
-    /// Read the current iteration value. Returns `None` if the key is absent.
-    async fn get(&self, session_id: &str) -> Option<u32>;
+    /// Read the current iteration value.
+    /// Returns `Ok(Some(n))` on success, `Ok(None)` if the key is absent,
+    /// or `Err` if the store is unreachable after retries.
+    async fn get(&self, session_id: &str) -> anyhow::Result<Option<u32>>;
 
     /// Atomic compare-and-swap: if current == expected, increment to expected+1.
     /// Returns `Ok(new)` on success, `Conflict(actual)` on mismatch.
@@ -96,11 +98,13 @@ impl IterationStore for RedisIterationStore {
             .unwrap_or(());
     }
 
-    async fn get(&self, session_id: &str) -> Option<u32> {
+    async fn get(&self, session_id: &str) -> anyhow::Result<Option<u32>> {
         use fred::interfaces::KeysInterface;
         let key = iteration_key(session_id);
-        let val: Option<i64> = self.client.get(&key).await.ok()?;
-        val.map(|v| v as u32)
+        // fred's built-in ReconnectPolicy handles transient connection errors;
+        // we just propagate the final result.
+        let val: Option<i64> = self.client.get(&key).await?;
+        Ok(val.map(|v| v as u32))
     }
 
     async fn compare_and_swap(&self, session_id: &str, expected: u32) -> CasResult {
@@ -156,8 +160,8 @@ pub mod tests {
                 .insert(iteration_key(session_id), 1);
         }
 
-        async fn get(&self, session_id: &str) -> Option<u32> {
-            self.state.read().get(&iteration_key(session_id)).copied()
+        async fn get(&self, session_id: &str) -> anyhow::Result<Option<u32>> {
+            Ok(self.state.read().get(&iteration_key(session_id)).copied())
         }
 
         async fn compare_and_swap(&self, session_id: &str, expected: u32) -> CasResult {
@@ -184,18 +188,18 @@ pub mod tests {
         let sid = "test-session";
 
         // Before init
-        assert_eq!(store.get(sid).await, None);
+        assert_eq!(store.get(sid).await.unwrap(), None);
 
         // Init
         store.init(sid, 3600).await;
-        assert_eq!(store.get(sid).await, Some(1));
+        assert_eq!(store.get(sid).await.unwrap(), Some(1));
 
         // CAS success
         match store.compare_and_swap(sid, 1).await {
             CasResult::Ok(v) => assert_eq!(v, 2),
             CasResult::Conflict(_) => panic!("expected Ok"),
         }
-        assert_eq!(store.get(sid).await, Some(2));
+        assert_eq!(store.get(sid).await.unwrap(), Some(2));
 
         // CAS conflict (stale expected)
         match store.compare_and_swap(sid, 1).await {
@@ -205,6 +209,6 @@ pub mod tests {
 
         // Delete
         store.delete(sid).await;
-        assert_eq!(store.get(sid).await, None);
+        assert_eq!(store.get(sid).await.unwrap(), None);
     }
 }
