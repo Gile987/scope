@@ -18,8 +18,10 @@ use http_body_util::Full;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
+use azure_storage::{CloudLocation, StorageCredentials};
+use azure_storage_blobs::prelude::{BlobServiceClient, ClientBuilder};
 use gateway::api::routes::ApiState;
 use gateway::api::server::build_api_router;
 use gateway::ca::CertificateAuthority;
@@ -29,9 +31,16 @@ use gateway::plugin::PluginRegistry;
 use gateway::plugins::har::plugin::HarPlugin;
 use gateway::proxy::handler::{handle_client, ProxyState};
 use gateway::session::SessionManager;
+use gateway::session_store::SessionStore;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install the process-level CryptoProvider so that all rustls consumers
+    // (our proxy TLS + reqwest in plugins) use the same aws-lc-rs backend.
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install default CryptoProvider");
+
     let cli = Cli::parse();
     let config = Config::load(&cli)?;
 
@@ -54,17 +63,148 @@ async fn main() -> anyhow::Result<()> {
     // URL filter
     let url_filter = Arc::new(UrlFilter::new(&config.urls_to_watch)?);
 
-    // Plugins
-    let har_dir = HarPlugin::output_dir_from_settings(&config.default_plugin_settings);
-    let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> = Arc::new(HarPlugin::new(har_dir));
+    // Plugins — HAR writer backend selected from config
+    let (har_plugin, blob_container_client): (
+        Arc<dyn gateway::plugin::ProxyPlugin>,
+        Option<azure_storage_blobs::prelude::ContainerClient>,
+    ) = if let Some(blob_cfg) = &config.har_blob {
+        let use_emulator = std::env::var("AZURE_STORAGE_USE_EMULATOR")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+
+        let container_client = if use_emulator {
+            // Azurite emulator: parse host/port from the storage account URL so
+            // the same config works for both local Docker Compose and CI.
+            // URL format: http://<host>:<port>/devstoreaccount1
+            let emulator_host =
+                std::env::var("AZURITE_BLOB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+            let emulator_port: u16 = std::env::var("AZURITE_BLOB_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(10000);
+            info!(
+                "HAR plugin: using Azurite emulator backend ({}:{}, container={})",
+                emulator_host, emulator_port, blob_cfg.container_name
+            );
+            ClientBuilder::with_location(
+                CloudLocation::Emulator {
+                    address: emulator_host,
+                    port: emulator_port,
+                },
+                StorageCredentials::emulator(),
+            )
+            .blob_service_client()
+            .container_client(&blob_cfg.container_name)
+        } else {
+            let conn_str = std::env::var("STORAGE_CONNECTION_STRING").map_err(|_| {
+                anyhow::anyhow!(
+                    "STORAGE_CONNECTION_STRING env var is required when harBlob is configured"
+                )
+            })?;
+            let (account_name, storage_creds) =
+                gateway::storage::parse_connection_string(&conn_str)?;
+            info!(
+                "HAR plugin: using Azure Blob Storage backend (account={}, container={})",
+                account_name, blob_cfg.container_name
+            );
+            BlobServiceClient::new(&account_name, storage_creds)
+                .container_client(&blob_cfg.container_name)
+        };
+
+        (
+            Arc::new(HarPlugin::new_with_blob(
+                container_client.clone(),
+                std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
+            )),
+            Some(container_client),
+        )
+    } else {
+        let har_dir = config.plugins.har.output_dir.clone();
+        info!("HAR plugin: using local filesystem backend ({:?})", har_dir);
+        (Arc::new(HarPlugin::new(har_dir)), None)
+    };
     let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
 
-    // Session manager
-    let session_manager = Arc::new(SessionManager::new(
-        registry.clone(),
-        Duration::from_secs(300),
-        100,
-    ));
+    // Session manager — wire Redis store when env vars are present.
+    let session_manager = {
+        let redis_host = std::env::var("REDIS_HOST").ok();
+        if let Some(host) = redis_host {
+            let port: u16 = std::env::var("REDIS_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(6380);
+            let password = std::env::var("REDIS_PASSWORD").ok();
+            // Use TLS only when REDIS_TLS=true is explicitly set.
+            let tls = if std::env::var("REDIS_TLS")
+                .map(|v| v == "true")
+                .unwrap_or(false)
+            {
+                fred::types::config::TlsConnector::default_rustls()
+                    .ok()
+                    .map(Into::into)
+            } else {
+                None
+            };
+            // Azure Redis Enterprise uses cluster protocol; local dev uses standalone.
+            let use_cluster = std::env::var("REDIS_CLUSTER")
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let server = if use_cluster {
+                fred::types::config::ServerConfig::new_clustered(vec![(host.as_str(), port)])
+            } else {
+                fred::types::config::ServerConfig::new_centralized(host.as_str(), port)
+            };
+            let redis_config = fred::types::config::Config {
+                server,
+                password,
+                tls,
+                ..Default::default()
+            };
+            match fred::types::Builder::from_config(redis_config).build() {
+                Ok(client) => {
+                    use fred::interfaces::ClientLike;
+                    match client.init().await {
+                        Ok(_) => {
+                            info!("Session store: connected to Redis at {}:{}", host, port);
+                            let store = SessionStore::new(client);
+                            Arc::new(SessionManager::new_with_store(
+                                registry.clone(),
+                                Duration::from_secs(300),
+                                100,
+                                store,
+                            ))
+                        }
+                        Err(e) => {
+                            warn!("Session store: Redis connect failed, running without persistence: {}", e);
+                            Arc::new(SessionManager::new(
+                                registry.clone(),
+                                Duration::from_secs(300),
+                                100,
+                            ))
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Session store: Redis config error, running without persistence: {}",
+                        e
+                    );
+                    Arc::new(SessionManager::new(
+                        registry.clone(),
+                        Duration::from_secs(300),
+                        100,
+                    ))
+                }
+            }
+        } else {
+            info!("Session store: REDIS_HOST not set, running without persistence");
+            Arc::new(SessionManager::new(
+                registry.clone(),
+                Duration::from_secs(300),
+                100,
+            ))
+        }
+    };
 
     // Shared HTTP/1.1 connection pool for plain (non-CONNECT) forwarding.
     // A single client avoids per-request connection setup and enables keepalive reuse.
@@ -92,6 +232,7 @@ async fn main() -> anyhow::Result<()> {
     let api_state = Arc::new(ApiState {
         session_manager: session_manager.clone(),
         ca: ca.clone(),
+        blob_container_client: blob_container_client.clone(),
     });
     let plugin_routes: Vec<axum::Router> = registry
         .plugins()
@@ -117,7 +258,7 @@ async fn main() -> anyhow::Result<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
-            let reaped = reaper_session_mgr.reap_idle();
+            let reaped = reaper_session_mgr.reap_idle().await;
             if !reaped.is_empty() {
                 info!("Reaped {} idle sessions", reaped.len());
             }

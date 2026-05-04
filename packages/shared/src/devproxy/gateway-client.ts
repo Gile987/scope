@@ -40,6 +40,22 @@ export class GatewayClient {
     return `${this.apiUrl}/mcp`;
   }
 
+  /**
+   * Proxy URL with the session ID embedded in the userinfo field.
+   * HTTP clients will send this as a `Proxy-Authorization: Basic` header,
+   * allowing the gateway to resolve the session directly without IP lookup.
+   *
+   * Returns the bare apiUrl if no session has been started yet.
+   */
+  get proxyUrl(): string {
+    if (!this.sessionId) {
+      return this.apiUrl;
+    }
+    const url = new URL(this.apiUrl);
+    url.username = this.sessionId;
+    return url.toString().replace(/\/$/, "");
+  }
+
   async waitForReady(timeoutMs?: number): Promise<void> {
     return waitForProxyReady(this.apiUrl, timeoutMs);
   }
@@ -53,17 +69,17 @@ export class GatewayClient {
   }
 
   async startSession(plugins: Record<string, unknown> = {}): Promise<string> {
+    const id = this.sessionId ?? crypto.randomUUID();
     const response = await fetch(`${this.apiUrl}/api/v1/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plugins }),
+      body: JSON.stringify({ id, plugins }),
     });
     if (!response.ok) {
       throw new Error(`Failed to create gateway session: ${response.status} ${response.statusText}`);
     }
-    const body = (await response.json()) as { id: string };
-    this.sessionId = body.id;
-    return body.id;
+    this.sessionId = id;
+    return id;
   }
 
   async stopSession(): Promise<void> {

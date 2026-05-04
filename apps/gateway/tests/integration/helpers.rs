@@ -105,6 +105,7 @@ impl TestGateway {
         let api_state = Arc::new(gateway::api::routes::ApiState {
             session_manager: session_manager.clone(),
             ca: ca.clone(),
+            blob_container_client: None,
         });
 
         let plugin_routes: Vec<axum::Router> = registry

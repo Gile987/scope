@@ -16,6 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::connect_info::ConnectInfo;
+use base64::Engine;
 use bytes::Bytes;
 use http::{Method, StatusCode};
 use http_body_util::{BodyExt, Full};
@@ -65,8 +66,6 @@ pub async fn handle_client(
     peer_addr: std::net::SocketAddr,
     state: Arc<ProxyState>,
 ) -> anyhow::Result<()> {
-    let client_ip = peer_addr.ip();
-
     let io = TokioIo::new(stream);
     let state_clone = state.clone();
 
@@ -79,8 +78,16 @@ pub async fn handle_client(
             io,
             service_fn(move |req| {
                 let state = state_clone.clone();
-                let session_id = state.session_manager.session_id_for_ip(&client_ip);
-                async move { handle_request(req, session_id, state, peer_addr).await }
+                async move {
+                    // Resolve session ID from Proxy-Authorization header.
+                    // Workers embed the session ID in the proxy URL userinfo;
+                    // HTTP clients send it as Proxy-Authorization: Basic.
+                    // Chromium/Electron requires a 407 challenge before sending
+                    // the header, so proxy requests without valid auth get a 407.
+                    let session_id = extract_session_from_proxy_auth(&req)
+                        .filter(|id| state.session_manager.is_active(id));
+                    handle_request(req, session_id, state, peer_addr).await
+                }
             }),
         )
         .with_upgrades()
@@ -101,25 +108,61 @@ fn is_api_request<B>(req: &hyper::Request<B>) -> bool {
     req.uri().host().is_none()
 }
 
+/// Extract a session ID from the `Proxy-Authorization: Basic <base64>` header.
+///
+/// Workers embed the session ID in the proxy URL userinfo field
+/// (`http://<sessionId>@host:port`), which HTTP clients send as
+/// `Proxy-Authorization: Basic base64(sessionId:)`. We decode the header
+/// and return the username portion (the session ID).
+fn extract_session_from_proxy_auth<B>(req: &hyper::Request<B>) -> Option<String> {
+    let header = req.headers().get(http::header::PROXY_AUTHORIZATION)?;
+    let value = header.to_str().ok()?;
+    let encoded = value.strip_prefix("Basic ")?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    let decoded_str = String::from_utf8(decoded).ok()?;
+    // Format is "username:password" — session ID is the username part.
+    let session_id = decoded_str.split(':').next()?.to_string();
+    if session_id.is_empty() {
+        None
+    } else {
+        Some(session_id)
+    }
+}
+
 async fn handle_request(
     req: hyper::Request<Incoming>,
     session_id: Option<SessionId>,
     state: Arc<ProxyState>,
     peer_addr: SocketAddr,
 ) -> Result<hyper::Response<StreamingBody>, hyper::Error> {
-    debug!(
-        "Request: {} {} from {} session={:?}",
-        req.method(),
-        req.uri(),
-        peer_addr.ip(),
-        session_id
-    );
-
     // Route API requests (relative URIs) to the Axum router.
     if is_api_request(&req) {
-        debug!("Dispatching to API: {} {}", req.method(), req.uri());
+        let path = req.uri().path();
+        if path.starts_with("/api/") {
+            debug!(target: "gateway::api", "{} {} from {} session={:?}", req.method(), req.uri(), peer_addr.ip(), session_id);
+        } else {
+            debug!(target: "gateway::internal", "{} {} from {}", req.method(), req.uri(), peer_addr.ip());
+        }
         return Ok(dispatch_to_api(req, state, peer_addr).await);
     }
+
+    // Proxy requests require a valid session via Proxy-Authorization.
+    // Chromium/Electron doesn't send credentials preemptively — it needs a
+    // 407 challenge first, then resends with Proxy-Authorization: Basic.
+    if session_id.is_none() {
+        debug!(target: "gateway::proxy", "407 challenge for {} {} from {} (no valid Proxy-Authorization)", req.method(), req.uri(), peer_addr.ip());
+        return Ok(hyper::Response::builder()
+            .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
+            .header(http::header::PROXY_AUTHENTICATE, "Basic realm=\"gateway\"")
+            .body(StreamingBody::Buffered(Full::new(Bytes::from(
+                "Proxy authentication required",
+            ))))
+            .unwrap());
+    }
+
+    debug!(target: "gateway::proxy", "{} {} from {} session={:?}", req.method(), req.uri(), peer_addr.ip(), session_id);
 
     if req.method() == Method::CONNECT {
         match handle_connect(req, session_id, state, peer_addr).await {
@@ -292,7 +335,7 @@ async fn handle_plain_http(
     let method = req.method().clone();
     let host = uri.host().unwrap_or("unknown").to_string();
 
-    debug!("HTTP forward {} {} session={:?}", method, uri, session_id);
+    debug!(target: "gateway::proxy", "HTTP forward {} {} session={:?}", method, uri, session_id);
 
     let should_record = session_id.is_some() && state.url_filter.matches_host(&host);
     let sid_for_record = session_id.unwrap_or_default();
@@ -300,7 +343,15 @@ async fn handle_plain_http(
     // Capture request metadata before consuming
     let req_method = method.clone();
     let req_uri: http::Uri = uri.to_string().parse()?;
-    let req_headers = req.headers().clone();
+    let mut req_headers = req.headers().clone();
+
+    // Give plugins a chance to mutate headers (e.g. refresh auth tokens)
+    if should_record {
+        state
+            .registry
+            .on_request(&sid_for_record, &req_uri, &mut req_headers)
+            .await?;
+    }
 
     // Read request body (requests are typically small)
     let (parts, body) = req.into_parts();
@@ -311,7 +362,7 @@ async fn handle_plain_http(
         .method(parts.method)
         .uri(&uri)
         .version(parts.version);
-    for (name, value) in &parts.headers {
+    for (name, value) in &req_headers {
         upstream_req = upstream_req.header(name, value);
     }
     let upstream_req = upstream_req.body(Full::new(req_body_bytes.clone()))?;
@@ -416,5 +467,74 @@ mod tests {
     fn is_api_request_post_relative_returns_true() {
         let req = make_request("POST", "/api/v1/sessions");
         assert!(is_api_request(&req));
+    }
+
+    /// Helper to build a request with a Proxy-Authorization header.
+    fn make_proxy_auth_request(session_id: &str) -> Request<()> {
+        use base64::Engine;
+        let credentials = format!("{}:", session_id);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
+        Request::builder()
+            .method("CONNECT")
+            .uri("example.com:443")
+            .header(
+                http::header::PROXY_AUTHORIZATION,
+                format!("Basic {}", encoded),
+            )
+            .body(())
+            .unwrap()
+    }
+
+    #[test]
+    fn extract_session_from_valid_proxy_auth() {
+        let req = make_proxy_auth_request("550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(
+            extract_session_from_proxy_auth(&req),
+            Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
+        );
+    }
+
+    #[test]
+    fn extract_session_returns_none_without_header() {
+        let req = make_request("CONNECT", "example.com:443");
+        assert_eq!(extract_session_from_proxy_auth(&req), None);
+    }
+
+    #[test]
+    fn extract_session_returns_none_for_empty_username() {
+        // Basic base64(":password") — empty username
+        let encoded = base64::engine::general_purpose::STANDARD.encode(":password");
+        let req = Request::builder()
+            .method("CONNECT")
+            .uri("example.com:443")
+            .header(
+                http::header::PROXY_AUTHORIZATION,
+                format!("Basic {}", encoded),
+            )
+            .body(())
+            .unwrap();
+        assert_eq!(extract_session_from_proxy_auth(&req), None);
+    }
+
+    #[test]
+    fn extract_session_returns_none_for_non_basic_auth() {
+        let req = Request::builder()
+            .method("CONNECT")
+            .uri("example.com:443")
+            .header(http::header::PROXY_AUTHORIZATION, "Bearer some-token")
+            .body(())
+            .unwrap();
+        assert_eq!(extract_session_from_proxy_auth(&req), None);
+    }
+
+    #[test]
+    fn extract_session_returns_none_for_invalid_base64() {
+        let req = Request::builder()
+            .method("CONNECT")
+            .uri("example.com:443")
+            .header(http::header::PROXY_AUTHORIZATION, "Basic !!!invalid!!!")
+            .body(())
+            .unwrap();
+        assert_eq!(extract_session_from_proxy_auth(&req), None);
     }
 }

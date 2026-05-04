@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, DevProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
@@ -14,12 +14,17 @@ dotenv.config();
  * routes traffic through the DevProxy MITM proxy.
  * When DevProxy is disabled (or setup failed), strips proxy env vars and clears
  * NODE_EXTRA_CA_CERTS to prevent the subprocess from loading a non-existent cert.
+ *
+ * @param proxyUrl - Optional session-scoped proxy URL (e.g. http://sessionId@host:port).
+ *   When provided, overrides the inherited HTTP_PROXY/HTTPS_PROXY so the subprocess
+ *   routes through the correct session.
  */
 export function buildSubprocessEnv(
   githubToken: string,
   devProxyEnabled: boolean,
   currentNodeOptions?: string,
   gatewayUrl?: string,
+  proxyUrl?: string,
 ): Record<string, string> {
   const gatewayHost = gatewayUrl ? new URL(gatewayUrl).hostname : null;
   const noProxy = ["localhost", "127.0.0.1", ...(gatewayHost ? [gatewayHost] : [])].join(",");
@@ -30,6 +35,12 @@ export function buildSubprocessEnv(
       NODE_TLS_REJECT_UNAUTHORIZED: "0",
       NO_PROXY: noProxy,
       no_proxy: noProxy,
+      ...(proxyUrl ? {
+        HTTP_PROXY: proxyUrl,
+        HTTPS_PROXY: proxyUrl,
+        http_proxy: proxyUrl,
+        https_proxy: proxyUrl,
+      } : {}),
     } : {
       HTTP_PROXY: "",
       HTTPS_PROXY: "",
@@ -110,24 +121,25 @@ class CopilotProcessor implements WorkerProcessor {
       skills: skillConfigs.map((s) => s.name),
     });
 
-    // DevProxy integration — start recording if enabled
-    let devProxy: DevProxyClient | null = null;
+    // Proxy integration — start recording if enabled
+    let devProxy: ProxyClient | null = null;
     let sslCertFile: string | undefined;
-    if (DevProxyClient.isEnabled()) {
-      devProxy = new DevProxyClient();
+    if (isProxyEnabled()) {
+      const proxy = createProxyClient();
       try {
-        await log("info", "DevProxy enabled — waiting for sidecar to be ready...");
-        await devProxy.waitForReady();
+        await log("info", `Proxy enabled [${proxy.backend}] — waiting for sidecar to be ready...`);
+        await proxy.waitForReady();
         // Download CA cert if needed (for NODE_EXTRA_CA_CERTS)
         const certPath = process.env.NODE_EXTRA_CA_CERTS || "/tmp/dev-proxy-ca.crt";
-        await devProxy.downloadCertificate(certPath);
+        await proxy.downloadCertificate(certPath);
         // Create combined CA bundle for native binaries (SSL_CERT_FILE)
         // The copilot binary is a native executable that doesn't use NODE_EXTRA_CA_CERTS
         const bundlePath = "/tmp/ca-bundle-combined.crt";
-        sslCertFile = await devProxy.createCombinedCaBundle(certPath, bundlePath);
-        await log("info", "DevProxy CA cert installed for native binaries", { sslCertFile });
-        await devProxy.startRecording();
-        await log("info", "DevProxy recording started");
+        sslCertFile = await proxy.createCombinedCaBundle(certPath, bundlePath);
+        await log("info", "Proxy CA cert installed for native binaries", { sslCertFile });
+        await proxy.startRecording();
+        devProxy = proxy;
+        await log("info", `Proxy recording started [${proxy.backend}]`, { proxyUrl: proxy.proxyUrl });
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         await log("warn", `DevProxy setup failed, continuing without HAR capture: ${msg}`);
@@ -159,7 +171,7 @@ class CopilotProcessor implements WorkerProcessor {
       const result = await runACPSession(message, {
         command: "copilot",
         args,
-        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL),
+        env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL, devProxy?.proxyUrl),
         cwd: this.workspacePath!,
         onLog: async (msg) => {
           await log("debug", msg);
