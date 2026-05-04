@@ -76,11 +76,19 @@ describe("GatewayClient", () => {
     });
 
     it("throws on error", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response("", { status: 500, statusText: "Internal Server Error" })
-      );
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValue(
+          new Response("", { status: 500, statusText: "Internal Server Error" })
+        );
 
       const client = new GatewayClient("http://test:18897");
+      await client.startSession();
       await expect(client.startSession()).rejects.toThrow("Failed to create gateway session: 500");
     });
 
@@ -144,7 +152,7 @@ describe("GatewayClient", () => {
             headers: { "Content-Type": "application/json" },
           })
         )
-        .mockResolvedValueOnce(
+        .mockResolvedValue(
           new Response("", { status: 500, statusText: "Internal Server Error" })
         );
 
@@ -321,7 +329,7 @@ describe("GatewayClient", () => {
       );
     });
 
-    it("throws on 409 conflict", async () => {
+    it("throws on 409 conflict when iteration jumped ahead", async () => {
       vi.spyOn(globalThis, "fetch")
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ id: SESSION_ID }), {
@@ -329,7 +337,7 @@ describe("GatewayClient", () => {
             headers: { "Content-Type": "application/json" },
           })
         )
-        .mockResolvedValueOnce(
+        .mockResolvedValue(
           new Response(JSON.stringify({ iteration: 3 }), {
             status: 409,
             headers: { "Content-Type": "application/json" },
@@ -339,6 +347,27 @@ describe("GatewayClient", () => {
       const client = new GatewayClient("http://test:18897");
       await client.startSession();
       await expect(client.rotateHar(1)).rejects.toThrow("HAR rotate conflict");
+    });
+
+    it("treats 409 as idempotent success when iteration === expected+1", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: SESSION_ID }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ iteration: 2 }), {
+            status: 409,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+
+      const client = new GatewayClient("http://test:18897");
+      await client.startSession();
+      const newIter = await client.rotateHar(1);
+      expect(newIter).toBe(2);
     });
 
     it("throws if no session started", async () => {
