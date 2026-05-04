@@ -6,7 +6,7 @@ ARG COPILOT_CLI_VERSION
 # uv and git are installed via Chocolatey (pre-installed on servercore).
 FROM mcr.microsoft.com/windows/servercore:ltsc2022 AS base
 
-SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
 
 # Install Chocolatey
 RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
@@ -35,10 +35,11 @@ RUN $env:UV_VERSION = '0.10.0'; \
     Expand-Archive -Path C:\uv.zip -DestinationPath C:\uv; \
     Remove-Item C:\uv.zip
 
-ENV PATH="C:\tools;C:\uv;C:\Program Files\nodejs;C:\Program Files\Git\cmd;C:\Python312;C:\ProgramData\chocolatey\bin;${PATH}"
+ENV PATH="C:\tools;C:\uv;C:\Program Files\nodejs;C:\Program Files\Git\cmd;C:\Python312;C:\ProgramData\chocolatey\bin;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Windows\system32;C:\Windows"
 
 # --- Builder stage: compile TypeScript ---
 FROM base AS builder
+SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
 
 WORKDIR C:/app
 
@@ -47,14 +48,14 @@ COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY apps/workers/coder-acp-copilot/package.json ./apps/workers/coder-acp-copilot/
 
-RUN pnpm install --frozen-lockfile
+RUN C:\tools\pnpm.exe install --frozen-lockfile
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
 COPY apps/workers/coder-acp-copilot/tsconfig.json ./apps/workers/coder-acp-copilot/
 COPY apps/workers/coder-acp-copilot/src ./apps/workers/coder-acp-copilot/src/
 
-RUN pnpm --filter shared build; pnpm --filter coder-acp-copilot build
+RUN C:\tools\pnpm.exe --filter shared build; C:\tools\pnpm.exe --filter coder-acp-copilot build
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
@@ -73,7 +74,8 @@ COPY config C:/app/config
 CMD ["powershell", "-File", "C:\\app\\scripts\\dev-entrypoint.ps1"]
 
 # --- Production stage ---
-FROM base
+FROM base AS production
+SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
 
 ARG COPILOT_CLI_VERSION
 RUN npm install -g @github/copilot@${COPILOT_CLI_VERSION}
@@ -84,7 +86,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
 COPY apps/workers/coder-acp-copilot/package.json ./apps/workers/coder-acp-copilot/
 
-RUN pnpm install --frozen-lockfile --prod
+RUN C:\tools\pnpm.exe install --frozen-lockfile --prod
 
 COPY --from=builder C:/app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder C:/app/apps/workers/coder-acp-copilot/dist ./apps/workers/coder-acp-copilot/dist/
