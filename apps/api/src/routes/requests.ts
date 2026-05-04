@@ -741,7 +741,8 @@ apiRoute(ctx.app, ctx.registry, {
         { $sort: { _id: 1 } },
       ];
       if (lastParam) {
-        // O(1) jump to last page: fetch the final keys directly.
+        // Single-request jump to the last page: fetch the final keys directly
+        // without client-side cursor traversal.
         keyPipeline.push({ $sort: { _id: -1 } });
       } else if (afterKey !== undefined) {
         keyPipeline.push({ $match: { _id: { $gt: afterKey } } });
