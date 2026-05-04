@@ -252,6 +252,13 @@ export function RunDetail() {
         )
       : undefined);
 
+  const skillIds = (run.skills && run.skills.length > 0)
+    ? run.skills
+    : Array.from(new Set((run.skillRevisions ?? []).map((ref) => {
+        const at = ref.lastIndexOf("@");
+        return at > 0 ? ref.substring(0, at) : ref;
+      })));
+
   return (
     <div className="space-y-6">
       {/* Back link + header */}
@@ -884,6 +891,28 @@ export function RunDetail() {
                         </Badge>
                       );
                     })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Skills card */}
+            {skillIds.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    Skills ({skillIds.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-1.5">
+                    {skillIds.map((skillId) => (
+                      <Link key={skillId} to={`/skills/${skillId}`}>
+                        <Badge variant="secondary" className="font-mono text-xs hover:bg-accent transition-colors">
+                          {skillId}
+                        </Badge>
+                      </Link>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
