@@ -35,7 +35,7 @@ RUN $env:UV_VERSION = '0.10.0'; \
     Expand-Archive -Path C:\uv.zip -DestinationPath C:\uv; \
     Remove-Item C:\uv.zip
 
-ENV PATH="C:\tools;C:\uv;C:\Program Files\nodejs;C:\Program Files\Git\cmd;C:\Python312;C:\ProgramData\chocolatey\bin;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Windows\system32;C:\Windows"
+ENV PATH="C:\tools;C:\tools\bin;C:\uv;C:\Program Files\nodejs;C:\Program Files\Git\cmd;C:\Python312;C:\ProgramData\chocolatey\bin;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Windows\system32;C:\Windows"
 
 # --- Builder stage: compile TypeScript ---
 FROM base AS builder
