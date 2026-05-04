@@ -67,6 +67,7 @@ const storageAccountName = process.env.AZURE_STORAGE_ACCOUNT_NAME || "";
 const storageConnectionString = process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING || "";
 const queueWorker1 = process.env.AZURE_STORAGE_QUEUE_WORKER_1 || "queue-coder-acp-claude-code";
 const queueWorker2 = process.env.AZURE_STORAGE_QUEUE_WORKER_2 || "queue-coder-acp-copilot";
+const queueWorkerWindows = process.env.AZURE_STORAGE_QUEUE_WORKER_WINDOWS || "queue-coder-acp-copilot-windows";
 const queueReport = process.env.AZURE_STORAGE_QUEUE_REPORT || "report-queue";
 const port = parseInt(process.env.PORT || "3000", 10);
 
@@ -151,6 +152,7 @@ async function initializeClients(): Promise<void> {
   const defaultAgents: Array<{ _id: string; name: string; modelProvider?: string }> = [
     { _id: "coder-acp-claude-code", name: "Claude Code (ACP)", modelProvider: "anthropic" },
     { _id: "coder-acp-copilot", name: "Copilot (ACP)", modelProvider: "github-copilot" },
+    { _id: "coder-acp-copilot-windows", name: "Copilot (ACP, Windows)", modelProvider: "github-copilot" },
   ];
   for (const agent of defaultAgents) {
     await agentCollection.updateOne(
@@ -171,6 +173,7 @@ async function initializeClients(): Promise<void> {
     // Connection string auth (local Azurite or Azure with connection string)
     queueClients.set("coder-acp-claude-code", new QueueClient(storageConnectionString, queueWorker1));
     queueClients.set("coder-acp-copilot", new QueueClient(storageConnectionString, queueWorker2));
+    queueClients.set("coder-acp-copilot-windows", new QueueClient(storageConnectionString, queueWorkerWindows));
     reportQueueClient = new QueueClient(storageConnectionString, queueReport);
   } else {
     // Azure with DefaultAzureCredential
@@ -178,6 +181,7 @@ async function initializeClients(): Promise<void> {
     const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
     queueClients.set("coder-acp-claude-code", new QueueClient(`${queueUrl}/${queueWorker1}`, credential));
     queueClients.set("coder-acp-copilot", new QueueClient(`${queueUrl}/${queueWorker2}`, credential));
+    queueClients.set("coder-acp-copilot-windows", new QueueClient(`${queueUrl}/${queueWorkerWindows}`, credential));
     reportQueueClient = new QueueClient(`${queueUrl}/${queueReport}`, credential);
   }
 

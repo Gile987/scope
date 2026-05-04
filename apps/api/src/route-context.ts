@@ -61,7 +61,8 @@ export type RunHistoryDocument = z.infer<typeof RunHistoryDocumentSchema>;
 
 export const VALID_WORKERS = [
   "coder-acp-claude-code",
-  "coder-acp-copilot"
+  "coder-acp-copilot",
+  "coder-acp-copilot-windows"
 ] as const;
 export type WorkerType = (typeof VALID_WORKERS)[number];
 
