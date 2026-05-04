@@ -31,20 +31,18 @@ use super::writer;
 struct HarSession {
     redact: bool,
     finalized: bool,
-    /// Set to true when the writer reports a hard failure (blob unreachable).
-    /// The next `on_request` call will return an error, failing the run visibly.
+    /// Set to true when the writer reports a hard failure (blob unreachable)
+    /// or the iteration store is unreachable.
     failed: bool,
-    /// Current iteration number (starts at 1, bumped by rotate).
-    current_iteration: u32,
 }
 
 /// Shared interior state cloned cheaply into Axum route handlers.
 struct HarInner {
     sessions: RwLock<HashMap<SessionId, HarSession>>,
     writer: Arc<dyn HarWriter>,
-    /// When set, the iteration counter is authoritative in Redis.
-    /// When `None` (no Redis), falls back to local-only `HarSession.current_iteration`.
-    iteration_store: Option<Arc<dyn IterationStore>>,
+    /// Iteration counter store — always present.
+    /// Redis-backed in production, in-memory for local dev / tests.
+    iteration_store: Arc<dyn IterationStore>,
 }
 
 impl HarInner {
@@ -66,30 +64,17 @@ pub struct HarPlugin {
 }
 
 impl HarPlugin {
-    /// Create using a `LocalWriter` (tests / local dev — no blob or Redis).
+    /// Create using a `LocalWriter` + in-memory iteration store (local dev / tests).
     pub fn new(har_dir: std::path::PathBuf) -> Self {
         let writer = Arc::new(LocalWriter::new(har_dir));
+        let iteration_store = Arc::new(
+            super::iteration_store::LocalIterationStore::new(),
+        ) as Arc<dyn IterationStore>;
         Self {
             inner: Arc::new(HarInner {
                 sessions: RwLock::new(HashMap::new()),
                 writer,
-                iteration_store: None,
-            }),
-        }
-    }
-
-    /// Test-only: local writer + iteration store (for testing Redis code paths).
-    #[cfg(test)]
-    pub(crate) fn new_with_iteration_store(
-        har_dir: std::path::PathBuf,
-        iteration_store: Arc<dyn IterationStore>,
-    ) -> Self {
-        let writer = Arc::new(LocalWriter::new(har_dir));
-        Self {
-            inner: Arc::new(HarInner {
-                sessions: RwLock::new(HashMap::new()),
-                writer,
-                iteration_store: Some(iteration_store),
+                iteration_store,
             }),
         }
     }
@@ -105,7 +90,7 @@ impl HarPlugin {
             inner: Arc::new(HarInner {
                 sessions: RwLock::new(HashMap::new()),
                 writer,
-                iteration_store: Some(iteration_store),
+                iteration_store,
             }),
         }
     }
@@ -132,10 +117,8 @@ impl ProxyPlugin for HarPlugin {
 
         self.inner.writer.init_session(session_id).await;
 
-        // Initialise the Redis iteration counter (if Redis is available).
-        if let Some(store) = &self.inner.iteration_store {
-            store.init(session_id, ttl_secs).await;
-        }
+        // Initialise the iteration counter.
+        self.inner.iteration_store.init(session_id, ttl_secs).await;
 
         let mut sessions = self.inner.sessions.write();
         sessions.insert(
@@ -144,7 +127,6 @@ impl ProxyPlugin for HarPlugin {
                 redact,
                 finalized: false,
                 failed: false,
-                current_iteration: 1,
             },
         );
         debug!("HAR plugin: session started for {}", session_id);
@@ -159,38 +141,31 @@ impl ProxyPlugin for HarPlugin {
             }
         };
 
-        // Read the authoritative iteration from Redis when available;
-        // fall back to local state when Redis is not configured.
-        let iteration = if let Some(store) = &self.inner.iteration_store {
-            match store.get(session_id).await {
-                Ok(Some(v)) => v,
-                Ok(None) => {
-                    // Key missing — session may have expired in Redis.
-                    tracing::error!(
-                        "HAR plugin: Redis iteration key missing for session {}",
-                        session_id
-                    );
-                    let mut sessions = self.inner.sessions.write();
-                    if let Some(s) = sessions.get_mut(session_id) {
-                        s.failed = true;
-                    }
-                    return;
+        // Read the current iteration from the store.
+        let iteration = match self.inner.iteration_store.get(session_id).await {
+            Ok(Some(v)) => v,
+            Ok(None) => {
+                tracing::error!(
+                    "HAR plugin: iteration key missing for session {}",
+                    session_id
+                );
+                let mut sessions = self.inner.sessions.write();
+                if let Some(s) = sessions.get_mut(session_id) {
+                    s.failed = true;
                 }
-                Err(e) => {
-                    tracing::error!(
-                        "HAR plugin: Redis iteration read failed for session {}: {}",
-                        session_id, e
-                    );
-                    let mut sessions = self.inner.sessions.write();
-                    if let Some(s) = sessions.get_mut(session_id) {
-                        s.failed = true;
-                    }
-                    return;
-                }
+                return;
             }
-        } else {
-            let sessions = self.inner.sessions.read();
-            sessions.get(session_id).map(|s| s.current_iteration).unwrap_or(1)
+            Err(e) => {
+                tracing::error!(
+                    "HAR plugin: iteration read failed for session {}: {}",
+                    session_id, e
+                );
+                let mut sessions = self.inner.sessions.write();
+                if let Some(s) = sessions.get_mut(session_id) {
+                    s.failed = true;
+                }
+                return;
+            }
         };
 
         let entry = super::writer::exchange_to_har_entry(exchange, redact);
@@ -240,10 +215,8 @@ impl ProxyPlugin for HarPlugin {
         }
         self.inner.writer.close_session(session_id);
 
-        // Clean up Redis iteration key.
-        if let Some(store) = &self.inner.iteration_store {
-            store.delete(session_id).await;
-        }
+        // Clean up iteration key.
+        self.inner.iteration_store.delete(session_id).await;
 
         debug!("HAR plugin: session cleared for {}", session_id);
     }
@@ -333,82 +306,35 @@ async fn post_rotate_har(
         }
     }
 
-    if let Some(store) = &inner.iteration_store {
-        // --- Redis-backed CAS ---
-        use super::iteration_store::CasResult;
-        match store.compare_and_swap(&session_id, query.expected).await {
-            CasResult::Ok(new_iteration) => {
-                inner.writer.init_iteration(&session_id, new_iteration).await;
+    use super::iteration_store::CasResult;
+    match inner.iteration_store.compare_and_swap(&session_id, query.expected).await {
+        CasResult::Ok(new_iteration) => {
+            inner.writer.init_iteration(&session_id, new_iteration).await;
 
-                debug!(
-                    "HAR plugin: rotated session {} from iter {} to {} (redis)",
-                    session_id, query.expected, new_iteration
-                );
+            debug!(
+                "HAR plugin: rotated session {} from iter {} to {}",
+                session_id, query.expected, new_iteration
+            );
 
-                let body =
-                    serde_json::to_vec(&RotateResponse { iteration: new_iteration }).unwrap_or_default();
-                axum::response::Response::builder()
-                    .status(StatusCode::OK)
-                    .header("content-type", "application/json")
-                    .body(axum::body::Body::from(body))
-                    .unwrap()
-                    .into_response()
-            }
-            CasResult::Conflict(actual) => {
-                let body =
-                    serde_json::to_vec(&RotateResponse { iteration: actual }).unwrap_or_default();
-                axum::response::Response::builder()
-                    .status(StatusCode::CONFLICT)
-                    .header("content-type", "application/json")
-                    .body(axum::body::Body::from(body))
-                    .unwrap()
-                    .into_response()
-            }
-        }
-    } else {
-        // --- Local-only CAS (single-replica / no Redis) ---
-        let current = {
-            let sessions = inner.sessions.read();
-            match sessions.get(&session_id) {
-                Some(s) => s.current_iteration,
-                None => return StatusCode::NOT_FOUND.into_response(),
-            }
-        };
-
-        if current != query.expected {
             let body =
-                serde_json::to_vec(&RotateResponse { iteration: current }).unwrap_or_default();
-            return axum::response::Response::builder()
+                serde_json::to_vec(&RotateResponse { iteration: new_iteration }).unwrap_or_default();
+            axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap()
+                .into_response()
+        }
+        CasResult::Conflict(actual) => {
+            let body =
+                serde_json::to_vec(&RotateResponse { iteration: actual }).unwrap_or_default();
+            axum::response::Response::builder()
                 .status(StatusCode::CONFLICT)
                 .header("content-type", "application/json")
                 .body(axum::body::Body::from(body))
                 .unwrap()
-                .into_response();
+                .into_response()
         }
-
-        let new_iteration = query.expected + 1;
-        inner.writer.init_iteration(&session_id, new_iteration).await;
-
-        {
-            let mut sessions = inner.sessions.write();
-            if let Some(s) = sessions.get_mut(&session_id) {
-                s.current_iteration = new_iteration;
-            }
-        }
-
-        debug!(
-            "HAR plugin: rotated session {} from iter {} to {}",
-            session_id, query.expected, new_iteration
-        );
-
-        let body =
-            serde_json::to_vec(&RotateResponse { iteration: new_iteration }).unwrap_or_default();
-        axum::response::Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "application/json")
-            .body(axum::body::Body::from(body))
-            .unwrap()
-            .into_response()
     }
 }
 
@@ -569,16 +495,13 @@ mod tests {
 
     #[tokio::test]
     async fn on_exchange_reads_iteration_from_store() {
-        use super::super::iteration_store::tests::MockIterationStore;
-
         let tmp = TempDir::new().unwrap();
-        let store = Arc::new(MockIterationStore::new());
-        let plugin = HarPlugin::new_with_iteration_store(tmp.path().to_path_buf(), store.clone());
+        let plugin = HarPlugin::new(tmp.path().to_path_buf());
         let sid = "10.0.0.1".to_string();
 
         // Start session — sets store to iteration 1.
         plugin.on_session_start(&sid, &serde_json::json!({})).await;
-        assert_eq!(store.get(&sid).await.unwrap(), Some(1));
+        assert_eq!(plugin.inner.iteration_store.get(&sid).await.unwrap(), Some(1));
 
         // Exchange lands in iter-1.
         plugin.on_exchange(&sid, &make_exchange()).await;
@@ -586,8 +509,9 @@ mod tests {
         assert_eq!(har1.log.entries.len(), 1);
 
         // Simulate external rotation (another replica bumped the store).
-        let cas = store.compare_and_swap(&sid, 1).await;
-        assert!(matches!(cas, super::super::iteration_store::CasResult::Ok(2)));
+        use super::super::iteration_store::CasResult;
+        let cas = plugin.inner.iteration_store.compare_and_swap(&sid, 1).await;
+        assert!(matches!(cas, CasResult::Ok(2)));
         // Must also init the file so the writer can append.
         plugin.inner.writer.init_iteration(&sid, 2).await;
 
@@ -601,6 +525,6 @@ mod tests {
 
         // Clear cleans up the store.
         plugin.on_session_clear(&sid).await;
-        assert_eq!(store.get(&sid).await.unwrap(), None);
+        assert_eq!(plugin.inner.iteration_store.get(&sid).await.unwrap(), None);
     }
 }

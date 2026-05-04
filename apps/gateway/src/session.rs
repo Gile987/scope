@@ -554,8 +554,8 @@ mod tests {
 
         let mut settings = HashMap::new();
         settings.insert(
-            "plugin".to_string(),
-            serde_json::json!({"max_session_duration_secs": 7200}),
+            "_maxSessionDurationSecs".to_string(),
+            serde_json::json!(7200),
         );
         let result = mgr.create_session("s1".into(), settings).await.unwrap();
         assert!(result);

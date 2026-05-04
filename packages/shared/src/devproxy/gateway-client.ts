@@ -89,14 +89,14 @@ export class GatewayClient {
     return createCombinedCaBundle(proxyCertPath, outputPath);
   }
 
-  async startSession(plugins: Record<string, unknown> = {}): Promise<string> {
+  async startSession(plugins: Record<string, unknown> = {}, maxSessionDurationSecs?: number): Promise<string> {
     const id = this.sessionId ?? crypto.randomUUID();
     await withRetry(
       async () => {
         const response = await fetch(`${this.apiUrl}/api/v1/sessions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, plugins }),
+          body: JSON.stringify({ id, plugins, maxSessionDurationSecs }),
         });
         if (!response.ok) {
           throw new Error(`Failed to create gateway session: ${response.status} ${response.statusText}`);

@@ -87,7 +87,16 @@ pub async fn post_create_session(
         return (StatusCode::BAD_REQUEST, "id must be a valid UUID").into_response();
     }
 
-    let plugin_settings = body.plugins.unwrap_or_default();
+    let mut plugin_settings = body.plugins.unwrap_or_default();
+
+    // Propagate the top-level maxSessionDurationSecs into plugin_settings
+    // so session_ttl() and PluginRegistry can access it uniformly.
+    if let Some(secs) = body.max_session_duration_secs {
+        plugin_settings.insert(
+            "_maxSessionDurationSecs".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(secs)),
+        );
+    }
 
     info!("Creating session {}", session_id);
 
@@ -115,6 +124,10 @@ pub async fn post_create_session(
 pub struct SessionCreateRequest {
     pub id: String,
     pub plugins: Option<HashMap<String, serde_json::Value>>,
+    /// Maximum session duration in seconds. Used as the TTL for Redis keys.
+    /// Falls back to `plugins.plugin.max_session_duration_secs` then 3600s.
+    #[serde(rename = "maxSessionDurationSecs")]
+    pub max_session_duration_secs: Option<u64>,
 }
 
 /// Response body after session creation.

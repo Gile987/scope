@@ -133,54 +133,59 @@ impl IterationStore for RedisIterationStore {
     }
 }
 
+// ---------------------------------------------------------------------------
+// In-memory implementation (single-replica / local dev)
+// ---------------------------------------------------------------------------
+
+/// In-memory `IterationStore` for single-replica deployments (no Redis).
+pub struct LocalIterationStore {
+    state: parking_lot::RwLock<std::collections::HashMap<String, u32>>,
+}
+
+impl LocalIterationStore {
+    pub fn new() -> Self {
+        Self {
+            state: parking_lot::RwLock::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl IterationStore for LocalIterationStore {
+    async fn init(&self, session_id: &str, _ttl_secs: i64) {
+        self.state
+            .write()
+            .insert(iteration_key(session_id), 1);
+    }
+
+    async fn get(&self, session_id: &str) -> anyhow::Result<Option<u32>> {
+        Ok(self.state.read().get(&iteration_key(session_id)).copied())
+    }
+
+    async fn compare_and_swap(&self, session_id: &str, expected: u32) -> CasResult {
+        let key = iteration_key(session_id);
+        let mut state = self.state.write();
+        match state.get_mut(&key) {
+            Some(cur) if *cur == expected => {
+                *cur = expected + 1;
+                CasResult::Ok(expected + 1)
+            }
+            Some(cur) => CasResult::Conflict(*cur),
+            None => CasResult::Conflict(0),
+        }
+    }
+
+    async fn delete(&self, session_id: &str) {
+        self.state.write().remove(&iteration_key(session_id));
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use parking_lot::RwLock;
-    use std::collections::HashMap;
 
-    /// In-memory mock for unit tests (no Redis required).
-    pub struct MockIterationStore {
-        state: RwLock<HashMap<String, u32>>,
-    }
-
-    impl MockIterationStore {
-        pub fn new() -> Self {
-            Self {
-                state: RwLock::new(HashMap::new()),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl IterationStore for MockIterationStore {
-        async fn init(&self, session_id: &str, _ttl_secs: i64) {
-            self.state
-                .write()
-                .insert(iteration_key(session_id), 1);
-        }
-
-        async fn get(&self, session_id: &str) -> anyhow::Result<Option<u32>> {
-            Ok(self.state.read().get(&iteration_key(session_id)).copied())
-        }
-
-        async fn compare_and_swap(&self, session_id: &str, expected: u32) -> CasResult {
-            let key = iteration_key(session_id);
-            let mut state = self.state.write();
-            match state.get_mut(&key) {
-                Some(cur) if *cur == expected => {
-                    *cur = expected + 1;
-                    CasResult::Ok(expected + 1)
-                }
-                Some(cur) => CasResult::Conflict(*cur),
-                None => CasResult::Conflict(0),
-            }
-        }
-
-        async fn delete(&self, session_id: &str) {
-            self.state.write().remove(&iteration_key(session_id));
-        }
-    }
+    /// Alias for tests — same as `LocalIterationStore`.
+    pub type MockIterationStore = LocalIterationStore;
 
     #[tokio::test]
     async fn mock_store_lifecycle() {
