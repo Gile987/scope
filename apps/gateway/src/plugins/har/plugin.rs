@@ -123,11 +123,18 @@ impl ProxyPlugin for HarPlugin {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
+        // Use the shared session TTL (injected by PluginRegistry) so the
+        // iteration key expires at the same time as the session record.
+        let ttl_secs = settings
+            .get("_sessionTtlSecs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(3600);
+
         self.inner.writer.init_session(session_id).await;
 
         // Initialise the Redis iteration counter (if Redis is available).
         if let Some(store) = &self.inner.iteration_store {
-            store.init(session_id, 3600).await;
+            store.init(session_id, ttl_secs).await;
         }
 
         let mut sessions = self.inner.sessions.write();

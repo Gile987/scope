@@ -108,12 +108,24 @@ impl PluginRegistry {
         session_id: &SessionId,
         plugin_settings: &HashMap<String, Value>,
     ) {
+        use crate::session_store::session_ttl;
+        let ttl_secs = session_ttl(plugin_settings).as_secs();
+
         // Plugins that aren't mentioned in the session's pluginSettings get an
         // empty JSON object, so they can apply their own defaults without None checks.
         let empty = Value::Object(serde_json::Map::new());
         for plugin in &self.plugins {
-            let settings = plugin_settings.get(plugin.name()).unwrap_or(&empty);
-            plugin.on_session_start(session_id, settings).await;
+            let base = plugin_settings.get(plugin.name()).unwrap_or(&empty);
+            // Inject the shared session TTL so plugins that create Redis keys
+            // can use the same expiration as the session record.
+            let mut settings = base.clone();
+            if let Value::Object(ref mut map) = settings {
+                map.insert(
+                    "_sessionTtlSecs".to_string(),
+                    Value::Number(serde_json::Number::from(ttl_secs)),
+                );
+            }
+            plugin.on_session_start(session_id, &settings).await;
         }
     }
 
@@ -319,6 +331,8 @@ mod tests {
 
         let captured = plugin.captured.lock().unwrap().clone().unwrap();
         assert!(captured.is_object());
-        assert_eq!(captured.as_object().unwrap().len(), 0);
+        // The only key should be _sessionTtlSecs (injected by PluginRegistry).
+        assert_eq!(captured.as_object().unwrap().len(), 1);
+        assert_eq!(captured["_sessionTtlSecs"], 3600);
     }
 }
