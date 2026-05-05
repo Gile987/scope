@@ -32,12 +32,13 @@ import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
   { id: "submission", label: "Submission" },
   { id: "task", label: "Task" },
+  { id: "criteria", label: "Criteria" },
   { id: "worker", label: "Worker" },
   { id: "version", label: "Version" },
   { id: "os", label: "OS" },
@@ -1439,6 +1440,7 @@ export function RunsList() {
               {isCol("id") && <TableHead className="w-[100px]">ID</TableHead>}
               {isCol("submission") && <TableHead className="w-[100px]">Submission</TableHead>}
               {isCol("task") && <TableHead>Task</TableHead>}
+              {isCol("criteria") && <TableHead>Criteria</TableHead>}
               {isCol("worker") && <TableHead className="w-[180px]">Worker</TableHead>}
               {isCol("version") && <TableHead>Version</TableHead>}
               {isCol("os") && <TableHead className="w-[80px]">OS</TableHead>}
@@ -1593,6 +1595,24 @@ function RunRow({
       </TableCell>}
       {isCol("task") && <TableCell className="max-w-[300px]">
         <span title={run.scenario?.task ?? "–"}>{truncate(run.scenario?.task ?? "–", 60)}</span>
+      </TableCell>}
+      {isCol("criteria") && <TableCell>
+        {run.scenario?.criteria && run.scenario.criteria.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {run.scenario.criteria.map((criterionId) => (
+              <Link
+                key={criterionId}
+                to={`/criteria/${criterionId}`}
+                className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors"
+                title={criterionId}
+              >
+                {criterionId}
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
       </TableCell>}
       {isCol("worker") && <TableCell>
         <span className="font-mono text-xs">{run.workerType}</span>

@@ -204,6 +204,29 @@ export function RunDetail() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // For completed runs, use the latest turn that contains DAG results
+  // and build a fast criterionId -> pass/fail lookup map.
+  const latestCriteriaResultsMap = useMemo(() => {
+    if (activeRun?.status !== "done") return undefined;
+    const turns = activeRun?.turns ?? [];
+    const latestTurnWithResults = [...turns].reverse().find((t) => (t.criteriaResults?.length ?? 0) > 0);
+    if (!latestTurnWithResults?.criteriaResults) return new Map<string, boolean>();
+
+    return new Map(
+      latestTurnWithResults.criteriaResults.map((r) => [r.criterionId, r.evaluated && r.passed])
+    );
+  }, [activeRun?.status, activeRun?.turns]);
+
+  // Prefer scenario criteria as the canonical list.
+  // If unavailable on a completed run, fall back to whatever the judge evaluated.
+  const displayedCriteria = useMemo(() => {
+    if ((run?.scenario?.criteria?.length ?? 0) > 0) return run?.scenario?.criteria ?? [];
+    if (activeRun?.status === "done" && latestCriteriaResultsMap) {
+      return Array.from(latestCriteriaResultsMap.keys());
+    }
+    return [] as string[];
+  }, [run?.scenario?.criteria, activeRun?.status, latestCriteriaResultsMap]);
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -741,15 +764,32 @@ export function RunDetail() {
                     <Badge variant="outline">{run.scenario!.version}</Badge>
                   </div>
                 )}
-                {(run.scenario?.criteria?.length ?? 0) > 0 && (
+                {displayedCriteria.length > 0 && (
                   <div>
-                    <h4 className="text-sm font-medium mb-1">Criteria ({run.scenario?.criteria?.length})</h4>
+                    <h4 className="text-sm font-medium mb-1">Criteria ({displayedCriteria.length})</h4>
                     <div className="flex flex-wrap gap-1.5">
-                      {run.scenario?.criteria?.map((c, i) => (
-                        <Badge key={i} variant="secondary" className="font-mono text-xs">
-                          {c}
-                        </Badge>
-                      ))}
+                      {displayedCriteria.map((c) => {
+                        // Before completion, criteria are informational only.
+                        if (activeRun?.status !== "done") {
+                          return (
+                            <Badge key={c} variant="secondary" className="font-mono text-xs">
+                              {c}
+                            </Badge>
+                          );
+                        }
+
+                        // After completion, render explicit boolean outcome with pass/fail color.
+                        const passed = latestCriteriaResultsMap?.get(c) === true;
+                        return (
+                          <Badge
+                            key={c}
+                            variant="outline"
+                            className={`font-mono text-xs ${passed ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400"}`}
+                          >
+                            {c}: {passed ? "true" : "false"}
+                          </Badge>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
