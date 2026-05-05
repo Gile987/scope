@@ -32,14 +32,14 @@ async fn nonmatching_url_passthrough() {
     let api_client = reqwest::Client::new();
 
     // Create a session
+    let session_id = uuid::Uuid::new_v4().to_string();
     let resp = api_client
         .post(gw.api_url("/api/v1/sessions"))
-        .json(&serde_json::json!({}))
+        .json(&serde_json::json!({"id": session_id}))
         .send()
         .await
         .unwrap();
-    let body: serde_json::Value = resp.json().await.unwrap();
-    let session_id = body["id"].as_str().unwrap().to_string();
+    assert_eq!(resp.status(), 201);
 
     // Stop session
     api_client

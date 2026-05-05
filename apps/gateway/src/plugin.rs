@@ -5,8 +5,8 @@
 //!
 //! The proxy core delegates all traffic observation to plugins via the
 //! `ProxyPlugin` trait, keeping the proxy pipeline decoupled from recording,
-//! analysis, or modification logic. Plugins are notified synchronously and
-//! sequentially — they're expected to be fast (append to buffer/file).
+//! analysis, or modification logic. All hooks are async — plugins may perform
+//! I/O (blob appends, Redis writes) without blocking Tokio worker threads.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -57,16 +57,28 @@ pub trait ProxyPlugin: Send + Sync {
 
     /// Called when a session starts.
     /// `settings` is the plugin-specific JSON from POST /session/start body.
-    fn on_session_start(&self, session_id: &SessionId, settings: &Value);
+    async fn on_session_start(&self, session_id: &SessionId, settings: &Value);
+
+    /// Called before a request is forwarded upstream. Plugins may mutate headers
+    /// (e.g. to refresh/inject credentials). Only called for intercepted sessions.
+    /// Default implementation is a no-op.
+    async fn on_request(
+        &self,
+        _session_id: &SessionId,
+        _uri: &Uri,
+        _headers: &mut HeaderMap,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 
     /// Called for each intercepted request/response pair.
-    fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange);
+    async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange);
 
     /// Called when a session stops (POST /session/stop).
-    fn on_session_stop(&self, session_id: &SessionId);
+    async fn on_session_stop(&self, session_id: &SessionId);
 
     /// Called when a session is reaped (idle timeout or next start).
-    fn on_session_clear(&self, session_id: &SessionId);
+    async fn on_session_clear(&self, session_id: &SessionId);
 
     /// Optional: register additional API routes.
     fn api_routes(&self) -> Option<axum::Router> {
@@ -91,7 +103,7 @@ impl PluginRegistry {
     }
 
     /// Notify all plugins that a session has started.
-    pub fn on_session_start(
+    pub async fn on_session_start(
         &self,
         session_id: &SessionId,
         plugin_settings: &HashMap<String, Value>,
@@ -101,28 +113,41 @@ impl PluginRegistry {
         let empty = Value::Object(serde_json::Map::new());
         for plugin in &self.plugins {
             let settings = plugin_settings.get(plugin.name()).unwrap_or(&empty);
-            plugin.on_session_start(session_id, settings);
+            plugin.on_session_start(session_id, settings).await;
         }
     }
 
-    /// Broadcast a captured exchange to all plugins.
-    pub fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
+    /// Give all plugins a chance to mutate request headers before forwarding.
+    pub async fn on_request(
+        &self,
+        session_id: &SessionId,
+        uri: &Uri,
+        headers: &mut HeaderMap,
+    ) -> anyhow::Result<()> {
         for plugin in &self.plugins {
-            plugin.on_exchange(session_id, exchange);
+            plugin.on_request(session_id, uri, headers).await?;
+        }
+        Ok(())
+    }
+
+    /// Broadcast a captured exchange to all plugins.
+    pub async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
+        for plugin in &self.plugins {
+            plugin.on_exchange(session_id, exchange).await;
         }
     }
 
     /// Notify all plugins that a session has stopped.
-    pub fn on_session_stop(&self, session_id: &SessionId) {
+    pub async fn on_session_stop(&self, session_id: &SessionId) {
         for plugin in &self.plugins {
-            plugin.on_session_stop(session_id);
+            plugin.on_session_stop(session_id).await;
         }
     }
 
     /// Notify all plugins that a session is being cleared (deleted or reaped).
-    pub fn on_session_clear(&self, session_id: &SessionId) {
+    pub async fn on_session_clear(&self, session_id: &SessionId) {
         for plugin in &self.plugins {
-            plugin.on_session_clear(session_id);
+            plugin.on_session_clear(session_id).await;
         }
     }
 }
@@ -156,19 +181,19 @@ mod tests {
             "test"
         }
 
-        fn on_session_start(&self, _session_id: &SessionId, _settings: &Value) {
+        async fn on_session_start(&self, _session_id: &SessionId, _settings: &Value) {
             self.start_count.fetch_add(1, Ordering::SeqCst);
         }
 
-        fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange) {
+        async fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange) {
             self.exchange_count.fetch_add(1, Ordering::SeqCst);
         }
 
-        fn on_session_stop(&self, _session_id: &SessionId) {
+        async fn on_session_stop(&self, _session_id: &SessionId) {
             self.stop_count.fetch_add(1, Ordering::SeqCst);
         }
 
-        fn on_session_clear(&self, _session_id: &SessionId) {
+        async fn on_session_clear(&self, _session_id: &SessionId) {
             self.clear_count.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -192,33 +217,37 @@ mod tests {
         }
     }
 
-    #[test]
-    fn registry_broadcasts_to_all_plugins() {
+    #[tokio::test]
+    async fn registry_broadcasts_to_all_plugins() {
         let p1 = Arc::new(TestPlugin::new());
         let p2 = Arc::new(TestPlugin::new());
         let registry = PluginRegistry::new(vec![p1.clone(), p2.clone()]);
 
         let settings = HashMap::new();
-        registry.on_session_start(&"10.0.0.1".to_string(), &settings);
+        registry
+            .on_session_start(&"10.0.0.1".to_string(), &settings)
+            .await;
         assert_eq!(p1.start_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.start_count.load(Ordering::SeqCst), 1);
 
         let exchange = make_exchange();
-        registry.on_exchange(&"10.0.0.1".to_string(), &exchange);
+        registry
+            .on_exchange(&"10.0.0.1".to_string(), &exchange)
+            .await;
         assert_eq!(p1.exchange_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.exchange_count.load(Ordering::SeqCst), 1);
 
-        registry.on_session_stop(&"10.0.0.1".to_string());
+        registry.on_session_stop(&"10.0.0.1".to_string()).await;
         assert_eq!(p1.stop_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.stop_count.load(Ordering::SeqCst), 1);
 
-        registry.on_session_clear(&"10.0.0.1".to_string());
+        registry.on_session_clear(&"10.0.0.1".to_string()).await;
         assert_eq!(p1.clear_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.clear_count.load(Ordering::SeqCst), 1);
     }
 
-    #[test]
-    fn registry_passes_plugin_specific_settings() {
+    #[tokio::test]
+    async fn registry_passes_plugin_specific_settings() {
         use std::sync::Mutex;
 
         struct SettingsCapture {
@@ -230,12 +259,12 @@ mod tests {
             fn name(&self) -> &str {
                 "capture"
             }
-            fn on_session_start(&self, _session_id: &SessionId, settings: &Value) {
+            async fn on_session_start(&self, _session_id: &SessionId, settings: &Value) {
                 *self.captured.lock().unwrap() = Some(settings.clone());
             }
-            fn on_exchange(&self, _: &SessionId, _: &HttpExchange) {}
-            fn on_session_stop(&self, _: &SessionId) {}
-            fn on_session_clear(&self, _: &SessionId) {}
+            async fn on_exchange(&self, _: &SessionId, _: &HttpExchange) {}
+            async fn on_session_stop(&self, _: &SessionId) {}
+            async fn on_session_clear(&self, _: &SessionId) {}
         }
 
         let plugin = Arc::new(SettingsCapture {
@@ -248,14 +277,16 @@ mod tests {
             "capture".to_string(),
             serde_json::json!({"redactCredentials": false}),
         );
-        registry.on_session_start(&"10.0.0.1".to_string(), &settings);
+        registry
+            .on_session_start(&"10.0.0.1".to_string(), &settings)
+            .await;
 
         let captured = plugin.captured.lock().unwrap().clone().unwrap();
         assert_eq!(captured["redactCredentials"], false);
     }
 
-    #[test]
-    fn registry_sends_empty_object_for_unconfigured_plugin() {
+    #[tokio::test]
+    async fn registry_sends_empty_object_for_unconfigured_plugin() {
         use std::sync::Mutex;
 
         struct SettingsCapture {
@@ -267,12 +298,12 @@ mod tests {
             fn name(&self) -> &str {
                 "nocfg"
             }
-            fn on_session_start(&self, _session_id: &SessionId, settings: &Value) {
+            async fn on_session_start(&self, _session_id: &SessionId, settings: &Value) {
                 *self.captured.lock().unwrap() = Some(settings.clone());
             }
-            fn on_exchange(&self, _: &SessionId, _: &HttpExchange) {}
-            fn on_session_stop(&self, _: &SessionId) {}
-            fn on_session_clear(&self, _: &SessionId) {}
+            async fn on_exchange(&self, _: &SessionId, _: &HttpExchange) {}
+            async fn on_session_stop(&self, _: &SessionId) {}
+            async fn on_session_clear(&self, _: &SessionId) {}
         }
 
         let plugin = Arc::new(SettingsCapture {
@@ -282,7 +313,9 @@ mod tests {
 
         // No settings for "nocfg" plugin
         let settings = HashMap::new();
-        registry.on_session_start(&"10.0.0.1".to_string(), &settings);
+        registry
+            .on_session_start(&"10.0.0.1".to_string(), &settings)
+            .await;
 
         let captured = plugin.captured.lock().unwrap().clone().unwrap();
         assert!(captured.is_object());

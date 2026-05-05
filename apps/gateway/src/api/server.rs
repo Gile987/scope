@@ -41,10 +41,13 @@ pub fn build_api_router(state: Arc<ApiState>, plugin_session_routes: Vec<Router>
         .route("/cacert", get(routes::get_cacert))
         .route("/sessions", post(routes::post_create_session))
         .route("/sessions", get(routes::get_list_sessions))
-        .with_state(state)
+        .with_state(state.clone())
         .nest("/sessions/{id}", session_routes);
 
     Router::new()
         .route("/health", get(routes::get_health))
+        .route("/health/alive", get(routes::get_health_alive))
+        .route("/health/ready", get(routes::get_health_ready))
+        .with_state(state)
         .nest("/api/v1", api_v1)
 }

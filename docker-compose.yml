@@ -138,6 +138,18 @@ services:
       timeout: 5s
       retries: 5
 
+  # Creates the 'har' blob container in Azurite for the gateway HAR plugin.
+  azurite-init:
+    image: mcr.microsoft.com/azure-cli:2.68.0
+    restart: "no"
+    depends_on:
+      azurite:
+        condition: service_healthy
+    environment:
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+    command: >
+      sh -c "az storage container create --name har --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true"
+
   # ===========================================================================
   # Application services
   # ===========================================================================
@@ -375,7 +387,19 @@ services:
       dockerfile: Dockerfile
     profiles: [gateway, vscode-electron-driver-ext]
     environment:
-      RUST_LOG: debug
+      RUST_LOG: debug,gateway::internal=info,azure_core::policies::transport=info
+      COPILOT_TOKEN_REFRESH_BUFFER_SECS: 120
+      COPILOT_TOKEN_MINT_RETRIES: 3
+      COPILOT_TOKEN_MINT_BACKOFF_MS: 500
+      COPILOT_MAX_SESSION_DURATION_SECS: 3600
+      AZURE_STORAGE_USE_EMULATOR: "true"
+      AZURITE_BLOB_HOST: azurite
+      AZURITE_BLOB_PORT: "10000"
+      BLOB_STORAGE_URL: "http://azurite:10000/devstoreaccount1"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      TOKEN_MANAGER_URL: http://token-manager:80
     ulimits:
       nofile:
         soft: 65536
@@ -391,6 +415,11 @@ services:
       timeout: 5s
       retries: 12
       start_period: 120s
+    depends_on:
+      azurite-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   # Claude Code worker (via ACP)
   coder-acp-claude-code:

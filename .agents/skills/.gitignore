@@ -3,3 +3,5 @@
 !.gitignore
 !scope-cli/
 !scope-cli/**
+!rust-best-practices/
+!rust-best-practices/**
