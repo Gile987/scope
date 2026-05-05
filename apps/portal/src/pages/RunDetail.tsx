@@ -252,12 +252,13 @@ export function RunDetail() {
         )
       : undefined);
 
-  const skillIds = (run.skills && run.skills.length > 0)
-    ? run.skills
-    : Array.from(new Set((run.skillRevisions ?? []).map((ref) => {
-        const at = ref.lastIndexOf("@");
-        return at > 0 ? ref.substring(0, at) : ref;
-      })));
+   const skillIdsFromRevisions = Array.from(new Set((run.skillRevisions ?? []).map((ref) => {
+     const at = ref.lastIndexOf("@");
+     return at > 0 ? ref.substring(0, at) : ref;
+   })));
+   const skillIds = skillIdsFromRevisions.length > 0
+     ? skillIdsFromRevisions
+     : (run.skills ?? []);
 
   return (
     <div className="space-y-6">
