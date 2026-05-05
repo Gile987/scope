@@ -735,25 +735,19 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       // Phase 1: Get paginated distinct group keys + total count (lightweight)
+      // For "last" and backward pagination we sort descending and later reverse the
+      // results; forward pagination (and the default first page) sorts ascending.
+      const sortDescending = lastParam || beforeKey !== undefined;
       const keyPipeline: Record<string, unknown>[] = [
         { $match: filter },
         { $group: { _id: groupByAggField } },
-        { $sort: { _id: 1 } },
+        { $sort: { _id: sortDescending ? -1 : 1 } },
       ];
-      if (lastParam) {
-        // Single-request jump to the last page: fetch the final keys directly
-        // without client-side cursor traversal.
-        keyPipeline.push({ $sort: { _id: -1 } });
-      } else if (afterKey !== undefined) {
+      if (!lastParam && afterKey !== undefined) {
         keyPipeline.push({ $match: { _id: { $gt: afterKey } } });
       }
       if (!lastParam && beforeKey !== undefined) {
         keyPipeline.push({ $match: { _id: { $lt: beforeKey } } });
-      }
-
-      // For backward: sort descending, take limit, then reverse
-      if (!lastParam && beforeKey !== undefined) {
-        keyPipeline.push({ $sort: { _id: -1 } });
       }
       keyPipeline.push({ $limit: limit });
 
