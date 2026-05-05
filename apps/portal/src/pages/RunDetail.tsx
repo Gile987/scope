@@ -206,14 +206,19 @@ export function RunDetail() {
 
   // For completed runs, use the latest turn that contains DAG results
   // and build a fast criterionId -> pass/fail lookup map.
+  // Preserve "not evaluated" as undefined so skipped or unavailable criteria
+  // are not collapsed into a failing `false` state.
   const latestCriteriaResultsMap = useMemo(() => {
     if (activeRun?.status !== "done") return undefined;
     const turns = activeRun?.turns ?? [];
     const latestTurnWithResults = [...turns].reverse().find((t) => (t.criteriaResults?.length ?? 0) > 0);
-    if (!latestTurnWithResults?.criteriaResults) return new Map<string, boolean>();
+    if (!latestTurnWithResults?.criteriaResults) return new Map<string, boolean | undefined>();
 
-    return new Map(
-      latestTurnWithResults.criteriaResults.map((r) => [r.criterionId, r.evaluated && r.passed])
+    return new Map<string, boolean | undefined>(
+      latestTurnWithResults.criteriaResults.map((r) => [
+        r.criterionId,
+        r.evaluated ? r.passed : undefined,
+      ])
     );
   }, [activeRun?.status, activeRun?.turns]);
 
