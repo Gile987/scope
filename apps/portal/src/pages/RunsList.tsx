@@ -1441,7 +1441,7 @@ export function RunsList() {
               {isCol("id") && <TableHead className="w-[100px]">ID</TableHead>}
               {isCol("submission") && <TableHead className="w-[100px]">Submission</TableHead>}
               {isCol("task") && <TableHead>Task</TableHead>}
-              {groupBy === "none" && isCol("criteria") && <TableHead>Criteria</TableHead>}
+              {isCol("criteria") && <TableHead>Criteria</TableHead>}
               {isCol("worker") && <TableHead className="w-[180px]">Worker</TableHead>}
               {isCol("version") && <TableHead>Version</TableHead>}
               {isCol("os") && <TableHead className="w-[80px]">OS</TableHead>}
@@ -2013,6 +2013,8 @@ function GroupRows({
             <span title={uniform.task}>{truncate(uniform.task, 60)}</span>
           ) : <span className="text-muted-foreground">–</span>}
         </TableCell>}
+        {/* Criteria — group rows never have individual criterion results */}
+        {isCol("criteria") && <TableCell><span className="text-xs text-muted-foreground">–</span></TableCell>}
         {/* Worker */}
         {isCol("worker") && <TableCell>
           {uniform.workerType ? (
