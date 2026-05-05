@@ -28,12 +28,14 @@ IMAGE_ARGS=("${@:-all}")
 echo "Using ACR: ${ACR_NAME}"
 
 # Image list
-ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal token-manager model-scanner-copilot model-scanner-anthropic report-generator scheduler gateway"
+ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot coder-acp-copilot-windows judge portal token-manager model-scanner-copilot model-scanner-anthropic report-generator scheduler gateway"
+WINDOWS_IMAGES="coder-acp-copilot-windows"
 
 get_dockerfile() {
   local name=$1
   case "$name" in
     api|judge|portal) echo "apps/${name}/Dockerfile" ;;
+    coder-acp-copilot-windows) echo "apps/workers/coder-acp-copilot/Dockerfile.windows" ;;
     coder-acp-*) echo "apps/workers/${name}/Dockerfile" ;;
     report-generator) echo "apps/workers/${name}/Dockerfile" ;;
     model-scanner-copilot) echo "apps/model-scanners/copilot/Dockerfile" ;;
@@ -52,10 +54,15 @@ build_image() {
   local timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 
   # Source pinned versions if available (e.g. coder-acp-copilot/versions.env)
+  # coder-acp-copilot-windows shares versions.env with coder-acp-copilot
+  local versions_search_name="$name"
+  if [ "$name" = "coder-acp-copilot-windows" ]; then
+    versions_search_name="coder-acp-copilot"
+  fi
   local extra_args=""
   local version_prefix=""
   local versions_file
-  for versions_file in "apps/workers/${name}/versions.env" "apps/${name}/versions.env"; do
+  for versions_file in "apps/workers/${versions_search_name}/versions.env" "apps/${versions_search_name}/versions.env"; do
     if [ -f "$versions_file" ]; then
       local key value
       while IFS='=' read -r key value; do
@@ -69,7 +76,7 @@ build_image() {
 
   # Build version prefix from component versions
   case "$name" in
-    coder-acp-copilot)
+    coder-acp-copilot|coder-acp-copilot-windows)
       version_prefix="copilot-${COPILOT_CLI_VERSION}" ;;
     coder-acp-claude-code)
       version_prefix="claude-agent-acp-${CLAUDE_CODE_ACP_VERSION}-sdk-${CLAUDE_AGENT_SDK_VERSION}" ;;
@@ -81,12 +88,19 @@ build_image() {
     image_args="${image_args} --image scoped/${name}:${version_prefix}-${timestamp}-${git_commit}"
   fi
 
+  # Windows images require a Windows ACR agent pool (az acr build --platform windows/amd64)
+  local platform_args=""
+  if echo " $WINDOWS_IMAGES " | grep -q " $name "; then
+    platform_args="--platform windows/amd64"
+  fi
+
   az acr build \
     --registry "$ACR_NAME" \
     ${image_args} \
     --build-arg GIT_COMMIT="$git_commit" \
     --build-arg BUILD_TIME="$build_time" \
     ${extra_args} \
+    ${platform_args} \
     --file "$dockerfile" \
     .
 }
