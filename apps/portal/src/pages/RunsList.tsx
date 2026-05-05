@@ -1440,7 +1440,7 @@ export function RunsList() {
               {isCol("id") && <TableHead className="w-[100px]">ID</TableHead>}
               {isCol("submission") && <TableHead className="w-[100px]">Submission</TableHead>}
               {isCol("task") && <TableHead>Task</TableHead>}
-              {isCol("criteria") && <TableHead>Criteria</TableHead>}
+              {groupBy === "none" && isCol("criteria") && <TableHead>Criteria</TableHead>}
               {isCol("worker") && <TableHead className="w-[180px]">Worker</TableHead>}
               {isCol("version") && <TableHead>Version</TableHead>}
               {isCol("os") && <TableHead className="w-[80px]">OS</TableHead>}
