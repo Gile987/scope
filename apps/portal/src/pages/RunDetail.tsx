@@ -28,6 +28,7 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
+import { criterionResultStyle } from "@/lib/criteria-result";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import type { RunState } from "@/types";
@@ -204,18 +205,21 @@ export function RunDetail() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // For completed runs, use the latest turn that contains DAG results
-  // and build a fast criterionId -> pass/fail lookup map.
-  // Preserve "not evaluated" as undefined so skipped or unavailable criteria
-  // are not collapsed into a failing `false` state.
+  // For completed runs, use the FINAL turn's criteriaResults to build a
+  // criterionId -> pass/fail/undefined lookup map.
+  // Using the final turn (not the latest turn with any results) avoids
+  // presenting stale pass/fail state from an earlier iteration when the
+  // last turn ended without evaluation (e.g. judge failure).
+  // "not evaluated" is preserved as undefined so skipped criteria are not
+  // collapsed into a failing `false` state.
   const latestCriteriaResultsMap = useMemo(() => {
     if (activeRun?.status !== "done") return undefined;
     const turns = activeRun?.turns ?? [];
-    const latestTurnWithResults = [...turns].reverse().find((t) => (t.criteriaResults?.length ?? 0) > 0);
-    if (!latestTurnWithResults?.criteriaResults) return new Map<string, boolean | undefined>();
+    const lastTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
+    if (!lastTurn?.criteriaResults?.length) return new Map<string, boolean | undefined>();
 
     return new Map<string, boolean | undefined>(
-      latestTurnWithResults.criteriaResults.map((r) => [
+      lastTurn.criteriaResults.map((r) => [
         r.criterionId,
         r.evaluated ? r.passed : undefined,
       ])
@@ -783,15 +787,17 @@ export function RunDetail() {
                           );
                         }
 
-                        // After completion, render explicit boolean outcome with pass/fail color.
-                        const passed = latestCriteriaResultsMap?.get(c) === true;
+                        // After completion, render explicit outcome with pass/fail/skipped color.
+                        // undefined = not evaluated (skipped due to ancestor failure or judge failure).
+                        const result = latestCriteriaResultsMap?.get(c);
+                        const { colorClass, label } = criterionResultStyle(result);
                         return (
                           <Badge
                             key={c}
                             variant="outline"
-                            className={`font-mono text-xs ${passed ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400"}`}
+                            className={`font-mono text-xs ${colorClass}`}
                           >
-                            {c}: {passed ? "true" : "false"}
+                            {c}: {label}
                           </Badge>
                         );
                       })}

@@ -29,6 +29,7 @@ import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
 import { formatStatRange } from "@/lib/grouping";
+import { criterionResultStyle } from "@/lib/criteria-result";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
@@ -1566,6 +1567,22 @@ function RunRow({
   hiddenColumns: Set<ColumnId>;
 }) {
   const isCol = (col: ColumnId) => !hiddenColumns.has(col);
+
+  // For completed runs, build a criterionId → result map from the final
+  // turn's criteriaResults. Using the final turn avoids showing stale results
+  // from an earlier iteration when the last turn lacked evaluation (e.g. judge failure).
+  const isDone = run.run?.status === "done";
+  const runTurns = run.run?.turns ?? [];
+  const lastTurn = runTurns.length > 0 ? runTurns[runTurns.length - 1] : undefined;
+  const criteriaResultsMap: Map<string, boolean | undefined> | undefined = isDone
+    ? new Map(
+        (lastTurn?.criteriaResults ?? []).map((r) => [
+          r.criterionId,
+          r.evaluated ? r.passed : undefined,
+        ])
+      )
+    : undefined;
+
   return (
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
       <TableCell>
@@ -1599,16 +1616,34 @@ function RunRow({
       {isCol("criteria") && <TableCell>
         {run.scenario?.criteria && run.scenario.criteria.length > 0 ? (
           <div className="flex flex-wrap gap-1">
-            {run.scenario.criteria.map((criterionId) => (
-              <Link
-                key={criterionId}
-                to={`/criteria/${criterionId}`}
-                className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors"
-                title={criterionId}
-              >
-                {criterionId}
-              </Link>
-            ))}
+            {run.scenario.criteria.map((criterionId) => {
+              if (!isDone || !criteriaResultsMap) {
+                return (
+                  <Link
+                    key={criterionId}
+                    to={`/criteria/${criterionId}`}
+                    className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors"
+                    title={criterionId}
+                  >
+                    {criterionId}
+                  </Link>
+                );
+              }
+
+              const result = criteriaResultsMap.get(criterionId);
+              const { colorClass, Icon, title } = criterionResultStyle(result);
+              return (
+                <Link
+                  key={criterionId}
+                  to={`/criteria/${criterionId}`}
+                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-mono hover:opacity-80 transition-opacity ${colorClass}`}
+                  title={title}
+                >
+                  <Icon className="h-3 w-3 shrink-0" />
+                  {criterionId}
+                </Link>
+              );
+            })}
           </div>
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
