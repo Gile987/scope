@@ -157,7 +157,7 @@ class CopilotProcessor implements WorkerProcessor {
         args.push("--additional-mcp-config", mcpConfigJson);
       }
       const result = await runACPSession(message, {
-        command: process.platform === "win32" ? "copilot.cmd" : "copilot",
+        command: "copilot",
         args,
         env: buildSubprocessEnv(githubToken, !!devProxy, process.env.NODE_OPTIONS, process.env.MCP_GATEWAY_URL),
         cwd: this.workspacePath!,
