@@ -24,12 +24,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
+import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
 import { formatStatRange } from "@/lib/grouping";
-import { criterionResultStyle } from "@/lib/criteria-result";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
@@ -1619,29 +1619,23 @@ function RunRow({
             {run.scenario.criteria.map((criterionId) => {
               if (!isDone || !criteriaResultsMap) {
                 return (
-                  <Link
+                  <CriteriaBadge
                     key={criterionId}
-                    to={`/criteria/${criterionId}`}
-                    className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors"
-                    title={criterionId}
-                  >
-                    {criterionId}
-                  </Link>
+                    criterionId={criterionId}
+                    evaluated={false}
+                    link={true}
+                  />
                 );
               }
 
-              const result = criteriaResultsMap.get(criterionId);
-              const { colorClass, Icon, title } = criterionResultStyle(result);
               return (
-                <Link
+                <CriteriaBadge
                   key={criterionId}
-                  to={`/criteria/${criterionId}`}
-                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-mono hover:opacity-80 transition-opacity ${colorClass}`}
-                  title={title}
-                >
-                  <Icon className="h-3 w-3 shrink-0" />
-                  {criterionId}
-                </Link>
+                  criterionId={criterionId}
+                  result={criteriaResultsMap.get(criterionId)}
+                  evaluated={true}
+                  link={true}
+                />
               );
             })}
           </div>

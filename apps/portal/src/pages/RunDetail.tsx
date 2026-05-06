@@ -26,9 +26,9 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
+import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
-import { criterionResultStyle } from "@/lib/criteria-result";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import type { RunState } from "@/types";
@@ -778,27 +778,15 @@ export function RunDetail() {
                     <h4 className="text-sm font-medium mb-1">Criteria ({displayedCriteria.length})</h4>
                     <div className="flex flex-wrap gap-1.5">
                       {displayedCriteria.map((c) => {
-                        // Before completion, criteria are informational only.
-                        if (activeRun?.status !== "done") {
-                          return (
-                            <Badge key={c} variant="secondary" className="font-mono text-xs">
-                              {c}
-                            </Badge>
-                          );
-                        }
-
-                        // After completion, render explicit outcome with pass/fail/skipped color.
-                        // undefined = not evaluated (skipped due to ancestor failure or judge failure).
-                        const result = latestCriteriaResultsMap?.get(c);
-                        const { colorClass, label } = criterionResultStyle(result);
                         return (
-                          <Badge
+                          <CriteriaBadge
                             key={c}
-                            variant="outline"
-                            className={`font-mono text-xs ${colorClass}`}
-                          >
-                            {c}: {label}
-                          </Badge>
+                            criterionId={c}
+                            result={latestCriteriaResultsMap?.get(c)}
+                            evaluated={activeRun?.status === "done"}
+                            showStateLabel={activeRun?.status === "done"}
+                            link={false}
+                          />
                         );
                       })}
                     </div>
