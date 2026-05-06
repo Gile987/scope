@@ -2060,7 +2060,7 @@ function RunRow({
     </TableRow>
     {isExpanded && (
       <TableRow className="bg-muted/30 hover:bg-muted/30">
-        <TableCell colSpan={100} className="px-6 py-4">
+        <TableCell colSpan={visibleColumns.length + 2} className="px-6 py-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 text-sm">
             {run.scenario?.task && (
               <div className="sm:col-span-2 lg:col-span-3">
