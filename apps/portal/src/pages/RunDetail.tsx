@@ -733,7 +733,7 @@ export function RunDetail() {
               <CardContent className="space-y-3">
                 <div>
                   <h4 className="text-sm font-medium mb-1">Task</h4>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{run.scenario?.task ?? "–"}</p>
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5" title={run.scenario?.task ?? "–"}>{run.scenario?.task ?? "–"}</p>
                 </div>
                 {run.scenario?.version && (
                   <div>

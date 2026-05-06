@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -18,7 +18,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
@@ -29,15 +29,45 @@ import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
 import { formatStatRange } from "@/lib/grouping";
+import { criterionResultStyle } from "@/lib/criteria-result";
+
+/** Shows the first `max` badge items, then a +N chip that opens a dropdown for the rest. */
+function OverflowBadges({ items, max = 1, renderItem, renderMenuItem }: {
+  items: string[];
+  max?: number;
+  renderItem: (item: string) => React.ReactNode;
+  renderMenuItem: (item: string) => React.ReactNode;
+}) {
+  const visible = items.slice(0, max);
+  const hidden = items.slice(max);
+  return (
+    <div className="flex gap-1 items-center min-w-0">
+      {visible.map((item) => renderItem(item))}
+      {hidden.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono bg-muted hover:bg-accent transition-colors cursor-pointer shrink-0">
+              +{hidden.length}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+            {hidden.map((item) => renderMenuItem(item))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
+  );
+}
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
   { id: "submission", label: "Submission" },
   { id: "task", label: "Task" },
+  { id: "criteria", label: "Criteria" },
   { id: "worker", label: "Worker" },
   { id: "version", label: "Version" },
   { id: "os", label: "OS" },
@@ -535,7 +565,48 @@ export function RunsList() {
     });
   };
 
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateTableScrollIndicators = useCallback(() => {
+    const el = tableScrollRef.current;
+    if (!el) {
+      setCanScrollLeft(false);
+      setCanScrollRight(false);
+      return;
+    }
+    const hasOverflow = el.scrollWidth - el.clientWidth > 1;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setCanScrollLeft(hasOverflow && left);
+    setCanScrollRight(hasOverflow && right);
+  }, []);
+
+  useEffect(() => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+
+    updateTableScrollIndicators();
+    const onScroll = () => updateTableScrollIndicators();
+    el.addEventListener("scroll", onScroll, { passive: true });
+
+    const resizeObserver = new ResizeObserver(() => updateTableScrollIndicators());
+    resizeObserver.observe(el);
+    const tableElement = el.querySelector("table");
+    if (tableElement) resizeObserver.observe(tableElement);
+
+    window.addEventListener("resize", onScroll);
+
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      resizeObserver.disconnect();
+    };
+  }, [updateTableScrollIndicators, hiddenColumns, groupBy, runs.length, serverGroups.length]);
+
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="space-y-6">
       {/* Page header */}
       <div className="flex items-center justify-between">
@@ -742,7 +813,6 @@ export function RunsList() {
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
-        <TooltipProvider delayDuration={300}>
         <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-4 py-2">
           <span className="text-sm font-medium whitespace-nowrap">
             {selectedIds.size} <span className="hidden sm:inline">run{selectedIds.size !== 1 ? "s" : ""} selected</span>
@@ -869,7 +939,6 @@ export function RunsList() {
             <TooltipContent>Delete selected</TooltipContent>
           </Tooltip>
         </div>
-        </TooltipProvider>
       )}
 
       {/* Bulk action dialogs (controlled, opened from dropdown menu) */}
@@ -1424,10 +1493,12 @@ export function RunsList() {
           No runs found. <Link to="/runs/new" className="text-primary underline">Submit one?</Link>
         </div>
       ) : (
-        <Table>
+        <div className="relative">
+          <div ref={tableScrollRef} className="w-full overflow-x-auto">
+        <Table className="min-w-max">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[40px]">
+              <TableHead className="w-[40px] sticky left-0 z-10 bg-white shadow-sm">
                 {groupBy === "none" && (
                   <Checkbox
                     checked={allSelected ? true : someSelected ? "indeterminate" : false}
@@ -1436,9 +1507,10 @@ export function RunsList() {
                   />
                 )}
               </TableHead>
-              {isCol("id") && <TableHead className="w-[100px]">ID</TableHead>}
+              {isCol("id") && <TableHead className="w-[100px] sticky left-[40px] z-10 bg-white border-r shadow-sm">ID</TableHead>}
               {isCol("submission") && <TableHead className="w-[100px]">Submission</TableHead>}
               {isCol("task") && <TableHead>Task</TableHead>}
+              {isCol("criteria") && <TableHead>Criteria</TableHead>}
               {isCol("worker") && <TableHead className="w-[180px]">Worker</TableHead>}
               {isCol("version") && <TableHead>Version</TableHead>}
               {isCol("os") && <TableHead className="w-[80px]">OS</TableHead>}
@@ -1456,7 +1528,7 @@ export function RunsList() {
               {isCol("duration") && <TableHead className="w-[100px]">Duration</TableHead>}
               {isCol("tokens") && <TableHead className="w-[120px]">Tokens</TableHead>}
               {isCol("created") && <TableHead className="w-[160px]">Created</TableHead>}
-              <TableHead className="w-[100px] text-right">Actions</TableHead>
+              <TableHead className="w-[100px] text-center sticky right-0 z-10 bg-white border-l shadow-sm">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1507,6 +1579,20 @@ export function RunsList() {
             )}
           </TableBody>
         </Table>
+          </div>
+          {canScrollLeft && (
+            <div className="pointer-events-none absolute inset-y-0 left-0 z-30 w-8 bg-gradient-to-r from-background to-transparent" />
+          )}
+          {canScrollRight && (
+            <div className="pointer-events-none absolute inset-y-0 right-0 z-30 w-8 bg-gradient-to-l from-background to-transparent" />
+          )}
+          {canScrollRight && (
+            <div className="pointer-events-none absolute right-2 top-2 z-40 inline-flex items-center gap-1 rounded-md border bg-background/95 px-2 py-1 text-[11px] text-muted-foreground shadow-sm">
+              More columns
+              <ChevronRight className="h-3 w-3" />
+            </div>
+          )}
+        </div>
       )}
 
       {/* Pagination controls */}
@@ -1535,6 +1621,7 @@ export function RunsList() {
         );
       })()}
     </div>
+    </TooltipProvider>
   );
 }
 
@@ -1564,16 +1651,34 @@ function RunRow({
   hiddenColumns: Set<ColumnId>;
 }) {
   const isCol = (col: ColumnId) => !hiddenColumns.has(col);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // For completed runs, build a criterionId → result map from the final
+  // turn's criteriaResults. Using the final turn avoids showing stale results
+  // from an earlier iteration when the last turn lacked evaluation (e.g. judge failure).
+  const isDone = run.run?.status === "done";
+  const runTurns = run.run?.turns ?? [];
+  const lastTurn = runTurns.length > 0 ? runTurns[runTurns.length - 1] : undefined;
+  const criteriaResultsMap: Map<string, boolean | undefined> | undefined = isDone
+    ? new Map(
+        (lastTurn?.criteriaResults ?? []).map((r) => [
+          r.criterionId,
+          r.evaluated ? r.passed : undefined,
+        ])
+      )
+    : undefined;
+
   return (
+  <>
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
-      <TableCell>
+      <TableCell className="w-[40px] min-w-[40px] sticky left-0 z-20 bg-white shadow-sm">
         <Checkbox
           checked={selectedIds.has(run._id)}
           onCheckedChange={() => onToggleSelect(run._id)}
           aria-label={`Select run ${formatId(run._id)}`}
         />
       </TableCell>
-      {isCol("id") && <TableCell className="font-mono text-xs">
+      {isCol("id") && <TableCell className="font-mono text-xs sticky left-[40px] z-10 bg-white border-r shadow-sm">
         <Link to={`/runs/${run._id}`} className="text-primary hover:underline">
           {formatId(run._id)}
         </Link>
@@ -1592,17 +1697,99 @@ function RunRow({
         )}
       </TableCell>}
       {isCol("task") && <TableCell className="max-w-[300px]">
-        <span title={run.scenario?.task ?? "–"}>{truncate(run.scenario?.task ?? "–", 60)}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="cursor-default">{truncate(run.scenario?.task ?? "–", 60)}</span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-sm whitespace-pre-wrap text-xs">{run.scenario?.task ?? "–"}</TooltipContent>
+        </Tooltip>
       </TableCell>}
-      {isCol("worker") && <TableCell>
-        <span className="font-mono text-xs">{run.workerType}</span>
-        {run.model && (
-          <span className="block font-mono text-xs text-muted-foreground">{run.model}</span>
+      {isCol("criteria") && <TableCell>
+        {run.scenario?.criteria && run.scenario.criteria.length > 0 ? (
+          <OverflowBadges
+            items={run.scenario.criteria}
+            max={1}
+            renderItem={(criterionId) => {
+              if (!isDone || !criteriaResultsMap) {
+                return (
+                  <Tooltip key={criterionId}>
+                    <TooltipTrigger asChild>
+                      <Link
+                        to={`/criteria/${criterionId}`}
+                        className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors"
+                      >
+                        {criterionId}
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent className="text-xs">{criterionId}</TooltipContent>
+                  </Tooltip>
+                );
+              }
+              const result = criteriaResultsMap.get(criterionId);
+              const { colorClass, Icon, title } = criterionResultStyle(result);
+              return (
+                <Tooltip key={criterionId}>
+                  <TooltipTrigger asChild>
+                    <Link
+                      to={`/criteria/${criterionId}`}
+                      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-mono hover:opacity-80 transition-opacity ${colorClass}`}
+                    >
+                      <Icon className="h-3 w-3 shrink-0" />
+                      {criterionId}
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent className="text-xs">{title} — {criterionId}</TooltipContent>
+                </Tooltip>
+              );
+            }}
+            renderMenuItem={(criterionId) => {
+              if (!isDone || !criteriaResultsMap) {
+                return (
+                  <DropdownMenuItem key={criterionId} asChild>
+                    <Link to={`/criteria/${criterionId}`} className="font-mono text-xs">{criterionId}</Link>
+                  </DropdownMenuItem>
+                );
+              }
+              const result = criteriaResultsMap.get(criterionId);
+              const { colorClass, Icon } = criterionResultStyle(result);
+              return (
+                <DropdownMenuItem key={criterionId} asChild>
+                  <Link to={`/criteria/${criterionId}`} className={`font-mono text-xs gap-1 ${colorClass}`}>
+                    <Icon className="h-3 w-3 shrink-0" />
+                    {criterionId}
+                  </Link>
+                </DropdownMenuItem>
+              );
+            }}
+          />
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
         )}
       </TableCell>}
-      {isCol("version") && <TableCell>
+      {isCol("worker") && <TableCell className="max-w-[200px]">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="font-mono text-xs truncate block cursor-default">{run.workerType}</span>
+          </TooltipTrigger>
+          <TooltipContent className="text-xs">{run.workerType}</TooltipContent>
+        </Tooltip>
+        {run.model && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="block font-mono text-xs text-muted-foreground truncate cursor-default">{run.model}</span>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs">{run.model}</TooltipContent>
+          </Tooltip>
+        )}
+      </TableCell>}
+      {isCol("version") && <TableCell className="max-w-[120px]">
         {run.agentVersion ? (
-          <span className="font-mono text-xs">{run.agentVersion}</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="font-mono text-xs truncate block cursor-default">{run.agentVersion}</span>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs">{run.agentVersion}</TooltipContent>
+          </Tooltip>
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
@@ -1616,47 +1803,93 @@ function RunRow({
       </TableCell>}
       {isCol("mcp") && <TableCell>
         {run.mcpServers && run.mcpServers.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {run.mcpServers.map((slug) => (
-              <Link key={slug} to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
-                {slug}
-              </Link>
-            ))}
-          </div>
+          <OverflowBadges
+            items={run.mcpServers}
+            max={1}
+            renderItem={(slug) => (
+              <Tooltip key={slug}>
+                <TooltipTrigger asChild>
+                  <Link to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                    {slug}
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent className="text-xs">{slug}</TooltipContent>
+              </Tooltip>
+            )}
+            renderMenuItem={(slug) => (
+              <DropdownMenuItem key={slug} asChild>
+                <Link to={`/mcp-servers/${slug}`} className="font-mono text-xs">{slug}</Link>
+              </DropdownMenuItem>
+            )}
+          />
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
       </TableCell>}
       {isCol("skills") && <TableCell>
         {run.skillRevisions && run.skillRevisions.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {run.skillRevisions.map((ref) => {
+          <OverflowBadges
+            items={run.skillRevisions}
+            max={1}
+            renderItem={(ref) => {
               const skillName = ref.split("@")[0].split("/").pop() ?? ref;
               const skillSlug = ref.split("@")[0];
               return (
-                <Link key={ref} to={`/skills/${skillSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={ref}>
-                  {skillName}
-                </Link>
+                <Tooltip key={ref}>
+                  <TooltipTrigger asChild>
+                    <Link to={`/skills/${skillSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                      {truncate(skillName, 20)}
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent className="text-xs">{ref}</TooltipContent>
+                </Tooltip>
               );
-            })}
-          </div>
+            }}
+            renderMenuItem={(ref) => {
+              const skillName = ref.split("@")[0].split("/").pop() ?? ref;
+              const skillSlug = ref.split("@")[0];
+              return (
+                <DropdownMenuItem key={ref} asChild>
+                  <Link to={`/skills/${skillSlug}`} className="font-mono text-xs" title={ref}>{truncate(skillName, 20)}</Link>
+                </DropdownMenuItem>
+              );
+            }}
+          />
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
       </TableCell>}
       {isCol("extensions") && <TableCell>
         {run.extensions && run.extensions.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {run.extensions.map((id) => {
+          <OverflowBadges
+            items={run.extensions}
+            max={1}
+            renderItem={(id) => {
               const [qualifiedName, version] = id.split("@");
               const shortName = qualifiedName.split(".").pop() ?? id;
+              const extensionLabel = `${shortName}${version ? `@${version}` : ""}`;
               return (
-                <Link key={id} to={`/extensions/${qualifiedName}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={id}>
-                  {shortName}{version ? `@${version}` : ""}
-                </Link>
+                <Tooltip key={id}>
+                  <TooltipTrigger asChild>
+                    <Link to={`/extensions/${qualifiedName}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                      {truncate(extensionLabel, 20)}
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent className="text-xs">{id}</TooltipContent>
+                </Tooltip>
               );
-            })}
-          </div>
+            }}
+            renderMenuItem={(id) => {
+              const [qualifiedName, version] = id.split("@");
+              const shortName = qualifiedName.split(".").pop() ?? id;
+              const extensionLabel = `${shortName}${version ? `@${version}` : ""}`;
+              return (
+                <DropdownMenuItem key={id} asChild>
+                  <Link to={`/extensions/${qualifiedName}`} className="font-mono text-xs">{truncate(extensionLabel, 20)}</Link>
+                </DropdownMenuItem>
+              );
+            }}
+          />
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}
@@ -1727,7 +1960,7 @@ function RunRow({
       {isCol("created") && <TableCell className="text-xs text-muted-foreground">
         {formatDate(run.createdAt)}
       </TableCell>}
-      <TableCell className="text-right">
+      <TableCell className="text-right sticky right-0 z-10 bg-white shadow-sm">
         <div className="flex items-center justify-end gap-1">
           <Link to={`/runs/${run._id}`}>
             <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -1808,9 +2041,118 @@ function RunRow({
             onDelete={() => deleteMutation.mutate(run._id)}
             isDeleting={deleteMutation.isPending}
           />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title={isExpanded ? "Collapse details" : "Expand details"}
+            onClick={() => setIsExpanded((v) => !v)}
+          >
+            <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+          </Button>
         </div>
       </TableCell>
     </TableRow>
+    {isExpanded && (
+      <TableRow className="bg-muted/30 hover:bg-muted/30">
+        <TableCell colSpan={100} className="px-6 py-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 text-sm">
+            {run.scenario?.task && (
+              <div className="sm:col-span-2 lg:col-span-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Task</p>
+                <p className="text-sm whitespace-pre-wrap">{run.scenario.task}</p>
+              </div>
+            )}
+            {run.scenario?.criteria && run.scenario.criteria.length > 0 && (
+              <div className="sm:col-span-2 lg:col-span-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Criteria</p>
+                <div className="flex flex-wrap gap-1">
+                  {run.scenario.criteria.map((criterionId) => {
+                    if (!isDone || !criteriaResultsMap) {
+                      return (
+                        <Link key={criterionId} to={`/criteria/${criterionId}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                          {criterionId}
+                        </Link>
+                      );
+                    }
+                    const result = criteriaResultsMap.get(criterionId);
+                    const { colorClass, Icon } = criterionResultStyle(result);
+                    return (
+                      <Link key={criterionId} to={`/criteria/${criterionId}`} className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-mono hover:opacity-80 transition-opacity ${colorClass}`}>
+                        <Icon className="h-3 w-3 shrink-0" />
+                        {criterionId}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Worker / Model</p>
+              <p className="font-mono text-xs">{run.workerType}</p>
+              {run.model && <p className="font-mono text-xs text-muted-foreground">{run.model}</p>}
+              {run.agentVersion && <p className="font-mono text-xs text-muted-foreground">v{run.agentVersion}</p>}
+            </div>
+            {run.skillRevisions && run.skillRevisions.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Skills</p>
+                <div className="flex flex-wrap gap-1">
+                  {run.skillRevisions.map((ref) => {
+                    const skillName = ref.split("@")[0].split("/").pop() ?? ref;
+                    const skillSlug = ref.split("@")[0];
+                    return (
+                      <Tooltip key={ref}>
+                        <TooltipTrigger asChild>
+                          <Link to={`/skills/${skillSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                            {truncate(skillName, 20)}
+                          </Link>
+                        </TooltipTrigger>
+                        <TooltipContent className="text-xs">{ref}</TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {run.extensions && run.extensions.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Extensions</p>
+                <div className="flex flex-wrap gap-1">
+                  {run.extensions.map((id) => {
+                    const [qualifiedName, version] = id.split("@");
+                    const shortName = qualifiedName.split(".").pop() ?? id;
+                    const extensionLabel = `${shortName}${version ? `@${version}` : ""}`;
+                    return (
+                      <Tooltip key={id}>
+                        <TooltipTrigger asChild>
+                          <Link to={`/extensions/${qualifiedName}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                            {truncate(extensionLabel, 20)}
+                          </Link>
+                        </TooltipTrigger>
+                        <TooltipContent className="text-xs">{id}</TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {run.mcpServers && run.mcpServers.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">MCP Servers</p>
+                <div className="flex flex-wrap gap-1">
+                  {run.mcpServers.map((slug) => (
+                    <Link key={slug} to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                      {slug}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </TableCell>
+      </TableRow>
+    )}
+  </>
   );
 }
 
@@ -1908,11 +2250,11 @@ function GroupRows({
   return (
     <>
       <TableRow
-        className="bg-muted/50 hover:bg-muted/70 cursor-pointer"
+        className="bg-white hover:bg-gray-50 cursor-pointer"
         onClick={onToggleExpand}
       >
         {/* Checkbox */}
-        <TableCell onClick={(e) => e.stopPropagation()}>
+        <TableCell onClick={(e) => e.stopPropagation()} className="w-[40px] min-w-[40px] sticky left-0 z-20 bg-white shadow-sm">
           <Checkbox
             checked={allGroupSelected ? true : someGroupSelected ? "indeterminate" : false}
             onCheckedChange={handleToggleGroupSelect}
@@ -1920,7 +2262,7 @@ function GroupRows({
           />
         </TableCell>
         {/* ID */}
-        {isCol("id") && <TableCell className="font-medium">
+        {isCol("id") && <TableCell className="font-medium sticky left-[40px] z-10 bg-white border-r shadow-sm">
           <div className="flex items-center gap-2">
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             <span>{aggregates.count} run{aggregates.count !== 1 ? "s" : ""}</span>
@@ -1953,26 +2295,51 @@ function GroupRows({
         {/* Task */}
         {isCol("task") && <TableCell className="max-w-[300px]">
           {groupBy === "task" ? (
-            <span className="font-medium" title={group.label}>{truncate(group.label, 60)}</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="font-medium cursor-default">{truncate(group.label, 60)}</span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-sm whitespace-pre-wrap text-xs">{group.label}</TooltipContent>
+            </Tooltip>
           ) : uniform.task ? (
-            <span title={uniform.task}>{truncate(uniform.task, 60)}</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-default">{truncate(uniform.task, 60)}</span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-sm whitespace-pre-wrap text-xs">{uniform.task}</TooltipContent>
+            </Tooltip>
           ) : <span className="text-muted-foreground">–</span>}
         </TableCell>}
         {/* Worker */}
-        {isCol("worker") && <TableCell>
+        {isCol("worker") && <TableCell className="max-w-[200px]">
           {uniform.workerType ? (
             <>
-              <span className="font-mono text-xs">{uniform.workerType}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="font-mono text-xs truncate block cursor-default">{uniform.workerType}</span>
+                </TooltipTrigger>
+                <TooltipContent className="text-xs">{uniform.workerType}</TooltipContent>
+              </Tooltip>
               {uniform.model && (
-                <span className="block font-mono text-xs text-muted-foreground">{uniform.model}</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="block font-mono text-xs text-muted-foreground truncate cursor-default">{uniform.model}</span>
+                  </TooltipTrigger>
+                  <TooltipContent className="text-xs">{uniform.model}</TooltipContent>
+                </Tooltip>
               )}
             </>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>}
         {/* Version */}
-        {isCol("version") && <TableCell>
+        {isCol("version") && <TableCell className="max-w-[120px]">
           {uniform.agentVersion ? (
-            <span className="font-mono text-xs">{uniform.agentVersion}</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="font-mono text-xs truncate block cursor-default">{uniform.agentVersion}</span>
+              </TooltipTrigger>
+              <TooltipContent className="text-xs">{uniform.agentVersion}</TooltipContent>
+            </Tooltip>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>}
         {/* Platform */}
@@ -1982,47 +2349,93 @@ function GroupRows({
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>}
         {/* MCP */}
-        {isCol("mcp") && <TableCell>
+        {isCol("mcp") && <TableCell onClick={(e) => e.stopPropagation()}>
           {uniform.mcpServers && uniform.mcpServers.length > 0 ? (
-            <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
-              {uniform.mcpServers.map((slug) => (
-                <Link key={slug} to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
-                  {slug}
-                </Link>
-              ))}
-            </div>
+            <OverflowBadges
+              items={uniform.mcpServers}
+              max={1}
+              renderItem={(slug) => (
+                <Tooltip key={slug}>
+                  <TooltipTrigger asChild>
+                    <Link to={`/mcp-servers/${slug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                      {slug}
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent className="text-xs">{slug}</TooltipContent>
+                </Tooltip>
+              )}
+              renderMenuItem={(slug) => (
+                <DropdownMenuItem key={slug} asChild>
+                  <Link to={`/mcp-servers/${slug}`} className="font-mono text-xs">{slug}</Link>
+                </DropdownMenuItem>
+              )}
+            />
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>}
         {/* Skills */}
-        {isCol("skills") && <TableCell>
+        {isCol("skills") && <TableCell onClick={(e) => e.stopPropagation()}>
           {uniform.skillRevisions && uniform.skillRevisions.length > 0 ? (
-            <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
-              {uniform.skillRevisions.map((ref) => {
+            <OverflowBadges
+              items={uniform.skillRevisions}
+              max={1}
+              renderItem={(ref) => {
                 const skillName = ref.split("@")[0].split("/").pop() ?? ref;
                 const skillSlug = ref.split("@")[0];
                 return (
-                  <Link key={ref} to={`/skills/${skillSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={ref}>
-                    {skillName}
-                  </Link>
+                  <Tooltip key={ref}>
+                    <TooltipTrigger asChild>
+                      <Link to={`/skills/${skillSlug}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                        {truncate(skillName, 20)}
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent className="text-xs">{ref}</TooltipContent>
+                  </Tooltip>
                 );
-              })}
-            </div>
+              }}
+              renderMenuItem={(ref) => {
+                const skillName = ref.split("@")[0].split("/").pop() ?? ref;
+                const skillSlug = ref.split("@")[0];
+                return (
+                  <DropdownMenuItem key={ref} asChild>
+                    <Link to={`/skills/${skillSlug}`} className="font-mono text-xs" title={ref}>{truncate(skillName, 20)}</Link>
+                  </DropdownMenuItem>
+                );
+              }}
+            />
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>}
         {/* Extensions */}
-        {isCol("extensions") && <TableCell>
+        {isCol("extensions") && <TableCell onClick={(e) => e.stopPropagation()}>
           {uniform.extensions && uniform.extensions.length > 0 ? (
-            <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
-              {uniform.extensions.map((id) => {
+            <OverflowBadges
+              items={uniform.extensions}
+              max={1}
+              renderItem={(id) => {
                 const [qualifiedName, version] = id.split("@");
                 const shortName = qualifiedName.split(".").pop() ?? id;
+                const extensionLabel = `${shortName}${version ? `@${version}` : ""}`;
                 return (
-                  <Link key={id} to={`/extensions/${qualifiedName}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors" title={id}>
-                    {shortName}{version ? `@${version}` : ""}
-                  </Link>
+                  <Tooltip key={id}>
+                    <TooltipTrigger asChild>
+                      <Link to={`/extensions/${qualifiedName}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                        {truncate(extensionLabel, 20)}
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent className="text-xs">{id}</TooltipContent>
+                  </Tooltip>
                 );
-              })}
-            </div>
+              }}
+              renderMenuItem={(id) => {
+                const [qualifiedName, version] = id.split("@");
+                const shortName = qualifiedName.split(".").pop() ?? id;
+                const extensionLabel = `${shortName}${version ? `@${version}` : ""}`;
+                return (
+                  <DropdownMenuItem key={id} asChild>
+                    <Link to={`/extensions/${qualifiedName}`} className="font-mono text-xs">{truncate(extensionLabel, 20)}</Link>
+                  </DropdownMenuItem>
+                );
+              }}
+            />
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>}
         {/* Profile */}
@@ -2144,7 +2557,7 @@ function GroupRows({
         {/* Created */}
         {isCol("created") && <TableCell />}
         {/* Actions */}
-        <TableCell />
+        <TableCell className="sticky right-0 z-10 bg-white border-l shadow-sm" />
       </TableRow>
       {isExpanded && (
         isExpandLoading ? (
