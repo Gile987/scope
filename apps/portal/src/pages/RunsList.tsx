@@ -2315,6 +2315,10 @@ function GroupRows({
             </Tooltip>
           ) : <span className="text-muted-foreground">–</span>}
         </TableCell>}
+        {/* Criteria */}
+        {isCol("criteria") && <TableCell>
+          <span className="text-muted-foreground">–</span>
+        </TableCell>}
         {/* Worker */}
         {isCol("worker") && <TableCell className="max-w-[200px]">
           {uniform.workerType ? (
