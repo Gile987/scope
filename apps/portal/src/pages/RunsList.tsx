@@ -1494,7 +1494,12 @@ export function RunsList() {
         </div>
       ) : (
         <div className="relative">
-          <div ref={tableScrollRef} className="w-full overflow-x-auto">
+          <div
+            ref={(node) => {
+              tableScrollRef.current = node?.querySelector("div") as HTMLDivElement | null;
+            }}
+            className="w-full"
+          >
         <Table className="min-w-max">
           <TableHeader>
             <TableRow>
