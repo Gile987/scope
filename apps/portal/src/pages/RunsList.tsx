@@ -1855,7 +1855,7 @@ function RunRow({
               const skillSlug = ref.split("@")[0];
               return (
                 <DropdownMenuItem key={ref} asChild>
-                  <Link to={`/skills/${skillSlug}`} className="font-mono text-xs" title={ref}>{truncate(skillName, 20)}</Link>
+                  <Link to={`/skills/${skillSlug}`} className="font-mono text-xs">{skillName}</Link>
                 </DropdownMenuItem>
               );
             }}
