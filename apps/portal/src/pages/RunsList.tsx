@@ -1503,7 +1503,7 @@ export function RunsList() {
         <Table className="min-w-max">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[40px] sticky left-0 z-10 bg-white shadow-sm">
+              <TableHead className="w-[40px] sticky left-0 z-10 bg-background shadow-sm">
                 {groupBy === "none" && (
                   <Checkbox
                     checked={allSelected ? true : someSelected ? "indeterminate" : false}
@@ -1512,7 +1512,7 @@ export function RunsList() {
                   />
                 )}
               </TableHead>
-              {isCol("id") && <TableHead className="w-[100px] sticky left-[40px] z-10 bg-white border-r shadow-sm">ID</TableHead>}
+              {isCol("id") && <TableHead className="w-[100px] sticky left-[40px] z-10 bg-background border-r shadow-sm">ID</TableHead>}
               {isCol("submission") && <TableHead className="w-[100px]">Submission</TableHead>}
               {isCol("task") && <TableHead>Task</TableHead>}
               {isCol("criteria") && <TableHead>Criteria</TableHead>}
@@ -1533,7 +1533,7 @@ export function RunsList() {
               {isCol("duration") && <TableHead className="w-[100px]">Duration</TableHead>}
               {isCol("tokens") && <TableHead className="w-[120px]">Tokens</TableHead>}
               {isCol("created") && <TableHead className="w-[160px]">Created</TableHead>}
-              <TableHead className="w-[100px] text-center sticky right-0 z-10 bg-white border-l shadow-sm">Actions</TableHead>
+              <TableHead className="w-[100px] text-center sticky right-0 z-10 bg-background border-l shadow-sm">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1675,15 +1675,15 @@ function RunRow({
 
   return (
   <>
-    <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
-      <TableCell className="w-[40px] min-w-[40px] sticky left-0 z-20 bg-white shadow-sm">
+    <TableRow className="group" data-state={selectedIds.has(run._id) ? "selected" : undefined}>
+      <TableCell className="w-[40px] min-w-[40px] sticky left-0 z-20 bg-background group-hover:bg-muted/50 group-data-[state=selected]:bg-muted shadow-sm">
         <Checkbox
           checked={selectedIds.has(run._id)}
           onCheckedChange={() => onToggleSelect(run._id)}
           aria-label={`Select run ${formatId(run._id)}`}
         />
       </TableCell>
-      {isCol("id") && <TableCell className="font-mono text-xs sticky left-[40px] z-10 bg-white border-r shadow-sm">
+      {isCol("id") && <TableCell className="font-mono text-xs sticky left-[40px] z-10 bg-background group-hover:bg-muted/50 group-data-[state=selected]:bg-muted border-r shadow-sm">
         <Link to={`/runs/${run._id}`} className="text-primary hover:underline">
           {formatId(run._id)}
         </Link>
@@ -1965,7 +1965,7 @@ function RunRow({
       {isCol("created") && <TableCell className="text-xs text-muted-foreground">
         {formatDate(run.createdAt)}
       </TableCell>}
-      <TableCell className="text-right sticky right-0 z-10 bg-white shadow-sm">
+      <TableCell className="text-right sticky right-0 z-10 bg-background group-hover:bg-muted/50 group-data-[state=selected]:bg-muted shadow-sm">
         <div className="flex items-center justify-end gap-1">
           <Link to={`/runs/${run._id}`}>
             <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -2255,11 +2255,11 @@ function GroupRows({
   return (
     <>
       <TableRow
-        className="bg-white hover:bg-gray-50 cursor-pointer"
+        className="group bg-background hover:bg-muted/50 cursor-pointer"
         onClick={onToggleExpand}
       >
         {/* Checkbox */}
-        <TableCell onClick={(e) => e.stopPropagation()} className="w-[40px] min-w-[40px] sticky left-0 z-20 bg-white shadow-sm">
+        <TableCell onClick={(e) => e.stopPropagation()} className="w-[40px] min-w-[40px] sticky left-0 z-20 bg-background group-hover:bg-muted/50 shadow-sm">
           <Checkbox
             checked={allGroupSelected ? true : someGroupSelected ? "indeterminate" : false}
             onCheckedChange={handleToggleGroupSelect}
@@ -2267,7 +2267,7 @@ function GroupRows({
           />
         </TableCell>
         {/* ID */}
-        {isCol("id") && <TableCell className="font-medium sticky left-[40px] z-10 bg-white border-r shadow-sm">
+        {isCol("id") && <TableCell className="font-medium sticky left-[40px] z-10 bg-background group-hover:bg-muted/50 border-r shadow-sm">
           <div className="flex items-center gap-2">
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             <span>{aggregates.count} run{aggregates.count !== 1 ? "s" : ""}</span>
@@ -2562,7 +2562,7 @@ function GroupRows({
         {/* Created */}
         {isCol("created") && <TableCell />}
         {/* Actions */}
-        <TableCell className="sticky right-0 z-10 bg-white border-l shadow-sm" />
+        <TableCell className="sticky right-0 z-10 bg-background group-hover:bg-muted/50 border-l shadow-sm" />
       </TableRow>
       {isExpanded && (
         isExpandLoading ? (
