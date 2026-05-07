@@ -1616,28 +1616,15 @@ function RunRow({
       {isCol("criteria") && <TableCell>
         {run.scenario?.criteria && run.scenario.criteria.length > 0 ? (
           <div className="flex flex-wrap gap-1">
-            {run.scenario.criteria.map((criterionId) => {
-              if (!isDone || !criteriaResultsMap) {
-                return (
-                  <CriteriaBadge
-                    key={criterionId}
-                    criterionId={criterionId}
-                    evaluated={false}
-                    link={true}
-                  />
-                );
-              }
-
-              return (
-                <CriteriaBadge
-                  key={criterionId}
-                  criterionId={criterionId}
-                  result={criteriaResultsMap.get(criterionId)}
-                  evaluated={true}
-                  link={true}
-                />
-              );
-            })}
+            {run.scenario.criteria.map((criterionId) => (
+              <CriteriaBadge
+                key={criterionId}
+                criterionId={criterionId}
+                result={criteriaResultsMap?.get(criterionId)}
+                evaluated={isDone && criteriaResultsMap !== undefined}
+                link={true}
+              />
+            ))}
           </div>
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
