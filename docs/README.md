@@ -22,6 +22,7 @@ Central documentation hub for the Scope platform — an AI coding agent benchmar
 | Document | Description |
 |----------|-------------|
 | [AKS Node Pool Separation](infrastructure/aks-node-pool-separation.md) | Taints, tolerations, node selectors for workload isolation |
+| [Mixed-OS AKS Cluster](architecture/mixed-os-cluster.md) | Single shared cluster for Linux + Windows workloads — Azure CNI Overlay + Calico, node pools, scheduling conventions |
 | [Azure Developer CLI](infrastructure/azd-deployment.md) | Provisioning with `azd up`, feature flags, environment variables |
 
 ## Research
