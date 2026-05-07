@@ -193,6 +193,7 @@ export const ListRequestsQuerySchema = z
     limit: z.coerce.number().int().min(1).max(100).optional(),
     after: z.string().optional(),
     before: z.string().optional(),
+    last: z.enum(["true", "false"]).optional(),
     sortBy: z.enum(["createdAt", "priority"]).optional(),
   })
   .openapi("ListRequestsQuery");
