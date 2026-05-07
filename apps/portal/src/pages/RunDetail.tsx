@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -261,6 +262,7 @@ export function RunDetail() {
      : (run.skills ?? []);
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="space-y-6">
       {/* Back link + header */}
       <div>
@@ -733,7 +735,14 @@ export function RunDetail() {
               <CardContent className="space-y-3">
                 <div>
                   <h4 className="text-sm font-medium mb-1">Task</h4>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5" title={run.scenario?.task ?? "–"}>{run.scenario?.task ?? "–"}</p>
+                   <Tooltip>
+                     <TooltipTrigger asChild>
+                       <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-default">{run.scenario?.task ?? "–"}</p>
+                     </TooltipTrigger>
+                     <TooltipContent className="max-w-sm whitespace-pre-wrap">
+                       {run.scenario?.task ?? "–"}
+                     </TooltipContent>
+                   </Tooltip>
                 </div>
                 {run.scenario?.version && (
                   <div>
@@ -1022,6 +1031,7 @@ export function RunDetail() {
         )}
       </Tabs>
     </div>
+    </TooltipProvider>
   );
 }
 
