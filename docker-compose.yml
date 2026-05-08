@@ -84,7 +84,8 @@ services:
       retries: 5
 
   # Lowkey Vault (Azure Key Vault emulator)
-  # Persists vault state via export/import. On first start, seeds from import.json.hbs.
+  # Persists vault state via export/import. On first start, seeds export.json
+  # inline so remote Docker daemon setups don't depend on bind-mounted files.
   lowkey-vault:
     image: nagyesta/lowkey-vault:7.2.0-ubi10-minimal
     ports:
@@ -97,16 +98,13 @@ services:
         --LOWKEY_VAULT_NAMES=-
         --LOWKEY_IMPORT_LOCATION=/import/export.json
         --LOWKEY_EXPORT_LOCATION=/import/export.json
-        --LOWKEY_IMPORT_TEMPLATE_HOST=lowkey-vault
-        --LOWKEY_IMPORT_TEMPLATE_PORT=8443
     volumes:
       - lowkey_vault_data:/import
-      - ./config/lowkey-vault/import.json.hbs:/import/seed.json.hbs:ro
     entrypoint:
       [
         "/bin/sh",
         "-c",
-        "[ -f /import/export.json ] || cp /import/seed.json.hbs /import/export.json; exec java -jar /lowkey-vault.jar $$LOWKEY_ARGS",
+        "[ -f /import/export.json ] || printf '%s\n' '{\"vaults\":[{\"attributes\":{\"baseUri\":\"https://lowkey-vault:8443\",\"recoveryLevel\":\"Recoverable+Purgeable\",\"recoverableDays\":90,\"created\":0,\"deleted\":null},\"keys\":{},\"secrets\":{},\"certificates\":{}}]}' > /import/export.json; exec java -jar /lowkey-vault.jar $$LOWKEY_ARGS",
       ]
     healthcheck:
       test: ["CMD", "curl", "-fk", "https://localhost:8443/ping"]
