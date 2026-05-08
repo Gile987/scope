@@ -274,6 +274,25 @@ export async function runMultiTurnLoop(
         }
       }
 
+      // Extract raw chat transcript path from the error if the worker attached it
+      const errorRawChatFilePath: string | undefined = (error as any)?.rawChatFilePath;
+      const errorRawChatFormat: string | undefined = (error as any)?.rawChatFormat;
+      let errorRawChatUrl: string | undefined;
+      if (errorRawChatFilePath) {
+        try {
+          const chatBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/chat-export.json`;
+          errorRawChatUrl = await blobStorage.uploadFile(
+            errorRawChatFilePath,
+            chatBlobName,
+            "application/json"
+          );
+          await iterLog("info", "Raw chat transcript uploaded from failed iteration", { rawChatUrl: errorRawChatUrl });
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await iterLog("warn", `Failed to upload raw chat transcript from failed iteration: ${msg}`);
+        }
+      }
+
       // Persist a partial turn so HAR/video URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
@@ -287,6 +306,8 @@ export async function runMultiTurnLoop(
         ...(errorHarUrl && { harUrl: errorHarUrl }),
         ...(errorVideoUrls.length > 0 && { videoUrls: errorVideoUrls }),
         ...(errorAiCallCount !== undefined && { aiCallCount: errorAiCallCount }),
+        ...(errorRawChatUrl && { rawChatUrl: errorRawChatUrl }),
+        ...(errorRawChatUrl && errorRawChatFormat && { rawChatFormat: errorRawChatFormat }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
