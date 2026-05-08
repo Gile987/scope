@@ -405,7 +405,6 @@ services:
         soft: 65536
         hard: 65536
     volumes:
-      - ./apps/gateway/config/default.yaml:/config/proxy.yaml:ro
       - gateway_cert:/certs
     ports:
       - "${GATEWAY_API_PORT:-18900}:18000"
