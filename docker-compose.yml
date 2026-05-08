@@ -454,13 +454,18 @@ services:
 
   # DevProxy sidecar for Claude Code worker (HAR capture)
   devproxy-claude-code:
-    image: ghcr.io/dotnet/dev-proxy:2.1.0
+    build:
+      context: ./apps/workers/coder-acp-claude-code
+      dockerfile: devproxy.Dockerfile
     profiles: [claude-code]
     user: "1000:1000"
     working_dir: /har-output
-    command: ["--config-file", "/config/devproxyrc.json", "--record"]
+    # Config is baked into the image at /etc/devproxy/devproxyrc.json (see
+    # devproxy.Dockerfile) — bind mounts of single files are unreliable on
+    # remote Podman/Docker setups, and the upstream image declares /config
+    # as a VOLUME (which would shadow any bind mount placed inside it).
+    command: ["--config-file", "/etc/devproxy/devproxyrc.json", "--record"]
     volumes:
-      - ./apps/workers/coder-acp-claude-code/devproxy-config.json:/config/devproxyrc.json:ro
       - claude_har_output:/har-output
       - claude_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
     ports:
