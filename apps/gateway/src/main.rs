@@ -186,15 +186,16 @@ async fn main() -> anyhow::Result<()> {
                 .container_client(&blob_cfg.container_name)
         };
 
-        let plugin: Arc<dyn gateway::plugin::ProxyPlugin> = {
-            if redis_client.is_none() {
-                panic!("Redis is required when harBlob is configured (blob + redis must both be present)");
-            }
-            Arc::new(HarPlugin::new_with_blob(
-                container_client.clone(),
-                std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
-            ))
-        };
+        if redis_client.is_none() {
+            anyhow::bail!(
+                "Redis is required when harBlob is configured (blob + redis must both be present). \
+                 Check earlier logs for the underlying Redis connection error."
+            );
+        }
+        let plugin: Arc<dyn gateway::plugin::ProxyPlugin> = Arc::new(HarPlugin::new_with_blob(
+            container_client.clone(),
+            std::time::Duration::from_secs(config.plugins.har.append_timeout_secs),
+        ));
         (plugin, Some(container_client))
     } else {
         let har_dir = config.plugins.har.output_dir.clone();
