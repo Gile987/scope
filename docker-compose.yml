@@ -434,6 +434,7 @@ services:
       # DevProxy integration (enabled by default when using claude-code profile)
       DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
       DEV_PROXY_API_URL: http://devproxy-claude-code:18897
+      DEV_PROXY_URL: http://devproxy-claude-code:18000
       DEV_PROXY_HAR_DIR: /har-output
       HTTP_PROXY: http://devproxy-claude-code:18000
       HTTPS_PROXY: http://devproxy-claude-code:18000
@@ -524,6 +525,7 @@ services:
       # DevProxy integration (enabled by default when using copilot profile)
       DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
       DEV_PROXY_API_URL: http://devproxy-copilot:18897
+      DEV_PROXY_URL: http://devproxy-copilot:18000
       DEV_PROXY_HAR_DIR: /har-output
       HTTP_PROXY: http://devproxy-copilot:18000
       HTTPS_PROXY: http://devproxy-copilot:18000

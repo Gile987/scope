@@ -19,6 +19,26 @@ import { tmpdir } from "node:os";
 const DEFAULT_API_URL = "http://localhost:18000";
 
 /**
+ * Default port that DevProxy listens on for actual MITM proxy traffic.
+ * Distinct from the management API port (18897, used by DEV_PROXY_API_URL).
+ */
+const DEFAULT_DEVPROXY_PROXY_PORT = "18000";
+
+/**
+ * Derive the MITM proxy URL from the management API URL by swapping the port.
+ * Used by the devproxy backend when DEV_PROXY_URL is not set explicitly.
+ */
+export function deriveProxyUrlFromApi(apiUrl: string): string {
+  try {
+    const u = new URL(apiUrl);
+    u.port = DEFAULT_DEVPROXY_PROXY_PORT;
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return apiUrl;
+  }
+}
+
+/**
  * Create the appropriate proxy client based on PROXY_BACKEND env var.
  *
  * Both backends are wrapped in a thin adapter that satisfies ProxyClient.
@@ -106,10 +126,19 @@ export function createProxyClient(): ProxyClient {
   }
 
   const dp = new DevProxyClient(apiUrl);
+  // DevProxy listens on two distinct ports: a management API (default 18897,
+  // exposed via DEV_PROXY_API_URL) and the actual MITM proxy (default 18000,
+  // exposed via HTTP_PROXY in compose). Earlier versions of this adapter
+  // returned `apiUrl` here, which pointed worker subprocesses at the
+  // management port and made every HTTPS request fail with
+  // "Authentication required". Read DEV_PROXY_URL when set (the gateway
+  // backend already uses this convention); fall back to swapping the port
+  // on apiUrl from the API default (18897) to the proxy default (18000).
+  const proxyUrl = process.env.DEV_PROXY_URL ?? deriveProxyUrlFromApi(apiUrl);
   return {
     backend: "devproxy",
     apiUrl,
-    proxyUrl: apiUrl,
+    proxyUrl,
     waitForReady: (t) => dp.waitForReady(t),
     downloadCertificate: (p) => dp.downloadCertificate(p),
     createCombinedCaBundle: (c, o) => dp.createCombinedCaBundle(c, o),
