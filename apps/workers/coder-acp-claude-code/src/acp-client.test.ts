@@ -2,10 +2,10 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ACPClientHandler } from "./acp-client.js";
+import { ACPClientHandler, runACPSession } from "./acp-client.js";
 
 describe("ACPClientHandler", () => {
   let workspace: string;
@@ -193,5 +193,80 @@ describe("ACPClientHandler", () => {
 
       expect(readFileSync(join(workspace, "a/c.txt"), "utf-8")).toBe("ok");
     });
+  });
+});
+
+describe("runACPSession raw chat tee", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "acp-tee-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("writes the agent's stdout verbatim to rawChatFilePath", async () => {
+    // Fake agent that writes two NDJSON lines and exits — runACPSession will
+    // reject (no real ACP handshake), but the tee should still flush both
+    // lines to disk before cleanup.
+    const lines = [
+      '{"jsonrpc":"2.0","method":"session/update","params":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}}',
+      '{"jsonrpc":"2.0","method":"session/update","params":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"bye"}}}',
+    ];
+    const script = `process.stdout.write(${JSON.stringify(lines.join("\n") + "\n")});`;
+    const rawChatFilePath = join(tmpDir, "iteration-1.jsonl");
+
+    await expect(
+      runACPSession("hello", {
+        command: "node",
+        args: ["-e", script],
+        cwd: tmpDir,
+        onLog: () => {},
+        rawChatFilePath,
+      })
+    ).rejects.toThrow();
+
+    expect(existsSync(rawChatFilePath)).toBe(true);
+    const captured = readFileSync(rawChatFilePath, "utf-8");
+    expect(captured).toBe(lines.join("\n") + "\n");
+  });
+
+  it("does not create a file when rawChatFilePath is omitted", async () => {
+    const script = `process.stdout.write("noise\\n");`;
+    const sentinel = join(tmpDir, "should-not-exist.jsonl");
+
+    await expect(
+      runACPSession("hello", {
+        command: "node",
+        args: ["-e", script],
+        cwd: tmpDir,
+        onLog: () => {},
+      })
+    ).rejects.toThrow();
+
+    expect(existsSync(sentinel)).toBe(false);
+  });
+
+  it("closes the tee file even when the subprocess crashes", async () => {
+    // Subprocess writes one line, then exits non-zero before completing the
+    // ACP handshake. The tee must still flush+close so the captured bytes
+    // are durable.
+    const line = '{"crash":true}';
+    const script = `process.stdout.write(${JSON.stringify(line + "\n")}); process.exit(2);`;
+    const rawChatFilePath = join(tmpDir, "iteration-1.jsonl");
+
+    await expect(
+      runACPSession("hello", {
+        command: "node",
+        args: ["-e", script],
+        cwd: tmpDir,
+        onLog: () => {},
+        rawChatFilePath,
+      })
+    ).rejects.toThrow();
+
+    expect(readFileSync(rawChatFilePath, "utf-8")).toBe(line + "\n");
   });
 });

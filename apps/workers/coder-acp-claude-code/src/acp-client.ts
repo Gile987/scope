@@ -162,6 +162,26 @@ export async function runACPSession(
     throw new Error("Failed to create agent process streams");
   }
 
+  // Track whether the ACP session has completed (to avoid spurious exit errors)
+  let sessionCompleted = false;
+
+  // Create a promise that rejects when the subprocess exits unexpectedly.
+  // Mirrors the pattern used by coder-acp-copilot so a crashed/missing agent
+  // surfaces as a real error instead of hanging on connection.initialize().
+  const exitPromise = new Promise<never>((_, reject) => {
+    agentProcess.on("exit", (code, signal) => {
+      if (!sessionCompleted) {
+        const reason = signal ? `signal ${signal}` : `code ${code}`;
+        reject(new Error(`ACP agent process exited unexpectedly (${reason})`));
+      }
+    });
+    agentProcess.on("error", (err) => {
+      if (!sessionCompleted) {
+        reject(new Error(`ACP agent process failed to start: ${err.message}`));
+      }
+    });
+  });
+
   // Create duplex stream for ACP communication
   const stdinStream = agentProcess.stdin;
   const stdoutStream = agentProcess.stdout;
@@ -213,7 +233,7 @@ export async function runACPSession(
     acpStream
   );
 
-  try {
+  const sessionWork = async (): Promise<ACPSessionResult> => {
     // Initialize the connection
     const initResult = await connection.initialize({
       protocolVersion: acp.PROTOCOL_VERSION,
@@ -289,6 +309,12 @@ export async function runACPSession(
       response: clientHandler.getResponse(),
       stopReason: promptResult.stopReason,
     };
+  };
+
+  try {
+    const result = await Promise.race([sessionWork(), exitPromise]);
+    sessionCompleted = true;
+    return result;
   } catch (error) {
     // Better error serialization
     if (error instanceof Error) {
@@ -296,6 +322,7 @@ export async function runACPSession(
     }
     throw new Error(JSON.stringify(error, null, 2));
   } finally {
+    sessionCompleted = true;
     // Cleanup
     stdinStream.end();
     agentProcess.kill();
