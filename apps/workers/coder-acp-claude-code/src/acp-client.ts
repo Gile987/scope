@@ -10,7 +10,7 @@
 
 import { spawn, ChildProcess } from "node:child_process";
 import { Duplex } from "node:stream";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, createWriteStream, type WriteStream } from "node:fs";
 import { dirname, resolve, isAbsolute } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import type { McpServerConfig } from "shared";
@@ -22,6 +22,15 @@ export interface ACPClientOptions {
   cwd: string;
   onLog?: (message: string) => void;
   mcpServers?: McpServerConfig[];
+  /**
+   * Optional path to capture the raw NDJSON stream emitted by the ACP agent on
+   * stdout. When set, every byte written by the agent is appended verbatim to
+   * this file (which is the agent→client side of the ACP protocol—one JSON
+   * object per line). The caller owns the file's lifetime; the tee opens it
+   * with `'w'` (truncating) at session start and closes it on stream
+   * end / error / session completion.
+   */
+  rawChatFilePath?: string;
 }
 
 export interface ACPSessionResult {
@@ -138,7 +147,7 @@ export async function runACPSession(
   prompt: string,
   options: ACPClientOptions
 ): Promise<ACPSessionResult> {
-  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [] } = options;
+  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [], rawChatFilePath } = options;
 
   onLog(`Starting ACP agent: ${command} ${args.join(" ")}`);
 
@@ -162,6 +171,23 @@ export async function runACPSession(
     onLog(`[stderr] ${chunk.toString().trim()}`);
   });
 
+  // Optional tee: capture the raw NDJSON stream emitted by the agent verbatim.
+  // The agent writes line-buffered JSON, so chunks land at line boundaries; we
+  // append raw bytes to preserve the exact stream the SDK saw. Failures to
+  // write are logged and swallowed so that capture issues never break the run.
+  let rawChatStream: WriteStream | null = null;
+  if (rawChatFilePath) {
+    try {
+      rawChatStream = createWriteStream(rawChatFilePath, { flags: "w" });
+      rawChatStream.on("error", (err) => {
+        onLog(`[raw-chat] write error: ${err.message}`);
+      });
+    } catch (err) {
+      onLog(`[raw-chat] failed to open ${rawChatFilePath}: ${err instanceof Error ? err.message : String(err)}`);
+      rawChatStream = null;
+    }
+  }
+
   // Create ACP stream
   const acpStream = acp.ndJsonStream(
     new WritableStream({
@@ -172,6 +198,7 @@ export async function runACPSession(
     new ReadableStream({
       start(controller) {
         stdoutStream.on("data", (chunk: Buffer) => {
+          if (rawChatStream) rawChatStream.write(chunk);
           controller.enqueue(chunk);
         });
         stdoutStream.on("end", () => controller.close());
@@ -272,5 +299,8 @@ export async function runACPSession(
     // Cleanup
     stdinStream.end();
     agentProcess.kill();
+    if (rawChatStream) {
+      await new Promise<void>((res) => rawChatStream!.end(res));
+    }
   }
 }
