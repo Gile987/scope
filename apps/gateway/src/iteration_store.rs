@@ -17,6 +17,7 @@
 use async_trait::async_trait;
 
 /// Result of a compare-and-swap rotation attempt.
+#[derive(Debug)]
 pub enum CasResult {
     /// The CAS succeeded — contains the new iteration value.
     Ok(u32),
@@ -148,6 +149,12 @@ impl LocalIterationStore {
         Self {
             state: parking_lot::RwLock::new(std::collections::HashMap::new()),
         }
+    }
+}
+
+impl Default for LocalIterationStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
