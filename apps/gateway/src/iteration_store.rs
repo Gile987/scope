@@ -154,9 +154,7 @@ impl LocalIterationStore {
 #[async_trait]
 impl IterationStore for LocalIterationStore {
     async fn init(&self, session_id: &str, _ttl_secs: i64) {
-        self.state
-            .write()
-            .insert(iteration_key(session_id), 1);
+        self.state.write().insert(iteration_key(session_id), 1);
     }
 
     async fn get(&self, session_id: &str) -> anyhow::Result<Option<u32>> {

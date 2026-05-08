@@ -35,7 +35,12 @@ impl ProxyPlugin for CounterPlugin {
 
     async fn on_session_start(&self, _session_id: &SessionId, _settings: &serde_json::Value) {}
 
-    async fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange, _iteration: u32) {
+    async fn on_exchange(
+        &self,
+        _session_id: &SessionId,
+        _exchange: &HttpExchange,
+        _iteration: u32,
+    ) {
         self.exchange_count.fetch_add(1, Ordering::SeqCst);
     }
 

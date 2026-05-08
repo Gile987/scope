@@ -142,7 +142,12 @@ impl PluginRegistry {
     }
 
     /// Broadcast a captured exchange to all plugins.
-    pub async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange, iteration: u32) {
+    pub async fn on_exchange(
+        &self,
+        session_id: &SessionId,
+        exchange: &HttpExchange,
+        iteration: u32,
+    ) {
         for plugin in &self.plugins {
             plugin.on_exchange(session_id, exchange, iteration).await;
         }
@@ -221,7 +226,12 @@ mod tests {
             self.start_count.fetch_add(1, Ordering::SeqCst);
         }
 
-        async fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange, _iteration: u32) {
+        async fn on_exchange(
+            &self,
+            _session_id: &SessionId,
+            _exchange: &HttpExchange,
+            _iteration: u32,
+        ) {
             self.exchange_count.fetch_add(1, Ordering::SeqCst);
         }
 

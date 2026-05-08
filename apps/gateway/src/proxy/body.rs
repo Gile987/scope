@@ -157,7 +157,10 @@ pub(crate) fn spawn_stream_and_record<B, F>(
             .unwrap_or(None)
             .unwrap_or(0);
 
-        state.registry.on_exchange(&ctx.session_id, &exchange, iteration).await;
+        state
+            .registry
+            .on_exchange(&ctx.session_id, &exchange, iteration)
+            .await;
     });
 }
 

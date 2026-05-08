@@ -87,12 +87,12 @@ impl LocalWriter {
     }
 
     fn session_dir(&self, session_id: &str) -> PathBuf {
-        self.har_dir
-            .join(session_id.replace(':', "_"))
+        self.har_dir.join(session_id.replace(':', "_"))
     }
 
     fn iter_path(&self, session_id: &str, iteration: u32) -> PathBuf {
-        self.session_dir(session_id).join(format!("iter-{}.jsonl", iteration))
+        self.session_dir(session_id)
+            .join(format!("iter-{}.jsonl", iteration))
     }
 }
 
@@ -112,21 +112,22 @@ impl HarWriter for LocalWriter {
         }
 
         let mut sessions = self.sessions.write();
-        sessions.insert(
-            session_id.to_string(),
-            LocalSession {
-                session_dir,
-            },
-        );
+        sessions.insert(session_id.to_string(), LocalSession { session_dir });
         debug!("HAR local: session initialised for {}", session_id);
     }
 
     async fn init_iteration(&self, session_id: &str, iteration: u32) {
         let path = self.iter_path(session_id, iteration);
         if let Err(e) = tokio::fs::File::create(&path).await {
-            warn!("HAR local: failed to create iteration file {:?}: {}", path, e);
+            warn!(
+                "HAR local: failed to create iteration file {:?}: {}",
+                path, e
+            );
         }
-        debug!("HAR local: iteration {} initialised for {}", iteration, session_id);
+        debug!(
+            "HAR local: iteration {} initialised for {}",
+            iteration, session_id
+        );
     }
 
     async fn append(&self, session_id: &str, iteration: u32, entry: &HarEntry) {
@@ -307,7 +308,10 @@ impl HarWriter for BlobWriter {
                 }
             }
         }
-        debug!("HAR blob: iteration {} initialised for {}", iteration, session_id);
+        debug!(
+            "HAR blob: iteration {} initialised for {}",
+            iteration, session_id
+        );
     }
 
     async fn append(&self, session_id: &str, iteration: u32, entry: &HarEntry) {
@@ -532,8 +536,14 @@ mod tests {
         // Both iterations have independent entries.
         assert_eq!(writer.read_entries("s-multi", 1).len(), 1);
         assert_eq!(writer.read_entries("s-multi", 2).len(), 1);
-        assert_eq!(writer.read_entries("s-multi", 1)[0].request.url, "https://example.com/1");
-        assert_eq!(writer.read_entries("s-multi", 2)[0].request.url, "https://example.com/2");
+        assert_eq!(
+            writer.read_entries("s-multi", 1)[0].request.url,
+            "https://example.com/1"
+        );
+        assert_eq!(
+            writer.read_entries("s-multi", 2)[0].request.url,
+            "https://example.com/2"
+        );
 
         // close_session removes everything.
         writer.close_session("s-multi");

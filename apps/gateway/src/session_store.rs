@@ -177,20 +177,14 @@ mod tests {
     #[test]
     fn session_ttl_reads_top_level_max_session_duration() {
         let mut settings = HashMap::new();
-        settings.insert(
-            "_maxSessionDurationSecs".to_string(),
-            json!(5400),
-        );
+        settings.insert("_maxSessionDurationSecs".to_string(), json!(5400));
         assert_eq!(session_ttl(&settings), Duration::from_secs(5400));
     }
 
     #[test]
     fn session_ttl_ignores_non_u64_value() {
         let mut settings = HashMap::new();
-        settings.insert(
-            "_maxSessionDurationSecs".to_string(),
-            json!("not_a_number"),
-        );
+        settings.insert("_maxSessionDurationSecs".to_string(), json!("not_a_number"));
         assert_eq!(session_ttl(&settings), Duration::from_secs(3600));
     }
 }

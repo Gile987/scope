@@ -223,7 +223,11 @@ pub async fn post_rotate(
 ) -> impl IntoResponse {
     use crate::iteration_store::CasResult;
 
-    match state.session_manager.rotate(&session_id, query.expected).await {
+    match state
+        .session_manager
+        .rotate(&session_id, query.expected)
+        .await
+    {
         Ok(CasResult::Ok(new_iteration)) => {
             info!(
                 "Session {} rotated from iter {} to {}",
@@ -237,16 +241,12 @@ pub async fn post_rotate(
             )
                 .into_response()
         }
-        Ok(CasResult::Conflict(actual)) => {
-            (
-                StatusCode::CONFLICT,
-                Json(RotateResponse { iteration: actual }),
-            )
-                .into_response()
-        }
-        Err(crate::session::SessionError::NotFound) => {
-            StatusCode::NOT_FOUND.into_response()
-        }
+        Ok(CasResult::Conflict(actual)) => (
+            StatusCode::CONFLICT,
+            Json(RotateResponse { iteration: actual }),
+        )
+            .into_response(),
+        Err(crate::session::SessionError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -292,7 +292,8 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let ca = Arc::new(CertificateAuthority::new(tmp.path(), 10).unwrap());
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        let iteration_store = Arc::new(LocalIterationStore::new()) as Arc<dyn crate::iteration_store::IterationStore>;
+        let iteration_store =
+            Arc::new(LocalIterationStore::new()) as Arc<dyn crate::iteration_store::IterationStore>;
         let mgr = Arc::new(SessionManager::new(
             registry,
             std::time::Duration::from_secs(300),
@@ -420,7 +421,8 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let ca = Arc::new(CertificateAuthority::new(tmp.path(), 10).unwrap());
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        let iteration_store = Arc::new(LocalIterationStore::new()) as Arc<dyn crate::iteration_store::IterationStore>;
+        let iteration_store =
+            Arc::new(LocalIterationStore::new()) as Arc<dyn crate::iteration_store::IterationStore>;
         let mgr = Arc::new(SessionManager::new(
             registry,
             std::time::Duration::from_secs(300),

@@ -41,7 +41,11 @@ struct HarInner {
 }
 
 impl HarInner {
-    async fn build_har_for_session(&self, session_id: &SessionId, iteration: u32) -> Option<super::types::Har> {
+    async fn build_har_for_session(
+        &self,
+        session_id: &SessionId,
+        iteration: u32,
+    ) -> Option<super::types::Har> {
         {
             let sessions = self.sessions.read();
             sessions.get(session_id)?;
@@ -149,7 +153,10 @@ impl ProxyPlugin for HarPlugin {
         };
 
         let entry = super::writer::exchange_to_har_entry(exchange, redact);
-        self.inner.writer.append(session_id, iteration, &entry).await;
+        self.inner
+            .writer
+            .append(session_id, iteration, &entry)
+            .await;
 
         // After the append, propagate a hard failure into the session so the
         // next on_request call can reject the run.
@@ -221,7 +228,10 @@ async fn get_har(
     Query(query): Query<HarQuery>,
     State(inner): State<Arc<HarInner>>,
 ) -> impl IntoResponse {
-    match inner.build_har_for_session(&session_id, query.iteration).await {
+    match inner
+        .build_har_for_session(&session_id, query.iteration)
+        .await
+    {
         Some(har) => {
             let failed = inner.writer.is_failed(&session_id);
             let count = har.log.entries.len();
