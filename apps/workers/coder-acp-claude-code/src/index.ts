@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces, createFreshArtifactsDir, cleanupArtifacts } from "shared";
 import { runACPSession } from "./acp-client.js";
+import { join } from "node:path";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -14,6 +15,8 @@ const AGENT_VERSION = `claude-agent-acp-${process.env.CLAUDE_CODE_ACP_VERSION ||
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
   workspacePath: string | undefined = undefined;
+  private artifactsDir: string | undefined = undefined;
+  private iteration = 0;
   private gateway: McpGatewayClient | null = null;
   private mcpConfigs: McpServerConfig[] = [];
 
@@ -30,7 +33,9 @@ class ClaudeCodeProcessor implements WorkerProcessor {
 
   async setup(log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<void> {
     this.workspacePath = createFreshWorkspace();
-    await log("info", "Fresh workspace created", { workspacePath: this.workspacePath });
+    this.artifactsDir = createFreshArtifactsDir();
+    this.iteration = 0;
+    await log("info", "Fresh workspace created", { workspacePath: this.workspacePath, artifactsDir: this.artifactsDir });
 
     this.mcpConfigs = options?.mcpServerConfigs ?? [];
     if (this.mcpConfigs.length > 0) {
@@ -59,7 +64,15 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     } catch (error) {
       await log("warn", `Failed to clean workspaces directory: ${error instanceof Error ? error.message : String(error)}`);
     }
+    try {
+      cleanupArtifacts();
+      await log("info", "Artifacts directory cleaned");
+    } catch (error) {
+      await log("warn", `Failed to clean artifacts directory: ${error instanceof Error ? error.message : String(error)}`);
+    }
     this.workspacePath = undefined;
+    this.artifactsDir = undefined;
+    this.iteration = 0;
     this.mcpConfigs = [];
   }
 
@@ -69,8 +82,14 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
     const skillConfigs = options?.skillConfigs ?? [];
+    this.iteration += 1;
+    const rawChatFilePath = this.artifactsDir
+      ? join(this.artifactsDir, `iteration-${this.iteration}.jsonl`)
+      : undefined;
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
+      iteration: this.iteration,
+      rawChatFilePath,
       model: options?.model,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
@@ -151,6 +170,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         mcpServers: this.gateway && this.mcpConfigs.length > 0
           ? [{ type: "http" as const, slug: "mcp-gateway", name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
           : [],
+        ...(rawChatFilePath ? { rawChatFilePath } : {}),
       });
 
       await log("info", "Claude Code processing complete", { 
@@ -162,7 +182,13 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       const { harFilePath, tokenUsage, aiCallCount } = devProxy
         ? await devProxy.stopAndCollectHar(log)
         : { harFilePath: null, tokenUsage: undefined, aiCallCount: undefined };
-      return { response, ...(harFilePath && { harFilePath }), ...(tokenUsage && { tokenUsage }), ...(aiCallCount !== undefined && { aiCallCount }) };
+      return {
+        response,
+        ...(harFilePath && { harFilePath }),
+        ...(tokenUsage && { tokenUsage }),
+        ...(aiCallCount !== undefined && { aiCallCount }),
+        ...(rawChatFilePath ? { rawChatFilePath, rawChatFormat: "acp-ndjson" } : {}),
+      };
     } catch (error) {
       if (devProxy) {
         const { harFilePath, aiCallCount } = await devProxy.stopAndCollectHar(log);
@@ -172,6 +198,12 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         if (aiCallCount !== undefined) {
           (error as any).aiCallCount = aiCallCount;
         }
+      }
+      // Surface the raw chat capture even on failure so the partial stream is
+      // still uploaded by the judge loop.
+      if (rawChatFilePath) {
+        (error as any).rawChatFilePath = rawChatFilePath;
+        (error as any).rawChatFormat = "acp-ndjson";
       }
       const errorMessage = error instanceof Error ? error.message : String(error);
       await log("error", `Claude Code processing failed: ${errorMessage}`);
