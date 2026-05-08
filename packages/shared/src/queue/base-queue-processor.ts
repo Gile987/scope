@@ -8,6 +8,10 @@ import { LogEvent, BaseQueueProcessorConfig } from "../types/types.js";
 import { LogPublisher } from "../logging/log-publisher.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
+import {
+  startVisibilityHeartbeat,
+  type VisibilityHeartbeat,
+} from "./visibility-heartbeat.js";
 
 /**
  * Generic queue processor that polls an Azure Storage Queue and processes messages.
@@ -172,6 +176,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
     let runId: string | undefined;
     let currentPopReceipt = message.popReceipt;
     let payload: Record<string, unknown> | undefined;
+    let heartbeat: VisibilityHeartbeat | undefined;
 
     try {
       const decodedContent = Buffer.from(message.messageText, "base64").toString("utf-8");
@@ -206,9 +211,36 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         await this.logPublisher.publish(documentId!, logRunId, level, msg, data);
       };
 
-      await this.handleRequest(doc as TDocument, message, currentPopReceipt, log, payload);
+      // Start the visibility heartbeat as soon as we commit to processing this
+      // message. Doing this in the base class (rather than inside handleRequest)
+      // covers all pre-handler work — MCP/skill/extension resolution, status
+      // updates, etc. — so the original 30 s receive timeout cannot expire and
+      // let another worker pick up the message in parallel.
+      heartbeat = startVisibilityHeartbeat(
+        this.queueClient,
+        message.messageId,
+        currentPopReceipt,
+        this.workerName,
+      );
+
+      try {
+        await this.handleRequest(doc as TDocument, message, heartbeat, log, payload);
+      } finally {
+        // Stop the heartbeat first so the latest pop receipt is stable before
+        // any subsequent safeDeleteMessage call (success path delete happens
+        // inside handleRequest; error path delete happens in the catch below).
+        currentPopReceipt = heartbeat.stop();
+        heartbeat = undefined;
+      }
     } catch (error) {
       console.error(`[${this.workerName}] Error processing message:`, error);
+
+      // Defensive: if handleRequest threw before the inner finally ran (it
+      // shouldn't, but guard anyway), stop the heartbeat now.
+      if (heartbeat) {
+        currentPopReceipt = heartbeat.stop();
+        heartbeat = undefined;
+      }
 
       if (documentId) {
         try {
@@ -287,11 +319,16 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
    * Process a document fetched from MongoDB. Subclasses must implement this.
    * The decoded payload is passed through so subclasses can extract additional
    * routing fields (e.g. runId for the run-retry-attempts feature).
+   *
+   * The {@link VisibilityHeartbeat} owns the live pop receipt — subclasses
+   * MUST use `heartbeat.popReceipt` (not the original `message.popReceipt`)
+   * when calling `safeDeleteMessage` on the success path. The base class
+   * stops the heartbeat after `handleRequest` returns or throws.
    */
   protected abstract handleRequest(
     doc: TDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void>;

@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
+import type { VisibilityHeartbeat } from "./visibility-heartbeat.js";
 import type { BaseQueueProcessorConfig, LogEvent } from "../types/types.js";
 import type { DequeuedMessageItem } from "@azure/storage-queue";
 
@@ -31,7 +32,7 @@ class TestQueueProcessor extends BaseQueueProcessor<{ _id: string; status: strin
   protected async handleRequest(
     doc: { _id: string; status: string },
     _message: DequeuedMessageItem,
-    _currentPopReceipt: string,
+    _heartbeat: VisibilityHeartbeat,
     _log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
   ): Promise<void> {
     this.handleRequestCalls.push(doc._id);

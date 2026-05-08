@@ -16,7 +16,7 @@ import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
-import { startVisibilityHeartbeat } from "./visibility-heartbeat.js";
+import type { VisibilityHeartbeat } from "./visibility-heartbeat.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
@@ -64,7 +64,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   protected async handleRequest(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void> {
@@ -81,7 +81,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         messageRunId,
         currentRunId,
       });
-      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
     // If the request was paused while sitting in the queue, discard the
@@ -91,7 +91,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         `[${this.workerName}] Request ${requestDoc._id} is paused — discarding queue message`,
       );
       await log("info", `Request paused — discarding queue message`);
-      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
     // Resolve MCP server slugs to configs via API
@@ -166,7 +166,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolved extensions: ${extensionConfigs.map(e => e.version ? `${e.id}@${e.version}` : e.id).join(", ")}`);
     }
 
-    await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs, extensionConfigs);
+    await this.processMultiTurn(requestDoc, message, heartbeat, log, mcpServerConfigs, skillConfigs, extensionConfigs);
   }
 
   /**
@@ -232,7 +232,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   private async processMultiTurn(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     mcpServerConfigs?: McpServerConfig[],
     skillConfigs?: SkillConfig[],
@@ -268,148 +268,138 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
     ));
 
-    // Start a visibility heartbeat that keeps the message hidden while we
-    // process.  Every 15 s the heartbeat extends the visibility by 30 s.
-    // If the worker crashes, the heartbeat dies and the message reappears
-    // after at most ~30 s instead of the previous 35-minute single-shot
-    // extension.
-    const heartbeat = startVisibilityHeartbeat(
-      this.queueClient, message.messageId,
-      currentPopReceipt, this.workerName,
-    );
+    await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
+      criteria: requestDoc.scenario.criteria,
+      maxIterations: requestDoc.maxIterations,
+    });
 
-    try {
-      await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
-        criteria: requestDoc.scenario.criteria,
-        maxIterations: requestDoc.maxIterations,
-      });
+    // Only create JudgeClient when criteria exist and judge will actually be called
+    const judgeClient = hasCriteria && judgeServiceUrl ? new JudgeClient(judgeServiceUrl) : undefined;
+    const blobStorage = new BlobStorage({
+      storageAccountName: this.config.storageAccountName,
+      storageConnectionString: this.config.storageConnectionString,
+    });
 
-      // Only create JudgeClient when criteria exist and judge will actually be called
-      const judgeClient = hasCriteria && judgeServiceUrl ? new JudgeClient(judgeServiceUrl) : undefined;
-      const blobStorage = new BlobStorage({
-        storageAccountName: this.config.storageAccountName,
-        storageConnectionString: this.config.storageConnectionString,
-      });
+    const maxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
 
-      const maxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
+    // Setup: create workspace, extract skills, upload setup videos
+    if (this.processor.setup) {
+      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
 
-      // Setup: create workspace, extract skills, upload setup videos
-      if (this.processor.setup) {
-        const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
-
-        if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
-          try {
-            const setupVideoUrls: string[] = [];
-            for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
-              const videoBlobName = `${requestId}/runs/${runId}/setup/video-${i}.webm`;
-              const videoUrl = await blobStorage.uploadFile(
-                setupResult.videoFilePaths[i],
-                videoBlobName,
-                "video/webm"
-              );
-              setupVideoUrls.push(videoUrl);
-            }
-            await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
-            if (setupVideoUrls.length > 0) {
-              await withRetry(() => this.collection.updateOne(
-                { _id: requestId },
-                { $set: { "run.setupVideoUrls": setupVideoUrls, "run.updatedAt": new Date(), updatedAt: new Date() } }
-              ));
-            }
-          } catch (uploadError) {
-            const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-            await log("warn", `Failed to upload setup video files: ${msg}`);
+      if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
+        try {
+          const setupVideoUrls: string[] = [];
+          for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
+            const videoBlobName = `${requestId}/runs/${runId}/setup/video-${i}.webm`;
+            const videoUrl = await blobStorage.uploadFile(
+              setupResult.videoFilePaths[i],
+              videoBlobName,
+              "video/webm"
+            );
+            setupVideoUrls.push(videoUrl);
           }
-        }
-      }
-
-      // Extract skills to the workspace (after setup so workspacePath is resolved)
-      if (skillConfigs) {
-        await this.extractSkills(requestDoc, skillConfigs, log);
-      }
-
-      // Resolve workspace path after setup
-      const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
-
-      let result;
-      try {
-        result = await runMultiTurnLoop({
-          processor: this.processor,
-          task: requestDoc.scenario.task,
-          criteria: requestDoc.scenario.criteria,
-          maxIterations,
-          workspacePath,
-          judgeClient,
-          blobStorage,
-          requestId,
-          runId,
-          log,
-          personaInstructions: requestDoc.personaInstructions,
-          model: requestDoc.model,
-          mcpServerConfigs,
-          skillConfigs,
-          extensionConfigs,
-          onTurnComplete: async (turn: ConversationTurn) => {
-            // Persist each turn incrementally to MongoDB (retry on CosmosDB 429).
-            // Push to run.turns (run-retry-attempts shape).
+          await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
+          if (setupVideoUrls.length > 0) {
             await withRetry(() => this.collection.updateOne(
               { _id: requestId },
-              {
-                $push: { "run.turns": turn },
-                $set: { "run.updatedAt": new Date(), updatedAt: new Date() },
-              } as any
+              { $set: { "run.setupVideoUrls": setupVideoUrls, "run.updatedAt": new Date(), updatedAt: new Date() } }
             ));
-          },
-        });
-      } finally {
-        // Lifecycle: always call teardown() if setup() exists, even on error
-        if (this.processor.teardown) {
-          await this.processor.teardown(log);
+          }
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await log("warn", `Failed to upload setup video files: ${msg}`);
         }
       }
-
-      const finalStatus = "done";
-      const finalOutcome = result.passed
-        ? "succeeded"
-        : result.hadError
-          ? "failed"
-          : result.turns.length >= maxIterations
-            ? "finished"
-            : "failed";
-      await log("info", `Multi-turn processing ${finalOutcome}`, {
-        passed: result.passed,
-        totalIterations: result.turns.length,
-        final: true,
-      });
-
-      const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
-
-      await withRetry(() => this.collection.updateOne(
-        { _id: requestId },
-        {
-          $set: {
-            "run.status": finalStatus,
-            "run.outcome": finalOutcome,
-            "run.result": result.finalResult,
-            "run.finishedAt": new Date(),
-            "run.updatedAt": new Date(),
-            updatedAt: new Date(),
-            ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
-            ...(result.passed ? {} : { "run.error": result.finalResult }),
-          },
-        }
-      ));
-
-      console.log(
-        `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
-      );
-
-      // Fire-and-forget report generation
-      await this.triggerReportGeneration(requestId);
-
-      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
-    } finally {
-      heartbeat.stop();
     }
+
+    // Extract skills to the workspace (after setup so workspacePath is resolved)
+    if (skillConfigs) {
+      await this.extractSkills(requestDoc, skillConfigs, log);
+    }
+
+    // Resolve workspace path after setup
+    const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+
+    let result;
+    try {
+      result = await runMultiTurnLoop({
+        processor: this.processor,
+        task: requestDoc.scenario.task,
+        criteria: requestDoc.scenario.criteria,
+        maxIterations,
+        workspacePath,
+        judgeClient,
+        blobStorage,
+        requestId,
+        runId,
+        log,
+        personaInstructions: requestDoc.personaInstructions,
+        model: requestDoc.model,
+        mcpServerConfigs,
+        skillConfigs,
+        extensionConfigs,
+        onTurnComplete: async (turn: ConversationTurn) => {
+          // Persist each turn incrementally to MongoDB (retry on CosmosDB 429).
+          // Push to run.turns (run-retry-attempts shape).
+          await withRetry(() => this.collection.updateOne(
+            { _id: requestId },
+            {
+              $push: { "run.turns": turn },
+              $set: { "run.updatedAt": new Date(), updatedAt: new Date() },
+            } as any
+          ));
+        },
+      });
+    } finally {
+      // Lifecycle: always call teardown() if setup() exists, even on error
+      if (this.processor.teardown) {
+        await this.processor.teardown(log);
+      }
+    }
+
+    const finalStatus = "done";
+    const finalOutcome = result.passed
+      ? "succeeded"
+      : result.hadError
+        ? "failed"
+        : result.turns.length >= maxIterations
+          ? "finished"
+          : "failed";
+    await log("info", `Multi-turn processing ${finalOutcome}`, {
+      passed: result.passed,
+      totalIterations: result.turns.length,
+      final: true,
+    });
+
+    const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
+
+    await withRetry(() => this.collection.updateOne(
+      { _id: requestId },
+      {
+        $set: {
+          "run.status": finalStatus,
+          "run.outcome": finalOutcome,
+          "run.result": result.finalResult,
+          "run.finishedAt": new Date(),
+          "run.updatedAt": new Date(),
+          updatedAt: new Date(),
+          ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
+          ...(result.passed ? {} : { "run.error": result.finalResult }),
+        },
+      }
+    ));
+
+    console.log(
+      `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
+    );
+
+    // Fire-and-forget report generation
+    await this.triggerReportGeneration(requestId);
+
+    // Stop the heartbeat before deleting so the pop receipt is stable —
+    // a tick landing between read and delete would invalidate it. The
+    // base class also calls stop() in its finally block (it's idempotent).
+    const finalPopReceipt = heartbeat.stop();
+    await this.safeDeleteMessage(message.messageId, finalPopReceipt);
   }
 }
