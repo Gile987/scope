@@ -21,12 +21,13 @@ COPY Cargo.toml Cargo.lock* ./
 COPY src/ src/
 COPY config/ config/
 EXPOSE 18000 18897
-CMD ["cargo", "watch", "-x", "run -- --config /config/proxy.yaml --port 18000 --api-port 18897 --cert-dir /tmp/scope-gateway/certs"]
+CMD ["cargo", "watch", "-x", "run -- --config /build/config/default.yaml --port 18000 --api-port 18897 --cert-dir /tmp/scope-gateway/certs"]
 
 # Runtime stage — minimal image with just the binary
 FROM alpine:3.21 AS runtime
 RUN apk add --no-cache ca-certificates wget
 COPY --from=builder /usr/local/bin/gateway /usr/local/bin/gateway
+COPY config/default.yaml /config/default.yaml
 EXPOSE 18000 18897
 ENTRYPOINT ["gateway"]
-CMD ["--config", "/config/proxy.yaml"]
+CMD ["--config", "/config/default.yaml"]
