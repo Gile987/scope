@@ -340,6 +340,8 @@ run
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
   .option("--submission-id <id>", "Filter by submission ID")
+  .option("--turns <expr>", "Filter by actual turns (e.g. '>=5', '<=10', '=3')")
+  .option("--max-iterations <expr>", "Filter by configured maxIterations (e.g. '>=5', '<=10', '=3')")
   .option("--include-deleted", "Include soft-deleted runs")
 )
   .action(async (options) => {
@@ -352,6 +354,25 @@ run
       }
       if (options.submissionId) {
         params.set("submissionId", options.submissionId);
+      }
+      const parseIterExpr = (raw: string, name: string): { op: "eq" | "gte" | "lte"; value: number } => {
+        const m = /^(>=|<=|=)?\s*(\d+)$/.exec(String(raw).trim());
+        if (!m) {
+          throw new Error(`Invalid ${name} expression '${raw}'. Use forms like '>=5', '<=10', '=3', or '5'.`);
+        }
+        const opSym = m[1] ?? "=";
+        const op = opSym === ">=" ? "gte" : opSym === "<=" ? "lte" : "eq";
+        return { op, value: Number(m[2]) };
+      };
+      if (options.turns !== undefined) {
+        const { op, value } = parseIterExpr(options.turns, "--turns");
+        params.set("turns", String(value));
+        params.set("turnsOp", op);
+      }
+      if (options.maxIterations !== undefined) {
+        const { op, value } = parseIterExpr(options.maxIterations, "--max-iterations");
+        params.set("maxIterations", String(value));
+        params.set("maxIterationsOp", op);
       }
       if (options.includeDeleted) {
         params.set("includeDeleted", "true");
