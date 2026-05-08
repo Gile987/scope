@@ -160,6 +160,9 @@ export const OUTCOME_LIST: RunOutcome[] = [
   "finished",
 ];
 
+/** Comparison operator for iteration-count filters. */
+export type IterationOp = "eq" | "gte" | "lte";
+
 // Criteria types
 export interface CriteriaConfig {
   id: string;
