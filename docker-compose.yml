@@ -566,7 +566,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 10s
+      # First run generates the root CA into the cert volume, which can
+      # take 1-2 minutes before the API listener accepts requests.
+      start_period: 180s
     depends_on:
       devproxy-copilot-init:
         condition: service_completed_successfully
