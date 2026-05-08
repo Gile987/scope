@@ -73,19 +73,32 @@ async fn main() -> anyhow::Result<()> {
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(6380);
             let password = std::env::var("REDIS_PASSWORD").ok();
+            let use_cluster = std::env::var("REDIS_CLUSTER")
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            // Clustered Redis over TLS (e.g. Azure Managed Redis Enterprise with
+            // OSSCluster policy) returns per-shard IP addresses in CLUSTER SLOTS.
+            // The cluster certificate is bound to the cluster FQDN, not those IPs,
+            // so SNI/cert validation against the IPs fails. `DefaultHost` tells
+            // fred to substitute the originally-configured hostname when validating
+            // each shard's TLS certificate. Centralized deployments don't need this.
             let tls = if std::env::var("REDIS_TLS")
                 .map(|v| v == "true")
                 .unwrap_or(false)
             {
                 fred::types::config::TlsConnector::default_rustls()
                     .ok()
-                    .map(Into::into)
+                    .map(|connector| fred::types::config::TlsConfig {
+                        connector,
+                        hostnames: if use_cluster {
+                            fred::types::config::TlsHostMapping::DefaultHost
+                        } else {
+                            fred::types::config::TlsHostMapping::None
+                        },
+                    })
             } else {
                 None
             };
-            let use_cluster = std::env::var("REDIS_CLUSTER")
-                .map(|v| v == "true")
-                .unwrap_or(false);
             let server = if use_cluster {
                 fred::types::config::ServerConfig::new_clustered(vec![(host.as_str(), port)])
             } else {
