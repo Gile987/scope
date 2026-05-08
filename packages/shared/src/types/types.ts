@@ -40,7 +40,6 @@ export interface ConversationTurn {
 export const MULTI_TURN_DEFAULTS = {
   MAX_ITERATIONS: 10,
   ITERATION_TIMEOUT_MS: 30 * 60 * 1000, // 30 minutes
-  VISIBILITY_TIMEOUT_SECONDS: 35 * 60,   // 35 minutes (must exceed max iteration time)
 } as const;
 
 // --- Persona & Scenario types (mirrors prototype config schema) ---
