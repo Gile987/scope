@@ -27,7 +27,7 @@ import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, ChevronsLeft, ChevronsRight, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
-import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
+import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion, IterationOp } from "@/types";
 import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
@@ -85,6 +85,10 @@ export function RunsList() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [taskFilter, setTaskFilter] = useState("all");
+  const [turnsOp, setTurnsOp] = useState<IterationOp>("gte");
+  const [turnsValue, setTurnsValue] = useState("");
+  const [maxIterOp, setMaxIterOp] = useState<IterationOp>("gte");
+  const [maxIterValue, setMaxIterValue] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [groupBy, setGroupBy] = useState<GroupByKey>("none");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -121,6 +125,10 @@ export function RunsList() {
   const effectiveTaskPromptId = taskFilter !== "all" ? taskFilter : taskPromptId;
   const effectiveStatus = statusFilter !== "all" ? statusFilter : undefined;
   const effectiveOutcome = outcomeFilter !== "all" ? outcomeFilter : undefined;
+  const parsedTurns = turnsValue.trim() === "" ? undefined : Number(turnsValue);
+  const effectiveTurns = parsedTurns !== undefined && Number.isFinite(parsedTurns) && parsedTurns >= 0 ? parsedTurns : undefined;
+  const parsedMaxIter = maxIterValue.trim() === "" ? undefined : Number(maxIterValue);
+  const effectiveMaxIter = parsedMaxIter !== undefined && Number.isFinite(parsedMaxIter) && parsedMaxIter >= 0 ? parsedMaxIter : undefined;
 
   const goToLastPage = useCallback(() => {
     if (isJumpingToLast) return;
@@ -130,7 +138,7 @@ export function RunsList() {
   }, [isJumpingToLast]);
 
   const { data: runsResponse, isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
+    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, effectiveTurns, turnsOp, effectiveMaxIter, maxIterOp, cursor, cursorDirection, limit],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId: effectiveTaskPromptId,
@@ -138,6 +146,10 @@ export function RunsList() {
       outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      turns: effectiveTurns,
+      turnsOp: effectiveTurns !== undefined ? turnsOp : undefined,
+      maxIterations: effectiveMaxIter,
+      maxIterationsOp: effectiveMaxIter !== undefined ? maxIterOp : undefined,
       limit: limit,
       last: cursorDirection === "last",
       after: cursorDirection === "after" ? cursor : undefined,
@@ -151,7 +163,7 @@ export function RunsList() {
 
   // Fetch server-side groups when groupBy is active
   const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
-    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
+    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, effectiveTurns, turnsOp, effectiveMaxIter, maxIterOp, cursor, cursorDirection, limit],
     queryFn: () => api.listRunGroups({
       groupBy: groupBy as "task" | "submissionId" | "profile",
       worker: workerFilter === "all" ? undefined : workerFilter,
@@ -160,6 +172,10 @@ export function RunsList() {
       outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      turns: effectiveTurns,
+      turnsOp: effectiveTurns !== undefined ? turnsOp : undefined,
+      maxIterations: effectiveMaxIter,
+      maxIterationsOp: effectiveMaxIter !== undefined ? maxIterOp : undefined,
       limit: limit,
       last: cursorDirection === "last",
       after: cursorDirection === "after" ? cursor : undefined,
@@ -629,6 +645,50 @@ export function RunsList() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Turns:</span>
+          <Select value={turnsOp} onValueChange={(v) => { setTurnsOp(v as IterationOp); resetCursor(); }}>
+            <SelectTrigger className="w-[70px]" disabled={isJumpingToLast}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="eq">=</SelectItem>
+              <SelectItem value="gte">≥</SelectItem>
+              <SelectItem value="lte">≤</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            type="number"
+            min={0}
+            placeholder="any"
+            className="w-[80px]"
+            value={turnsValue}
+            disabled={isJumpingToLast}
+            onChange={(e) => { setTurnsValue(e.target.value); resetCursor(); }}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Max iter:</span>
+          <Select value={maxIterOp} onValueChange={(v) => { setMaxIterOp(v as IterationOp); resetCursor(); }}>
+            <SelectTrigger className="w-[70px]" disabled={isJumpingToLast}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="eq">=</SelectItem>
+              <SelectItem value="gte">≥</SelectItem>
+              <SelectItem value="lte">≤</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            type="number"
+            min={0}
+            placeholder="any"
+            className="w-[80px]"
+            value={maxIterValue}
+            disabled={isJumpingToLast}
+            onChange={(e) => { setMaxIterValue(e.target.value); resetCursor(); }}
+          />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Group by:</span>
