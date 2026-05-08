@@ -380,6 +380,11 @@ describe("request schemas", () => {
       const result = ListRequestsQuerySchema.parse({ status: "done" });
       expect(result.status).toBe("done");
     });
+
+    it("accepts last-page query flag", () => {
+      const result = ListRequestsQuerySchema.parse({ last: "true" });
+      expect(result.last).toBe("true");
+    });
   });
 
   describe("BulkResubmitInputSchema", () => {

@@ -43,6 +43,10 @@ export const UpdateMcpServerInputSchema = z
     version: z.string().optional(),
     description: z.string().optional(),
   })
+  .refine(
+    (data) => !(data.env !== undefined && data.headers !== undefined),
+    { message: "Only one of 'env' or 'headers' may be provided" },
+  )
   .openapi("UpdateMcpServerInput");
 
 export const McpServerResponseSchema = z

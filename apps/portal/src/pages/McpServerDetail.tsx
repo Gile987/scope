@@ -89,24 +89,57 @@ export function McpServerDetail() {
 
   const handleSave = () => {
     if (isStdio) {
+      const envPayload = Object.fromEntries(
+        envPairs
+          .filter((p) => p.name)
+          .map((p) => [p.name, p.value]),
+      );
+
+      // Guard: if a key is new (not in the originally-fetched env) and has no value,
+      // the API would delete the old secret but not create one for the new key.
+      const originalEnvKeys = new Set(server?.env ? Object.keys(server.env) : []);
+      const renamedWithoutValue = Object.entries(envPayload).find(
+        ([key, value]) => !value && !originalEnvKeys.has(key),
+      );
+      if (renamedWithoutValue) {
+        toast.error(`Enter a value for "${renamedWithoutValue[0]}" or remove the row`);
+        return;
+      }
+
       updateMutation.mutate({
         name,
         type,
         command,
         args: args.trim() ? args.trim().split(/\s+/) : undefined,
-        env: envPairs.length > 0 ? Object.fromEntries(envPairs.filter(p => p.name && p.value).map(p => [p.name, p.value])) : undefined,
+        // Always send env object so the API can reconcile removals.
+        // Sending `{}` explicitly clears all env secrets (user removed all pairs).
+        env: envPayload,
         sessionMode,
         version: version.trim() || undefined,
         description: description.trim() || undefined,
       });
     } else {
-      const filteredHeaders = headers.filter(h => h.name && h.value);
+      const filteredHeaders = headers.filter(h => h.name);
+
+      // Guard: if a header name is new (not in the originally-fetched headers) and has no
+      // value, the API would delete the old secret but not create one for the new name.
+      const originalHeaderNames = new Set(server?.headers?.map(h => h.name) ?? []);
+      const renamedWithoutValue = filteredHeaders.find(
+        h => !h.value && !originalHeaderNames.has(h.name),
+      );
+      if (renamedWithoutValue) {
+        toast.error(`Enter a value for "${renamedWithoutValue.name}" or remove the row`);
+        return;
+      }
+
       updateMutation.mutate({
         name,
         type,
         url,
         description: description.trim() || undefined,
-        headers: filteredHeaders.length > 0 ? filteredHeaders : undefined,
+        // Always send headers array so the API can reconcile removals.
+        // Sending `[]` explicitly clears all header secrets (user removed all headers).
+        headers: filteredHeaders,
       });
     }
   };
@@ -474,7 +507,7 @@ export function McpServerDetail() {
                       className="font-mono text-sm"
                     />
                     <Input
-                      placeholder={pair.value === "" && server?.env?.[pair.name] === "<secret>" ? "(already set — enter new value to change)" : "value"}
+                      placeholder={pair.value === "" && server?.env?.[pair.name] === "<secret>" ? "" : "value"}
                       type="password"
                       value={pair.value}
                       onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
