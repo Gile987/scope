@@ -38,6 +38,7 @@ export function createProxyClient(): ProxyClient {
       downloadCertificate: (p) => gw.downloadCertificate(p),
       createCombinedCaBundle: (c, o) => gw.createCombinedCaBundle(c, o),
       startRecording: async () => {
+        const maxSessionDurationSecs = parseInt(process.env.COPILOT_MAX_SESSION_DURATION_SECS || "3600", 10);
         const plugins: Record<string, unknown> = {};
 
         // Enable the copilot_token auto-refresh plugin when TOKEN_MANAGER_URL is set.
@@ -48,7 +49,7 @@ export function createProxyClient(): ProxyClient {
           plugins.copilot_token = {
             capability: process.env.COPILOT_TOKEN_CAPABILITY || "generic",
             refreshBufferSecs: 120,
-            maxSessionDurationSecs: parseInt(process.env.COPILOT_MAX_SESSION_DURATION_SECS || "3600", 10),
+            maxSessionDurationSecs,
             targetHosts: [
               "api.githubcopilot.com",
               "api.enterprise.githubcopilot.com",
@@ -57,13 +58,13 @@ export function createProxyClient(): ProxyClient {
           };
         }
 
-        await gw.startSession(plugins);
+        await gw.startSession(plugins, maxSessionDurationSecs);
       },
       stopAndCollectHar: async (log) => {
         try {
           await gw.stopSession();
           await log("info", "Gateway session stopped");
-          const har = await gw.downloadHar();
+          const har = await gw.downloadHar(1);
           if (har) {
             // Write HAR to temp file so the upload pipeline can pick it up
             const harFilePath = join(tmpdir(), `gateway-${Date.now()}.har`);
@@ -80,6 +81,25 @@ export function createProxyClient(): ProxyClient {
         }
         // Best-effort cleanup even on failure
         try { await gw.deleteSession(); } catch { /* best effort */ }
+        return { harFilePath: null };
+      },
+      collectHar: async (iteration, log) => {
+        try {
+          const har = await gw.downloadHar(iteration);
+          if (har) {
+            const harFilePath = join(tmpdir(), `gateway-iter${iteration}-${Date.now()}.har`);
+            await writeFile(harFilePath, JSON.stringify(har), "utf-8");
+            await log("info", `Downloaded HAR for iteration ${iteration}`);
+            // Rotate so subsequent exchanges go to iteration+1
+            const newIter = await gw.rotateHar(iteration);
+            await log("info", `Rotated HAR to iteration ${newIter}`);
+            return extractHarMetadata(har, harFilePath, log);
+          }
+          await log("warn", `No HAR data returned from gateway for iteration ${iteration}`);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          await log("warn", `Gateway HAR collection for iteration ${iteration} failed: ${msg}`);
+        }
         return { harFilePath: null };
       },
     };
@@ -109,6 +129,9 @@ export function createProxyClient(): ProxyClient {
         await log("warn", `Gateway HAR collection failed (session may have been lost due to a gateway restart): ${msg}`);
       }
       return { harFilePath: null };
+    },
+    collectHar: async () => {
+      throw new Error("collectHar() is not supported by the devproxy backend");
     },
   };
 }

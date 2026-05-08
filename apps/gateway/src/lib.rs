@@ -6,6 +6,7 @@ pub mod ca;
 pub mod clients;
 pub mod config;
 pub mod filters;
+pub mod iteration_store;
 pub mod plugin;
 pub mod plugins;
 pub mod proxy;

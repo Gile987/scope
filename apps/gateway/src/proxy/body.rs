@@ -149,7 +149,18 @@ pub(crate) fn spawn_stream_and_record<B, F>(
             elapsed_ms,
         };
 
-        state.registry.on_exchange(&ctx.session_id, &exchange).await;
+        // Read iteration from session manager before notifying plugins.
+        let iteration = state
+            .session_manager
+            .get_iteration(&ctx.session_id)
+            .await
+            .unwrap_or(None)
+            .unwrap_or(0);
+
+        state
+            .registry
+            .on_exchange(&ctx.session_id, &exchange, iteration)
+            .await;
     });
 }
 

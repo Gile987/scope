@@ -35,7 +35,12 @@ impl ProxyPlugin for CounterPlugin {
 
     async fn on_session_start(&self, _session_id: &SessionId, _settings: &serde_json::Value) {}
 
-    async fn on_exchange(&self, _session_id: &SessionId, _exchange: &HttpExchange) {
+    async fn on_exchange(
+        &self,
+        _session_id: &SessionId,
+        _exchange: &HttpExchange,
+        _iteration: u32,
+    ) {
         self.exchange_count.fetch_add(1, Ordering::SeqCst);
     }
 
@@ -78,7 +83,7 @@ async fn har_plugin_lifecycle() {
 
     // Get HAR
     let resp = client
-        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har?iteration=1", session_id)))
         .send()
         .await
         .unwrap();
@@ -119,8 +124,8 @@ async fn custom_plugin_receives_exchanges() {
         elapsed_ms: 10,
     };
 
-    registry.on_exchange(&sid, &exchange).await;
-    registry.on_exchange(&sid, &exchange).await;
+    registry.on_exchange(&sid, &exchange, 1).await;
+    registry.on_exchange(&sid, &exchange, 1).await;
 
     assert_eq!(counter.count(), 2);
 
@@ -157,7 +162,7 @@ async fn multiple_plugins_receive_exchanges() {
         elapsed_ms: 5,
     };
 
-    registry.on_exchange(&sid, &exchange).await;
+    registry.on_exchange(&sid, &exchange, 1).await;
 
     assert_eq!(counter1.count(), 1);
     assert_eq!(counter2.count(), 1);

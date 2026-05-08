@@ -25,6 +25,27 @@ import {
 
 const DEFAULT_API_URL = "http://localhost:18000";
 
+/** Returns true for network errors and 5xx responses (transient). */
+function isTransientError(err: unknown): boolean {
+  if (!(err instanceof Error)) return true;
+  // Network-level failures (fetch failed, ECONNREFUSED, etc.)
+  if (err.name === "TypeError") return true;
+  const msg = err.message;
+  // 5xx server errors
+  if (/\b5\d{2}\b/.test(msg)) return true;
+  return false;
+}
+
+const RETRY_OPTS = {
+  maxRetries: 3,
+  baseDelayMs: 500,
+  isRetryable: isTransientError,
+  onRetry: (err: unknown, attempt: number) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[GatewayClient] Attempt ${attempt} failed: ${msg}`);
+  },
+} as const;
+
 export class GatewayClient {
   readonly apiUrl: string;
   private sessionId: string | null = null;
@@ -68,65 +89,108 @@ export class GatewayClient {
     return createCombinedCaBundle(proxyCertPath, outputPath);
   }
 
-  async startSession(plugins: Record<string, unknown> = {}): Promise<string> {
+  async startSession(plugins: Record<string, unknown> = {}, maxSessionDurationSecs?: number): Promise<string> {
     const id = this.sessionId ?? crypto.randomUUID();
-    const response = await fetch(`${this.apiUrl}/api/v1/sessions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, plugins }),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to create gateway session: ${response.status} ${response.statusText}`);
-    }
+    await withRetry(
+      async () => {
+        const response = await fetch(`${this.apiUrl}/api/v1/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, plugins, maxSessionDurationSecs }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to create gateway session: ${response.status} ${response.statusText}`);
+        }
+      },
+      RETRY_OPTS,
+    );
     this.sessionId = id;
     return id;
   }
 
   async stopSession(): Promise<void> {
     const id = this.requireSessionId();
-    const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}/stop`, {
-      method: "POST",
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to stop gateway session: ${response.status} ${response.statusText}`);
-    }
+    await withRetry(
+      async () => {
+        const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}/stop`, {
+          method: "POST",
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to stop gateway session: ${response.status} ${response.statusText}`);
+        }
+      },
+      RETRY_OPTS,
+    );
   }
 
-  async downloadHar(): Promise<HarFile | null> {
+  async downloadHar(iteration: number): Promise<HarFile | null> {
     const id = this.sessionId;
     if (!id) return null;
     try {
       return await withRetry(
         async () => {
-          const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}/har`);
+          const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}/har?iteration=${iteration}`);
           if (!response.ok) {
             throw new Error(`HAR download failed: ${response.status} ${response.statusText}`);
           }
           return (await response.json()) as HarFile;
         },
-        {
-          maxRetries: 3,
-          baseDelayMs: 500,
-          isRetryable: () => true,
-          onRetry: (err, attempt) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.warn(`[GatewayClient] HAR download attempt ${attempt} failed: ${msg}`);
-          },
-        },
+        { ...RETRY_OPTS, isRetryable: () => true },
       );
     } catch {
       return null;
     }
   }
 
+  /**
+   * Rotate the HAR iteration: CAS-guarded bump from `expected` to `expected+1`.
+   * Returns the new iteration number on success.
+   *
+   * Idempotent: if a previous attempt succeeded but the response was lost
+   * (network blip), the retry will get a 409 with `iteration === expected+1`,
+   * which is treated as success.
+   */
+  async rotateHar(expected: number): Promise<number> {
+    const id = this.requireSessionId();
+    return withRetry(
+      async () => {
+        const response = await fetch(
+          `${this.apiUrl}/api/v1/sessions/${id}/rotate?expected=${expected}`,
+          { method: "POST" },
+        );
+        const body = (await response.json()) as { iteration: number };
+        if (response.status === 409) {
+          // The rotation we requested already happened (lost response on
+          // a previous attempt). Treat as idempotent success.
+          if (body.iteration === expected + 1) {
+            return body.iteration;
+          }
+          throw new Error(
+            `HAR rotate conflict: expected iteration ${expected}, server has ${body.iteration}`,
+          );
+        }
+        if (!response.ok) {
+          throw new Error(`HAR rotate failed: ${response.status} ${response.statusText}`);
+        }
+        return body.iteration;
+      },
+      RETRY_OPTS,
+    );
+  }
+
   async deleteSession(): Promise<void> {
     const id = this.requireSessionId();
-    const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}`, {
-      method: "DELETE",
-    });
-    if (!response.ok && response.status !== 404) {
-      throw new Error(`Failed to delete gateway session: ${response.status} ${response.statusText}`);
-    }
+    await withRetry(
+      async () => {
+        const response = await fetch(`${this.apiUrl}/api/v1/sessions/${id}`, {
+          method: "DELETE",
+        });
+        if (!response.ok && response.status !== 404) {
+          throw new Error(`Failed to delete gateway session: ${response.status} ${response.statusText}`);
+        }
+      },
+      RETRY_OPTS,
+    );
     this.sessionId = null;
   }
 

@@ -38,7 +38,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 backon = "1"
 azure_storage = { version = "0.21", default-features = false, features = ["enable_reqwest_rustls", "hmac_rust"] }
 azure_storage_blobs = { version = "0.21", default-features = false, features = ["enable_reqwest_rustls"] }
-fred = { version = "10", features = ["tracing", "enable-rustls"] }
+fred = { version = "10", features = ["tracing", "enable-rustls", "i-scripts"] }
 
 [dev-dependencies]
 futures-util = "0.3"

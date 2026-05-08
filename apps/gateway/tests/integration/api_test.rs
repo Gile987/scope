@@ -59,9 +59,9 @@ async fn session_lifecycle() {
         .unwrap();
     assert_eq!(resp.status(), 200);
 
-    // GET /api/v1/sessions/:id/har — should return empty HAR (no traffic intercepted)
+    // GET /api/v1/sessions/:id/har?iteration=1 — should return empty HAR (no traffic intercepted)
     let resp = client
-        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har?iteration=1", session_id)))
         .send()
         .await
         .unwrap();
@@ -113,7 +113,7 @@ async fn har_returns_404_without_session() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(gw.api_url("/api/v1/sessions/nonexistent/har"))
+        .get(gw.api_url("/api/v1/sessions/nonexistent/har?iteration=1"))
         .send()
         .await
         .unwrap();
@@ -140,7 +140,7 @@ async fn har_returns_empty_har_while_session_active() {
     assert_eq!(body["id"].as_str().unwrap(), session_id);
 
     let resp = client
-        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har?iteration=1", session_id)))
         .send()
         .await
         .unwrap();
