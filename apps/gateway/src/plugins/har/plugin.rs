@@ -105,10 +105,38 @@ impl ProxyPlugin for HarPlugin {
             HarSession {
                 redact,
                 finalized: false,
-                failed: false,
+                failed: self.inner.writer.is_failed(session_id),
             },
         );
         debug!("HAR plugin: session started for {}", session_id);
+    }
+
+    async fn on_iteration_rotate(
+        &self,
+        session_id: &SessionId,
+        next_iteration: u32,
+    ) -> anyhow::Result<()> {
+        self.inner
+            .writer
+            .init_iteration(session_id, next_iteration)
+            .await;
+
+        let failed = self.inner.writer.is_failed(session_id);
+        {
+            let mut sessions = self.inner.sessions.write();
+            if let Some(s) = sessions.get_mut(session_id) {
+                s.failed = failed;
+            }
+        }
+
+        if failed {
+            anyhow::bail!(
+                "HAR storage failure while preparing iteration {} for session {}",
+                next_iteration,
+                session_id
+            );
+        }
+        Ok(())
     }
 
     async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange, iteration: u32) {

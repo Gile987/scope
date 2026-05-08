@@ -271,6 +271,7 @@ mod tests {
         let session_routes = Router::new()
             .route("/", get(get_session))
             .route("/stop", post(post_stop_session))
+            .route("/rotate", post(post_rotate))
             .route("/", delete(delete_session))
             .with_state(state.clone());
 
@@ -594,6 +595,61 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), 409);
+    }
+
+    // --- Rotate iteration ---
+
+    #[tokio::test]
+    async fn rotate_session_returns_200_with_next_iteration() {
+        let state = test_state();
+        let id = uuid::Uuid::new_v4().to_string();
+        state
+            .session_manager
+            .create_session(id.clone(), HashMap::new())
+            .await
+            .unwrap();
+
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/api/v1/sessions/{}/rotate?expected=1", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), 200);
+        let body = body_string(resp).await;
+        assert!(body.contains("\"iteration\":2"));
+    }
+
+    #[tokio::test]
+    async fn rotate_session_conflict_returns_409_with_actual_iteration() {
+        let state = test_state();
+        let id = uuid::Uuid::new_v4().to_string();
+        state
+            .session_manager
+            .create_session(id.clone(), HashMap::new())
+            .await
+            .unwrap();
+
+        // First rotate succeeds to iteration 2.
+        state.session_manager.rotate(&id, 1).await.unwrap();
+
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/api/v1/sessions/{}/rotate?expected=1", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), 409);
+        let body = body_string(resp).await;
+        assert!(body.contains("\"iteration\":2"));
     }
 
     // --- Delete session ---

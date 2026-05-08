@@ -80,6 +80,17 @@ pub trait ProxyPlugin: Send + Sync {
     /// Called when a session is reaped (idle timeout or next start).
     async fn on_session_clear(&self, session_id: &SessionId);
 
+    /// Called before the session iteration counter is rotated from N to N+1.
+    /// Plugins can prepare per-iteration resources (for example, create an
+    /// append blob for the next HAR shard) before the CAS increment is applied.
+    async fn on_iteration_rotate(
+        &self,
+        _session_id: &SessionId,
+        _next_iteration: u32,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// Optional: register additional API routes.
     fn api_routes(&self) -> Option<axum::Router> {
         None
@@ -150,6 +161,29 @@ impl PluginRegistry {
             plugin.on_session_clear(session_id).await;
         }
     }
+
+    /// Notify all plugins before rotating a session iteration counter.
+    pub async fn on_iteration_rotate(
+        &self,
+        session_id: &SessionId,
+        next_iteration: u32,
+    ) -> anyhow::Result<()> {
+        for plugin in &self.plugins {
+            plugin
+                .on_iteration_rotate(session_id, next_iteration)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "plugin '{}' failed to prepare iteration {} for session {}: {}",
+                        plugin.name(),
+                        next_iteration,
+                        session_id,
+                        e
+                    )
+                })?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -162,6 +196,7 @@ mod tests {
         exchange_count: AtomicUsize,
         stop_count: AtomicUsize,
         clear_count: AtomicUsize,
+        rotate_count: AtomicUsize,
     }
 
     impl TestPlugin {
@@ -171,6 +206,7 @@ mod tests {
                 exchange_count: AtomicUsize::new(0),
                 stop_count: AtomicUsize::new(0),
                 clear_count: AtomicUsize::new(0),
+                rotate_count: AtomicUsize::new(0),
             }
         }
     }
@@ -195,6 +231,15 @@ mod tests {
 
         async fn on_session_clear(&self, _session_id: &SessionId) {
             self.clear_count.fetch_add(1, Ordering::SeqCst);
+        }
+
+        async fn on_iteration_rotate(
+            &self,
+            _session_id: &SessionId,
+            _next_iteration: u32,
+        ) -> anyhow::Result<()> {
+            self.rotate_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
         }
     }
 
@@ -244,6 +289,13 @@ mod tests {
         registry.on_session_clear(&"10.0.0.1".to_string()).await;
         assert_eq!(p1.clear_count.load(Ordering::SeqCst), 1);
         assert_eq!(p2.clear_count.load(Ordering::SeqCst), 1);
+
+        registry
+            .on_iteration_rotate(&"10.0.0.1".to_string(), 2)
+            .await
+            .unwrap();
+        assert_eq!(p1.rotate_count.load(Ordering::SeqCst), 1);
+        assert_eq!(p2.rotate_count.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

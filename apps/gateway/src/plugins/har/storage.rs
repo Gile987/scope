@@ -256,6 +256,17 @@ impl BlobWriter {
 #[async_trait]
 impl HarWriter for BlobWriter {
     async fn init_session(&self, session_id: &str) {
+        let failed = Arc::new(AtomicBool::new(false));
+        {
+            let mut sessions = self.sessions.write();
+            sessions.insert(
+                session_id.to_string(),
+                BlobSession {
+                    failed: failed.clone(),
+                },
+            );
+        }
+
         let blob_name = Self::blob_name(session_id, 1);
         let blob_client = self.container_client.blob_client(blob_name);
 
@@ -268,20 +279,18 @@ impl HarWriter for BlobWriter {
                     "HAR blob: failed to create append blob for session {}: {}",
                     session_id, e
                 );
+                failed.store(true, Ordering::Relaxed);
             }
         }
-
-        let mut sessions = self.sessions.write();
-        sessions.insert(
-            session_id.to_string(),
-            BlobSession {
-                failed: Arc::new(AtomicBool::new(false)),
-            },
-        );
         debug!("HAR blob: session initialised for {}", session_id);
     }
 
     async fn init_iteration(&self, session_id: &str, iteration: u32) {
+        let failed = {
+            let sessions = self.sessions.read();
+            sessions.get(session_id).map(|s| s.failed.clone())
+        };
+
         let blob_name = Self::blob_name(session_id, iteration);
         let blob_client = self.container_client.blob_client(blob_name);
 
@@ -293,6 +302,9 @@ impl HarWriter for BlobWriter {
                     "HAR blob: failed to create append blob for session {} iter {}: {}",
                     session_id, iteration, e
                 );
+                if let Some(failed) = failed {
+                    failed.store(true, Ordering::Relaxed);
+                }
             }
         }
         debug!("HAR blob: iteration {} initialised for {}", iteration, session_id);
