@@ -6479,6 +6479,56 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "turns",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "turnsOp",
+            "required": false,
+            "schema": {
+              "enum": [
+                "eq",
+                "gte",
+                "lte",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "maxIterations",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "maxIterationsOp",
+            "required": false,
+            "schema": {
+              "enum": [
+                "eq",
+                "gte",
+                "lte",
+              ],
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {

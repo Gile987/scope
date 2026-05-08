@@ -542,13 +542,14 @@ services:
 
   # DevProxy sidecar for Copilot worker (HAR capture)
   devproxy-copilot:
-    image: ghcr.io/dotnet/dev-proxy:2.1.0
+    build:
+      context: ./apps/workers/coder-acp-copilot
+      dockerfile: devproxy.Dockerfile
     profiles: [copilot]
     user: "1000:1000"
     working_dir: /har-output
-    command: ["--config-file", "/config/devproxyrc.json", "--record"]
+    command: ["--config-file", "/etc/devproxy/devproxyrc.json", "--record"]
     volumes:
-      - ./apps/workers/coder-acp-copilot/devproxy-config.json:/config/devproxyrc.json:ro
       - copilot_har_output:/har-output
       - copilot_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
     ports:

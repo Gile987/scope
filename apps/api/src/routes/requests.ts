@@ -646,6 +646,10 @@ apiRoute(ctx.app, ctx.registry, {
     const profileIdFilter = req.query.profileId as string;
     const statusFilter = req.query.status as string;
     const outcomeFilter = req.query.outcome as string;
+    const turnsFilterRaw = req.query.turns as string | undefined;
+    const turnsOpFilter = (req.query.turnsOp as string | undefined) ?? "eq";
+    const maxIterationsFilterRaw = req.query.maxIterations as string | undefined;
+    const maxIterationsOpFilter = (req.query.maxIterationsOp as string | undefined) ?? "eq";
     const includeDeleted = req.query.includeDeleted === "true";
     const groupByParam = req.query.groupBy as "task" | "submissionId" | "profile" | undefined;
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
@@ -685,6 +689,28 @@ apiRoute(ctx.app, ctx.registry, {
     }
     if (!includeDeleted) {
       filter.deletedAt = { $exists: false };
+    }
+
+    // Iteration-count filters. `maxIterations` is a top-level field; `turns`
+    // requires a $expr against the size of the run.turns array.
+    const OP_MAP: Record<string, "$eq" | "$gte" | "$lte"> = { eq: "$eq", gte: "$gte", lte: "$lte" };
+    if (maxIterationsFilterRaw !== undefined && maxIterationsFilterRaw !== "") {
+      const n = Number(maxIterationsFilterRaw);
+      const op = OP_MAP[maxIterationsOpFilter];
+      if (!Number.isFinite(n) || n < 0 || !op) {
+        res.status(400).json({ error: "Invalid maxIterations or maxIterationsOp" });
+        return;
+      }
+      filter.maxIterations = { [op]: n };
+    }
+    if (turnsFilterRaw !== undefined && turnsFilterRaw !== "") {
+      const n = Number(turnsFilterRaw);
+      const op = OP_MAP[turnsOpFilter];
+      if (!Number.isFinite(n) || n < 0 || !op) {
+        res.status(400).json({ error: "Invalid turns or turnsOp" });
+        return;
+      }
+      filter.$expr = { [op]: [{ $size: { $ifNull: ["$run.turns", []] } }, n] };
     }
 
     // Filter by MDP criteria state vector (e.g. "has_azure:0|has_cloud:1")
