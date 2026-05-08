@@ -71,14 +71,18 @@ Every `processMessage()` call must return a `WorkerResult`:
 
 ```typescript
 interface WorkerResult {
-  response: string;           // The coding agent's text response (required)
-  harFilePath?: string;       // Path to HAR file on disk (optional)
-  videoFilePaths?: string[];  // Paths to video recordings on disk (optional)
-  tokenUsage?: TokenUsage;    // LLM token usage counters (optional)
+  response: string;            // The coding agent's text response (required)
+  harFilePath?: string;        // Path to HAR file on disk (optional)
+  videoFilePaths?: string[];   // Paths to video recordings on disk (optional)
+  tokenUsage?: TokenUsage;     // LLM token usage counters (optional)
+  aiCallCount?: number;        // Number of AI completion API calls (optional)
+  rawChatFilePath?: string;    // Path to raw chat transcript on disk (optional)
+  rawChatFormat?: string;      // Identifier for the raw chat format, e.g.
+                               //   'acp-ndjson' (claude-code, copilot)
 }
 ```
 
-The queue processor handles uploading HAR and video files to Azure Blob Storage — the worker only needs to provide local file paths.
+The queue processor handles uploading HAR, video, and raw chat transcript files to Azure Blob Storage — the worker only needs to provide local file paths. Files written for capture purposes must live **outside** `workspacePath` (which is tar.gz'd into the iteration snapshot); use `createFreshArtifactsDir()` from `shared` for a per-run `/tmp/artifacts/run-<rand>/` directory and call `cleanupArtifacts()` in `teardown()`.
 
 **Source:** [`packages/shared/src/types/types.ts`](../../packages/shared/src/types/types.ts) — `WorkerResult` interface.
 
