@@ -435,9 +435,6 @@ services:
       DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
       DEV_PROXY_API_URL: http://devproxy-claude-code:18897
       DEV_PROXY_HAR_DIR: /har-output
-      HTTP_PROXY: http://devproxy-claude-code:18000
-      HTTPS_PROXY: http://devproxy-claude-code:18000
-      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-claude-code,mcp-gateway-claude-code"
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
       MCP_GATEWAY_URL: http://mcp-gateway-claude-code:8080
     volumes:
