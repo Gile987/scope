@@ -61,7 +61,7 @@ async fn get_har(
     session_id: &str,
 ) -> serde_json::Value {
     let resp = api_client
-        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har?iteration=1", session_id)))
         .send()
         .await
         .unwrap();

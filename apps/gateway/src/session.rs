@@ -17,6 +17,7 @@ use parking_lot::RwLock;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::iteration_store::IterationStore;
 use crate::plugin::{PluginRegistry, SessionId};
 use crate::session_store::{session_ttl, PersistedSession, SessionPersistence};
 
@@ -59,17 +60,25 @@ pub struct SessionManager {
     max_sessions: usize,
     /// Optional persistence backend (Redis in production, mock in tests).
     store: Option<Box<dyn SessionPersistence>>,
+    /// Iteration counter store — always present.
+    iteration_store: Arc<dyn IterationStore>,
 }
 
 impl SessionManager {
     /// Create a new session manager without Redis persistence.
-    pub fn new(registry: Arc<PluginRegistry>, idle_timeout: Duration, max_sessions: usize) -> Self {
+    pub fn new(
+        registry: Arc<PluginRegistry>,
+        idle_timeout: Duration,
+        max_sessions: usize,
+        iteration_store: Arc<dyn IterationStore>,
+    ) -> Self {
         Self {
             sessions_lock: RwLock::new(HashMap::new()),
             registry,
             idle_timeout,
             max_sessions,
             store: None,
+            iteration_store,
         }
     }
 
@@ -79,6 +88,7 @@ impl SessionManager {
         idle_timeout: Duration,
         max_sessions: usize,
         store: impl SessionPersistence + 'static,
+        iteration_store: Arc<dyn IterationStore>,
     ) -> Self {
         Self {
             sessions_lock: RwLock::new(HashMap::new()),
@@ -86,6 +96,7 @@ impl SessionManager {
             idle_timeout,
             max_sessions,
             store: Some(Box::new(store)),
+            iteration_store,
         }
     }
 
@@ -145,6 +156,10 @@ impl SessionManager {
             true
         };
 
+        // Initialise the iteration counter.
+        let ttl_secs = session_ttl(&plugin_settings).as_secs() as i64;
+        self.iteration_store.init(&session_id, ttl_secs).await;
+
         Ok(is_new)
     }
 
@@ -176,6 +191,9 @@ impl SessionManager {
             sessions.remove(session_id).ok_or(SessionError::NotFound)?;
         }
         self.registry.on_session_clear(session_id).await;
+
+        // Clean up iteration counter.
+        self.iteration_store.delete(session_id).await;
 
         // Delete from Redis on explicit clear.
         if let Some(store) = &self.store {
@@ -229,6 +247,7 @@ impl SessionManager {
         };
         for id in &reaped {
             self.registry.on_session_clear(id).await;
+            self.iteration_store.delete(id).await;
         }
         reaped
     }
@@ -236,6 +255,39 @@ impl SessionManager {
     /// Number of sessions.
     pub fn session_count(&self) -> usize {
         self.sessions_lock.read().len()
+    }
+
+    /// Read the current iteration for a session.
+    pub async fn get_iteration(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<u32>, anyhow::Error> {
+        self.iteration_store.get(session_id).await
+    }
+
+    /// Atomic compare-and-swap rotation of the session iteration counter.
+    pub async fn rotate(
+        &self,
+        session_id: &SessionId,
+        expected: u32,
+    ) -> Result<crate::iteration_store::CasResult, SessionError> {
+        {
+            let sessions = self.sessions_lock.read();
+            if !sessions.contains_key(session_id) {
+                return Err(SessionError::NotFound);
+            }
+        }
+
+        let next_iteration = expected.saturating_add(1);
+        self.registry
+            .on_iteration_rotate(session_id, next_iteration)
+            .await
+            .map_err(|e| SessionError::RotatePrepareFailed(e.to_string()))?;
+
+        Ok(self
+            .iteration_store
+            .compare_and_swap(session_id, expected)
+            .await)
     }
 }
 
@@ -247,19 +299,34 @@ pub enum SessionError {
     NotActive,
     #[error("max concurrent sessions reached")]
     MaxSessionsReached,
+    #[error("failed to prepare rotation: {0}")]
+    RotatePrepareFailed(String),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::PluginRegistry;
+    use crate::iteration_store::CasResult;
+    use crate::iteration_store::LocalIterationStore;
+    use crate::plugin::{HttpExchange, PluginRegistry, ProxyPlugin, SessionId};
     use crate::session_store::SessionPersistence;
     use async_trait::async_trait;
+    use serde_json::Value;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    fn make_iteration_store() -> Arc<dyn IterationStore> {
+        Arc::new(LocalIterationStore::new())
+    }
 
     fn make_manager(max: usize) -> SessionManager {
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        SessionManager::new(registry, Duration::from_secs(300), max)
+        SessionManager::new(
+            registry,
+            Duration::from_secs(300),
+            max,
+            make_iteration_store(),
+        )
     }
 
     /// In-memory mock that records calls and returns configurable results.
@@ -431,7 +498,12 @@ mod tests {
     #[tokio::test]
     async fn idle_reaping() {
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        let mgr = SessionManager::new(registry, Duration::from_millis(0), 100);
+        let mgr = SessionManager::new(
+            registry,
+            Duration::from_millis(0),
+            100,
+            make_iteration_store(),
+        );
         mgr.create_session("s1".into(), HashMap::new())
             .await
             .unwrap();
@@ -463,7 +535,13 @@ mod tests {
     async fn create_session_calls_store_save() {
         let (mock, save_calls, _delete_calls) = MockStore::new(true);
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
 
         let result = mgr
             .create_session("s1".into(), HashMap::new())
@@ -477,7 +555,13 @@ mod tests {
     async fn create_session_returns_false_when_store_says_existing() {
         let (mock, save_calls, _) = MockStore::new(false); // store says "already exists"
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
 
         let result = mgr
             .create_session("s1".into(), HashMap::new())
@@ -493,7 +577,13 @@ mod tests {
     async fn idempotent_create_skips_store_on_second_call() {
         let (mock, save_calls, _) = MockStore::new(true);
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
 
         mgr.create_session("s1".into(), HashMap::new())
             .await
@@ -512,7 +602,13 @@ mod tests {
     async fn stop_session_calls_store_delete() {
         let (mock, _, delete_calls) = MockStore::new(true);
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
 
         mgr.create_session("s1".into(), HashMap::new())
             .await
@@ -525,7 +621,13 @@ mod tests {
     async fn delete_session_calls_store_delete() {
         let (mock, _, delete_calls) = MockStore::new(true);
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
 
         mgr.create_session("s1".into(), HashMap::new())
             .await
@@ -538,7 +640,13 @@ mod tests {
     async fn stop_nonexistent_does_not_call_store_delete() {
         let (mock, _, delete_calls) = MockStore::new(true);
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
 
         let _ = mgr.stop_session(&"nonexistent".into()).await;
         assert_eq!(delete_calls.load(Ordering::Relaxed), 0);
@@ -550,15 +658,153 @@ mod tests {
         // confirm the path through session_ttl → store.save is exercised).
         let (mock, save_calls, _) = MockStore::new(true);
         let registry = Arc::new(PluginRegistry::new(vec![]));
-        let mgr = SessionManager::new_with_store(registry, Duration::from_secs(300), 100, mock);
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
 
         let mut settings = HashMap::new();
         settings.insert(
-            "plugin".to_string(),
-            serde_json::json!({"max_session_duration_secs": 7200}),
+            "_maxSessionDurationSecs".to_string(),
+            serde_json::json!(7200),
         );
         let result = mgr.create_session("s1".into(), settings).await.unwrap();
         assert!(result);
         assert_eq!(save_calls.load(Ordering::Relaxed), 1);
+    }
+
+    struct RotationRecordingPlugin {
+        events: Arc<Mutex<Vec<&'static str>>>,
+        fail_rotate: bool,
+    }
+
+    #[async_trait]
+    impl ProxyPlugin for RotationRecordingPlugin {
+        fn name(&self) -> &str {
+            "rotation-recorder"
+        }
+
+        async fn on_session_start(&self, _session_id: &SessionId, _settings: &Value) {}
+
+        async fn on_exchange(
+            &self,
+            _session_id: &SessionId,
+            _exchange: &HttpExchange,
+            _iteration: u32,
+        ) {
+        }
+
+        async fn on_session_stop(&self, _session_id: &SessionId) {}
+
+        async fn on_session_clear(&self, _session_id: &SessionId) {}
+
+        async fn on_iteration_rotate(
+            &self,
+            _session_id: &SessionId,
+            _next_iteration: u32,
+        ) -> anyhow::Result<()> {
+            self.events.lock().unwrap().push("plugin");
+            if self.fail_rotate {
+                anyhow::bail!("rotation setup failed")
+            }
+            Ok(())
+        }
+    }
+
+    struct RecordingIterationStore {
+        current: parking_lot::RwLock<std::collections::HashMap<String, u32>>,
+        events: Arc<Mutex<Vec<&'static str>>>,
+        cas_calls: Arc<AtomicUsize>,
+    }
+
+    impl RecordingIterationStore {
+        fn new(events: Arc<Mutex<Vec<&'static str>>>, cas_calls: Arc<AtomicUsize>) -> Self {
+            Self {
+                current: parking_lot::RwLock::new(std::collections::HashMap::new()),
+                events,
+                cas_calls,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl IterationStore for RecordingIterationStore {
+        async fn init(&self, session_id: &str, _ttl_secs: i64) {
+            self.current.write().insert(session_id.to_string(), 1);
+        }
+
+        async fn get(&self, session_id: &str) -> Result<Option<u32>, anyhow::Error> {
+            Ok(self.current.read().get(session_id).copied())
+        }
+
+        async fn compare_and_swap(&self, session_id: &str, expected: u32) -> CasResult {
+            self.cas_calls.fetch_add(1, Ordering::Relaxed);
+            self.events.lock().unwrap().push("cas");
+            let mut current = self.current.write();
+            match current.get_mut(session_id) {
+                Some(cur) if *cur == expected => {
+                    *cur = expected + 1;
+                    CasResult::Ok(*cur)
+                }
+                Some(cur) => CasResult::Conflict(*cur),
+                None => CasResult::Conflict(0),
+            }
+        }
+
+        async fn delete(&self, session_id: &str) {
+            self.current.write().remove(session_id);
+        }
+    }
+
+    #[tokio::test]
+    async fn rotate_prepares_plugin_before_cas() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let cas_calls = Arc::new(AtomicUsize::new(0));
+        let plugin = Arc::new(RotationRecordingPlugin {
+            events: events.clone(),
+            fail_rotate: false,
+        });
+        let registry = Arc::new(PluginRegistry::new(vec![plugin]));
+        let iteration_store = Arc::new(RecordingIterationStore::new(events.clone(), cas_calls));
+        let mgr = SessionManager::new(registry, Duration::from_secs(300), 100, iteration_store);
+
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+
+        match mgr.rotate(&"s1".into(), 1).await.unwrap() {
+            CasResult::Ok(next) => assert_eq!(next, 2),
+            CasResult::Conflict(actual) => panic!("expected CAS success, got conflict {}", actual),
+        }
+
+        let got = events.lock().unwrap().clone();
+        assert_eq!(got, vec!["plugin", "cas"]);
+    }
+
+    #[tokio::test]
+    async fn rotate_returns_error_when_plugin_prepare_fails() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let cas_calls = Arc::new(AtomicUsize::new(0));
+        let plugin = Arc::new(RotationRecordingPlugin {
+            events,
+            fail_rotate: true,
+        });
+        let registry = Arc::new(PluginRegistry::new(vec![plugin]));
+        let iteration_store = Arc::new(RecordingIterationStore::new(
+            Arc::new(Mutex::new(Vec::new())),
+            cas_calls.clone(),
+        ));
+        let mgr = SessionManager::new(registry, Duration::from_secs(300), 100, iteration_store);
+
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+
+        let err = mgr.rotate(&"s1".into(), 1).await.unwrap_err();
+        assert!(matches!(err, SessionError::RotatePrepareFailed(_)));
+        assert_eq!(cas_calls.load(Ordering::Relaxed), 0);
     }
 }

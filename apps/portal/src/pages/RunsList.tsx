@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -24,10 +24,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
-import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
+import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, ChevronsLeft, ChevronsRight, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
-import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
+import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion, IterationOp } from "@/types";
 import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
@@ -85,6 +85,10 @@ export function RunsList() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [taskFilter, setTaskFilter] = useState("all");
+  const [turnsOp, setTurnsOp] = useState<IterationOp>("gte");
+  const [turnsValue, setTurnsValue] = useState("");
+  const [maxIterOp, setMaxIterOp] = useState<IterationOp>("gte");
+  const [maxIterValue, setMaxIterValue] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [groupBy, setGroupBy] = useState<GroupByKey>("none");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -95,7 +99,8 @@ export function RunsList() {
   const [priorityDialogOpen, setPriorityDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
-  const [cursorDirection, setCursorDirection] = useState<"after" | "before" | undefined>(undefined);
+  const [cursorDirection, setCursorDirection] = useState<"after" | "before" | "last" | undefined>(undefined);
+  const [isJumpingToLast, setIsJumpingToLast] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(loadHiddenColumns);
   const queryClient = useQueryClient();
 
@@ -120,9 +125,20 @@ export function RunsList() {
   const effectiveTaskPromptId = taskFilter !== "all" ? taskFilter : taskPromptId;
   const effectiveStatus = statusFilter !== "all" ? statusFilter : undefined;
   const effectiveOutcome = outcomeFilter !== "all" ? outcomeFilter : undefined;
+  const parsedTurns = turnsValue.trim() === "" ? undefined : Number(turnsValue);
+  const effectiveTurns = parsedTurns !== undefined && Number.isFinite(parsedTurns) && parsedTurns >= 0 ? parsedTurns : undefined;
+  const parsedMaxIter = maxIterValue.trim() === "" ? undefined : Number(maxIterValue);
+  const effectiveMaxIter = parsedMaxIter !== undefined && Number.isFinite(parsedMaxIter) && parsedMaxIter >= 0 ? parsedMaxIter : undefined;
+
+  const goToLastPage = useCallback(() => {
+    if (isJumpingToLast) return;
+    setIsJumpingToLast(true);
+    setCursor(undefined);
+    setCursorDirection("last");
+  }, [isJumpingToLast]);
 
   const { data: runsResponse, isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
+    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, effectiveTurns, turnsOp, effectiveMaxIter, maxIterOp, cursor, cursorDirection, limit],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId: effectiveTaskPromptId,
@@ -130,7 +146,12 @@ export function RunsList() {
       outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      turns: effectiveTurns,
+      turnsOp: effectiveTurns !== undefined ? turnsOp : undefined,
+      maxIterations: effectiveMaxIter,
+      maxIterationsOp: effectiveMaxIter !== undefined ? maxIterOp : undefined,
       limit: limit,
+      last: cursorDirection === "last",
       after: cursorDirection === "after" ? cursor : undefined,
       before: cursorDirection === "before" ? cursor : undefined,
     }),
@@ -142,7 +163,7 @@ export function RunsList() {
 
   // Fetch server-side groups when groupBy is active
   const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
-    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
+    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, effectiveTurns, turnsOp, effectiveMaxIter, maxIterOp, cursor, cursorDirection, limit],
     queryFn: () => api.listRunGroups({
       groupBy: groupBy as "task" | "submissionId" | "profile",
       worker: workerFilter === "all" ? undefined : workerFilter,
@@ -151,7 +172,12 @@ export function RunsList() {
       outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      turns: effectiveTurns,
+      turnsOp: effectiveTurns !== undefined ? turnsOp : undefined,
+      maxIterations: effectiveMaxIter,
+      maxIterationsOp: effectiveMaxIter !== undefined ? maxIterOp : undefined,
       limit: limit,
+      last: cursorDirection === "last",
       after: cursorDirection === "after" ? cursor : undefined,
       before: cursorDirection === "before" ? cursor : undefined,
     }),
@@ -515,6 +541,16 @@ export function RunsList() {
   const allSelected = runs.length > 0 && runs.every((r) => selectedIds.has(r._id));
   const someSelected = runs.some((r) => selectedIds.has(r._id));
 
+  useEffect(() => {
+    if (!isJumpingToLast) return;
+    const done = groupBy === "none"
+      ? !isLoading && !isRefetching
+      : !isGroupsLoading && !isGroupsRefetching;
+    if (done) {
+      setIsJumpingToLast(false);
+    }
+  }, [isJumpingToLast, groupBy, isLoading, isRefetching, isGroupsLoading, isGroupsRefetching]);
+
   const toggleSelectAll = () => {
     if (allSelected) {
       setSelectedIds(new Set());
@@ -555,7 +591,7 @@ export function RunsList() {
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Worker:</span>
           <Select value={workerFilter} onValueChange={(v) => { setWorkerFilter(v); setTaskFilter("all"); resetCursor(); }}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="w-[200px]" disabled={isJumpingToLast}>
               <SelectValue placeholder="All workers" />
             </SelectTrigger>
             <SelectContent>
@@ -569,7 +605,7 @@ export function RunsList() {
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Status:</span>
           <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); resetCursor(); }}>
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-[160px]" disabled={isJumpingToLast}>
               <SelectValue placeholder="All statuses" />
             </SelectTrigger>
             <SelectContent>
@@ -583,7 +619,7 @@ export function RunsList() {
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Outcome:</span>
           <Select value={outcomeFilter} onValueChange={(v) => { setOutcomeFilter(v); resetCursor(); }}>
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-[160px]" disabled={isJumpingToLast}>
               <SelectValue placeholder="All outcomes" />
             </SelectTrigger>
             <SelectContent>
@@ -597,7 +633,7 @@ export function RunsList() {
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Task:</span>
           <Select value={taskFilter} onValueChange={(v) => { setTaskFilter(v); resetCursor(); }}>
-            <SelectTrigger className="w-[260px]">
+            <SelectTrigger className="w-[260px]" disabled={isJumpingToLast}>
               <SelectValue placeholder="All tasks" />
             </SelectTrigger>
             <SelectContent>
@@ -611,9 +647,53 @@ export function RunsList() {
           </Select>
         </div>
         <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Turns:</span>
+          <Select value={turnsOp} onValueChange={(v) => { setTurnsOp(v as IterationOp); resetCursor(); }}>
+            <SelectTrigger className="w-[70px]" disabled={isJumpingToLast}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="eq">=</SelectItem>
+              <SelectItem value="gte">≥</SelectItem>
+              <SelectItem value="lte">≤</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            type="number"
+            min={0}
+            placeholder="any"
+            className="w-[80px]"
+            value={turnsValue}
+            disabled={isJumpingToLast}
+            onChange={(e) => { setTurnsValue(e.target.value); resetCursor(); }}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Max iter:</span>
+          <Select value={maxIterOp} onValueChange={(v) => { setMaxIterOp(v as IterationOp); resetCursor(); }}>
+            <SelectTrigger className="w-[70px]" disabled={isJumpingToLast}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="eq">=</SelectItem>
+              <SelectItem value="gte">≥</SelectItem>
+              <SelectItem value="lte">≤</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            type="number"
+            min={0}
+            placeholder="any"
+            className="w-[80px]"
+            value={maxIterValue}
+            disabled={isJumpingToLast}
+            onChange={(e) => { setMaxIterValue(e.target.value); resetCursor(); }}
+          />
+        </div>
+        <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Group by:</span>
           <Select value={groupBy} onValueChange={(v) => { setGroupBy(v as GroupByKey); setExpandedGroups(new Set()); resetCursor(); }}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[180px]" disabled={isJumpingToLast}>
               <SelectValue placeholder="None" />
             </SelectTrigger>
             <SelectContent>
@@ -1518,7 +1598,15 @@ export function RunsList() {
             <Button
               variant="outline"
               size="sm"
-              disabled={!activeCursors.prev}
+              disabled={!activeCursors.prev || isJumpingToLast}
+              onClick={resetCursor}
+            >
+              <ChevronsLeft className="h-4 w-4 mr-1" /> First
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!activeCursors.prev || isJumpingToLast}
               onClick={() => { setCursor(activeCursors.prev!); setCursorDirection("before"); }}
             >
               <ChevronLeft className="h-4 w-4 mr-1" /> Previous
@@ -1526,10 +1614,18 @@ export function RunsList() {
             <Button
               variant="outline"
               size="sm"
-              disabled={!activeCursors.next}
+              disabled={!activeCursors.next || isJumpingToLast}
               onClick={() => { setCursor(activeCursors.next!); setCursorDirection("after"); }}
             >
               Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!activeCursors.next || isJumpingToLast}
+              onClick={goToLastPage}
+            >
+              Last {isJumpingToLast ? <RefreshCw className="h-4 w-4 ml-1 animate-spin" /> : <ChevronsRight className="h-4 w-4 ml-1" />}
             </Button>
           </div>
         );

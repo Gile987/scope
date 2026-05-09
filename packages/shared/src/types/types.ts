@@ -258,6 +258,9 @@ export interface WorkerProcessorOptions {
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
   extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation
+  /** Current iteration number (1-based) for multi-turn runs. Used by the
+   *  proxy HAR rotation logic so each iteration gets its own HAR file. */
+  iteration?: number;
 }
 
 // Result returned by a worker processor

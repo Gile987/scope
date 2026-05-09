@@ -159,7 +159,7 @@ export async function runMultiTurnLoop(
     let turnRawChatFormat: string | undefined;
     const turnVideoUrls: string[] = [];
     try {
-      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs, extensionConfigs });
+      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
       codingResponse = workerResult.response;
       turnTokenUsage = workerResult.tokenUsage;
       turnAiCallCount = workerResult.aiCallCount;

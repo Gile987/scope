@@ -193,7 +193,15 @@ export const ListRequestsQuerySchema = z
     limit: z.coerce.number().int().min(1).max(100).optional(),
     after: z.string().optional(),
     before: z.string().optional(),
+    last: z.enum(["true", "false"]).optional(),
     sortBy: z.enum(["createdAt", "priority"]).optional(),
+    // Iteration-count filters. `turns` matches the actual number of turns
+    // executed (size of run.turns); `maxIterations` matches the configured
+    // upper bound. Each pairs with an operator (default "eq").
+    turns: z.coerce.number().int().min(0).optional(),
+    turnsOp: z.enum(["eq", "gte", "lte"]).optional(),
+    maxIterations: z.coerce.number().int().min(0).optional(),
+    maxIterationsOp: z.enum(["eq", "gte", "lte"]).optional(),
   })
   .openapi("ListRequestsQuery");
 

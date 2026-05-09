@@ -340,6 +340,8 @@ run
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
   .option("--submission-id <id>", "Filter by submission ID")
+  .option("--turns <expr>", "Filter by actual turns (e.g. '>=5', '<=10', '=3')")
+  .option("--max-iterations <expr>", "Filter by configured maxIterations (e.g. '>=5', '<=10', '=3')")
   .option("--include-deleted", "Include soft-deleted runs")
 )
   .action(async (options) => {
@@ -352,6 +354,25 @@ run
       }
       if (options.submissionId) {
         params.set("submissionId", options.submissionId);
+      }
+      const parseIterExpr = (raw: string, name: string): { op: "eq" | "gte" | "lte"; value: number } => {
+        const m = /^(>=|<=|=)?\s*(\d+)$/.exec(String(raw).trim());
+        if (!m) {
+          throw new Error(`Invalid ${name} expression '${raw}'. Use forms like '>=5', '<=10', '=3', or '5'.`);
+        }
+        const opSym = m[1] ?? "=";
+        const op = opSym === ">=" ? "gte" : opSym === "<=" ? "lte" : "eq";
+        return { op, value: Number(m[2]) };
+      };
+      if (options.turns !== undefined) {
+        const { op, value } = parseIterExpr(options.turns, "--turns");
+        params.set("turns", String(value));
+        params.set("turnsOp", op);
+      }
+      if (options.maxIterations !== undefined) {
+        const { op, value } = parseIterExpr(options.maxIterations, "--max-iterations");
+        params.set("maxIterations", String(value));
+        params.set("maxIterationsOp", op);
       }
       if (options.includeDeleted) {
         params.set("includeDeleted", "true");
@@ -367,41 +388,43 @@ run
         process.exit(1);
       }
 
-      const requests = await response.json();
-      if (Array.isArray(requests) && requests.length === 0) {
+      const responseBody = await response.json();
+      const requests = Array.isArray(responseBody)
+        ? responseBody
+        : Array.isArray(responseBody?.data)
+          ? responseBody.data
+          : [];
+
+      if (requests.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner('No requests found.'));
         return;
       }
-      if (Array.isArray(requests)) {
-        if (!isMachineReadable(format)) {
-          console.log(label(`Found ${requests.length} request(s):\n`));
-        }
-
-        const displayFields: DisplayField[] = [
-          { key: 'id', label: 'ID',
-            formatter: (req: any) => req.id ?? '(no id)',
-            tableFormatter: (req: any) => value(req.id ?? '(no id)'),
-          },
-          { key: 'workerType', label: 'Worker',
-            formatter: (req: any) => req.workerType ?? 'unknown',
-          },
-          { key: 'status', label: 'Status',
-            formatter: (req: any) => req.run?.status ?? 'unknown',
-            tableFormatter: (req: any) => {
-              const s = req.run?.status ?? 'unknown';
-              const o = req.run?.outcome;
-              return o === 'succeeded' ? successText(s) : o === 'failed' || o === 'finished' ? errorText(s) : value(s);
-            },
-          },
-          { key: 'submissionId', label: 'Submission',
-            formatter: (req: any) => req.submissionId ? req.submissionId.substring(0, 8) : '–',
-          },
-        ];
-
-        console.log(formatData(requests, displayFields, format));
-      } else {
-        console.log(JSON.stringify(requests, null, 2));
+      if (!isMachineReadable(format)) {
+        console.log(label(`Found ${requests.length} request(s):\n`));
       }
+
+      const displayFields: DisplayField[] = [
+        { key: 'id', label: 'ID',
+          formatter: (req: any) => req.id ?? '(no id)',
+          tableFormatter: (req: any) => value(req.id ?? '(no id)'),
+        },
+        { key: 'workerType', label: 'Worker',
+          formatter: (req: any) => req.workerType ?? 'unknown',
+        },
+        { key: 'status', label: 'Status',
+          formatter: (req: any) => req.run?.status ?? 'unknown',
+          tableFormatter: (req: any) => {
+            const s = req.run?.status ?? 'unknown';
+            const o = req.run?.outcome;
+            return o === 'succeeded' ? successText(s) : o === 'failed' || o === 'finished' ? errorText(s) : value(s);
+          },
+        },
+        { key: 'submissionId', label: 'Submission',
+          formatter: (req: any) => req.submissionId ? req.submissionId.substring(0, 8) : '–',
+        },
+      ];
+
+      console.log(formatData(requests, displayFields, format));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

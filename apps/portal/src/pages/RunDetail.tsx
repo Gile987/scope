@@ -93,10 +93,12 @@ export function RunDetail() {
   // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
   // Must be called unconditionally (before any early returns) per Rules of Hooks
   // The SSE endpoint handles completed runs by replaying blob logs then closing.
+  // Pass run?.run?.attemptNumber so the hook reconnects only when a new latest attempt is created (e.g., on retry).
   const logStream = useLogStream({
     id: run?._id ?? "",
     enabled: !!run,
     fromStart: true,
+    attemptNumber: run?.run?.attemptNumber,
   });
 
   const effectiveLogs = logStream.logs;
@@ -251,6 +253,14 @@ export function RunDetail() {
           { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
         )
       : undefined);
+
+   const skillIdsFromRevisions = Array.from(new Set((run.skillRevisions ?? []).map((ref) => {
+     const at = ref.lastIndexOf("@");
+     return at > 0 ? ref.substring(0, at) : ref;
+   })));
+   const skillIds = skillIdsFromRevisions.length > 0
+     ? skillIdsFromRevisions
+     : (run.skills ?? []);
 
   return (
     <div className="space-y-6">
@@ -884,6 +894,28 @@ export function RunDetail() {
                         </Badge>
                       );
                     })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Skills card */}
+            {skillIds.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    Skills ({skillIds.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-1.5">
+                    {skillIds.map((skillId) => (
+                      <Link key={skillId} to={`/skills/${skillId}`}>
+                        <Badge variant="secondary" className="font-mono text-xs hover:bg-accent transition-colors">
+                          {skillId}
+                        </Badge>
+                      </Link>
+                    ))}
                   </div>
                 </CardContent>
               </Card>

@@ -49,6 +49,13 @@ export interface ProxyClient {
 
   /** Stop recording / session, collect HAR, extract metadata. */
   stopAndCollectHar(log: WorkerLogFn): Promise<HarCollectionResult>;
+
+  /**
+   * Collect HAR for a specific iteration without destroying the session.
+   * Rotates the iteration counter so subsequent exchanges go to a new file.
+   * Only supported by the gateway backend; other backends should throw.
+   */
+  collectHar(iteration: number, log: WorkerLogFn): Promise<HarCollectionResult>;
 }
 
 /**
