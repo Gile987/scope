@@ -84,8 +84,14 @@ pub async fn handle_client(
                     // HTTP clients send it as Proxy-Authorization: Basic.
                     // Chromium/Electron requires a 407 challenge before sending
                     // the header, so proxy requests without valid auth get a 407.
-                    let session_id = extract_session_from_proxy_auth(&req)
-                        .filter(|id| state.session_manager.is_active(id));
+                    //
+                    // `resolve_or_hydrate` checks the in-memory map first and,
+                    // on miss, lazily rehydrates from Redis so sessions
+                    // survive a gateway pod restart.
+                    let session_id = match extract_session_from_proxy_auth(&req) {
+                        Some(id) if state.session_manager.resolve_or_hydrate(&id).await => Some(id),
+                        _ => None,
+                    };
                     handle_request(req, session_id, state, peer_addr).await
                 }
             }),
