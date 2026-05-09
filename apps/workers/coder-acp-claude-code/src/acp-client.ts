@@ -36,6 +36,10 @@ export interface ACPClientOptions {
 export interface ACPSessionResult {
   response: string;
   stopReason: string;
+  /** ID of the ACP session that handled this prompt. The worker uses this to
+   *  locate the agent-native session transcript on disk (e.g.
+   *  `~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl`). */
+  sessionId: string;
 }
 
 /**
@@ -308,6 +312,7 @@ export async function runACPSession(
     return {
       response: clientHandler.getResponse(),
       stopReason: promptResult.stopReason,
+      sessionId: sessionResult.sessionId,
     };
   };
 

@@ -3,6 +3,7 @@
 
 import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces, createFreshArtifactsDir, cleanupArtifacts } from "shared";
 import { runACPSession } from "./acp-client.js";
+import { copyNativeTranscriptIfPresent } from "./native-transcript.js";
 import { join } from "node:path";
 import dotenv from "dotenv";
 
@@ -11,6 +12,34 @@ dotenv.config();
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-claude-code";
 const tokenClient = new TokenManagerClient();
 const AGENT_VERSION = `claude-agent-acp-${process.env.CLAUDE_CODE_ACP_VERSION || "unknown"}-sdk-${process.env.CLAUDE_AGENT_SDK_VERSION || "unknown"}`;
+
+/**
+ * Build the WorkerResult.rawChatLogs array from the captured chat-export
+ * file paths. Either or both inputs may be missing; entries are emitted in
+ * the order [acp wire log, native transcript] so consumers see the lower-
+ * level protocol log first when both are present.
+ */
+function buildRawChatLogs(opts: {
+  acpChatFilePath?: string;
+  nativeChatFilePath?: string;
+}): NonNullable<WorkerResult["rawChatLogs"]> {
+  const logs: NonNullable<WorkerResult["rawChatLogs"]> = [];
+  if (opts.acpChatFilePath) {
+    logs.push({
+      filePath: opts.acpChatFilePath,
+      format: "acp-ndjson",
+      label: "ACP wire log",
+    });
+  }
+  if (opts.nativeChatFilePath) {
+    logs.push({
+      filePath: opts.nativeChatFilePath,
+      format: "claude-code-stream-json",
+      label: "Claude Code Stream JSON",
+    });
+  }
+  return logs;
+}
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
@@ -83,13 +112,21 @@ class ClaudeCodeProcessor implements WorkerProcessor {
   ): Promise<WorkerResult> {
     const skillConfigs = options?.skillConfigs ?? [];
     this.iteration += 1;
-    const rawChatFilePath = this.artifactsDir
-      ? join(this.artifactsDir, `iteration-${this.iteration}.jsonl`)
+    // ACP wire log (NDJSON tee of the agent's stdout). Captured for every
+    // run so we always have at least the protocol-level conversation.
+    const acpChatFilePath = this.artifactsDir
+      ? join(this.artifactsDir, `iteration-${this.iteration}.acp.jsonl`)
+      : undefined;
+    // Destination for the native Claude Code session transcript (copied from
+    // ~/.claude/projects/... after the session ends, when the file exists).
+    const nativeChatDestPath = this.artifactsDir
+      ? join(this.artifactsDir, `iteration-${this.iteration}.claude.jsonl`)
       : undefined;
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
       iteration: this.iteration,
-      rawChatFilePath,
+      acpChatFilePath,
+      nativeChatDestPath,
       model: options?.model,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
@@ -170,24 +207,47 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         mcpServers: this.gateway && this.mcpConfigs.length > 0
           ? [{ type: "http" as const, slug: "mcp-gateway", name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
           : [],
-        ...(rawChatFilePath ? { rawChatFilePath } : {}),
+        ...(acpChatFilePath ? { rawChatFilePath: acpChatFilePath } : {}),
       });
 
       await log("info", "Claude Code processing complete", { 
         stopReason: result.stopReason,
-        responseLength: result.response.length 
+        responseLength: result.response.length,
+        sessionId: result.sessionId,
       });
+
+      // Copy the agent-native session transcript out of ~/.claude/projects/ so
+      // it is uploaded by the judge layer alongside the ACP wire log. Falls
+      // back to ACP-only if the file is missing (logged with the looked-up
+      // path so the mismatch is debuggable).
+      let nativeChatFilePath: string | undefined;
+      if (nativeChatDestPath) {
+        try {
+          nativeChatFilePath = await copyNativeTranscriptIfPresent({
+            sessionId: result.sessionId,
+            cwd: this.workspacePath!,
+            destination: nativeChatDestPath,
+            onLog: (msg) => log("warn", msg).catch(() => {}),
+          });
+          if (nativeChatFilePath) {
+            await log("info", "Copied Claude Code native transcript", { nativeChatFilePath });
+          }
+        } catch (copyError) {
+          await log("warn", `Failed to copy Claude Code native transcript: ${copyError instanceof Error ? copyError.message : String(copyError)}`);
+        }
+      }
 
       const response = result.response || `[${this.workerName}] No response from Claude Code`;
       const { harFilePath, tokenUsage, aiCallCount } = devProxy
         ? await devProxy.stopAndCollectHar(log)
         : { harFilePath: null, tokenUsage: undefined, aiCallCount: undefined };
+      const rawChatLogs = buildRawChatLogs({ acpChatFilePath, nativeChatFilePath });
       return {
         response,
         ...(harFilePath && { harFilePath }),
         ...(tokenUsage && { tokenUsage }),
         ...(aiCallCount !== undefined && { aiCallCount }),
-        ...(rawChatFilePath ? { rawChatFilePath, rawChatFormat: "acp-ndjson" } : {}),
+        ...(rawChatLogs.length > 0 ? { rawChatLogs } : {}),
       };
     } catch (error) {
       if (devProxy) {
@@ -200,10 +260,11 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         }
       }
       // Surface the raw chat capture even on failure so the partial stream is
-      // still uploaded by the judge loop.
-      if (rawChatFilePath) {
-        (error as any).rawChatFilePath = rawChatFilePath;
-        (error as any).rawChatFormat = "acp-ndjson";
+      // still uploaded by the judge loop. The native transcript may not exist
+      // (failure happened before the SDK flushed it), so only attach the ACP
+      // wire log here.
+      if (acpChatFilePath) {
+        (error as any).rawChatLogs = buildRawChatLogs({ acpChatFilePath });
       }
       const errorMessage = error instanceof Error ? error.message : String(error);
       await log("error", `Claude Code processing failed: ${errorMessage}`);
