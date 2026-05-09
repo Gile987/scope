@@ -102,6 +102,8 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     const heartbeat: VisibilityHeartbeat = {
       stop: () => "pop-1",
       get popReceipt() { return "pop-1"; },
+      abortSignal: new AbortController().signal,
+      lost: false,
     };
     const message = { messageId: "msg-1", popReceipt: "pop-1", messageText: "" } as any;
 
