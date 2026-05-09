@@ -4,8 +4,8 @@
 
 import dotenv from "dotenv";
 import { Command } from "commander";
-import { configureHelp, generateOutputFormatsHelp } from "./utils/helpFormatter.js";
-import { OUTPUT_FORMATS } from "./utils/shared.js";
+import { configureHelp, generateOutputFormatsHelp, generateEnvVarsHelp } from "./utils/helpFormatter.js";
+import { OUTPUT_FORMATS, ENV_VARS } from "./utils/shared.js";
 import { registerRunCommands } from "./commands/run.js";
 import { registerCriteriaCommands } from "./commands/criteria.js";
 import { registerPromptFeatureCommands } from "./commands/prompt-feature.js";
@@ -30,7 +30,8 @@ program
   .action(() => {
     program.help();
   })
-  .addHelpText('after', generateOutputFormatsHelp(OUTPUT_FORMATS));
+  .addHelpText('after', generateOutputFormatsHelp(OUTPUT_FORMATS))
+  .addHelpText('after', generateEnvVarsHelp(ENV_VARS));
 
 configureHelp(program);
 

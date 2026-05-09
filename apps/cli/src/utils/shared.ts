@@ -23,6 +23,17 @@ export const DEFAULT_WORKERS = [
   "coder-acp-copilot"
 ];
 
+// Environment variable definitions surfaced in `--help`
+export const ENV_VARS = {
+  SCOPE_API_URL: {
+    description: 'Default API base URL used by the -u, --url option of every command',
+    default: 'http://localhost:3100',
+  },
+  SCOPE_MT_DOWNLOAD_OUTPUT_DIR: {
+    description: 'Default download directory for `run get` / `run watch` when --download-output-dir is omitted',
+  },
+} as const;
+
 // Output format definitions with descriptions and categories
 export const OUTPUT_FORMATS = {
   table: { section: 'Human-readable formats', description: 'Formatted table with borders (default for lists)' },
