@@ -2,11 +2,13 @@
 // Licensed under the MIT License.
 
 import {
+  ChatLogRef,
   ConversationTurn,
   CriterionResult,
   TokenUsage,
   WorkerProcessor,
   WorkerProcessorOptions,
+  WorkerResult,
   LogEvent,
   MULTI_TURN_DEFAULTS,
 } from "../types/types.js";
@@ -17,6 +19,74 @@ import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
 import { sanitizeHarFile, extractToolCalls } from "../har/har-parser.js";
 import type { ToolCall } from "../har/types.js";
 import { JudgeClient } from "./judge-client.js";
+import { chatExportContentType, chatExportFilename } from "../utils/chat-export.js";
+
+/**
+ * Resolve the list of chat-export entries the worker reported.
+ *
+ * New writers populate `rawChatLogs`; legacy writers populate the single
+ * `rawChatFilePath`/`rawChatFormat` pair. Returns a normalised array (possibly
+ * empty) so the rest of the loop can handle both cases uniformly.
+ */
+function resolveChatLogEntries(
+  source: Pick<WorkerResult, "rawChatLogs" | "rawChatFilePath" | "rawChatFormat"> | undefined,
+): NonNullable<WorkerResult["rawChatLogs"]> {
+  if (!source) return [];
+  if (source.rawChatLogs && source.rawChatLogs.length > 0) {
+    return source.rawChatLogs;
+  }
+  if (source.rawChatFilePath) {
+    return [{
+      filePath: source.rawChatFilePath,
+      format: source.rawChatFormat ?? "unknown",
+    }];
+  }
+  return [];
+}
+
+/**
+ * Upload all entries in `entries` to blob storage under the per-iteration
+ * prefix and return the resulting `ChatLogRef[]`. Logs a warning per failed
+ * entry and continues with the rest.
+ */
+async function uploadChatLogEntries(opts: {
+  entries: NonNullable<WorkerResult["rawChatLogs"]>;
+  requestId: string;
+  runId: string;
+  iteration: number;
+  blobStorage: BlobStorage;
+  log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>;
+  failureContext: "iteration" | "failed iteration";
+}): Promise<ChatLogRef[]> {
+  const { entries, requestId, runId, iteration, blobStorage, log, failureContext } = opts;
+  const refs: ChatLogRef[] = [];
+  for (const entry of entries) {
+    try {
+      const filename = chatExportFilename(entry.format, iteration);
+      const blobName = `${requestId}/runs/${runId}/iteration-${iteration}/${filename}`;
+      const url = await blobStorage.uploadFile(
+        entry.filePath,
+        blobName,
+        chatExportContentType(entry.format),
+      );
+      refs.push({ url, format: entry.format, ...(entry.label ? { label: entry.label } : {}) });
+      await log(
+        "info",
+        failureContext === "failed iteration"
+          ? "Raw chat transcript uploaded from failed iteration"
+          : "Raw chat transcript uploaded",
+        { rawChatUrl: url, format: entry.format },
+      );
+    } catch (uploadError) {
+      const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+      await log(
+        "warn",
+        `Failed to upload raw chat transcript${failureContext === "failed iteration" ? " from failed iteration" : ""} (${entry.format}): ${msg}`,
+      );
+    }
+  }
+  return refs;
+}
 
 export interface MultiTurnConfig {
   /** The coding worker processor (unchanged interface, called per iteration) */
@@ -155,8 +225,7 @@ export async function runMultiTurnLoop(
     let turnTokenUsage: TokenUsage | undefined;
     let turnAiCallCount: number | undefined;
     let turnToolCalls: ToolCall[] | undefined;
-    let turnRawChatUrl: string | undefined;
-    let turnRawChatFormat: string | undefined;
+    let turnRawChatLogs: ChatLogRef[] = [];
     const turnVideoUrls: string[] = [];
     try {
       const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
@@ -211,21 +280,18 @@ export async function runMultiTurnLoop(
         }
       }
 
-      // Upload raw chat transcript to blob storage if available
-      if (workerResult.rawChatFilePath) {
-        try {
-          const chatBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/chat-export.json`;
-          turnRawChatUrl = await blobStorage.uploadFile(
-            workerResult.rawChatFilePath,
-            chatBlobName,
-            "application/json"
-          );
-          turnRawChatFormat = workerResult.rawChatFormat;
-          await iterLog("info", "Raw chat transcript uploaded", { rawChatUrl: turnRawChatUrl });
-        } catch (uploadError) {
-          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-          await iterLog("warn", `Failed to upload raw chat transcript: ${msg}`);
-        }
+      // Upload raw chat transcripts to blob storage if available
+      const chatEntries = resolveChatLogEntries(workerResult);
+      if (chatEntries.length > 0) {
+        turnRawChatLogs = await uploadChatLogEntries({
+          entries: chatEntries,
+          requestId,
+          runId,
+          iteration,
+          blobStorage,
+          log: iterLog,
+          failureContext: "iteration",
+        });
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -274,24 +340,24 @@ export async function runMultiTurnLoop(
         }
       }
 
-      // Extract raw chat transcript path from the error if the worker attached it
-      const errorRawChatFilePath: string | undefined = (error as any)?.rawChatFilePath;
-      const errorRawChatFormat: string | undefined = (error as any)?.rawChatFormat;
-      let errorRawChatUrl: string | undefined;
-      if (errorRawChatFilePath) {
-        try {
-          const chatBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/chat-export.json`;
-          errorRawChatUrl = await blobStorage.uploadFile(
-            errorRawChatFilePath,
-            chatBlobName,
-            "application/json"
-          );
-          await iterLog("info", "Raw chat transcript uploaded from failed iteration", { rawChatUrl: errorRawChatUrl });
-        } catch (uploadError) {
-          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-          await iterLog("warn", `Failed to upload raw chat transcript from failed iteration: ${msg}`);
-        }
-      }
+      // Extract raw chat transcript paths from the error if the worker attached them.
+      // Workers may attach either the new `rawChatLogs` array or the legacy single-file pair.
+      const errorChatEntries = resolveChatLogEntries({
+        rawChatLogs: (error as any)?.rawChatLogs,
+        rawChatFilePath: (error as any)?.rawChatFilePath,
+        rawChatFormat: (error as any)?.rawChatFormat,
+      });
+      const errorRawChatLogs: ChatLogRef[] = errorChatEntries.length > 0
+        ? await uploadChatLogEntries({
+            entries: errorChatEntries,
+            requestId,
+            runId,
+            iteration,
+            blobStorage,
+            log: iterLog,
+            failureContext: "failed iteration",
+          })
+        : [];
 
       // Persist a partial turn so HAR/video URLs are not lost
       const partialTurn: ConversationTurn = {
@@ -306,8 +372,7 @@ export async function runMultiTurnLoop(
         ...(errorHarUrl && { harUrl: errorHarUrl }),
         ...(errorVideoUrls.length > 0 && { videoUrls: errorVideoUrls }),
         ...(errorAiCallCount !== undefined && { aiCallCount: errorAiCallCount }),
-        ...(errorRawChatUrl && { rawChatUrl: errorRawChatUrl }),
-        ...(errorRawChatUrl && errorRawChatFormat && { rawChatFormat: errorRawChatFormat }),
+        ...(errorRawChatLogs.length > 0 && { rawChatLogs: errorRawChatLogs }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -352,8 +417,7 @@ export async function runMultiTurnLoop(
         durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(turnHarUrl && { harUrl: turnHarUrl }),
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
-        ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
-        ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnRawChatLogs.length > 0 && { rawChatLogs: turnRawChatLogs }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -389,8 +453,7 @@ export async function runMultiTurnLoop(
         ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
         ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
         ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
-        ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
-        ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnRawChatLogs.length > 0 && { rawChatLogs: turnRawChatLogs }),
       };
       turns.push(turn);
       if (onTurnComplete) {
@@ -440,8 +503,7 @@ export async function runMultiTurnLoop(
         ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
         ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
         ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
-        ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
-        ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnRawChatLogs.length > 0 && { rawChatLogs: turnRawChatLogs }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -489,8 +551,7 @@ export async function runMultiTurnLoop(
       ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
       ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
       ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
-      ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
-      ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+      ...(turnRawChatLogs.length > 0 && { rawChatLogs: turnRawChatLogs }),
     };
     turns.push(turn);
 
