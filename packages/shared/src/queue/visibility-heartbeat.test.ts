@@ -48,7 +48,7 @@ describe("visibility heartbeat", () => {
     await vi.advanceTimersByTimeAsync(150);
 
     expect(qc.updateMessage).toHaveBeenCalledTimes(1);
-    expect(qc.updateMessage).toHaveBeenCalledWith("msg-1", "receipt-0", undefined, 120);
+    expect(qc.updateMessage).toHaveBeenCalledWith("msg-1", "receipt-0", undefined, 120, expect.objectContaining({ abortSignal: expect.any(AbortSignal) }));
     expect(hb.popReceipt).toBe("receipt-1");
 
     hb.stop();
@@ -67,12 +67,12 @@ describe("visibility heartbeat", () => {
     // Tick 1
     await vi.advanceTimersByTimeAsync(150);
     expect(hb.popReceipt).toBe("receipt-1");
-    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-0", undefined, 120);
+    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-0", undefined, 120, expect.objectContaining({ abortSignal: expect.any(AbortSignal) }));
 
     // Tick 2
     await vi.advanceTimersByTimeAsync(100);
     expect(hb.popReceipt).toBe("receipt-2");
-    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-1", undefined, 120);
+    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-1", undefined, 120, expect.objectContaining({ abortSignal: expect.any(AbortSignal) }));
 
     hb.stop();
   });
@@ -125,7 +125,7 @@ describe("visibility heartbeat", () => {
     // Tick 2 — succeeds with the same receipt-0 (since tick 1 failed)
     await vi.advanceTimersByTimeAsync(100);
     expect(qc.updateMessage).toHaveBeenCalledTimes(2);
-    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-0", undefined, 120);
+    expect(qc.updateMessage).toHaveBeenLastCalledWith("msg-1", "receipt-0", undefined, 120, expect.objectContaining({ abortSignal: expect.any(AbortSignal) }));
     expect(hb.popReceipt).toBe("receipt-2");
 
     hb.stop();
@@ -225,5 +225,47 @@ describe("visibility heartbeat", () => {
     expect(hb.popReceipt).toBe("receipt-final");
 
     hb.stop();
+  });
+
+  it("times out a hung updateMessage call after intervalMs and counts it as a failure", async () => {
+    const qc = createMockQueueClient();
+    // Simulate the SDK respecting the per-call abortSignal: never resolve on its
+    // own, but reject when the signal aborts. This mirrors what the real
+    // @azure/storage-queue client does on a frozen TCP connection.
+    (qc.updateMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      (_id: string, _pr: string, _msg: undefined, _vt: number, opts?: { abortSignal?: AbortSignal }) =>
+        new Promise((_, reject) => {
+          opts?.abortSignal?.addEventListener("abort", () => {
+            const err = new Error("aborted") as Error & { name: string };
+            err.name = "AbortError";
+            reject(err);
+          }, { once: true });
+        }),
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // intervalMs=100 → each hung call should be aborted after 100ms,
+    // then immediately retried on the next tick. After 3 consecutive
+    // hung-then-aborted ticks, self-abort fires.
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120, {}, 3);
+
+    // Tick 1: 100ms wait + 100ms hang = 200ms
+    // Tick 2: +200ms = 400ms total
+    // Tick 3: +200ms = 600ms total → self-abort
+    await vi.advanceTimersByTimeAsync(700);
+
+    expect(hb.lost).toBe(true);
+    expect(hb.abortSignal.aborted).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("tick failed"),
+      expect.anything(),
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("self-aborting after 3 consecutive failures"),
+    );
+
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 });

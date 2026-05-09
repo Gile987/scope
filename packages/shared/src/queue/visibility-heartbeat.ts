@@ -91,9 +91,21 @@ export function startVisibilityHeartbeat(
         abort.signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
       });
       if (abort.signal.aborted) break;
+      // Bound each updateMessage call so a hung TCP connection (e.g. the
+      // queue endpoint is frozen / network-partitioned) doesn't wedge the
+      // loop indefinitely. Without this, the await never returns, the
+      // failure counter never increments, and self-abort never fires.
+      // We give it the full interval to complete; if it takes longer than
+      // that we'd skip the next tick anyway.
+      const callAbort = new AbortController();
+      const callTimer = setTimeout(
+        () => callAbort.abort(new Error(`updateMessage exceeded ${intervalMs}ms`)),
+        intervalMs,
+      );
       try {
         const response = await queueClient.updateMessage(
           messageId, popReceipt, undefined, visibilityTimeoutSeconds,
+          { abortSignal: callAbort.signal },
         );
         popReceipt = response.popReceipt!;
         tickCount++;
@@ -116,6 +128,8 @@ export function startVisibilityHeartbeat(
           abort.abort();
           break;
         }
+      } finally {
+        clearTimeout(callTimer);
       }
     }
   };
