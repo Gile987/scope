@@ -373,21 +373,39 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
 
-    await withRetry(() => this.collection.updateOne(
-      { _id: requestId },
-      {
-        $set: {
-          "run.status": finalStatus,
-          "run.outcome": finalOutcome,
-          "run.result": result.finalResult,
-          "run.finishedAt": new Date(),
-          "run.updatedAt": new Date(),
-          updatedAt: new Date(),
-          ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
-          ...(result.passed ? {} : { "run.error": result.finalResult }),
-        },
-      }
-    ));
+    // Zombie guard: if the heartbeat self-aborted (too many consecutive
+    // updateMessage failures), this worker has likely lost ownership of
+    // the message — a redelivered copy is/was being processed by another
+    // replica which has already marked the run failed. Skip the terminal
+    // write so we don't overwrite that failed marker with succeeded/finished.
+    // We still call stop() and attempt safeDeleteMessage (it will fail with
+    // a stale pop receipt and be logged as a warning).
+    if (heartbeat.lost) {
+      console.warn(
+        `[${this.workerName}] Skipping terminal Mongo write for ${requestId}: heartbeat lost (zombie worker — message likely redelivered)`,
+      );
+      await log("error", "Worker lost message ownership (heartbeat self-aborted) — terminal status not written; another replica owns this run", { final: true });
+    } else {
+      await withRetry(() => this.collection.updateOne(
+        // Gate the terminal write on still owning the current run in
+        // 'processing' state. If a redelivered copy of this message has
+        // already marked the run failed (or a retry has demoted it), the
+        // updateOne will be a no-op rather than clobber that state.
+        { _id: requestId, "run._id": runId, "run.status": "processing" } as any,
+        {
+          $set: {
+            "run.status": finalStatus,
+            "run.outcome": finalOutcome,
+            "run.result": result.finalResult,
+            "run.finishedAt": new Date(),
+            "run.updatedAt": new Date(),
+            updatedAt: new Date(),
+            ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
+            ...(result.passed ? {} : { "run.error": result.finalResult }),
+          },
+        }
+      ));
+    }
 
     console.log(
       `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`

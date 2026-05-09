@@ -9,6 +9,13 @@ export const HEARTBEAT_INTERVAL_MS = 15_000;
  *  Set to 4× the interval so up to 3 consecutive tick failures can occur
  *  before the message reappears for another worker. */
 export const HEARTBEAT_VISIBILITY_SECONDS = 60;
+/** After this many consecutive `updateMessage` failures, the heartbeat
+ *  self-aborts: it stops attempting further extensions and signals the
+ *  worker via {@link VisibilityHeartbeat.abortSignal} that ownership of
+ *  the message has likely been lost. With the defaults above, 3 failures
+ *  span ~45 s of the 60 s visibility window — at this point another
+ *  worker has either already redelivered the message or is about to. */
+export const HEARTBEAT_MAX_CONSECUTIVE_FAILURES = 3;
 
 /**
  * Handle returned by {@link startVisibilityHeartbeat}.
@@ -18,6 +25,15 @@ export interface VisibilityHeartbeat {
   stop(): string;
   /** Current pop receipt (updated by each heartbeat tick). */
   readonly popReceipt: string;
+  /** Fires when the heartbeat self-aborts after too many consecutive
+   *  `updateMessage` failures. Workers should observe this and bail out
+   *  of long-running operations instead of continuing as zombies. */
+  readonly abortSignal: AbortSignal;
+  /** True once the heartbeat has self-aborted due to consecutive failures.
+   *  Workers should check this before performing terminal Mongo writes —
+   *  a redelivered copy of the message has likely already taken ownership
+   *  of the run. */
+  readonly lost: boolean;
 }
 
 /**
@@ -48,10 +64,12 @@ export function startVisibilityHeartbeat(
   intervalMs: number = HEARTBEAT_INTERVAL_MS,
   visibilityTimeoutSeconds: number = HEARTBEAT_VISIBILITY_SECONDS,
   context: HeartbeatLogContext = {},
+  maxConsecutiveFailures: number = HEARTBEAT_MAX_CONSECUTIVE_FAILURES,
 ): VisibilityHeartbeat {
   let popReceipt = initialPopReceipt;
   let tickCount = 0;
   let failureCount = 0;
+  let lost = false;
   const abort = new AbortController();
   const startedAt = Date.now();
 
@@ -90,6 +108,14 @@ export function startVisibilityHeartbeat(
           `[${workerName}] Visibility heartbeat tick failed (${failureCount} consecutive) ${ctx}:`,
           error,
         );
+        if (failureCount >= maxConsecutiveFailures) {
+          lost = true;
+          console.error(
+            `[${workerName}] Visibility heartbeat self-aborting after ${failureCount} consecutive failures — message ownership likely lost ${ctx}`,
+          );
+          abort.abort();
+          break;
+        }
       }
     }
   };
@@ -113,5 +139,7 @@ export function startVisibilityHeartbeat(
       return popReceipt;
     },
     get popReceipt() { return popReceipt; },
+    get abortSignal() { return abort.signal; },
+    get lost() { return lost; },
   };
 }

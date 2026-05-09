@@ -6,6 +6,7 @@ import {
   startVisibilityHeartbeat,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_VISIBILITY_SECONDS,
+  HEARTBEAT_MAX_CONSECUTIVE_FAILURES,
   type VisibilityHeartbeat,
 } from "./visibility-heartbeat.js";
 import type { QueueClient } from "@azure/storage-queue";
@@ -133,6 +134,7 @@ describe("visibility heartbeat", () => {
   it("exports correct default constants", () => {
     expect(HEARTBEAT_INTERVAL_MS).toBe(15_000);
     expect(HEARTBEAT_VISIBILITY_SECONDS).toBe(60);
+    expect(HEARTBEAT_MAX_CONSECUTIVE_FAILURES).toBe(3);
   });
 
   it("logs start and stop with tick count", async () => {
@@ -153,5 +155,75 @@ describe("visibility heartbeat", () => {
     );
 
     logSpy.mockRestore();
+  });
+
+  it("exposes an initially-not-aborted abortSignal and lost=false", () => {
+    const qc = createMockQueueClient();
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120);
+    expect(hb.abortSignal.aborted).toBe(false);
+    expect(hb.lost).toBe(false);
+    hb.stop();
+  });
+
+  it("self-aborts after maxConsecutiveFailures, sets lost=true and fires abortSignal", async () => {
+    const qc = createMockQueueClient();
+    (qc.updateMessage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("transient 409"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // intervalMs=100, maxConsecutiveFailures=3 → aborts on the 3rd failed tick
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120, {}, 3);
+
+    let aborted = false;
+    hb.abortSignal.addEventListener("abort", () => { aborted = true; });
+
+    // Tick 1 fails
+    await vi.advanceTimersByTimeAsync(150);
+    expect(hb.lost).toBe(false);
+    expect(aborted).toBe(false);
+
+    // Tick 2 fails
+    await vi.advanceTimersByTimeAsync(100);
+    expect(hb.lost).toBe(false);
+    expect(aborted).toBe(false);
+
+    // Tick 3 fails → self-abort
+    await vi.advanceTimersByTimeAsync(100);
+    expect(hb.lost).toBe(true);
+    expect(hb.abortSignal.aborted).toBe(true);
+    expect(aborted).toBe(true);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("self-aborting after 3 consecutive failures"),
+    );
+
+    // No further updateMessage calls after self-abort
+    const callsAtAbort = (qc.updateMessage as ReturnType<typeof vi.fn>).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(500);
+    expect((qc.updateMessage as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(callsAtAbort);
+
+    errorSpy.mockRestore();
+  });
+
+  it("resets failure count on successful tick (does not self-abort prematurely)", async () => {
+    const qc = createMockQueueClient();
+    (qc.updateMessage as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error("blip 1"))
+      .mockRejectedValueOnce(new Error("blip 2"))
+      .mockResolvedValueOnce({ popReceipt: "receipt-recovered" })
+      .mockRejectedValueOnce(new Error("blip 3"))
+      .mockRejectedValueOnce(new Error("blip 4"))
+      .mockResolvedValueOnce({ popReceipt: "receipt-final" });
+
+    const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120, {}, 3);
+
+    // 6 ticks: fail, fail, ok, fail, fail, ok
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(110);
+    }
+
+    expect(hb.lost).toBe(false);
+    expect(hb.abortSignal.aborted).toBe(false);
+    expect(hb.popReceipt).toBe("receipt-final");
+
+    hb.stop();
   });
 });
