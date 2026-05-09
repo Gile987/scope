@@ -15,7 +15,6 @@ import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
 import { sanitizeHarFile, extractToolCalls } from "../har/har-parser.js";
-import type { ToolCall } from "../har/types.js";
 import { JudgeClient } from "./judge-client.js";
 
 export interface MultiTurnConfig {
@@ -154,7 +153,8 @@ export async function runMultiTurnLoop(
     let turnHarUrl: string | undefined;
     let turnTokenUsage: TokenUsage | undefined;
     let turnAiCallCount: number | undefined;
-    let turnToolCalls: ToolCall[] | undefined;
+    let turnToolCallsUrl: string | undefined;
+    let turnToolCallCount: number | undefined;
     let turnRawChatUrl: string | undefined;
     let turnRawChatFormat: string | undefined;
     const turnVideoUrls: string[] = [];
@@ -176,15 +176,26 @@ export async function runMultiTurnLoop(
           );
           await iterLog("info", "HAR file uploaded", { harUrl: turnHarUrl });
 
-          // Extract tool calls from the sanitized HAR so they are persisted on the turn
+          // Extract tool calls from the sanitized HAR and append them to a
+          // per-iteration JSONL blob alongside the HAR. Storing tool calls
+          // out-of-band keeps unbounded lists out of the request document
+          // (which is bounded to 2 MB on CosmosDB).
           try {
-            turnToolCalls = extractToolCalls(sanitizedHar);
-            if (turnToolCalls.length > 0) {
-              await iterLog("info", `Extracted ${turnToolCalls.length} tool call(s) from HAR`);
+            const extracted = extractToolCalls(sanitizedHar);
+            if (extracted.length > 0) {
+              for (const toolCall of extracted) {
+                await blobStorage.appendToolCall(requestId, runId, iteration, toolCall);
+              }
+              turnToolCallsUrl = blobStorage.getToolCallsBlobUrl(requestId, runId, iteration);
+              turnToolCallCount = extracted.length;
+              await iterLog("info", `Extracted ${extracted.length} tool call(s) from HAR`, {
+                toolCallsUrl: turnToolCallsUrl,
+                toolCallCount: turnToolCallCount,
+              });
             }
           } catch (extractError) {
             const msg = extractError instanceof Error ? extractError.message : String(extractError);
-            await iterLog("warn", `Failed to extract tool calls from HAR: ${msg}`);
+            await iterLog("warn", `Failed to extract or persist tool calls from HAR: ${msg}`);
           }
         } catch (uploadError) {
           const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
@@ -367,7 +378,8 @@ export async function runMultiTurnLoop(
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
         ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
         ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
-        ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
+        ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+        ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
         ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
         ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
       };
@@ -418,7 +430,8 @@ export async function runMultiTurnLoop(
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
         ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
         ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
-        ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
+        ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+        ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
         ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
         ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
       };
@@ -467,7 +480,8 @@ export async function runMultiTurnLoop(
       ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
       ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
       ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
-      ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
+      ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+      ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
       ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
       ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
     };

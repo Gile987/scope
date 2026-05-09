@@ -256,6 +256,8 @@ describe("runMultiTurnLoop — tool call extraction", () => {
       blobStorage: {
         uploadFile: vi.fn().mockResolvedValue("https://blob/har"),
         uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
+        appendToolCall: vi.fn().mockResolvedValue(undefined),
+        getToolCallsBlobUrl: vi.fn().mockReturnValue("https://blob/tool-calls.jsonl"),
       } as any,
       requestId: "req1",
       runId: "attempt-1",
@@ -265,7 +267,7 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     };
   }
 
-  it("extracts tool calls from HAR and stores them on the turn", async () => {
+  it("extracts tool calls from HAR and appends them to a JSONL blob, recording url + count on the turn", async () => {
     const harFile = { log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } };
     mockSanitizeHarFile.mockResolvedValue(harFile);
 
@@ -284,11 +286,17 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     const result = await runMultiTurnLoop(config as any);
 
     expect(result.passed).toBe(true);
-    expect(result.turns[0].toolCalls).toEqual(expectedToolCalls);
+    expect(result.turns[0].toolCalls).toBeUndefined();
+    expect(result.turns[0].toolCallsUrl).toBe("https://blob/tool-calls.jsonl");
+    expect(result.turns[0].toolCallCount).toBe(2);
     expect(mockExtractToolCalls).toHaveBeenCalledWith(harFile);
+    const appendToolCall = (config.blobStorage as any).appendToolCall;
+    expect(appendToolCall).toHaveBeenCalledTimes(2);
+    expect(appendToolCall).toHaveBeenNthCalledWith(1, "req1", "attempt-1", 1, expectedToolCalls[0]);
+    expect(appendToolCall).toHaveBeenNthCalledWith(2, "req1", "attempt-1", 1, expectedToolCalls[1]);
   });
 
-  it("does not include toolCalls when no HAR file is available", async () => {
+  it("does not record toolCallsUrl when no HAR file is available", async () => {
     const config = makeConfig();
     (config.processor as any).processMessage.mockResolvedValue({
       response: "done",
@@ -297,10 +305,13 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     const result = await runMultiTurnLoop(config as any);
 
     expect(result.turns[0].toolCalls).toBeUndefined();
+    expect(result.turns[0].toolCallsUrl).toBeUndefined();
+    expect(result.turns[0].toolCallCount).toBeUndefined();
     expect(mockExtractToolCalls).not.toHaveBeenCalled();
+    expect((config.blobStorage as any).appendToolCall).not.toHaveBeenCalled();
   });
 
-  it("does not include toolCalls when extraction returns empty array", async () => {
+  it("does not record toolCallsUrl when extraction returns empty array", async () => {
     mockSanitizeHarFile.mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
     mockExtractToolCalls.mockReturnValue([]);
 
@@ -313,6 +324,9 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     const result = await runMultiTurnLoop(config as any);
 
     expect(result.turns[0].toolCalls).toBeUndefined();
+    expect(result.turns[0].toolCallsUrl).toBeUndefined();
+    expect(result.turns[0].toolCallCount).toBeUndefined();
+    expect((config.blobStorage as any).appendToolCall).not.toHaveBeenCalled();
   });
 
   it("logs warning but continues when tool call extraction fails", async () => {
@@ -329,7 +343,8 @@ describe("runMultiTurnLoop — tool call extraction", () => {
 
     expect(result.passed).toBe(true);
     expect(result.turns[0].toolCalls).toBeUndefined();
-    expect(mockLog).toHaveBeenCalledWith("warn", expect.stringContaining("Failed to extract tool calls"), expect.anything());
+    expect(result.turns[0].toolCallsUrl).toBeUndefined();
+    expect(mockLog).toHaveBeenCalledWith("warn", expect.stringContaining("Failed to extract or persist tool calls"), expect.anything());
   });
 });
 

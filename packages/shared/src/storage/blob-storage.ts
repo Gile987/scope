@@ -15,6 +15,7 @@ import { pipeline } from "stream/promises";
 import { createGunzip } from "zlib";
 import { extract } from "tar";
 import type { LogEvent } from "../types/types.js";
+import type { ToolCall } from "../har/types.js";
 
 const SNAPSHOTS_CONTAINER = "snapshots";
 const LOGS_CONTAINER = "logs";
@@ -113,6 +114,15 @@ export class BlobStorage {
    */
   evictRun(requestId: string, runId: string): void {
     this.initializedBlobs.delete(`${requestId}/runs/${runId}/run.jsonl`);
+    // Tool-call append blobs in the snapshots container are keyed per
+    // iteration; remove every cached entry whose key starts with the
+    // run prefix so a long-lived BlobStorage instance doesn't accumulate.
+    const toolCallPrefix = `${requestId}/runs/${runId}/iteration-`;
+    for (const key of this.initializedBlobs.keys()) {
+      if (key.startsWith(toolCallPrefix) && key.endsWith("/tool-calls.jsonl")) {
+        this.initializedBlobs.delete(key);
+      }
+    }
   }
 
   /**
@@ -187,6 +197,106 @@ export class BlobStorage {
     }
     const fromLegacy = await tryDownload(`${requestId}/run.jsonl`);
     return fromLegacy ?? [];
+  }
+
+  /**
+   * Appends a single tool call as a JSON line to the per-iteration append
+   * blob in the snapshots container. Mirrors `appendLogEvent` but lives next
+   * to the iteration's other artifacts (HAR, video, chat-export).
+   *
+   * Path scheme: `{requestId}/runs/{runId}/iteration-{iteration}/tool-calls.jsonl`.
+   * Blob-level initialization is cached so concurrent appends only call
+   * `createIfNotExists` once per blob.
+   */
+  async appendToolCall(
+    requestId: string,
+    runId: string,
+    iteration: number,
+    toolCall: ToolCall,
+  ): Promise<void> {
+    await this.ensureContainer();
+    const blobName = `${requestId}/runs/${runId}/iteration-${iteration}/tool-calls.jsonl`;
+    const appendBlobClient = this.containerClient.getAppendBlobClient(blobName);
+    if (!this.initializedBlobs.has(blobName)) {
+      this.initializedBlobs.set(
+        blobName,
+        appendBlobClient.createIfNotExists().then(() => undefined),
+      );
+    }
+    await this.initializedBlobs.get(blobName);
+    const line = JSON.stringify(toolCall) + "\n";
+    await appendBlobClient.appendBlock(line, Buffer.byteLength(line));
+  }
+
+  /**
+   * Returns the full blob URL for a per-iteration tool-calls blob in the
+   * snapshots container. Use to populate `ConversationTurn.toolCallsUrl`.
+   */
+  getToolCallsBlobUrl(requestId: string, runId: string, iteration: number): string {
+    const blobName = `${requestId}/runs/${runId}/iteration-${iteration}/tool-calls.jsonl`;
+    return this.containerClient.getAppendBlobClient(blobName).url;
+  }
+
+  /**
+   * Downloads and parses the per-iteration tool-calls JSONL blob.
+   *
+   * Accepts either a full blob URL (preferred — the value stored on
+   * `ConversationTurn.toolCallsUrl`) or a `(requestId, runId, iteration)`
+   * triple via the second/third/fourth args. Returns an empty array if the
+   * blob does not exist (e.g. legacy turns or iterations with no tool calls).
+   */
+  async getToolCalls(
+    toolCallsUrlOrRequestId: string,
+    runId?: string,
+    iteration?: number,
+  ): Promise<ToolCall[]> {
+    await this.ensureContainer();
+
+    const tryDownload = async (blobName: string): Promise<ToolCall[] | undefined> => {
+      const client = this.containerClient.getAppendBlobClient(blobName);
+      try {
+        const download = await client.download();
+        if (!download.readableStreamBody) return [];
+        const chunks: Buffer[] = [];
+        for await (const chunk of download.readableStreamBody as AsyncIterable<Buffer>) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const text = Buffer.concat(chunks).toString("utf-8");
+        return text
+          .split("\n")
+          .filter((line) => line.trim().length > 0)
+          .map((line) => JSON.parse(line) as ToolCall);
+      } catch (err: any) {
+        if (err?.statusCode === 404) return undefined;
+        throw err;
+      }
+    };
+
+    if (
+      toolCallsUrlOrRequestId.startsWith("http://") ||
+      toolCallsUrlOrRequestId.startsWith("https://")
+    ) {
+      const url = new URL(toolCallsUrlOrRequestId);
+      const containerPrefix = `/${SNAPSHOTS_CONTAINER}/`;
+      const containerIndex = url.pathname.indexOf(containerPrefix);
+      if (containerIndex === -1) {
+        throw new Error(
+          `Tool-calls URL does not contain container '${SNAPSHOTS_CONTAINER}': ${toolCallsUrlOrRequestId}`,
+        );
+      }
+      const blobName = decodeURIComponent(
+        url.pathname.substring(containerIndex + containerPrefix.length),
+      );
+      return (await tryDownload(blobName)) ?? [];
+    }
+
+    if (runId === undefined || iteration === undefined) {
+      throw new Error(
+        "getToolCalls requires either a full blob URL or (requestId, runId, iteration)",
+      );
+    }
+    const blobName = `${toolCallsUrlOrRequestId}/runs/${runId}/iteration-${iteration}/tool-calls.jsonl`;
+    return (await tryDownload(blobName)) ?? [];
   }
 
   /**
