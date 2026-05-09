@@ -19,6 +19,16 @@ export interface VisibilityHeartbeat {
 }
 
 /**
+ * Optional correlation fields included in heartbeat log lines so you can
+ * attribute them to a specific message / document / run when many workers
+ * are running in parallel.
+ */
+export interface HeartbeatLogContext {
+  documentId?: string;
+  runId?: string;
+}
+
+/**
  * Start a background loop that periodically extends a queue message's
  * visibility timeout via `QueueClient.updateMessage`. This keeps the message
  * hidden from other workers as long as this process is alive. If the worker
@@ -35,12 +45,24 @@ export function startVisibilityHeartbeat(
   workerName: string,
   intervalMs: number = HEARTBEAT_INTERVAL_MS,
   visibilityTimeoutSeconds: number = HEARTBEAT_VISIBILITY_SECONDS,
+  context: HeartbeatLogContext = {},
 ): VisibilityHeartbeat {
   let popReceipt = initialPopReceipt;
   let tickCount = 0;
+  let failureCount = 0;
   const abort = new AbortController();
+  const startedAt = Date.now();
 
-  console.log(`[${workerName}] Visibility heartbeat started (every ${intervalMs / 1000}s, extending by ${visibilityTimeoutSeconds}s)`);
+  // Build a stable `key=value` suffix so log lines are easy to grep / parse.
+  // Always includes messageId; documentId and runId are added when known.
+  const ctxParts = [`messageId=${messageId}`];
+  if (context.documentId) ctxParts.push(`documentId=${context.documentId}`);
+  if (context.runId) ctxParts.push(`runId=${context.runId}`);
+  const ctx = ctxParts.join(" ");
+
+  console.log(
+    `[${workerName}] Visibility heartbeat started (every ${intervalMs / 1000}s, extending by ${visibilityTimeoutSeconds}s) ${ctx}`,
+  );
 
   const loop = async () => {
     while (!abort.signal.aborted) {
@@ -55,9 +77,14 @@ export function startVisibilityHeartbeat(
         );
         popReceipt = response.popReceipt!;
         tickCount++;
+        failureCount = 0;
       } catch (error) {
         if (abort.signal.aborted) break;
-        console.warn(`[${workerName}] Visibility heartbeat failed:`, error);
+        failureCount++;
+        console.warn(
+          `[${workerName}] Visibility heartbeat tick failed (${failureCount} consecutive) ${ctx}:`,
+          error,
+        );
       }
     }
   };
@@ -67,7 +94,10 @@ export function startVisibilityHeartbeat(
   return {
     stop: () => {
       abort.abort();
-      console.log(`[${workerName}] Visibility heartbeat stopped after ${tickCount} tick(s)`);
+      const elapsedMs = Date.now() - startedAt;
+      console.log(
+        `[${workerName}] Visibility heartbeat stopped after ${tickCount} tick(s), ${failureCount} consecutive failure(s), elapsed=${(elapsedMs / 1000).toFixed(1)}s ${ctx}`,
+      );
       return popReceipt;
     },
     get popReceipt() { return popReceipt; },

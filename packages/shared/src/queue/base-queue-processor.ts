@@ -221,6 +221,9 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         message.messageId,
         currentPopReceipt,
         this.workerName,
+        undefined,
+        undefined,
+        { documentId, runId: logRunId },
       );
 
       try {
