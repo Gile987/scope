@@ -34,6 +34,7 @@ export const RUN_FIELDS = [
   "setupVideoUrls",
   "tokenUsage",
   "aiCallCount",
+  "rawChatLogs",
   "rawChatUrl",
   "rawChatFormat",
 ] as const;

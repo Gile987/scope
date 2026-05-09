@@ -34,6 +34,14 @@ export const CriterionResultSchema = z
   })
   .openapi("CriterionResult");
 
+export const ChatLogRefSchema = z
+  .object({
+    url: z.string(),
+    format: z.string(),
+    label: z.string().optional(),
+  })
+  .openapi("ChatLogRef");
+
 export const ConversationTurnSchema = z
   .object({
     iteration: z.number(),
@@ -56,7 +64,10 @@ export const ConversationTurnSchema = z
       timestamp: z.string().optional(),
     })).optional(),
     aiCallCount: z.number().optional(),
+    rawChatLogs: z.array(ChatLogRefSchema).optional(),
+    /** @deprecated read-side back-compat with pre-array runs. */
     rawChatUrl: z.string().optional(),
+    /** @deprecated read-side back-compat with pre-array runs. */
     rawChatFormat: z.string().optional(),
   })
   .openapi("ConversationTurn");
@@ -164,7 +175,10 @@ export const RunStateSchema = z
     setupVideoUrls: z.array(z.string()).optional(),
     tokenUsage: TokenUsageSchema.optional(),
     aiCallCount: z.number().optional(),
+    rawChatLogs: z.array(ChatLogRefSchema).optional(),
+    /** @deprecated read-side back-compat with pre-array runs. */
     rawChatUrl: z.string().optional(),
+    /** @deprecated read-side back-compat with pre-array runs. */
     rawChatFormat: z.string().optional(),
     pausedAt: z.coerce.date().optional(),
     resumedAt: z.coerce.date().optional(),

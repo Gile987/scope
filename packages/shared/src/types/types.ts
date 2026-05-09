@@ -16,6 +16,22 @@ export interface TokenUsage {
   totalTokens: number;
 }
 
+/**
+ * Reference to a single captured chat log artifact (one entry per format).
+ * A turn or run may produce multiple entries when several chat exports are
+ * captured concurrently — e.g. an ACP wire log alongside an agent-native
+ * session transcript.
+ */
+export interface ChatLogRef {
+  /** Blob storage URL of the uploaded chat-export artifact. */
+  url: string;
+  /** Format identifier (e.g. 'acp-ndjson', 'claude-code-stream-json',
+   *  'generic-cmd'). Drives extension/content-type. */
+  format: string;
+  /** Optional human-readable label for UI display. */
+  label?: string;
+}
+
 // Multi-turn conversation turn (one coding + judge iteration)
 export interface ConversationTurn {
   iteration: number;
@@ -32,8 +48,14 @@ export interface ConversationTurn {
   durationMs?: number;     // Wall-clock duration of this iteration in milliseconds
   toolCalls?: ToolCall[];   // Tool calls extracted from HAR (computed at iteration completion)
   aiCallCount?: number;    // Number of AI completion API calls made during this iteration
-  rawChatUrl?: string;     // Blob storage URL to the raw chat transcript export
-  rawChatFormat?: string;  // Format identifier for the raw chat export
+  /** All captured chat-export artifacts for this turn (one entry per format). */
+  rawChatLogs?: ChatLogRef[];
+  /** @deprecated Use rawChatLogs[0]. Kept for read-side back-compat with
+   *  pre-array-format runs. New writers must populate rawChatLogs only. */
+  rawChatUrl?: string;
+  /** @deprecated Use rawChatLogs[0]. Kept for read-side back-compat with
+   *  pre-array-format runs. */
+  rawChatFormat?: string;
 }
 
 // Multi-turn configuration constants
@@ -217,7 +239,11 @@ export interface RunState {
   setupVideoUrls?: string[];
   tokenUsage?: TokenUsage;
   aiCallCount?: number;
+  /** All top-level captured chat-export artifacts (one entry per format). */
+  rawChatLogs?: ChatLogRef[];
+  /** @deprecated Use rawChatLogs[0]. Kept for read-side back-compat. */
   rawChatUrl?: string;
+  /** @deprecated Use rawChatLogs[0]. Kept for read-side back-compat. */
   rawChatFormat?: string;
 }
 
@@ -249,6 +275,7 @@ export const RUN_STATE_FIELD_NAMES = [
   "setupVideoUrls",
   "tokenUsage",
   "aiCallCount",
+  "rawChatLogs",
   "rawChatUrl",
   "rawChatFormat",
 ] as const;
@@ -278,9 +305,23 @@ export interface WorkerResult {
   aiCallCount?: number;
   /** Tool calls extracted from the chat transcript export */
   toolCalls?: ToolCall[];
-  /** Path to the raw chat transcript export file on disk (for upload to blob storage) */
+  /** All captured chat-export artifacts for this iteration. The judge layer
+   *  uploads each entry, derives the canonical filename from `format`, and
+   *  stores the resulting blob URLs on the ConversationTurn as `rawChatLogs`. */
+  rawChatLogs?: Array<{
+    /** Path to the chat-export file on disk. */
+    filePath: string;
+    /** Format identifier (e.g. 'acp-ndjson', 'claude-code-stream-json'). */
+    format: string;
+    /** Optional human-readable label propagated to ChatLogRef. */
+    label?: string;
+  }>;
+  /** @deprecated Use rawChatLogs. Kept for read-side back-compat with
+   *  workers that have not migrated yet. The judge layer treats a non-empty
+   *  rawChatFilePath as a single-entry rawChatLogs[0]. */
   rawChatFilePath?: string;
-  /** Format identifier for the raw chat export */
+  /** @deprecated Use rawChatLogs. Format identifier paired with the legacy
+   *  rawChatFilePath. */
   rawChatFormat?: string;
 }
 
