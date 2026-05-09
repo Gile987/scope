@@ -132,7 +132,7 @@ describe("visibility heartbeat", () => {
 
   it("exports correct default constants", () => {
     expect(HEARTBEAT_INTERVAL_MS).toBe(15_000);
-    expect(HEARTBEAT_VISIBILITY_SECONDS).toBe(30);
+    expect(HEARTBEAT_VISIBILITY_SECONDS).toBe(60);
   });
 
   it("logs start and stop with tick count", async () => {

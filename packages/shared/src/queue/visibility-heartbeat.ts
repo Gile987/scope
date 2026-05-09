@@ -5,8 +5,10 @@ import type { QueueClient } from "@azure/storage-queue";
 
 /** How often to extend message visibility (ms). */
 export const HEARTBEAT_INTERVAL_MS = 15_000;
-/** Each heartbeat extends visibility by this many seconds. */
-export const HEARTBEAT_VISIBILITY_SECONDS = 30;
+/** Each heartbeat extends visibility by this many seconds.
+ *  Set to 4× the interval so up to 3 consecutive tick failures can occur
+ *  before the message reappears for another worker. */
+export const HEARTBEAT_VISIBILITY_SECONDS = 60;
 
 /**
  * Handle returned by {@link startVisibilityHeartbeat}.
