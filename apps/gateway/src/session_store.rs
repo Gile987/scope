@@ -40,6 +40,10 @@ pub trait SessionPersistence: Send + Sync {
 
     /// Delete a session from the store.
     async fn delete(&self, session_id: &str);
+
+    /// Fetch a single persisted session by id. Returns `None` on miss or
+    /// any error (best-effort: never block a proxy request).
+    async fn load(&self, session_id: &str) -> Option<PersistedSession>;
 }
 
 /// Redis-backed store for session persistence across pod restarts.
@@ -134,6 +138,40 @@ impl SessionPersistence for SessionStore {
             );
         }
         debug!("SessionStore: deleted session {}", session_id);
+    }
+
+    /// Fetch a single persisted session by id from Redis.
+    ///
+    /// Single-key `GET gateway:session:{id}` (cluster-safe). No manual retry —
+    /// `fred`'s built-in `ReconnectPolicy` handles transient connection errors,
+    /// matching the pattern used by `RedisIterationStore::get()`. On any error,
+    /// log a warning and return `None` so the caller treats it as a miss.
+    async fn load(&self, session_id: &str) -> Option<PersistedSession> {
+        let session_key = format!("gateway:session:{}", session_id);
+        let raw: Option<String> = match self.client.get(&session_key).await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(
+                    "SessionStore: failed to load session {}: {}",
+                    session_id, e
+                );
+                return None;
+            }
+        };
+        let json = raw?;
+        match serde_json::from_str::<PersistedSession>(&json) {
+            Ok(ps) => {
+                debug!("SessionStore: loaded session {}", session_id);
+                Some(ps)
+            }
+            Err(e) => {
+                warn!(
+                    "SessionStore: failed to deserialise session {}: {}",
+                    session_id, e
+                );
+                None
+            }
+        }
     }
 }
 

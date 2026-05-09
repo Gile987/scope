@@ -11,15 +11,23 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use dashmap::DashMap;
 // parking_lot::RwLock over std::sync::RwLock: no poisoning overhead, better
 // performance for read-heavy workloads (proxy lookups are reads; mutations are rare).
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 use serde_json::Value;
+use tokio::sync::OnceCell;
+use tracing::{info, warn};
 
 use crate::iteration_store::IterationStore;
 use crate::plugin::{PluginRegistry, SessionId};
 use crate::session_store::{session_ttl, PersistedSession, SessionPersistence};
+
+/// TTL for the negative cache used by `SessionManager::resolve_or_hydrate`.
+/// Short enough that a freshly-created session is not blocked for long;
+/// long enough to absorb bursts of requests for an unknown id.
+const NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(5);
 
 /// State of a single session.
 #[derive(Debug)]
@@ -62,6 +70,12 @@ pub struct SessionManager {
     store: Option<Box<dyn SessionPersistence>>,
     /// Iteration counter store — always present.
     iteration_store: Arc<dyn IterationStore>,
+    /// Negative cache: id → "not-found until" instant. Prevents Redis
+    /// hammering for unknown ids during the cache window.
+    negative_cache: Mutex<HashMap<SessionId, Instant>>,
+    /// Singleflight for in-flight hydration lookups so concurrent first
+    /// requests for the same id share one Redis fetch.
+    inflight: DashMap<SessionId, Arc<OnceCell<bool>>>,
 }
 
 impl SessionManager {
@@ -79,6 +93,8 @@ impl SessionManager {
             max_sessions,
             store: None,
             iteration_store,
+            negative_cache: Mutex::new(HashMap::new()),
+            inflight: DashMap::new(),
         }
     }
 
@@ -97,6 +113,8 @@ impl SessionManager {
             max_sessions,
             store: Some(Box::new(store)),
             iteration_store,
+            negative_cache: Mutex::new(HashMap::new()),
+            inflight: DashMap::new(),
         }
     }
 
@@ -109,6 +127,10 @@ impl SessionManager {
         session_id: SessionId,
         plugin_settings: HashMap<String, Value>,
     ) -> Result<bool, SessionError> {
+        // Drop any negative-cache entry so a freshly-created session is never
+        // falsely reported as missing by `resolve_or_hydrate`.
+        self.negative_cache.lock().remove(&session_id);
+
         // If session already exists and is active, return idempotent success.
         {
             let sessions = self.sessions_lock.read();
@@ -207,6 +229,150 @@ impl SessionManager {
     pub fn is_active(&self, session_id: &SessionId) -> bool {
         let sessions = self.sessions_lock.read();
         sessions.get(session_id).map(|s| s.active).unwrap_or(false)
+    }
+
+    /// Return `true` if the session is active in memory or recoverable from
+    /// the persistence store (Redis). On miss, performs at most one store
+    /// lookup. The result is cached: hits land in the in-memory map (and
+    /// plugins are notified); misses are negative-cached for a short window
+    /// to prevent Redis hammering.
+    ///
+    /// Concurrent calls for the same id are coalesced via a singleflight
+    /// `OnceCell`, so only one store fetch happens.
+    pub async fn resolve_or_hydrate(&self, session_id: &SessionId) -> bool {
+        // Fast path — already in memory.
+        if self.is_active(session_id) {
+            return true;
+        }
+
+        // Negative cache check.
+        {
+            let mut neg = self.negative_cache.lock();
+            if let Some(until) = neg.get(session_id).copied() {
+                if Instant::now() < until {
+                    return false;
+                }
+                // Expired entry — remove it.
+                neg.remove(session_id);
+            }
+        }
+
+        // No store configured — nothing to hydrate from.
+        if self.store.is_none() {
+            return false;
+        }
+
+        // Singleflight: dedupe concurrent hydrations for the same id.
+        let cell = self
+            .inflight
+            .entry(session_id.clone())
+            .or_insert_with(|| Arc::new(OnceCell::new()))
+            .clone();
+
+        let result = cell
+            .get_or_init(|| async { self.do_hydrate(session_id).await })
+            .await;
+        let result = *result;
+
+        // Drop the inflight entry now that the cell has resolved so future
+        // calls don't keep a stale singleflight cell alive.
+        self.inflight.remove(session_id);
+
+        result
+    }
+
+    /// Slow-path hydration: fetch from the store, notify plugins, insert into
+    /// the in-memory map. Returns `true` on success, `false` on miss / cap.
+    async fn do_hydrate(&self, session_id: &SessionId) -> bool {
+        let store = match &self.store {
+            Some(s) => s,
+            None => return false,
+        };
+
+        let persisted = match store.load(session_id).await {
+            Some(p) => p,
+            None => {
+                self.negative_cache
+                    .lock()
+                    .insert(session_id.clone(), Instant::now() + NEGATIVE_CACHE_TTL);
+                return false;
+            }
+        };
+
+        // Respect the max-sessions cap.
+        {
+            let sessions = self.sessions_lock.read();
+            if sessions.len() >= self.max_sessions {
+                warn!(
+                    "SessionManager: cannot hydrate session {} — max_sessions cap ({}) reached",
+                    session_id, self.max_sessions
+                );
+                self.negative_cache
+                    .lock()
+                    .insert(session_id.clone(), Instant::now() + NEGATIVE_CACHE_TTL);
+                return false;
+            }
+        }
+
+        // Inject the original wall-clock start time into each per-plugin
+        // settings object so plugins like `plugin` can correctly
+        // reconstruct their state across a pod restart. We mutate per-plugin
+        // entries (not a top-level field) because `PluginRegistry` extracts
+        // each plugin's own settings by plugin name. Only existing entries
+        // are touched, so plugins that weren't configured originally don't
+        // get spuriously activated.
+        let mut plugin_settings = persisted.plugin_settings.clone();
+        let started_at_str = persisted
+            .started_at
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        for v in plugin_settings.values_mut() {
+            if let Value::Object(map) = v {
+                map.insert(
+                    "_startedAt".to_string(),
+                    Value::String(started_at_str.clone()),
+                );
+            }
+        }
+
+        // Notify plugins before inserting — mirrors create_session ordering.
+        self.registry
+            .on_session_start(session_id, &plugin_settings)
+            .await;
+
+        // Insert into the in-memory map. Preserve started_at from Redis;
+        // last_activity is reset to now so the idle reaper gives the
+        // rehydrated session a full grace period.
+        {
+            let mut sessions = self.sessions_lock.write();
+            // Re-check the cap under the write lock in case of a race.
+            if sessions.len() >= self.max_sessions {
+                warn!(
+                    "SessionManager: cannot hydrate session {} — max_sessions cap ({}) reached",
+                    session_id, self.max_sessions
+                );
+                self.negative_cache
+                    .lock()
+                    .insert(session_id.clone(), Instant::now() + NEGATIVE_CACHE_TTL);
+                return false;
+            }
+            sessions.insert(
+                session_id.clone(),
+                Session {
+                    id: session_id.clone(),
+                    active: true,
+                    plugin_settings,
+                    started_at: persisted.started_at,
+                    last_activity: Instant::now(),
+                },
+            );
+        }
+
+        // Re-init the iteration counter (idempotent: NX-style on Redis).
+        let ttl_secs = session_ttl(&persisted.plugin_settings).as_secs() as i64;
+        self.iteration_store.init(session_id, ttl_secs).await;
+
+        info!("Hydrated session {} from Redis", session_id);
+        true
     }
 
     /// Touch a session to reset its idle timer.
@@ -335,6 +501,9 @@ mod tests {
         save_returns_new: bool,
         save_calls: Arc<AtomicUsize>,
         delete_calls: Arc<AtomicUsize>,
+        /// Pre-seeded sessions returned by `load()`.
+        loaded: Mutex<HashMap<String, PersistedSession>>,
+        load_calls: Arc<AtomicUsize>,
     }
 
     impl MockStore {
@@ -346,9 +515,28 @@ mod tests {
                     save_returns_new,
                     save_calls: save_calls.clone(),
                     delete_calls: delete_calls.clone(),
+                    loaded: Mutex::new(HashMap::new()),
+                    load_calls: Arc::new(AtomicUsize::new(0)),
                 },
                 save_calls,
                 delete_calls,
+            )
+        }
+
+        /// Variant that exposes the load-call counter and accepts a seed.
+        fn with_seed(
+            seed: HashMap<String, PersistedSession>,
+        ) -> (Self, Arc<AtomicUsize>) {
+            let load_calls = Arc::new(AtomicUsize::new(0));
+            (
+                Self {
+                    save_returns_new: true,
+                    save_calls: Arc::new(AtomicUsize::new(0)),
+                    delete_calls: Arc::new(AtomicUsize::new(0)),
+                    loaded: Mutex::new(seed),
+                    load_calls: load_calls.clone(),
+                },
+                load_calls,
             )
         }
     }
@@ -361,6 +549,10 @@ mod tests {
         }
         async fn delete(&self, _session_id: &str) {
             self.delete_calls.fetch_add(1, Ordering::Relaxed);
+        }
+        async fn load(&self, session_id: &str) -> Option<PersistedSession> {
+            self.load_calls.fetch_add(1, Ordering::Relaxed);
+            self.loaded.lock().unwrap().get(session_id).cloned()
         }
     }
 
@@ -674,6 +866,238 @@ mod tests {
         let result = mgr.create_session("s1".into(), settings).await.unwrap();
         assert!(result);
         assert_eq!(save_calls.load(Ordering::Relaxed), 1);
+    }
+
+    // --- resolve_or_hydrate tests ---
+
+    /// Plugin that records `on_session_start` calls (id + the full settings map).
+    struct RecordingPlugin {
+        starts: Arc<Mutex<Vec<(SessionId, Value)>>>,
+    }
+
+    #[async_trait]
+    impl ProxyPlugin for RecordingPlugin {
+        fn name(&self) -> &str {
+            "recording"
+        }
+        async fn on_session_start(&self, session_id: &SessionId, settings: &Value) {
+            self.starts
+                .lock()
+                .unwrap()
+                .push((session_id.clone(), settings.clone()));
+        }
+        async fn on_exchange(
+            &self,
+            _session_id: &SessionId,
+            _exchange: &HttpExchange,
+            _iteration: u32,
+        ) {
+        }
+        async fn on_session_stop(&self, _session_id: &SessionId) {}
+        async fn on_session_clear(&self, _session_id: &SessionId) {}
+    }
+
+    fn make_persisted(id: &str) -> PersistedSession {
+        PersistedSession {
+            session_id: id.to_string(),
+            plugin_settings: HashMap::new(),
+            started_at: chrono::Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_or_hydrate_in_memory_hit_skips_store() {
+        let (mock, load_calls) = MockStore::with_seed(HashMap::new());
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+
+        assert!(mgr.resolve_or_hydrate(&"s1".into()).await);
+        assert_eq!(load_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn resolve_or_hydrate_loads_from_store_on_miss_and_notifies_plugin() {
+        let mut seed = HashMap::new();
+        let started_at = chrono::Utc::now() - chrono::Duration::seconds(42);
+        // Persisted settings include an entry keyed by the plugin name so
+        // SessionManager has somewhere to inject `_startedAt`.
+        let mut persisted_plugin_settings = HashMap::new();
+        persisted_plugin_settings.insert(
+            "recording".to_string(),
+            serde_json::json!({"foo": "bar"}),
+        );
+        seed.insert(
+            "s1".to_string(),
+            PersistedSession {
+                session_id: "s1".to_string(),
+                plugin_settings: persisted_plugin_settings,
+                started_at,
+            },
+        );
+        let (mock, load_calls) = MockStore::with_seed(seed);
+
+        let starts = Arc::new(Mutex::new(Vec::new()));
+        let plugin = Arc::new(RecordingPlugin {
+            starts: starts.clone(),
+        });
+        let registry = Arc::new(PluginRegistry::new(vec![plugin]));
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
+
+        assert!(mgr.resolve_or_hydrate(&"s1".into()).await);
+        assert_eq!(load_calls.load(Ordering::Relaxed), 1);
+
+        // Plugin was notified with its own per-plugin settings, including the
+        // injected `_startedAt`.
+        let recorded = starts.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].0, "s1");
+        let injected = recorded[0]
+            .1
+            .get("_startedAt")
+            .and_then(|v| v.as_str())
+            .expect("_startedAt should be injected as a string");
+        assert_eq!(
+            injected,
+            started_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        );
+        // Original fields are preserved.
+        assert_eq!(recorded[0].1.get("foo").and_then(|v| v.as_str()), Some("bar"));
+
+        // Session is now in memory and started_at preserved.
+        let info = mgr.get_session(&"s1".into()).expect("session in memory");
+        assert!(info.active);
+        assert_eq!(
+            info.started_at,
+            started_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_or_hydrate_returns_false_when_no_store() {
+        let mgr = make_manager(100);
+        assert!(!mgr.resolve_or_hydrate(&"missing".into()).await);
+    }
+
+    #[tokio::test]
+    async fn resolve_or_hydrate_negative_cache_short_circuits_repeat_misses() {
+        let (mock, load_calls) = MockStore::with_seed(HashMap::new());
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
+
+        assert!(!mgr.resolve_or_hydrate(&"missing".into()).await);
+        assert!(!mgr.resolve_or_hydrate(&"missing".into()).await);
+        assert_eq!(load_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn resolve_or_hydrate_singleflight_deduplicates_concurrent_loads() {
+        let mut seed = HashMap::new();
+        seed.insert("s1".to_string(), make_persisted("s1"));
+        let (mock, load_calls) = MockStore::with_seed(seed);
+
+        let starts = Arc::new(Mutex::new(Vec::new()));
+        let plugin = Arc::new(RecordingPlugin {
+            starts: starts.clone(),
+        });
+        let registry = Arc::new(PluginRegistry::new(vec![plugin]));
+        let mgr = Arc::new(SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        ));
+
+        // Spawn N concurrent calls.
+        let mut handles = Vec::new();
+        for _ in 0..16 {
+            let m = mgr.clone();
+            handles.push(tokio::spawn(async move {
+                m.resolve_or_hydrate(&"s1".into()).await
+            }));
+        }
+        let results: Vec<bool> = futures_util::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert!(results.iter().all(|r| *r));
+        assert_eq!(load_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(starts.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn resolve_or_hydrate_respects_max_sessions() {
+        let mut seed = HashMap::new();
+        seed.insert("s2".to_string(), make_persisted("s2"));
+        let (mock, _) = MockStore::with_seed(seed);
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            1,
+            mock,
+            make_iteration_store(),
+        );
+
+        // Fill to cap with a created session.
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+        assert_eq!(mgr.session_count(), 1);
+
+        // Hydration should refuse and not exceed the cap.
+        assert!(!mgr.resolve_or_hydrate(&"s2".into()).await);
+        assert_eq!(mgr.session_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_session_clears_negative_cache_entry() {
+        let (mock, load_calls) = MockStore::with_seed(HashMap::new());
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        let mgr = SessionManager::new_with_store(
+            registry,
+            Duration::from_secs(300),
+            100,
+            mock,
+            make_iteration_store(),
+        );
+
+        // Populate negative cache with a miss.
+        assert!(!mgr.resolve_or_hydrate(&"s1".into()).await);
+        assert_eq!(load_calls.load(Ordering::Relaxed), 1);
+
+        // Now create the session — negative cache must be cleared.
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+
+        // Subsequent resolve sees the new session.
+        assert!(mgr.resolve_or_hydrate(&"s1".into()).await);
+        // Store is not consulted because the in-memory fast path wins.
+        assert_eq!(load_calls.load(Ordering::Relaxed), 1);
     }
 
     struct RotationRecordingPlugin {
