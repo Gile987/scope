@@ -79,6 +79,7 @@ describe("visibility heartbeat", () => {
   it("stop() is idempotent and returns latest pop receipt", async () => {
     const qc = createMockQueueClient();
     (qc.updateMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ popReceipt: "receipt-1" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     const hb = startVisibilityHeartbeat(qc, "msg-1", "receipt-0", "test-worker", 100, 120);
 
@@ -87,6 +88,14 @@ describe("visibility heartbeat", () => {
     const second = hb.stop();
     expect(first).toBe("receipt-1");
     expect(second).toBe("receipt-1");
+
+    // Only one "stopped" log line should be emitted, even though stop()
+    // was called twice (subclass + base-class defensive cleanup).
+    const stopLogs = logSpy.mock.calls.filter((args) =>
+      typeof args[0] === "string" && args[0].includes("Visibility heartbeat stopped"),
+    );
+    expect(stopLogs).toHaveLength(1);
+    logSpy.mockRestore();
   });
 
   it("does not call updateMessage after stop", async () => {

@@ -93,6 +93,13 @@ export function startVisibilityHeartbeat(
 
   return {
     stop: () => {
+      if (abort.signal.aborted) {
+        // Idempotent: already stopped — return the frozen receipt without
+        // re-logging. The base class always calls stop() in its finally
+        // block as defensive cleanup, so subclass + base produce two calls
+        // on the success path; we only want one log line.
+        return popReceipt;
+      }
       abort.abort();
       const elapsedMs = Date.now() - startedAt;
       console.log(
