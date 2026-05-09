@@ -78,6 +78,9 @@ export function startVisibilityHeartbeat(
         popReceipt = response.popReceipt!;
         tickCount++;
         failureCount = 0;
+        console.log(
+          `[${workerName}] Visibility heartbeat tick #${tickCount} extended by ${visibilityTimeoutSeconds}s ${ctx}`,
+        );
       } catch (error) {
         if (abort.signal.aborted) break;
         failureCount++;
