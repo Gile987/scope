@@ -14,6 +14,7 @@ import {
   ReportTemplateDocument,
   Reporter,
   TokenManagerClient,
+  type VisibilityHeartbeat,
 } from "shared";
 import { createReportTools } from "./tools.js";
 import { REPORT_SYSTEM_PROMPT, withRetry } from "shared";
@@ -54,7 +55,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
   protected override async handleRequest(
     doc: ReportDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<void> {
     const reportId = doc._id;
@@ -166,8 +167,10 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       }
     }
 
-    // Delete the queue message on success
-    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    // Stop the heartbeat before deleting so the pop receipt is stable.
+    // The base class also calls stop() in its finally block (idempotent).
+    const finalPopReceipt = heartbeat.stop();
+    await this.safeDeleteMessage(message.messageId, finalPopReceipt);
   }
 
   /** Char-count interval for emitting delta progress logs */

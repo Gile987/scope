@@ -16,6 +16,7 @@ import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
+import type { VisibilityHeartbeat } from "./visibility-heartbeat.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
@@ -63,7 +64,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   protected async handleRequest(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void> {
@@ -80,7 +81,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         messageRunId,
         currentRunId,
       });
-      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
     // If the request was paused while sitting in the queue, discard the
@@ -90,7 +91,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         `[${this.workerName}] Request ${requestDoc._id} is paused — discarding queue message`,
       );
       await log("info", `Request paused — discarding queue message`);
-      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
     // Resolve MCP server slugs to configs via API
@@ -165,7 +166,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolved extensions: ${extensionConfigs.map(e => e.version ? `${e.id}@${e.version}` : e.id).join(", ")}`);
     }
 
-    await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs, extensionConfigs);
+    await this.processMultiTurn(requestDoc, message, heartbeat, log, mcpServerConfigs, skillConfigs, extensionConfigs);
   }
 
   /**
@@ -231,7 +232,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   private async processMultiTurn(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     mcpServerConfigs?: McpServerConfig[],
     skillConfigs?: SkillConfig[],
@@ -266,21 +267,6 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         },
       }
     ));
-
-    // Extend queue message visibility for long-running multi-turn.
-    // updateMessage returns a new pop receipt that must be used for subsequent operations.
-    const visibilityTimeout = MULTI_TURN_DEFAULTS.VISIBILITY_TIMEOUT_SECONDS;
-    try {
-      const updateResponse = await this.queueClient.updateMessage(
-        message.messageId,
-        currentPopReceipt,
-        message.messageText,
-        visibilityTimeout
-      );
-      currentPopReceipt = updateResponse.popReceipt!;
-    } catch (error) {
-      console.warn(`[${this.workerName}] Failed to extend message visibility: ${error}`);
-    }
 
     await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
       criteria: requestDoc.scenario.criteria,
@@ -410,6 +396,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // Fire-and-forget report generation
     await this.triggerReportGeneration(requestId);
 
-    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    // Stop the heartbeat before deleting so the pop receipt is stable —
+    // a tick landing between read and delete would invalidate it. The
+    // base class also calls stop() in its finally block (it's idempotent).
+    const finalPopReceipt = heartbeat.stop();
+    await this.safeDeleteMessage(message.messageId, finalPopReceipt);
   }
 }
