@@ -50,7 +50,7 @@
     "check:versions:claude-code": "pnpm --filter version-checker-claude-code check",
     "vscode-web:capture-auth-state": "pnpm --filter github-cookie-updater capture",
     "vscode-web:auto-auth-state": "pnpm --filter github-cookie-updater start",
-    "worktrees:clean": "pnpm worktrees:clean:worktrees && pnpm worktrees:clean:docker",
+    "worktrees:clean": "pnpm worktrees:clean:docker && pnpm worktrees:clean:worktrees",
     "worktrees:clean:worktrees": "tsx scripts/clean-worktrees.ts",
     "worktrees:clean:docker": "tsx scripts/clean-compose.ts"
   },
