@@ -348,6 +348,22 @@ RFC 3339 is a strict subset of ISO 8601 — the key difference is that RFC 3339 
 
 Idle sessions are reaped after a configurable timeout (default: 5 minutes). Max concurrent sessions: 100.
 
+### Crash recovery
+
+`SessionManager` persists every active session to Redis at `gateway:session:{id}` (SET NX with a TTL derived from `maxSessionDurationSecs`). When a gateway pod restarts, in-memory state is empty but the Redis records survive.
+
+Recovery is **lazy** — there is no startup `SCAN` or eager `load_all`. Each intercepted proxy request already carries the session id via `Proxy-Authorization`, so the proxy handler calls `SessionManager::resolve_or_hydrate(id).await`:
+
+1. **In-memory hit** → fast path, no Redis call.
+2. **Negative cache** (5 s TTL) short-circuits repeat lookups for unknown ids and is cleared by `create_session`.
+3. **Singleflight** (`DashMap<SessionId, Arc<OnceCell<bool>>>`) coalesces concurrent first-requests for the same id into a single `GET gateway:session:{id}`.
+4. **Hit** → notify plugins via `on_session_start` (with `_startedAt` injected as RFC3339 so plugins like `copilot_token` reconstruct their original wall-clock start time), insert into the in-memory map preserving `started_at` from Redis, re-init the iteration counter, log `Hydrated session {id} from Redis`. The `max_sessions` cap is respected.
+5. **Miss** → cache negatively, return `false` (the proxy then issues a 407 challenge as usual).
+
+Because rehydration runs on the request path, sessions whose workers have already finished impose zero recovery cost. Single-key `GET` is cluster-safe (the key hashes to the right shard) so no special handling is required for Redis Cluster mode.
+
+Wall-clock vs monotonic: `Session.started_at` and `copilot_token::SessionState.started_at` are both `chrono::DateTime<Utc>` so the max-session-duration check stays correct after a restart. We trust the pod clock — durations are on the order of hours.
+
 ## TypeScript Client
 
 Workers interact with the gateway through the `GatewayClient` class in `packages/shared/src/devproxy/gateway-client.ts`. The `createProxyClient()` factory in `packages/shared/src/devproxy/index.ts` selects between `GatewayClient` and `DevProxyClient` based on the `PROXY_BACKEND` env var:
