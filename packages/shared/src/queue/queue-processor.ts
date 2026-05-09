@@ -94,6 +94,53 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
+    // Redelivery fail-fast: if the run is already in "processing" state, the
+    // message was redelivered after a crash (or heartbeat false-negative)
+    // mid-execution. Don't silently restart — that would wipe run.turns,
+    // overwrite run.startedAt, and burn a fresh round of LLM/judge tokens.
+    // Mark the run as failed atomically (gated on the current run._id and
+    // status="processing" so we don't race a still-live original worker or
+    // a concurrent retry) and delete the message. The user can opt into a
+    // clean restart via the explicit POST /requests/:id/retry endpoint,
+    // which properly demotes the failed run to history.
+    if (requestDoc.run?.status === "processing") {
+      const claim = await withRetry(() => this.collection.findOneAndUpdate(
+        {
+          _id: requestDoc._id,
+          "run._id": requestDoc.run!._id,
+          "run.status": "processing",
+        } as any,
+        {
+          $set: {
+            "run.status": "done",
+            "run.outcome": "failed",
+            "run.error": "Worker crashed or queue message was redelivered while run was in 'processing' state",
+            "run.finishedAt": new Date(),
+            "run.updatedAt": new Date(),
+            updatedAt: new Date(),
+          },
+        } as any,
+      ));
+      if (claim) {
+        console.warn(
+          `[${this.workerName}] Redelivery detected for ${requestDoc._id} (runId=${requestDoc.run!._id}) — marked run as failed`,
+        );
+        await log(
+          "error",
+          "Run marked failed: queue message was redelivered while run was already in 'processing' state (likely worker crash). Use the retry endpoint to start a new attempt.",
+          { final: true, runId: requestDoc.run!._id },
+        );
+      } else {
+        // Status changed under us (a concurrent retry already demoted this
+        // run, or the original worker just finished). Nothing to do — just
+        // drop the duplicate message.
+        console.log(
+          `[${this.workerName}] Redelivery for ${requestDoc._id} but run state changed concurrently — discarding`,
+        );
+      }
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
     // Resolve MCP server slugs to configs via API
     let mcpServerConfigs: McpServerConfig[] | undefined;
     if (requestDoc.mcpServers && requestDoc.mcpServers.length > 0) {
