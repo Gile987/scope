@@ -512,7 +512,7 @@ services:
       context: .
       dockerfile: apps/workers/coder-acp-copilot/Dockerfile
       args:
-        COPILOT_CLI_VERSION: ${COPILOT_CLI_VERSION}
+        COPILOT_CLI_VERSION: ${COPILOT_CLI_VERSION:-}
     profiles: [copilot]
     environment:
       <<: *worker-env
