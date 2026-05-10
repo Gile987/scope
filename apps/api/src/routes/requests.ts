@@ -1589,6 +1589,98 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
+// Download per-iteration tool-calls JSONL for a multi-turn run.
+// GET /api/v1/requests/:id/tool-calls?iteration=N
+// Returns application/x-ndjson — one ToolCall per line.
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/tool-calls",
+  tags: ["Requests"],
+  summary: "Download per-iteration tool-calls JSONL",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "JSONL stream — one ToolCall per line",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const iterationParam = req.query.iteration as string | undefined;
+
+      const resource = await ctx.requestCollection.findOne({ _id: id });
+      if (!resource) {
+        res.status(404).json({ error: "Request not found" });
+        return;
+      }
+
+      // Tool calls are always per-iteration; locate the turn by iteration number.
+      let toolCallsUrl: string | undefined;
+      let label: string;
+      if (!iterationParam) {
+        res.status(400).json({ error: "iteration query parameter is required" });
+        return;
+      }
+      const iterNum = parseInt(iterationParam, 10);
+      if (isNaN(iterNum) || iterNum < 1) {
+        res.status(400).json({ error: "Invalid iteration number" });
+        return;
+      }
+      const turns = resource.run?.turns;
+      const turn = turns?.find((t) => t.iteration === iterNum);
+      toolCallsUrl = turn?.toolCallsUrl;
+      label = `${id}-iteration-${iterNum}-tool-calls`;
+
+      if (!toolCallsUrl) {
+        res.status(404).json({ error: "No tool-calls JSONL available for this iteration" });
+        return;
+      }
+
+      let blobServiceClient: BlobServiceClient;
+      if (ctx.storageConnectionString) {
+        blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
+      } else {
+        blobServiceClient = new BlobServiceClient(
+          `https://${ctx.storageAccountName}.blob.core.windows.net`,
+          new DefaultAzureCredential()
+        );
+      }
+
+      const parsedUrl = new URL(toolCallsUrl);
+      const containerPrefix = "/snapshots/";
+      const containerIndex = parsedUrl.pathname.indexOf(containerPrefix);
+      if (containerIndex === -1) {
+        res.status(500).json({ error: "Invalid tool-calls URL format" });
+        return;
+      }
+      const blobName = decodeURIComponent(
+        parsedUrl.pathname.substring(containerIndex + containerPrefix.length)
+      );
+      const containerClient = blobServiceClient.getContainerClient("snapshots");
+      const blobClient = containerClient.getBlobClient(blobName);
+
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody) {
+        res.status(500).json({ error: "Failed to download tool-calls JSONL" });
+        return;
+      }
+
+      res.setHeader("Content-Type", "application/x-ndjson");
+      res.setHeader("Content-Disposition", `attachment; filename="${label}.jsonl"`);
+      if (downloadResponse.contentLength) {
+        res.setHeader("Content-Length", downloadResponse.contentLength);
+      }
+
+      downloadResponse.readableStreamBody.pipe(res);
+    } catch (error) {
+      if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+        res.status(404).json({ error: "Tool-calls JSONL not found — the blob may have been deleted or is no longer available" });
+        return;
+      }
+      throw error;
+    }
+  },
+});
+
 // Download a session recording video for a specific request or turn
 // For one-shot runs: GET /api/v1/requests/:id/video?index=0
 // For multi-turn runs: GET /api/v1/requests/:id/video?iteration=N&index=0
