@@ -55,6 +55,8 @@ export const ConversationTurnSchema = z
       response: z.string().optional(),
       timestamp: z.string().optional(),
     })).optional(),
+    toolCallsUrl: z.string().optional(),
+    toolCallCount: z.number().optional(),
     aiCallCount: z.number().optional(),
     rawChatUrl: z.string().optional(),
     rawChatFormat: z.string().optional(),

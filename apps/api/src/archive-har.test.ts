@@ -10,6 +10,8 @@ import {
   uploadBundledHarFiles,
   detectBundledChatFiles,
   uploadBundledChatFiles,
+  detectBundledToolCallsFiles,
+  uploadBundledToolCallsFiles,
   packRunIntoTar,
   type BlobUploader,
   type BlobDownloader,
@@ -80,6 +82,22 @@ describe("rewriteHarUrlsForArchive", () => {
     rewriteHarUrlsForArchive(resource);
     expect(resource.run.harUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/capture.har");
     expect(resource.run.turns[0].harUrl).toBe("https://storage.blob.core.windows.net/snapshots/abc/iter-1/capture.har");
+  });
+
+  it("rewrites per-turn toolCallsUrl to iteration-N.tool-calls.jsonl", () => {
+    const resource = {
+      run: {
+        turns: [
+          { iteration: 1, toolCallsUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-1/tool-calls.jsonl" },
+          { iteration: 2, toolCallsUrl: "https://storage.blob.core.windows.net/snapshots/abc/iter-2/tool-calls.jsonl" },
+          { iteration: 3 },
+        ],
+      },
+    };
+    const result = rewriteHarUrlsForArchive(resource);
+    expect(result.run!.turns![0].toolCallsUrl).toBe("iteration-1.tool-calls.jsonl");
+    expect(result.run!.turns![1].toolCallsUrl).toBe("iteration-2.tool-calls.jsonl");
+    expect(result.run!.turns![2].toolCallsUrl).toBeUndefined();
   });
 });
 
@@ -437,6 +455,95 @@ describe("uploadBundledChatFiles", () => {
     });
 
     expect(topLevelUrl).toBeUndefined();
+    expect(uploaded).toHaveLength(0);
+  });
+});
+
+// --- detectBundledToolCallsFiles ---
+
+describe("detectBundledToolCallsFiles", () => {
+  it("detects per-iteration tool-calls JSONL files", () => {
+    const files = [
+      "iteration-1.tool-calls.jsonl",
+      "iteration-2.tool-calls.jsonl",
+      "iteration-1.har",
+      "run.yaml",
+    ];
+    const result = detectBundledToolCallsFiles(files);
+    expect(result).toEqual([
+      { fileName: "iteration-1.tool-calls.jsonl", iteration: 1 },
+      { fileName: "iteration-2.tool-calls.jsonl", iteration: 2 },
+    ]);
+  });
+
+  it("ignores tool-calls files with unexpected names", () => {
+    const files = ["random.tool-calls.jsonl", "tool-calls.jsonl", "run.tool-calls.jsonl"];
+    expect(detectBundledToolCallsFiles(files)).toEqual([]);
+  });
+
+  it("returns empty when no tool-calls files present", () => {
+    expect(detectBundledToolCallsFiles(["run.yaml", "iteration-1.har"])).toEqual([]);
+  });
+});
+
+// --- uploadBundledToolCallsFiles ---
+
+describe("uploadBundledToolCallsFiles", () => {
+  function makeMockContainerClient() {
+    const uploaded: Array<{ blobName: string; filePath: string; contentType: string; tags: Record<string, string> }> = [];
+    const client: BlobUploader = {
+      getBlockBlobClient(blobName: string) {
+        return {
+          url: `https://mock.blob.core.windows.net/snapshots/${blobName}`,
+          async uploadFile(filePath: string, options?: { blobHTTPHeaders?: { blobContentType?: string }; tags?: Record<string, string> }) {
+            uploaded.push({
+              blobName,
+              filePath,
+              contentType: options?.blobHTTPHeaders?.blobContentType ?? "",
+              tags: options?.tags ?? {},
+            });
+          },
+        };
+      },
+    };
+    return { client, uploaded };
+  }
+
+  it("uploads per-iteration JSONL files and sets toolCallsUrl on matching turns", async () => {
+    const { client, uploaded } = makeMockContainerClient();
+    const turns: Array<{ iteration: number; toolCallsUrl?: string }> = [
+      { iteration: 1 },
+      { iteration: 2 },
+    ];
+
+    await uploadBundledToolCallsFiles({
+      toolCallsFiles: [
+        { fileName: "iteration-1.tool-calls.jsonl", iteration: 1 },
+        { fileName: "iteration-2.tool-calls.jsonl", iteration: 2 },
+      ],
+      runDir: "/tmp/extracted/run789",
+      runId: "run789",
+      turns,
+      containerClient: client,
+    });
+
+    expect(uploaded).toHaveLength(2);
+    expect(uploaded[0].blobName).toBe("run789/iteration-1/tool-calls.jsonl");
+    expect(uploaded[0].contentType).toBe("application/x-ndjson");
+    expect(uploaded[1].blobName).toBe("run789/iteration-2/tool-calls.jsonl");
+    expect(turns[0].toolCallsUrl).toBe("https://mock.blob.core.windows.net/snapshots/run789/iteration-1/tool-calls.jsonl");
+    expect(turns[1].toolCallsUrl).toBe("https://mock.blob.core.windows.net/snapshots/run789/iteration-2/tool-calls.jsonl");
+  });
+
+  it("does nothing when no tool-calls files are provided", async () => {
+    const { client, uploaded } = makeMockContainerClient();
+    await uploadBundledToolCallsFiles({
+      toolCallsFiles: [],
+      runDir: "/tmp/extracted/run000",
+      runId: "run000",
+      turns: [],
+      containerClient: client,
+    });
     expect(uploaded).toHaveLength(0);
   });
 });

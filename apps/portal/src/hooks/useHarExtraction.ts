@@ -64,7 +64,8 @@ export function useAllTurnsToolCalls(
   turns?: ConversationTurn[],
   topLevelHarUrl?: string,
 ): { allToolCalls: AggregatedToolCall[]; isLoading: boolean } {
-  // Turns that already have pre-computed toolCalls don't need HAR fetching
+  // Turns that already have pre-computed `toolCalls` (legacy inline shape)
+  // don't need any blob fetch.
   const preComputed = useMemo(() => {
     const out: AggregatedToolCall[] = [];
     if (turns) {
@@ -79,7 +80,41 @@ export function useAllTurnsToolCalls(
     return out;
   }, [turns]);
 
-  // Build query descriptors only for turns that need HAR extraction
+  // New shape: per-iteration tool-calls.jsonl in blob storage. Fetched via
+  // the API proxy (`/api/v1/requests/:id/tool-calls?iteration=N`) and parsed
+  // line-by-line. Preferred over re-extracting from the HAR.
+  const jsonlQueries = useMemo(() => {
+    const q: { iteration: number }[] = [];
+    if (turns) {
+      for (const t of turns) {
+        const hasInline = t.toolCalls && t.toolCalls.length > 0;
+        if (!hasInline && t.toolCallsUrl) {
+          q.push({ iteration: t.iteration });
+        }
+      }
+    }
+    return q;
+  }, [turns]);
+
+  const jsonlResults = useQueries({
+    queries: jsonlQueries.map((q) => ({
+      queryKey: ["tool-calls", runId, q.iteration],
+      queryFn: async () => {
+        const url = api.toolCallsUrl(runId, q.iteration);
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        return text
+          .split("\n")
+          .filter((line) => line.trim().length > 0)
+          .map((line) => JSON.parse(line) as ToolCall);
+      },
+      staleTime: Infinity,
+    })),
+  });
+
+  // Legacy fallback: turns that have `harUrl` but neither inline `toolCalls`
+  // nor a `toolCallsUrl` blob — re-extract from the HAR.
   const queries = useMemo(() => {
     const q: { iteration: number | undefined; enabled: boolean }[] = [];
 
@@ -88,10 +123,13 @@ export function useAllTurnsToolCalls(
       q.push({ iteration: undefined, enabled: true });
     }
 
-    // Multi-turn: one query per turn with harUrl but WITHOUT pre-computed toolCalls
+    // Multi-turn: one query per turn with harUrl but WITHOUT pre-computed
+    // toolCalls and WITHOUT a tool-calls JSONL blob.
     if (turns) {
       for (const t of turns) {
-        if (t.harUrl && !(t.toolCalls && t.toolCalls.length > 0)) {
+        const hasInline = t.toolCalls && t.toolCalls.length > 0;
+        const hasJsonl = !!t.toolCallsUrl;
+        if (t.harUrl && !hasInline && !hasJsonl) {
           q.push({ iteration: t.iteration, enabled: true });
         }
       }
@@ -116,6 +154,16 @@ export function useAllTurnsToolCalls(
 
   const allToolCalls = useMemo(() => {
     const out: AggregatedToolCall[] = [...preComputed];
+    // JSONL blob fetches first
+    for (let i = 0; i < jsonlResults.length; i++) {
+      const tcs = jsonlResults[i].data;
+      if (!tcs) continue;
+      const iteration = jsonlQueries[i].iteration;
+      for (const tc of tcs) {
+        out.push({ ...tc, timestamp: tc.timestamp ?? "", _iteration: iteration });
+      }
+    }
+    // Legacy HAR re-extraction
     for (let i = 0; i < results.length; i++) {
       const har = results[i].data;
       if (!har) continue;
@@ -129,9 +177,9 @@ export function useAllTurnsToolCalls(
       }
     }
     return out;
-  }, [preComputed, results, queries]);
+  }, [preComputed, jsonlResults, jsonlQueries, results, queries]);
 
-  const isLoading = results.some((r) => r.isLoading);
+  const isLoading = results.some((r) => r.isLoading) || jsonlResults.some((r) => r.isLoading);
 
   return { allToolCalls, isLoading };
 }

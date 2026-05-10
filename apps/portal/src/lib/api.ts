@@ -185,6 +185,11 @@ export const api = {
     return `${BASE}/requests/${id}/har${qs}`;
   },
 
+  /** Get tool-calls JSONL download URL for a per-iteration turn */
+  toolCallsUrl: (id: string, iteration: number): string => {
+    return `${BASE}/requests/${id}/tool-calls?iteration=${iteration}`;
+  },
+
   /** Get full run archive download URL (.tar.gz with run.yaml + iteration snapshots) */
   archiveUrl: (id: string): string => {
     return `${BASE}/requests/${id}/archive`;

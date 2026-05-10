@@ -30,7 +30,15 @@ export interface ConversationTurn {
   tokenUsage?: TokenUsage;  // LLM token usage for this iteration
   startedAt?: Date;        // When this iteration began
   durationMs?: number;     // Wall-clock duration of this iteration in milliseconds
-  toolCalls?: ToolCall[];   // Tool calls extracted from HAR (computed at iteration completion)
+  toolCalls?: ToolCall[];   // @deprecated — legacy inline tool calls. New writes use `toolCallsUrl` + `toolCallCount`. Kept for backwards-compatible reads.
+  /** Blob storage URL to the per-iteration tool-calls JSONL append blob
+   *  (`{requestId}/runs/{runId}/iteration-{n}/tool-calls.jsonl`). Replaces
+   *  the inline `toolCalls` array so unbounded tool-call lists no longer
+   *  contribute to the CosmosDB 2 MB document-size limit. */
+  toolCallsUrl?: string;
+  /** Number of tool calls in `toolCallsUrl` — kept on the turn so consumers
+   *  can render counts/aggregates without fetching the JSONL blob. */
+  toolCallCount?: number;
   aiCallCount?: number;    // Number of AI completion API calls made during this iteration
   rawChatUrl?: string;     // Blob storage URL to the raw chat transcript export
   rawChatFormat?: string;  // Format identifier for the raw chat export
