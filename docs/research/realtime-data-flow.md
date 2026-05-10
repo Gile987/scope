@@ -53,6 +53,21 @@ sequenceDiagram
 - `useLogStream` hook in `apps/portal/src/hooks/use-log-stream.ts` — uses browser `EventSource` API
 - Used by `RunDetail.tsx` and `LogViewer.tsx`
 
+## Append-Blob Artifacts
+
+A few per-run artifacts follow the same append-only JSONL pattern as logs and are
+read lazily by clients (no SSE stream — fetched on demand by ID/iteration):
+
+| Artifact | Container | Path | Producer | Consumer |
+|----------|-----------|------|----------|----------|
+| Log events | `logs` | `{requestId}/runs/{runId}/run.jsonl` | `BlobStorage.appendLogEvent` (workers) | SSE replay + `GET /api/v1/requests/:id/logs` |
+| Per-iteration tool calls | `snapshots` | `{requestId}/runs/{runId}/iteration-{n}/tool-calls.jsonl` | `BlobStorage.appendToolCall` (`multi-turn-loop`) | `GET /api/v1/requests/:id/tool-calls?iteration=N`, consumed by `useAllTurnsToolCalls` |
+
+Tool-call JSONL was introduced (#812) to keep unbounded per-iteration tool-call
+lists out of the `RequestDocument` (CosmosDB document size is capped at 2 MB).
+The turn carries only `toolCallsUrl` + `toolCallCount`; legacy turns with an
+inline `toolCalls[]` array remain readable for backwards compatibility.
+
 ## React Query Polling
 
 [TanStack Query](https://tanstack.com/query) (formerly React Query) provides client-side polling via `refetchInterval`:
