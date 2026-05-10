@@ -29,4 +29,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "014-introduce-runs-and-run.ts",
   "015-add-priority-and-scheduler-index.ts",
   "016-fix-scheduler-sort-index.ts",
+  "017-backfill-tool-calls-jsonl.ts",
 ];
