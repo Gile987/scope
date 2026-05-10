@@ -48,9 +48,11 @@ import { resolveSkillSpecs } from "../utils/skill-helpers.js";
 import {
   detectBundledChatFiles,
   detectBundledHarFiles,
+  detectBundledToolCallsFiles,
   packRunIntoTar,
   uploadBundledChatFiles,
   uploadBundledHarFiles,
+  uploadBundledToolCallsFiles,
 } from "../archive-har.js";
 import { subscribeClient, unsubscribeClient } from "../utils/sse.js";
 import type { SSEClient } from "../utils/sse.js";
@@ -2001,6 +2003,17 @@ apiRoute(ctx.app, ctx.registry, {
     if (topLevelChatUrl) {
       runDoc.rawChatUrl = topLevelChatUrl;
     }
+
+    // Upload bundled per-iteration tool-calls JSONL files to blob storage.
+    // Mutates each matching turn's `toolCallsUrl` in place.
+    const detectedToolCallsFiles = detectBundledToolCallsFiles(readdirSync(runDir));
+    await uploadBundledToolCallsFiles({
+      toolCallsFiles: detectedToolCallsFiles,
+      runDir,
+      runId: runDoc._id,
+      turns,
+      containerClient,
+    });
 
     // Prepare document for insertion
     const docToInsert: RequestDocument = {
