@@ -286,7 +286,6 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     const result = await runMultiTurnLoop(config as any);
 
     expect(result.passed).toBe(true);
-    expect(result.turns[0].toolCalls).toBeUndefined();
     expect(result.turns[0].toolCallsUrl).toBe("https://blob/tool-calls.jsonl");
     expect(result.turns[0].toolCallCount).toBe(2);
     expect(mockExtractToolCalls).toHaveBeenCalledWith(harFile);
@@ -304,7 +303,6 @@ describe("runMultiTurnLoop — tool call extraction", () => {
 
     const result = await runMultiTurnLoop(config as any);
 
-    expect(result.turns[0].toolCalls).toBeUndefined();
     expect(result.turns[0].toolCallsUrl).toBeUndefined();
     expect(result.turns[0].toolCallCount).toBeUndefined();
     expect(mockExtractToolCalls).not.toHaveBeenCalled();
@@ -323,7 +321,6 @@ describe("runMultiTurnLoop — tool call extraction", () => {
 
     const result = await runMultiTurnLoop(config as any);
 
-    expect(result.turns[0].toolCalls).toBeUndefined();
     expect(result.turns[0].toolCallsUrl).toBeUndefined();
     expect(result.turns[0].toolCallCount).toBeUndefined();
     expect((config.blobStorage as any).appendToolCall).not.toHaveBeenCalled();
@@ -342,7 +339,6 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     const result = await runMultiTurnLoop(config as any);
 
     expect(result.passed).toBe(true);
-    expect(result.turns[0].toolCalls).toBeUndefined();
     expect(result.turns[0].toolCallsUrl).toBeUndefined();
     expect(mockLog).toHaveBeenCalledWith("warn", expect.stringContaining("Failed to extract or persist tool calls"), expect.anything());
   });

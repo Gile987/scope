@@ -40,9 +40,7 @@ export interface ConversationTurn {
   tokenUsage?: TokenUsage;
   startedAt?: string;
   durationMs?: number;
-  toolCalls?: ToolCall[];
-  /** Blob storage URL to the per-iteration tool-calls JSONL append blob.
-   *  Replaces the inline `toolCalls` array for new runs. */
+  /** Blob storage URL to the per-iteration tool-calls JSONL append blob. */
   toolCallsUrl?: string;
   /** Number of tool calls in `toolCallsUrl` — used for counts/aggregates
    *  without fetching the JSONL blob. */
