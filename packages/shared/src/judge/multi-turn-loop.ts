@@ -176,16 +176,14 @@ export async function runMultiTurnLoop(
           );
           await iterLog("info", "HAR file uploaded", { harUrl: turnHarUrl });
 
-          // Extract tool calls from the sanitized HAR and append them to a
+          // Extract tool calls from the sanitized HAR and write them to a
           // per-iteration JSONL blob alongside the HAR. Storing tool calls
           // out-of-band keeps unbounded lists out of the request document
           // (which is bounded to 2 MB on CosmosDB).
           try {
             const extracted = extractToolCalls(sanitizedHar);
             if (extracted.length > 0) {
-              for (const toolCall of extracted) {
-                await blobStorage.appendToolCall(requestId, runId, iteration, toolCall);
-              }
+              await blobStorage.writeToolCalls(requestId, runId, iteration, extracted);
               turnToolCallsUrl = blobStorage.getToolCallsBlobUrl(requestId, runId, iteration);
               turnToolCallCount = extracted.length;
               await iterLog("info", `Extracted ${extracted.length} tool call(s) from HAR`, {
