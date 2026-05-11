@@ -407,7 +407,6 @@ describe("run import/export — round-trip (export → import)", () => {
       .post("/api/v1/runs/upload")
       .attach("archive", archiveBuf, "archive.tar.gz");
 
-console.log("Import response body:", importRes.body);
     expect(importRes.status).toBe(201);
     expect(importRes.body.id).toBe(fixture._id);
     expect(importRes.body.iterations).toBe(1);
@@ -431,5 +430,168 @@ console.log("Import response body:", importRes.body);
     const reuploaded = blobStore.get(`snapshots/${fixture._id}/iteration-1/workspace.tar.gz`);
     expect(reuploaded).toBeDefined();
     expect(reuploaded!.length).toBeGreaterThan(0);
+  });
+
+  it("round-trips per-iteration HAR, chat-export and tool-calls plus run-level HAR/chat-export", async () => {
+    const id = "rt-blobs";
+    const fixture: any = makeFixtureRun(id);
+
+    // Wire URLs onto the run + turn so packRunIntoTar pulls each blob into
+    // the archive. URLs only need the `/snapshots/` (or `/logs/`) marker —
+    // blobNameFromSnapshotsUrl strips everything before that prefix.
+    fixture.run.harUrl = blobUrl("snapshots", `${id}/run.har`);
+    fixture.run.rawChatUrl = blobUrl("snapshots", `${id}/run.chat-export.json`);
+    fixture.run.logsUrl = blobUrl("logs", `${id}/runs/${id}/run.jsonl`);
+    fixture.run.turns[0].harUrl = blobUrl("snapshots", `${id}/iteration-1/network.har`);
+    fixture.run.turns[0].rawChatUrl = blobUrl("snapshots", `${id}/iteration-1/chat-export.json`);
+    fixture.run.turns[0].chatResultUrl = blobUrl("snapshots", `${id}/iteration-1/chat-result.json`);
+    fixture.run.turns[0].toolCallsUrl = blobUrl("snapshots", `${id}/iteration-1/tool-calls.jsonl`);
+
+    // Seed source blobs. Contents are arbitrary bytes — the export/import
+    // pipeline treats every file as opaque, so a marker string per slot is
+    // enough to assert byte-equal round-trip.
+    const innerIterTar = await buildTarGz({ "hello.txt": "iteration-1" });
+    const blobs: Record<string, Buffer> = {
+      [`snapshots/${id}/iteration-1/workspace.tar.gz`]: innerIterTar,
+      [`snapshots/${id}/iteration-1/network.har`]: Buffer.from('{"log":{"entries":[]}}'),
+      [`snapshots/${id}/run.har`]: Buffer.from('{"log":{"top":true}}'),
+      [`snapshots/${id}/iteration-1/chat-export.json`]: Buffer.from('{"chat":"per-iter"}'),
+      [`snapshots/${id}/run.chat-export.json`]: Buffer.from('{"chat":"top"}'),
+      [`snapshots/${id}/iteration-1/chat-result.json`]: Buffer.from('{"result":"per-iter"}'),
+      [`snapshots/${id}/iteration-1/tool-calls.jsonl`]: Buffer.from('{"tool":"a"}\n{"tool":"b"}\n'),
+      [`logs/${id}/runs/${id}/run.jsonl`]: Buffer.from('{"level":"info","message":"hi"}\n'),
+    };
+    for (const [k, v] of Object.entries(blobs)) blobStore.set(k, v);
+
+    const sourceReqs = makeRequestCollection();
+    sourceReqs.docs.set(id, fixture);
+
+    // 1. Export and verify every artifact lands in the archive byte-equal.
+    const exportApp = buildApp(sourceReqs);
+    const exportRes = await request(exportApp)
+      .get(`/api/v1/requests/${id}/archive`)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+
+    expect(exportRes.status).toBe(200);
+    const archiveBuf: Buffer = exportRes.body;
+    const entries = await readTarGz(archiveBuf);
+
+    // Source-blob → archive-entry mapping (mirrors packRunIntoTar's layout).
+    const expectedArchiveEntries: Record<string, string> = {
+      [`${id}/run.yaml`]: "<yaml>", // contents checked below
+      [`${id}/iteration-1.tar.gz`]: `snapshots/${id}/iteration-1/workspace.tar.gz`,
+      [`${id}/iteration-1.har`]: `snapshots/${id}/iteration-1/network.har`,
+      [`${id}/run.har`]: `snapshots/${id}/run.har`,
+      [`${id}/iteration-1.chat-export.json`]: `snapshots/${id}/iteration-1/chat-export.json`,
+      [`${id}/run.chat-export.json`]: `snapshots/${id}/run.chat-export.json`,
+      [`${id}/iteration-1.chat-result.json`]: `snapshots/${id}/iteration-1/chat-result.json`,
+      [`${id}/iteration-1.tool-calls.jsonl`]: `snapshots/${id}/iteration-1/tool-calls.jsonl`,
+      [`${id}/logs.jsonl`]: `logs/${id}/runs/${id}/run.jsonl`,
+    };
+    expect(Object.keys(entries).sort()).toEqual(Object.keys(expectedArchiveEntries).sort());
+    for (const [entryName, srcKey] of Object.entries(expectedArchiveEntries)) {
+      if (srcKey === "<yaml>") continue;
+      expect(entries[entryName]).toEqual(blobStore.get(srcKey));
+    }
+
+    // 2. Re-import into a fresh blob store + Mongo. Importer ingests
+    // HAR / chat-export / tool-calls; chat-result and logs.jsonl are
+    // intentionally not yet wired through and are dropped on import — the
+    // separate test below pins that behaviour.
+    blobStore.clear();
+    const targetReqs = makeRequestCollection();
+    const importApp = buildApp(targetReqs);
+    const importRes = await request(importApp)
+      .post("/api/v1/runs/upload")
+      .attach("archive", archiveBuf, "archive.tar.gz");
+    expect(importRes.status).toBe(201);
+
+    // Each ingested artifact must land at the importer's canonical blob
+    // name with byte-equal contents.
+    const expectedReuploads: Record<string, Buffer> = {
+      [`snapshots/${id}/iteration-1/workspace.tar.gz`]: innerIterTar,
+      [`snapshots/${id}/iteration-1/capture.har`]: blobs[`snapshots/${id}/iteration-1/network.har`],
+      [`snapshots/${id}/capture.har`]: blobs[`snapshots/${id}/run.har`],
+      [`snapshots/${id}/iteration-1/chat-export.json`]:
+        blobs[`snapshots/${id}/iteration-1/chat-export.json`],
+      [`snapshots/${id}/chat-export.json`]: blobs[`snapshots/${id}/run.chat-export.json`],
+      [`snapshots/${id}/iteration-1/tool-calls.jsonl`]:
+        blobs[`snapshots/${id}/iteration-1/tool-calls.jsonl`],
+    };
+    for (const [k, v] of Object.entries(expectedReuploads)) {
+      expect(blobStore.get(k), `expected reupload at ${k}`).toEqual(v);
+    }
+
+    // The re-inserted run document points at the new canonical URLs.
+    const reinserted = targetReqs.docs.get(id);
+    expect(reinserted.run.harUrl).toMatch(new RegExp(`/snapshots/${id}/capture\\.har$`));
+    expect(reinserted.run.rawChatUrl).toMatch(new RegExp(`/snapshots/${id}/chat-export\\.json$`));
+    expect(reinserted.run.turns[0].harUrl).toMatch(
+      new RegExp(`/snapshots/${id}/iteration-1/capture\\.har$`),
+    );
+    expect(reinserted.run.turns[0].rawChatUrl).toMatch(
+      new RegExp(`/snapshots/${id}/iteration-1/chat-export\\.json$`),
+    );
+    expect(reinserted.run.turns[0].toolCallsUrl).toMatch(
+      new RegExp(`/snapshots/${id}/iteration-1/tool-calls\\.jsonl$`),
+    );
+  });
+
+  it("documents that chat-result and logs.jsonl are dropped on import (asymmetry vs export)", async () => {
+    // The export side bundles iteration-N.chat-result.json and logs.jsonl
+    // entries into the archive (see prior test), but the upload handler has
+    // no detect+upload helper for either, so they silently disappear on
+    // re-import. This test pins that behaviour so any future importer
+    // change either keeps it explicit or fails here, prompting an update.
+    const id = "asym-1";
+    const fixture: any = makeFixtureRun(id);
+    fixture.run.logsUrl = blobUrl("logs", `${id}/runs/${id}/run.jsonl`);
+    fixture.run.turns[0].chatResultUrl = blobUrl("snapshots", `${id}/iteration-1/chat-result.json`);
+
+    blobStore.set(`snapshots/${id}/iteration-1/workspace.tar.gz`, await buildTarGz({ "x.txt": "x" }));
+    blobStore.set(`snapshots/${id}/iteration-1/chat-result.json`, Buffer.from('{"r":1}'));
+    blobStore.set(`logs/${id}/runs/${id}/run.jsonl`, Buffer.from('{"level":"info"}\n'));
+
+    const sourceReqs = makeRequestCollection();
+    sourceReqs.docs.set(id, fixture);
+
+    const exportApp = buildApp(sourceReqs);
+    const exportRes = await request(exportApp)
+      .get(`/api/v1/requests/${id}/archive`)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(exportRes.status).toBe(200);
+    const archive = await readTarGz(exportRes.body);
+    expect(archive[`${id}/iteration-1.chat-result.json`]).toBeDefined();
+    expect(archive[`${id}/logs.jsonl`]).toBeDefined();
+
+    blobStore.clear();
+    const targetReqs = makeRequestCollection();
+    const importApp = buildApp(targetReqs);
+    const importRes = await request(importApp)
+      .post("/api/v1/runs/upload")
+      .attach("archive", exportRes.body, "archive.tar.gz");
+    expect(importRes.status).toBe(201);
+
+    const reinserted = targetReqs.docs.get(id);
+    // chat-result is not re-uploaded. The exporter rewrites the URL to a
+    // relative archive path (`iteration-1.chat-result.json`); since the
+    // importer has no helper for it, that broken relative string survives
+    // on the turn and no blob is re-uploaded.
+    expect(reinserted.run.turns[0].chatResultUrl).toBe("iteration-1.chat-result.json");
+    expect([...blobStore.keys()].some(k => k.endsWith("chat-result.json"))).toBe(false);
+
+    // logs.jsonl is not re-uploaded; the importer only sets a fresh logsUrl
+    // pointing at the (empty) per-attempt logs blob.
+    expect([...blobStore.keys()].some(k => k.startsWith("logs/"))).toBe(false);
   });
 });
