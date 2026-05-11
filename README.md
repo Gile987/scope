@@ -25,108 +25,72 @@
 
 For the full system overview, see [docs/architecture/overview.md](docs/architecture/overview.md).
 
+### Run lifecycle
+
 ```mermaid
 flowchart TB
-    %% ── Clients ─────────────────────────────────────
-    subgraph Clients[" "]
-        direction LR
-        CLI([CLI])
-        Portal([Portal])
-    end
+    CLI([CLI])
+    Portal([Portal])
+    API[API]
+    Scheduler[Scheduler]
+    Judge[Judge]
+    TM[Token Manager]
 
-    %% ── Control plane ───────────────────────────────
-    subgraph Control["Control Plane"]
-        direction LR
-        API[API]
-        Scheduler[Scheduler]
-        Judge[Judge]
-        TM[Token Manager]
-    end
+    Queues["Azure Storage Queues<br/><i>copilot · claude-code · vscode-web · vscode-electron</i>"]
 
-    %% ── Queues ──────────────────────────────────────
-    subgraph Queues["Azure Storage Queues"]
-        direction LR
-        Q1[copilot]
-        Q2[claude-code]
-        Q3[vscode-web]
-        Q4[vscode-electron]
-    end
+    MongoDB[(MongoDB)]
+    Redis[(Redis Pub/Sub)]
+    Blob[(Blob Storage)]
+    KV[(Key Vault)]
 
-    %% ── Worker pods (each with an MCP Gateway sidecar) ──
-    subgraph WorkersGroup["Coding Agent Workers (each pod ships an MCP Gateway sidecar)"]
-        direction LR
-        subgraph P1[" "]
-            direction TB
-            W1[coder-acp-copilot]
-            MCP1[MCP Gateway]
-            W1 -.-> MCP1
-        end
-        subgraph P2[" "]
-            direction TB
-            W2[coder-acp-claude-code]
-            MCP2[MCP Gateway]
-            W2 -.-> MCP2
-        end
-        subgraph P3[" "]
-            direction TB
-        end
-        subgraph P4[" "]
-            direction TB
-            MCP4[MCP Gateway]
-            W4 -.-> MCP4
-        end
-    end
-
-    %% ── Egress ──────────────────────────────────────
-    subgraph Egress["Egress / Upstream"]
-        direction LR
-        GW["AI Gateway<br/><i>Rust TLS proxy</i>"]
-        subgraph MCPServers["MCP Servers"]
-            direction TB
-            StdioMCP["stdio (filesystem, …)"]
-            RemoteMCP["remote HTTP (context7, …)"]
-        end
-        subgraph AIProviders["AI Providers"]
-            direction TB
-            Copilot[GitHub Copilot API]
-            Anthropic[Anthropic API]
-        end
-    end
-
-    %% ── Storage ─────────────────────────────────────
-    subgraph Storage["Storage"]
-        direction LR
-        MongoDB[(MongoDB)]
-        Redis[(Redis Pub/Sub)]
-        Blob[(Blob Storage)]
-        KV[(Key Vault)]
-    end
-
-    %% ── Edges ───────────────────────────────────────
     CLI <-->|REST · SSE| API
     Portal <-->|REST · SSE| API
-
     API -->|persist| MongoDB
     Scheduler -->|poll| MongoDB
     Scheduler -->|enqueue| Queues
-    Redis -->|subscribe| API
-    TM <--> KV
-
-    Q1 --> W1
-    Q2 --> W2
-    Q3 --> W3
-    Q4 --> W4
-
-    WorkersGroup -->|status + results| MongoDB
-    WorkersGroup -->|real-time logs| Redis
-    WorkersGroup -->|workspace snapshots| Blob
-    WorkersGroup -->|fetch tokens| TM
-    WorkersGroup -->|invoke| Judge
+    Queues -->|dequeue| Workers
+    Workers -->|status + results| MongoDB
+    Workers -->|real-time logs| Redis
+    Workers -->|workspace snapshots| Blob
+    Workers -->|fetch tokens| TM
+    Workers -->|invoke| Judge
     Judge -->|scores| MongoDB
+    Redis -->|subscribe| API
+    TM <-->|store/sync| KV
+```
 
-    W4 -->|TLS intercept + HAR| GW
-    GW --> Copilot & Anthropic
-    MCP1 & MCP2 & MCP4 --> StdioMCP & RemoteMCP
+### Worker pod egress
+
+Each ACP worker pod ships an **MCP Gateway** sidecar ([MCPJungle](https://github.com/mcpjungle/MCPJungle)) that aggregates stdio + remote HTTP MCP servers behind one streamable HTTP endpoint. The Electron worker additionally routes its HTTPS traffic through the shared **AI Gateway** (Rust TLS proxy) to record HAR transcripts of upstream Copilot/Anthropic calls.
+
+```mermaid
+flowchart LR
+    subgraph Pod["Worker Pod"]
+        direction TB
+        Worker["Worker process<br/><i>(coder-acp-* / coder-vscode-*)</i>"]
+        MCP["MCP Gateway sidecar<br/><i>MCPJungle</i>"]
+        Worker -.->|tool calls| MCP
+    end
+
+    GW["AI Gateway<br/><i>shared Rust TLS proxy</i>"]
+
+    subgraph AI["AI Providers"]
+        direction TB
+        Copilot[GitHub Copilot API]
+        Anthropic[Anthropic API]
+    end
+
+    subgraph MCPServers["MCP Servers"]
+        direction TB
+        StdioMCP["stdio (filesystem, …)"]
+        RemoteMCP["remote HTTP (context7, …)"]
+    end
+
+    Worker -->|"HTTPS<br/>(Electron worker only)"| GW
+    GW --> Copilot
+    GW --> Anthropic
+    MCP --> StdioMCP
+    MCP --> RemoteMCP
 ```
 
 ## Quick Start
