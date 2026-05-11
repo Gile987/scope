@@ -1829,6 +1829,216 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
+// Helpers for run-archive import (single + batch endpoints below).
+
+/** Errors thrown by `ingestRunFromDir` that map cleanly to HTTP responses. */
+class ImportError extends Error {
+  constructor(public statusCode: number, message: string, public details?: Record<string, unknown>) {
+    super(message);
+  }
+}
+
+function buildBlobServiceClient(): BlobServiceClient {
+  if (ctx.storageConnectionString) {
+    return BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
+  }
+  return new BlobServiceClient(
+    `https://${ctx.storageAccountName}.blob.core.windows.net`,
+    new DefaultAzureCredential(),
+  );
+}
+
+/**
+ * Ingest a single extracted run directory (containing run.yaml + iteration
+ * files + bundled artifacts) into Mongo + blob storage. Used by both the
+ * single-archive and batch-archive upload endpoints. Throws ImportError on
+ * recoverable failures (bad yaml, conflict, in-flight status, …).
+ */
+async function ingestRunFromDir(
+  runDir: string,
+  blobServiceClient: BlobServiceClient,
+): Promise<{ id: string; status: string; iterations: number }> {
+  const runYamlPath = join(runDir, "run.yaml");
+  if (!existsSync(runYamlPath)) {
+    throw new ImportError(400, "Invalid archive: run.yaml not found");
+  }
+
+  const runYamlContent = await readFile(runYamlPath, "utf-8");
+  let runDocRaw: unknown;
+  try {
+    runDocRaw = yamlParse(runYamlContent) as unknown;
+  } catch (parseErr) {
+    throw new ImportError(400, `Failed to parse run.yaml: ${parseErr}`);
+  }
+
+  // Validate the parsed YAML against the same schema used elsewhere for
+  // RequestDocument, plus a required `run` sub-document (the exporter
+  // always writes one, and the importer needs `run.status` to enforce
+  // the terminal-only rule below).
+  const ImportSchema = RequestResponseSchema.extend({ run: RunStateSchema });
+  const parsed = ImportSchema.safeParse(runDocRaw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map(i => ({
+      path: i.path.join(".") || "<root>",
+      message: i.message,
+    }));
+    throw new ImportError(
+      400,
+      `Invalid run.yaml: ${issues.map(i => `${i.path}: ${i.message}`).join("; ")}`,
+      { details: issues },
+    );
+  }
+  const runDoc = parsed.data;
+  const runState = runDoc.run;
+
+  // Validate status is terminal (cannot import in-flight runs).
+  const terminalStatuses = ["done"];
+  if (!terminalStatuses.includes(runState.status)) {
+    throw new ImportError(
+      400,
+      `Cannot upload in-flight run (status: ${runState.status}). Only terminal runs can be uploaded.`,
+    );
+  }
+
+  // Check if run already exists.
+  const existingRun = await ctx.requestCollection.findOne({ _id: runDoc._id });
+  if (existingRun) {
+    throw new ImportError(
+      409,
+      `Run with ID '${runDoc._id}' already exists`,
+      { existingStatus: existingRun.run?.status },
+    );
+  }
+
+  // Clone turns so we can mutate snapshotUrl/harUrl/etc. on each entry
+  // without touching the immutable parsed value.
+  const turns = (runState.turns ?? []).map(t => ({ ...t }));
+  const dirEntries = readdirSync(runDir);
+  const iterationFiles = dirEntries.filter(name => /^iteration-\d+\.tar\.gz$/.test(name));
+
+  const containerClient = blobServiceClient.getContainerClient("snapshots");
+  await containerClient.createIfNotExists();
+  const logsContainerClient = blobServiceClient.getContainerClient("logs");
+  await logsContainerClient.createIfNotExists();
+
+  // Upload iteration snapshots to blob storage and update snapshotUrls.
+  // The exporter writes each iteration as `iteration-N.tar.gz` (a file,
+  // not a directory) — copy the bytes through to blob storage as-is.
+  for (const iterFile of iterationFiles) {
+    const iterMatch = iterFile.match(/^iteration-(\d+)\.tar\.gz$/);
+    if (!iterMatch) continue;
+
+    const iterNum = parseInt(iterMatch[1], 10);
+    const iterPath = join(runDir, iterFile);
+
+    const blobName = `${runDoc._id}/iteration-${iterNum}/workspace.tar.gz`;
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    await blockBlobClient.uploadFile(iterPath, {
+      blobHTTPHeaders: { blobContentType: "application/gzip" },
+      tags: { requestId: runDoc._id, iteration: String(iterNum) },
+    });
+
+    const turn = turns.find(t => t.iteration === iterNum);
+    if (turn) {
+      turn.snapshotUrl = blockBlobClient.url;
+    }
+  }
+
+  // Upload bundled HAR files to blob storage.
+  const detectedHarFiles = detectBundledHarFiles(readdirSync(runDir));
+  const topLevelHarUrl = await uploadBundledHarFiles({
+    harFiles: detectedHarFiles,
+    runDir,
+    runId: runDoc._id,
+    turns,
+    containerClient,
+  });
+  if (topLevelHarUrl) {
+    runState.harUrl = topLevelHarUrl;
+  }
+
+  // Upload bundled chat-export files to blob storage.
+  const detectedChatFiles = detectBundledChatFiles(readdirSync(runDir));
+  const topLevelChatUrl = await uploadBundledChatFiles({
+    chatFiles: detectedChatFiles,
+    runDir,
+    runId: runDoc._id,
+    turns,
+    containerClient,
+  });
+  if (topLevelChatUrl) {
+    runState.rawChatUrl = topLevelChatUrl;
+  }
+
+  // Upload bundled per-iteration tool-calls JSONL files.
+  const detectedToolCallsFiles = detectBundledToolCallsFiles(readdirSync(runDir));
+  await uploadBundledToolCallsFiles({
+    toolCallsFiles: detectedToolCallsFiles,
+    runDir,
+    runId: runDoc._id,
+    turns,
+    containerClient,
+  });
+
+  // Upload bundled per-iteration chat-result JSON files.
+  const detectedChatResultFiles = detectBundledChatResultFiles(readdirSync(runDir));
+  await uploadBundledChatResultFiles({
+    chatResultFiles: detectedChatResultFiles,
+    runDir,
+    runId: runDoc._id,
+    turns,
+    containerClient,
+  });
+
+  // Re-upload the bundled run.jsonl into the logs container at the
+  // canonical per-attempt location so downloaded logs survive the
+  // round-trip. Re-imported runs are terminal, so a one-shot block-blob
+  // write is fine even though the live path uses an append blob — the
+  // download side reads via the blob client, which is type-agnostic.
+  const logsArchivePath = join(runDir, "logs.jsonl");
+  if (existsSync(logsArchivePath)) {
+    const logsBlobName = `${runDoc._id}/runs/${runDoc._id}/run.jsonl`;
+    const logsBlobClient = logsContainerClient.getBlockBlobClient(logsBlobName);
+    await logsBlobClient.uploadFile(logsArchivePath, {
+      blobHTTPHeaders: { blobContentType: "application/x-ndjson" },
+      tags: { requestId: runDoc._id },
+    });
+  }
+
+  // Prepare document for insertion. The schema parse already produced
+  // properly-typed/coerced values, so the doc shape lines up with
+  // RequestDocument without further hand-rolled conversions.
+  const docToInsert: RequestDocument = {
+    _id: runDoc._id,
+    scenario: runDoc.scenario,
+    workerType: runDoc.workerType as WorkerType,
+    createdAt: runDoc.createdAt ?? new Date(),
+    priority: runDoc.priority ?? 0,
+    ...(runDoc.updatedAt ? { updatedAt: runDoc.updatedAt } : {}),
+    ...(runDoc.maxIterations ? { maxIterations: runDoc.maxIterations } : {}),
+    ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
+    ...(runDoc.persona ? { persona: runDoc.persona } : {}),
+    ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv4() }),
+    run: {
+      _id: runDoc._id,
+      attemptNumber: 1,
+      status: runState.status,
+      logsUrl: ctx.blobStorage.getLogsBlobUrl(`${runDoc._id}/runs/${runDoc._id}/run.jsonl`),
+      ...(runState.outcome ? { outcome: runState.outcome } : {}),
+      ...(runState.result ? { result: runState.result } : {}),
+      ...(runState.error ? { error: runState.error } : {}),
+      ...(runState.harUrl ? { harUrl: runState.harUrl } : {}),
+      ...(runState.rawChatUrl ? { rawChatUrl: runState.rawChatUrl } : {}),
+      ...(runState.rawChatFormat ? { rawChatFormat: runState.rawChatFormat } : {}),
+      turns,
+    },
+  };
+
+  await ctx.requestCollection.insertOne(docToInsert);
+
+  return { id: runDoc._id, status: runState.status, iterations: iterationFiles.length };
+}
+
 // POST /api/v1/runs/upload — Upload a run archive (tar.gz) to import a previously downloaded run
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
@@ -1844,7 +2054,6 @@ apiRoute(ctx.app, ctx.registry, {
   let uploadedFilePath: string | undefined;
 
   try {
-    // Validate file was uploaded
     if (!req.file) {
       res.status(400).json({ error: "No archive file uploaded. Use 'archive' field for the tar.gz file." });
       return;
@@ -1855,28 +2064,20 @@ apiRoute(ctx.app, ctx.registry, {
     const extractDir = join(tempDir, "extracted");
     execSync(`mkdir -p "${extractDir}" && tar xzf "${uploadedFilePath}" -C "${extractDir}"`, { stdio: "pipe" });
 
-    // Find the run directory (archive contains <id>/ folder with run.yaml)
+    // Find the run directory: archive may have run.yaml at root or wrapped
+    // in a single <id>/ subdirectory. Auto-detect.
     const entries = readdirSync(extractDir);
     if (entries.length === 0) {
       res.status(400).json({ error: "Archive is empty" });
       return;
     }
-
-    // Determine run directory - could be at root or in a subdirectory
     let runDir = extractDir;
-    let runYamlPath = join(extractDir, "run.yaml");
-    
-    if (!existsSync(runYamlPath)) {
-      // run.yaml might be inside a subdirectory (e.g., <id>/run.yaml)
-      // Check each top-level entry for run.yaml
+    if (!existsSync(join(extractDir, "run.yaml"))) {
       for (const entry of entries) {
         const subDir = join(extractDir, entry);
-        const subRunYaml = join(subDir, "run.yaml");
         try {
-          const stat = statSync(subDir);
-          if (stat.isDirectory() && existsSync(subRunYaml)) {
+          if (statSync(subDir).isDirectory() && existsSync(join(subDir, "run.yaml"))) {
             runDir = subDir;
-            runYamlPath = subRunYaml;
             break;
           }
         } catch {
@@ -1885,218 +2086,125 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
-    if (!existsSync(runYamlPath)) {
-      res.status(400).json({ error: "Invalid archive: run.yaml not found" });
-      return;
-    }
-
-    // Parse run.yaml
-    const runYamlContent = await readFile(runYamlPath, "utf-8");
-    let runDocRaw: unknown;
+    const blobServiceClient = buildBlobServiceClient();
     try {
-      runDocRaw = yamlParse(runYamlContent) as unknown;
-    } catch (parseErr) {
-      res.status(400).json({ error: `Failed to parse run.yaml: ${parseErr}` });
-      return;
-    }
-
-    // Validate the parsed YAML against the same schema used elsewhere for
-    // RequestDocument, plus a required `run` sub-document (the exporter
-    // always writes one, and the importer needs `run.status` to enforce
-    // the terminal-only rule below).
-    const ImportSchema = RequestResponseSchema.extend({ run: RunStateSchema });
-    const parsed = ImportSchema.safeParse(runDocRaw);
-    if (!parsed.success) {
-      const issues = parsed.error.issues.map(i => ({
-        path: i.path.join(".") || "<root>",
-        message: i.message,
-      }));
-      res.status(400).json({
-        error: `Invalid run.yaml: ${issues.map(i => `${i.path}: ${i.message}`).join("; ")}`,
-        details: issues,
+      const result = await ingestRunFromDir(runDir, blobServiceClient);
+      console.log(`Uploaded run ${result.id} with ${result.iterations} iterations`);
+      res.status(201).json({
+        id: result.id,
+        status: result.status,
+        iterations: result.iterations,
+        message: "Run uploaded successfully",
       });
-      return;
-    }
-    const runDoc = parsed.data;
-    const runState = runDoc.run;
-
-    // Validate status is terminal (cannot import in-flight runs)
-    const terminalStatuses = ["done"];
-    if (!terminalStatuses.includes(runState.status)) {
-      res.status(400).json({
-        error: `Cannot upload in-flight run (status: ${runState.status}). Only terminal runs can be uploaded.`,
-      });
-      return;
-    }
-
-    // Check if run already exists
-    const existingRun = await ctx.requestCollection.findOne({ _id: runDoc._id });
-    if (existingRun) {
-      res.status(409).json({
-        error: `Run with ID '${runDoc._id}' already exists`,
-        existingStatus: existingRun.run?.status,
-      });
-      return;
-    }
-
-    // Upload iteration snapshots to blob storage and update snapshotUrls.
-    // The exporter writes each iteration as `iteration-N.tar.gz` (a file,
-    // not a directory) — copy the bytes through to blob storage as-is.
-    // Clone turns so we can mutate snapshotUrl/harUrl/etc. on each entry
-    // without touching the immutable parsed value.
-    const turns = (runState.turns ?? []).map(t => ({ ...t }));
-    const dirEntries = readdirSync(runDir);
-    const iterationFiles = dirEntries.filter(name => /^iteration-\d+\.tar\.gz$/.test(name));
-
-    // Connect to blob storage
-    let blobServiceClient: BlobServiceClient;
-    if (ctx.storageConnectionString) {
-      blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
-    } else {
-      blobServiceClient = new BlobServiceClient(
-        `https://${ctx.storageAccountName}.blob.core.windows.net`,
-        new DefaultAzureCredential()
-      );
-    }
-    const containerClient = blobServiceClient.getContainerClient("snapshots");
-    await containerClient.createIfNotExists();
-    const logsContainerClient = blobServiceClient.getContainerClient("logs");
-    await logsContainerClient.createIfNotExists();
-
-    for (const iterFile of iterationFiles) {
-      const iterMatch = iterFile.match(/^iteration-(\d+)\.tar\.gz$/);
-      if (!iterMatch) continue;
-
-      const iterNum = parseInt(iterMatch[1], 10);
-      const iterPath = join(runDir, iterFile);
-
-      // Upload the iteration tar.gz directly to blob storage
-      const blobName = `${runDoc._id}/iteration-${iterNum}/workspace.tar.gz`;
-      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-      await blockBlobClient.uploadFile(iterPath, {
-        blobHTTPHeaders: { blobContentType: "application/gzip" },
-        tags: { requestId: runDoc._id, iteration: String(iterNum) },
-      });
-
-      // Update turn's snapshotUrl
-      const turn = turns.find(t => t.iteration === iterNum);
-      if (turn) {
-        turn.snapshotUrl = blockBlobClient.url;
+    } catch (err) {
+      if (err instanceof ImportError) {
+        res.status(err.statusCode).json({ error: err.message, ...(err.details ?? {}) });
+        return;
       }
+      throw err;
     }
-
-    // Upload bundled HAR files to blob storage
-    const detectedHarFiles = detectBundledHarFiles(readdirSync(runDir));
-    const topLevelHarUrl = await uploadBundledHarFiles({
-      harFiles: detectedHarFiles,
-      runDir,
-      runId: runDoc._id,
-      turns,
-      containerClient,
-    });
-    if (topLevelHarUrl) {
-      runState.harUrl = topLevelHarUrl;
-    }
-
-    // Upload bundled chat export files to blob storage
-    const detectedChatFiles = detectBundledChatFiles(readdirSync(runDir));
-    const topLevelChatUrl = await uploadBundledChatFiles({
-      chatFiles: detectedChatFiles,
-      runDir,
-      runId: runDoc._id,
-      turns,
-      containerClient,
-    });
-    if (topLevelChatUrl) {
-      runState.rawChatUrl = topLevelChatUrl;
-    }
-
-    // Upload bundled per-iteration tool-calls JSONL files to blob storage.
-    // Mutates each matching turn's `toolCallsUrl` in place.
-    const detectedToolCallsFiles = detectBundledToolCallsFiles(readdirSync(runDir));
-    await uploadBundledToolCallsFiles({
-      toolCallsFiles: detectedToolCallsFiles,
-      runDir,
-      runId: runDoc._id,
-      turns,
-      containerClient,
-    });
-
-    // Upload bundled per-iteration chat-result JSON files to blob storage.
-    // Mutates each matching turn's `chatResultUrl` in place.
-    const detectedChatResultFiles = detectBundledChatResultFiles(readdirSync(runDir));
-    await uploadBundledChatResultFiles({
-      chatResultFiles: detectedChatResultFiles,
-      runDir,
-      runId: runDoc._id,
-      turns,
-      containerClient,
-    });
-
-    // Re-upload the bundled run.jsonl into the logs container at the
-    // canonical per-attempt location so downloaded logs survive the
-    // round-trip. Re-imported runs are terminal, so a one-shot block-blob
-    // write is fine even though the live path uses an append blob — the
-    // download side reads via the blob client, which is type-agnostic.
-    const logsArchivePath = join(runDir, "logs.jsonl");
-    if (existsSync(logsArchivePath)) {
-      const logsBlobName = `${runDoc._id}/runs/${runDoc._id}/run.jsonl`;
-      const logsBlobClient = logsContainerClient.getBlockBlobClient(logsBlobName);
-      await logsBlobClient.uploadFile(logsArchivePath, {
-        blobHTTPHeaders: { blobContentType: "application/x-ndjson" },
-        tags: { requestId: runDoc._id },
-      });
-    }
-
-    // Prepare document for insertion. The schema parse already produced
-    // properly-typed/coerced values, so the doc shape lines up with
-    // RequestDocument without further hand-rolled conversions.
-    const docToInsert: RequestDocument = {
-      _id: runDoc._id,
-      scenario: runDoc.scenario,
-      workerType: runDoc.workerType as WorkerType,
-      createdAt: runDoc.createdAt ?? new Date(),
-      priority: runDoc.priority ?? 0,
-      ...(runDoc.updatedAt ? { updatedAt: runDoc.updatedAt } : {}),
-      ...(runDoc.maxIterations ? { maxIterations: runDoc.maxIterations } : {}),
-      ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
-      ...(runDoc.persona ? { persona: runDoc.persona } : {}),
-      ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv4() }),
-      // All per-attempt state lives in the run sub-document.
-      run: {
-        _id: runDoc._id,
-        attemptNumber: 1,
-        status: runState.status,
-        logsUrl: ctx.blobStorage.getLogsBlobUrl(`${runDoc._id}/runs/${runDoc._id}/run.jsonl`),
-        ...(runState.outcome ? { outcome: runState.outcome } : {}),
-        ...(runState.result ? { result: runState.result } : {}),
-        ...(runState.error ? { error: runState.error } : {}),
-        ...(runState.harUrl ? { harUrl: runState.harUrl } : {}),
-        ...(runState.rawChatUrl ? { rawChatUrl: runState.rawChatUrl } : {}),
-        ...(runState.rawChatFormat ? { rawChatFormat: runState.rawChatFormat } : {}),
-        turns,
-      },
-    };
-
-    // Insert into MongoDB
-    await ctx.requestCollection.insertOne(docToInsert);
-
-    console.log(`Uploaded run ${runDoc._id} with ${iterationFiles.length} iterations`);
-
-    res.status(201).json({
-      id: runDoc._id,
-      status: runState.status,
-      iterations: iterationFiles.length,
-      message: "Run uploaded successfully",
-    });
-
   } finally {
-    // Cleanup temp files
     rmSync(tempDir, { recursive: true, force: true });
     if (uploadedFilePath && existsSync(uploadedFilePath)) {
       rmSync(uploadedFilePath, { force: true });
     }
   }
+  },
+});
+
+// POST /api/v1/runs/upload-batch — Upload a batch archive (tar.gz of one
+// <runId>/... subtree per run, as produced by POST /api/v1/requests/archive).
+// Each run is ingested independently; per-run failures are reported in the
+// response without aborting the rest of the batch.
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/runs/upload-batch",
+  tags: ["Requests"],
+  summary: "Import batch run archive",
+  middleware: [upload.single("archive")],
+  response: z.object({
+    imported: z.array(z.object({
+      id: z.string(),
+      status: z.string(),
+      iterations: z.number(),
+    })),
+    failed: z.array(z.object({
+      id: z.string().optional(),
+      error: z.string(),
+      statusCode: z.number(),
+    })),
+  }),
+  rawResponse: true,
+  // Status is computed dynamically based on imported/failed counts; this
+  // value is only used for OpenAPI docs.
+  successStatus: 207,
+  responseDescription:
+    "Multi-status: 201 if all runs imported, 400 if none imported, 207 if partial",
+  errorResponses: {
+    400: { description: "No archive uploaded, empty archive, or all runs failed" },
+  },
+  handler: async (req, res) => {
+    const tempDir = mkdtempSync(join(tmpdir(), "run-upload-batch-"));
+    let uploadedFilePath: string | undefined;
+
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: "No archive file uploaded. Use 'archive' field for the tar.gz file." });
+        return;
+      }
+      uploadedFilePath = req.file.path;
+
+      const extractDir = join(tempDir, "extracted");
+      execSync(`mkdir -p "${extractDir}" && tar xzf "${uploadedFilePath}" -C "${extractDir}"`, { stdio: "pipe" });
+
+      const entries = readdirSync(extractDir);
+      const runDirs: string[] = [];
+      for (const entry of entries) {
+        const subDir = join(extractDir, entry);
+        try {
+          if (statSync(subDir).isDirectory() && existsSync(join(subDir, "run.yaml"))) {
+            runDirs.push(subDir);
+          }
+        } catch {
+          // Entry might not be a directory, skip
+        }
+      }
+
+      if (runDirs.length === 0) {
+        res.status(400).json({
+          error: "Batch archive contains no run subdirectories with run.yaml",
+        });
+        return;
+      }
+
+      const blobServiceClient = buildBlobServiceClient();
+      const imported: { id: string; status: string; iterations: number }[] = [];
+      const failed: { id?: string; error: string; statusCode: number }[] = [];
+
+      for (const runDir of runDirs) {
+        const fallbackId = basename(runDir);
+        try {
+          const result = await ingestRunFromDir(runDir, blobServiceClient);
+          imported.push(result);
+          console.log(`Uploaded run ${result.id} with ${result.iterations} iterations (batch)`);
+        } catch (err) {
+          if (err instanceof ImportError) {
+            failed.push({ id: fallbackId, error: err.message, statusCode: err.statusCode });
+          } else {
+            failed.push({ id: fallbackId, error: err instanceof Error ? err.message : String(err), statusCode: 500 });
+          }
+        }
+      }
+
+      // 201 if everything succeeded, 400 if nothing did, 207 otherwise.
+      const status = failed.length === 0 ? 201 : imported.length === 0 ? 400 : 207;
+      res.status(status).json({ imported, failed });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      if (uploadedFilePath && existsSync(uploadedFilePath)) {
+        rmSync(uploadedFilePath, { force: true });
+      }
+    }
   },
 });
 

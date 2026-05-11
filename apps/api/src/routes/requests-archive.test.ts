@@ -610,3 +610,130 @@ describe("run import/export — round-trip (export → import)", () => {
     );
   });
 });
+
+describe("batch run import (POST /api/v1/runs/upload-batch)", () => {
+  it("returns 400 when no file is uploaded", async () => {
+    const app = buildApp(makeRequestCollection());
+    const res = await request(app).post("/api/v1/runs/upload-batch");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/no archive file/i);
+  });
+
+  it("returns 400 when the batch archive contains no run subdirectories", async () => {
+    const app = buildApp(makeRequestCollection());
+    // Tar with only a stray top-level file — no <runId>/run.yaml inside.
+    const archive = await buildTarGz({ "stray.txt": "no run here" });
+    const res = await request(app)
+      .post("/api/v1/runs/upload-batch")
+      .attach("archive", archive, "batch.tar.gz");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/no run subdirectories/i);
+  });
+
+  it("round-trips a batch archive containing two runs", async () => {
+    // Round-trip via the existing batch-export endpoint: gives us a real
+    // batch archive in the exact shape the importer must accept.
+    const id1 = "batch-1";
+    const id2 = "batch-2";
+    const fixture1 = makeFixtureRun(id1);
+    const fixture2 = makeFixtureRun(id2);
+
+    const sourceReqs = makeRequestCollection();
+    sourceReqs.docs.set(id1, fixture1);
+    sourceReqs.docs.set(id2, fixture2);
+    blobStore.set(
+      `snapshots/${id1}/iteration-1/workspace.tar.gz`,
+      await buildTarGz({ "a.txt": "run-1 contents" }),
+    );
+    blobStore.set(
+      `snapshots/${id2}/iteration-1/workspace.tar.gz`,
+      await buildTarGz({ "b.txt": "run-2 contents" }),
+    );
+
+    const exportApp = buildApp(sourceReqs);
+    const exportRes = await request(exportApp)
+      .post("/api/v1/requests/archive")
+      .send({ ids: [id1, id2] })
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(exportRes.status).toBe(200);
+
+    // Verify: archive contains both run subtrees.
+    const entries = await readTarGz(exportRes.body);
+    expect(Object.keys(entries)).toEqual(
+      expect.arrayContaining([
+        `${id1}/run.yaml`,
+        `${id1}/iteration-1.tar.gz`,
+        `${id2}/run.yaml`,
+        `${id2}/iteration-1.tar.gz`,
+      ]),
+    );
+
+    blobStore.clear();
+    const targetReqs = makeRequestCollection();
+    const importApp = buildApp(targetReqs);
+    const importRes = await request(importApp)
+      .post("/api/v1/runs/upload-batch")
+      .attach("archive", exportRes.body, "batch.tar.gz");
+
+    expect(importRes.status).toBe(201);
+    expect(importRes.body.failed).toEqual([]);
+    expect(importRes.body.imported).toHaveLength(2);
+    const importedIds = (importRes.body.imported as Array<{ id: string }>).map(r => r.id).sort();
+    expect(importedIds).toEqual([id1, id2]);
+
+    // Both docs landed in target Mongo and both iteration blobs were
+    // re-uploaded.
+    expect(targetReqs.docs.has(id1)).toBe(true);
+    expect(targetReqs.docs.has(id2)).toBe(true);
+    expect(blobStore.has(`snapshots/${id1}/iteration-1/workspace.tar.gz`)).toBe(true);
+    expect(blobStore.has(`snapshots/${id2}/iteration-1/workspace.tar.gz`)).toBe(true);
+  });
+
+  it("returns 207 multi-status when some runs succeed and others conflict", async () => {
+    const id1 = "batch-ok";
+    const id2 = "batch-conflict";
+    const fixture1 = makeFixtureRun(id1);
+    const fixture2 = makeFixtureRun(id2);
+
+    const sourceReqs = makeRequestCollection();
+    sourceReqs.docs.set(id1, fixture1);
+    sourceReqs.docs.set(id2, fixture2);
+    blobStore.set(`snapshots/${id1}/iteration-1/workspace.tar.gz`, await buildTarGz({ "x": "1" }));
+    blobStore.set(`snapshots/${id2}/iteration-1/workspace.tar.gz`, await buildTarGz({ "x": "2" }));
+
+    const exportApp = buildApp(sourceReqs);
+    const exportRes = await request(exportApp)
+      .post("/api/v1/requests/archive")
+      .send({ ids: [id1, id2] })
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(exportRes.status).toBe(200);
+
+    blobStore.clear();
+    const targetReqs = makeRequestCollection();
+    // Pre-seed the conflict run on the target so its import returns 409.
+    targetReqs.docs.set(id2, makeFixtureRun(id2));
+
+    const importApp = buildApp(targetReqs);
+    const importRes = await request(importApp)
+      .post("/api/v1/runs/upload-batch")
+      .attach("archive", exportRes.body, "batch.tar.gz");
+
+    expect(importRes.status).toBe(207);
+    expect(importRes.body.imported).toHaveLength(1);
+    expect(importRes.body.imported[0].id).toBe(id1);
+    expect(importRes.body.failed).toHaveLength(1);
+    expect(importRes.body.failed[0].id).toBe(id2);
+    expect(importRes.body.failed[0].statusCode).toBe(409);
+    expect(importRes.body.failed[0].error).toMatch(/already exists/i);
+  });
+});
