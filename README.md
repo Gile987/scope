@@ -1,6 +1,6 @@
 # Scope Core
 
-**Scope Core** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers (GitHub Copilot, Claude Code, VS Code Web, VS Code Electron), evaluates results using a criteria DAG, captures upstream AI traffic through a Rust TLS-intercepting gateway, and streams logs in real time — all backed by MongoDB (CosmosDB-compatible), Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
+**Scope Core** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers (GitHub Copilot, Claude Code, VS Code Electron), evaluates results using a criteria DAG, captures upstream AI traffic through a Rust TLS-intercepting gateway, and streams logs in real time — all backed by MongoDB (CosmosDB-compatible), Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
 
 ## Components
 
@@ -18,8 +18,7 @@
 | **coder-acp-claude-code** | Claude Code agent worker (ACP SDK) |
 | **report-generator** | Post-run evaluation report generator (Copilot SDK) |
 | **model-scanners** | Feature detection for Copilot and Anthropic models |
-| **version-checkers** | Poll for new releases of agents/tools (`acp-copilot`, `claude-code`, `vscode-web`, `vscode-electron`) |
-| **key-updaters** | GitHub auth cookie management for the VS Code Web worker |
+| **version-checkers** | Poll for new releases of agents/tools (`acp-copilot`, `claude-code`, `vscode-electron`) |
 
 ## Architecture
 
@@ -36,7 +35,7 @@ flowchart TB
     Judge[Judge]
     TM[Token Manager]
 
-    Queues["Azure Storage Queues<br/><i>copilot · claude-code · vscode-web · vscode-electron</i>"]
+    Queues["Azure Storage Queues<br/><i>copilot · claude-code · vscode-electron</i>"]
 
     MongoDB[(MongoDB)]
     Redis[(Redis Pub/Sub)]
@@ -273,16 +272,13 @@ scope-core/
 │   ├── portal/                                 # React + Vite web UI
 │   ├── scheduler/                              # Queue-depth scheduler (MongoDB → Azure Queues)
 │   ├── token-manager/                          # Token storage / validation / distribution
-│   ├── key-updaters/
-│   │   └── github-cookie-updater/              # Refreshes GitHub auth cookies for VS Code Web
 │   ├── model-scanners/
 │   │   ├── anthropic/                          # Anthropic model scanner
 │   │   └── copilot/                            # Copilot model scanner
 │   ├── version-checkers/
 │   │   ├── acp-copilot/                        # Copilot ACP version polling
 │   │   ├── claude-code/                        # Claude Code version polling
-│   │   ├── vscode-electron/                    # VS Code Electron version polling
-│   │   └── vscode-web/                         # VS Code Web version polling
+│   │   └── vscode-electron/                    # VS Code Electron version polling
 │   └── workers/
 │       ├── coder-acp-claude-code/              # Claude Code worker (ACP)
 │       ├── coder-acp-copilot/                  # Copilot worker (ACP)
