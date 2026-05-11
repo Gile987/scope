@@ -19,7 +19,12 @@ export interface TokenUsage {
 // Multi-turn conversation turn (one coding + judge iteration)
 export interface ConversationTurn {
   iteration: number;
-  codingAgentResponse: string;
+  /** The coding agent's final assistant message for this iteration.
+   *  Optional: workers may omit it when no response text could be extracted
+   *  from the agent (e.g. the chat result envelope contained no recognizable
+   *  assistant text). The full transcript is still available via rawChatUrl /
+   *  harUrl. */
+  codingAgentResponse?: string;
   judgeFeedback: string;
   snapshotUrl: string;
   passed: boolean;
@@ -30,6 +35,7 @@ export interface ConversationTurn {
   tokenUsage?: TokenUsage;  // LLM token usage for this iteration
   startedAt?: Date;        // When this iteration began
   durationMs?: number;     // Wall-clock duration of this iteration in milliseconds
+  toolCalls?: ToolCall[];   // @deprecated — legacy inline tool calls. New writes use `toolCallsUrl` + `toolCallCount`. Kept for backwards-compatible reads.
   /** Blob storage URL to the per-iteration tool-calls JSONL append blob
    *  (`{requestId}/runs/{runId}/iteration-{n}/tool-calls.jsonl`). Replaces
    *  the inline `toolCalls` array so unbounded tool-call lists no longer
@@ -41,6 +47,16 @@ export interface ConversationTurn {
   aiCallCount?: number;    // Number of AI completion API calls made during this iteration
   rawChatUrl?: string;     // Blob storage URL to the raw chat transcript export
   rawChatFormat?: string;  // Format identifier for the raw chat export
+  /** Blob storage URL to the JSON-serialized chat result envelope returned
+   *  by the chat command (VS Code's `IChatAgentResult2` shape for the
+   *  electron worker). Carries internal metadata — timings, tool-call
+   *  rounds/results, summaries, resolved model, response id — that is NOT
+   *  the assistant's prose (see `codingAgentResponse` for that). Useful for
+   *  post-hoc diagnostics; not meant for end-user display. */
+  chatResultUrl?: string;
+  /** Format identifier for the chat result envelope
+   *  (e.g. 'IChatAgentResult2' for the electron worker). */
+  chatResultFormat?: string;
 }
 
 // Multi-turn configuration constants
@@ -272,8 +288,10 @@ export interface WorkerProcessorOptions {
 
 // Result returned by a worker processor
 export interface WorkerResult {
-  /** The coding agent's text response */
-  response: string;
+  /** The coding agent's text response. Optional: workers omit this when no
+   *  final assistant message could be extracted from the chat envelope.
+   *  See growth-ecosystems/scope-core#811. */
+  response?: string;
   /** Path to the HAR file on disk (for upload to blob storage) */
   harFilePath?: string;
   /** Paths to session recording video files on disk (for upload to blob storage) */
@@ -282,10 +300,19 @@ export interface WorkerResult {
   tokenUsage?: TokenUsage;
   /** Number of AI completion API calls made during this iteration (extracted from HAR) */
   aiCallCount?: number;
+  /** Tool calls extracted from the chat transcript export */
+  toolCalls?: ToolCall[];
   /** Path to the raw chat transcript export file on disk (for upload to blob storage) */
   rawChatFilePath?: string;
   /** Format identifier for the raw chat export */
   rawChatFormat?: string;
+  /** Path on disk to the JSON-serialized chat result envelope (for upload to
+   *  blob storage as `chatResultUrl`). The electron worker writes VS Code's
+   *  `IChatAgentResult2` here — see growth-ecosystems/scope-core#811 for
+   *  why we keep it as a separate blob rather than inlining it. */
+  chatResultFilePath?: string;
+  /** Format identifier for the chat result envelope (e.g. 'IChatAgentResult2'). */
+  chatResultFormat?: string;
 }
 
 /** Log function signature used by worker processors. */

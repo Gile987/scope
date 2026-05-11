@@ -200,32 +200,28 @@ export class BlobStorage {
   }
 
   /**
-   * Appends a single tool call as a JSON line to the per-iteration append
-   * blob in the snapshots container. Mirrors `appendLogEvent` but lives next
-   * to the iteration's other artifacts (HAR, video, chat-export).
+   * Uploads the per-iteration tool-calls JSONL file in a single block-blob
+   * upload. The whole array is already in memory (extracted from the
+   * sanitized HAR after the iteration finishes), so an atomic write is both
+   * simpler and cheaper than appending one block per tool call.
    *
    * Path scheme: `{requestId}/runs/{runId}/iteration-{iteration}/tool-calls.jsonl`.
-   * Blob-level initialization is cached so concurrent appends only call
-   * `createIfNotExists` once per blob.
+   * Idempotent: subsequent calls overwrite. No-op when `toolCalls` is empty.
    */
-  async appendToolCall(
+  async writeToolCalls(
     requestId: string,
     runId: string,
     iteration: number,
-    toolCall: ToolCall,
+    toolCalls: ToolCall[],
   ): Promise<void> {
+    if (toolCalls.length === 0) return;
     await this.ensureContainer();
     const blobName = `${requestId}/runs/${runId}/iteration-${iteration}/tool-calls.jsonl`;
-    const appendBlobClient = this.containerClient.getAppendBlobClient(blobName);
-    if (!this.initializedBlobs.has(blobName)) {
-      this.initializedBlobs.set(
-        blobName,
-        appendBlobClient.createIfNotExists().then(() => undefined),
-      );
-    }
-    await this.initializedBlobs.get(blobName);
-    const line = JSON.stringify(toolCall) + "\n";
-    await appendBlobClient.appendBlock(line, Buffer.byteLength(line));
+    const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
+    const body = toolCalls.map((tc) => JSON.stringify(tc)).join("\n") + "\n";
+    await blockBlobClient.upload(body, Buffer.byteLength(body), {
+      blobHTTPHeaders: { blobContentType: "application/x-ndjson" },
+    });
   }
 
   /**
@@ -234,7 +230,7 @@ export class BlobStorage {
    */
   getToolCallsBlobUrl(requestId: string, runId: string, iteration: number): string {
     const blobName = `${requestId}/runs/${runId}/iteration-${iteration}/tool-calls.jsonl`;
-    return this.containerClient.getAppendBlobClient(blobName).url;
+    return this.containerClient.getBlockBlobClient(blobName).url;
   }
 
   /**
@@ -253,7 +249,9 @@ export class BlobStorage {
     await this.ensureContainer();
 
     const tryDownload = async (blobName: string): Promise<ToolCall[] | undefined> => {
-      const client = this.containerClient.getAppendBlobClient(blobName);
+      // Type-agnostic getBlobClient handles both new block blobs and any
+      // legacy append blobs that may still exist from earlier dev runs.
+      const client = this.containerClient.getBlobClient(blobName);
       try {
         const download = await client.download();
         if (!download.readableStreamBody) return [];
@@ -414,6 +412,29 @@ export class BlobStorage {
       },
     });
 
+    return blockBlobClient.url;
+  }
+
+  /**
+   * Uploads an in-memory JSON-serializable value (or a pre-serialized JSON
+   * string) to the snapshots container as a single block blob. Overwrites if
+   * the blob already exists. Returns the blob URL.
+   *
+   * Useful when the data is already in memory (e.g. migrations rewriting
+   * documents) so callers don't need to round-trip through a temp file.
+   */
+  async uploadJson(
+    blobName: string,
+    data: unknown,
+  ): Promise<string> {
+    await this.ensureContainer();
+
+    const body = typeof data === "string" ? data : JSON.stringify(data);
+    const buf = Buffer.from(body, "utf-8");
+    const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
+    await blockBlobClient.uploadData(buf, {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+    });
     return blockBlobClient.url;
   }
 

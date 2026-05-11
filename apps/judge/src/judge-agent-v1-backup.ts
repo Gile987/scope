@@ -206,7 +206,7 @@ function buildSystemPrompt(
       ? `\n## Previous Iterations\n${conversationHistory
           .map(
             (t) =>
-              `### Iteration ${t.iteration}\n- **Coding agent response**: ${t.codingAgentResponse.substring(0, 500)}${t.codingAgentResponse.length > 500 ? "..." : ""}\n- **Your previous feedback**: ${t.judgeFeedback.substring(0, 500)}${t.judgeFeedback.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`
+              `### Iteration ${t.iteration}\n- **Coding agent response**: ${(t.codingAgentResponse ?? "(no response captured)").substring(0, 500)}${(t.codingAgentResponse ?? "").length > 500 ? "..." : ""}\n- **Your previous feedback**: ${t.judgeFeedback.substring(0, 500)}${t.judgeFeedback.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`
           )
           .join("\n\n")}`
       : "";

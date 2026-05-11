@@ -298,6 +298,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "aiCallCount": {
             "type": "number",
           },
+          "chatResultFormat": {
+            "type": "string",
+          },
+          "chatResultUrl": {
+            "type": "string",
+          },
           "codingAgentResponse": {
             "type": "string",
           },
@@ -351,6 +357,35 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "toolCallCount": {
             "type": "number",
           },
+          "toolCalls": {
+            "items": {
+              "properties": {
+                "arguments": {
+                  "additionalProperties": {},
+                  "type": "object",
+                },
+                "id": {
+                  "type": "string",
+                },
+                "name": {
+                  "type": "string",
+                },
+                "response": {
+                  "type": "string",
+                },
+                "timestamp": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "id",
+                "name",
+                "arguments",
+              ],
+              "type": "object",
+            },
+            "type": "array",
+          },
           "toolCallsUrl": {
             "type": "string",
           },
@@ -363,7 +398,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "iteration",
-          "codingAgentResponse",
           "judgeFeedback",
           "snapshotUrl",
           "passed",

@@ -40,20 +40,21 @@ export function blobNameFromLogsUrl(url: string): string | null {
 }
 
 /**
- * Deep-clone a run resource and rewrite `harUrl`, `rawChatUrl`, and
- * `toolCallsUrl` fields to relative archive paths.
+ * Deep-clone a run resource and rewrite `harUrl`, `rawChatUrl`,
+ * `chatResultUrl`, and `toolCallsUrl` fields to relative archive paths.
  *
  * - `run.harUrl`              → `"run.har"`
  * - Per-turn `harUrl`          → `"iteration-{N}.har"`
  * - `run.rawChatUrl`           → `"run.chat-export.json"`
  * - Per-turn `rawChatUrl`      → `"iteration-{N}.chat-export.json"`
+ * - Per-turn `chatResultUrl`   → `"iteration-{N}.chat-result.json"`
  * - Per-turn `toolCallsUrl`    → `"iteration-{N}.tool-calls.jsonl"`
  */
 export function rewriteHarUrlsForArchive<T extends {
   run?: {
     harUrl?: string;
     rawChatUrl?: string;
-    turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; toolCallsUrl?: string; [key: string]: unknown }>;
+    turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; chatResultUrl?: string; toolCallsUrl?: string; [key: string]: unknown }>;
     [key: string]: unknown;
   };
 }>(resource: T): T {
@@ -72,6 +73,9 @@ export function rewriteHarUrlsForArchive<T extends {
         }
         if (turn.rawChatUrl) {
           turn.rawChatUrl = `iteration-${turn.iteration}.chat-export.json`;
+        }
+        if (turn.chatResultUrl) {
+          turn.chatResultUrl = `iteration-${turn.iteration}.chat-result.json`;
         }
         if (turn.toolCallsUrl) {
           turn.toolCallsUrl = `iteration-${turn.iteration}.tool-calls.jsonl`;
@@ -315,6 +319,7 @@ export interface ArchivableRun {
       snapshotUrl?: string;
       harUrl?: string;
       rawChatUrl?: string;
+      chatResultUrl?: string;
       toolCallsUrl?: string;
       [key: string]: unknown;
     }>;
@@ -409,6 +414,27 @@ export async function packRunIntoTar(
   if (topRawChatUrl) chatEntries.push({ url: topRawChatUrl, entryName: `${id}/run.chat-export.json` });
 
   for (const { url, entryName } of chatEntries) {
+    try {
+      const blobName = blobNameFromSnapshotsUrl(url);
+      if (!blobName) continue;
+      const blobClient = container.getBlockBlobClient(blobName);
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
+      const entry = pack.entry({ name: entryName, size: downloadResponse.contentLength });
+      await pipeline(downloadResponse.readableStreamBody, entry);
+    } catch (blobError) {
+      if (isBlobNotFound(blobError)) continue;
+      throw blobError;
+    }
+  }
+
+  // Bundle IChatAgentResult2 envelope files into the archive (#811)
+  const chatResultEntries: Array<{ url: string; entryName: string }> = [];
+  for (const turn of turns) {
+    if (turn.chatResultUrl) chatResultEntries.push({ url: turn.chatResultUrl, entryName: `${id}/iteration-${turn.iteration}.chat-result.json` });
+  }
+
+  for (const { url, entryName } of chatResultEntries) {
     try {
       const blobName = blobNameFromSnapshotsUrl(url);
       if (!blobName) continue;
