@@ -26,72 +26,107 @@
 For the full system overview, see [docs/architecture/overview.md](docs/architecture/overview.md).
 
 ```mermaid
-flowchart LR
-    Client([CLI])
-    Portal([Portal])
-    API[API]
-    Judge[Judge]
-    Scheduler[Scheduler]
-    GW["AI Gateway<br/><i>Rust TLS proxy</i>"]
-    TM[Token Manager]
+flowchart TB
+    %% ── Clients ─────────────────────────────────────
+    subgraph Clients[" "]
+        direction LR
+        CLI([CLI])
+        Portal([Portal])
+    end
 
+    %% ── Control plane ───────────────────────────────
+    subgraph Control["Control Plane"]
+        direction LR
+        API[API]
+        Scheduler[Scheduler]
+        Judge[Judge]
+        TM[Token Manager]
+    end
+
+    %% ── Queues ──────────────────────────────────────
     subgraph Queues["Azure Storage Queues"]
+        direction LR
         Q1[copilot]
         Q2[claude-code]
         Q3[vscode-web]
         Q4[vscode-electron]
     end
 
-    subgraph Workers["Coding Agent Workers (each with MCP Gateway sidecar)"]
-        W1[coder-acp-copilot]
-        MCP1["MCP Gateway<br/><i>MCPJungle</i>"]
-        W2[coder-acp-claude-code]
-        MCP2["MCP Gateway<br/><i>MCPJungle</i>"]
-        MCP4["MCP Gateway<br/><i>MCPJungle</i>"]
-        W1 -.->|tool calls| MCP1
-        W2 -.->|tool calls| MCP2
-        W4 -.->|tool calls| MCP4
+    %% ── Worker pods (each with an MCP Gateway sidecar) ──
+    subgraph WorkersGroup["Coding Agent Workers (each pod ships an MCP Gateway sidecar)"]
+        direction LR
+        subgraph P1[" "]
+            direction TB
+            W1[coder-acp-copilot]
+            MCP1[MCP Gateway]
+            W1 -.-> MCP1
+        end
+        subgraph P2[" "]
+            direction TB
+            W2[coder-acp-claude-code]
+            MCP2[MCP Gateway]
+            W2 -.-> MCP2
+        end
+        subgraph P3[" "]
+            direction TB
+        end
+        subgraph P4[" "]
+            direction TB
+            MCP4[MCP Gateway]
+            W4 -.-> MCP4
+        end
     end
 
-    subgraph MCPServers["MCP Servers"]
-        StdioMCP["stdio servers<br/><i>(filesystem, etc.)</i>"]
-        RemoteMCP["remote HTTP servers<br/><i>(context7, etc.)</i>"]
+    %% ── Egress ──────────────────────────────────────
+    subgraph Egress["Egress / Upstream"]
+        direction LR
+        GW["AI Gateway<br/><i>Rust TLS proxy</i>"]
+        subgraph MCPServers["MCP Servers"]
+            direction TB
+            StdioMCP["stdio (filesystem, …)"]
+            RemoteMCP["remote HTTP (context7, …)"]
+        end
+        subgraph AIProviders["AI Providers"]
+            direction TB
+            Copilot[GitHub Copilot API]
+            Anthropic[Anthropic API]
+        end
     end
 
-    subgraph AI["AI Providers"]
-        Copilot[GitHub Copilot API]
-        Anthropic[Anthropic API]
+    %% ── Storage ─────────────────────────────────────
+    subgraph Storage["Storage"]
+        direction LR
+        MongoDB[(MongoDB)]
+        Redis[(Redis Pub/Sub)]
+        Blob[(Blob Storage)]
+        KV[(Key Vault)]
     end
 
-    MongoDB[(MongoDB)]
-    Redis[(Redis Pub/Sub)]
-    Blob[(Blob Storage)]
-    KV[(Key Vault)]
+    %% ── Edges ───────────────────────────────────────
+    CLI <-->|REST · SSE| API
+    Portal <-->|REST · SSE| API
 
-    Client -->|REST| API
-    Portal -->|REST| API
-    API -->|SSE| Client
-    API -->|SSE| Portal
-    API -->|persist requests| MongoDB
+    API -->|persist| MongoDB
     Scheduler -->|poll| MongoDB
-    Scheduler -->|enqueue| Q1 & Q2 & Q3 & Q4
+    Scheduler -->|enqueue| Queues
+    Redis -->|subscribe| API
+    TM <--> KV
+
     Q1 --> W1
     Q2 --> W2
     Q3 --> W3
     Q4 --> W4
-    W1 & W2 & W3 & W4 -->|status + results| MongoDB
-    W1 & W2 & W3 & W4 -->|real-time logs| Redis
-    W1 & W2 & W3 & W4 -->|workspace snapshots| Blob
-    W1 & W2 & W3 & W4 -->|fetch tokens| TM
-    TM <-->|store/sync| KV
+
+    WorkersGroup -->|status + results| MongoDB
+    WorkersGroup -->|real-time logs| Redis
+    WorkersGroup -->|workspace snapshots| Blob
+    WorkersGroup -->|fetch tokens| TM
+    WorkersGroup -->|invoke| Judge
+    Judge -->|scores| MongoDB
+
     W4 -->|TLS intercept + HAR| GW
-    GW --> Copilot
-    GW --> Anthropic
-    MCP1 & MCP2 & MCP4 --> StdioMCP
-    MCP1 & MCP2 & MCP4 --> RemoteMCP
-    W1 & W2 & W3 -->|invoke| Judge
-    Judge -->|persist scores| MongoDB
-    Redis -->|subscribe| API
+    GW --> Copilot & Anthropic
+    MCP1 & MCP2 & MCP4 --> StdioMCP & RemoteMCP
 ```
 
 ## Quick Start
