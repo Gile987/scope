@@ -20,6 +20,16 @@
 | **model-scanners** | Feature detection for Copilot and Anthropic models |
 | **version-checkers** | Poll for new releases of agents/tools (`acp-copilot`, `claude-code`, `vscode-electron`) |
 
+## Key Features
+
+- **Centralized queue scheduling** — A dedicated [scheduler](apps/scheduler/) ([docs](docs/architecture/queue-scheduler.md)) decouples request ordering from message delivery. MongoDB stores priority and pause/resume state; Azure Storage Queues are kept deliberately shallow so scheduling decisions take effect within seconds and re-prioritization is always possible.
+- **Run priorities** — Every request carries a root-level `priority` field (default `0`, higher dispatched first). Priority is editable on `pending` and `paused` requests via single and bulk REST endpoints, with a Portal UI offering −10…+10 presets and ±1/±5 increments.
+- **Out-of-band (OOB) request support** — Because the scheduler dispatches by priority on every tick, OOB requests submitted with a high priority jump ahead of the pending queue and reach a worker on the next dispatch — without disturbing in-flight work or requiring a separate execution path.
+- **Low-dimensional feature-space MDP modelisation** — Runs are aggregated into a Markov Decision Process state-transition graph ([apps/api/src/criteria-mdp.ts](apps/api/src/criteria-mdp.ts), Portal `/criteria/mdp` view) over composite criteria state vectors. The space can be projected to any chosen subset of criteria to produce a sub-MDP, and start states are derived from extracted prompt features.
+- **Cross-scenario analysis** — Combining **prompt-feature extraction** (stored on `TaskPromptDocument` and used to type the MDP start nodes), the **criteria DAG** as a trajectory ontology, and the **MDP** built across all runs makes it possible to compare agent trajectories across heterogeneous scenarios in a common state space rather than per-scenario in isolation.
+- **Prompt variations** — The API can AI-generate meaningful task-prompt variations from an existing prompt ([apps/api/src/task-prompt-llm.ts](apps/api/src/task-prompt-llm.ts), exposed in the Portal's Submit Run flow), enabling targeted exploration of prompt sensitivity.
+- **Experiment analysis** — *Upcoming.* Dedicated experiment-level analysis (grouping runs into experiments and comparing them as cohorts) is not yet implemented.
+
 ## Architecture
 
 For the full system overview, see [docs/architecture/overview.md](docs/architecture/overview.md).
