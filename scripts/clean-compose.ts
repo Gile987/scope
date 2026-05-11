@@ -11,7 +11,7 @@
 //
 // Usage:
 //   npx tsx scripts/clean-compose.ts [--yes] [--dry-run] [--no-volumes]
-//   pnpm clean:compose
+//   pnpm worktrees:clean:docker
 // =============================================================================
 
 import { execSync } from "child_process";
