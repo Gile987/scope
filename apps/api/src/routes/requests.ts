@@ -1898,6 +1898,11 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    // Per-attempt fields live under run.* (migration 014). The exporter
+    // writes a RequestDocument verbatim, so the importer must read them
+    // from the same place.
+    const runState: Record<string, any> = (runDoc.run ?? {}) as Record<string, any>;
+
     // Validate required fields
     if (!runDoc._id) {
       res.status(400).json({ error: "Invalid run.yaml: missing _id field" });
@@ -1911,16 +1916,16 @@ apiRoute(ctx.app, ctx.registry, {
       res.status(400).json({ error: "Invalid run.yaml: missing workerType field" });
       return;
     }
-    if (!runDoc.status) {
-      res.status(400).json({ error: "Invalid run.yaml: missing status field" });
+    if (!runState.status) {
+      res.status(400).json({ error: "Invalid run.yaml: missing run.status field" });
       return;
     }
 
     // Validate status is terminal (cannot import in-flight runs)
     const terminalStatuses = ["done"];
-    if (!terminalStatuses.includes(runDoc.status)) {
+    if (!terminalStatuses.includes(runState.status)) {
       res.status(400).json({
-        error: `Cannot upload in-flight run (status: ${runDoc.status}). Only terminal runs can be uploaded.`,
+        error: `Cannot upload in-flight run (status: ${runState.status}). Only terminal runs can be uploaded.`,
       });
       return;
     }
@@ -1935,10 +1940,13 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    // Upload iteration snapshots to blob storage and update snapshotUrls
-    const turns = runDoc.turns || [];
-    const iterationDirs = readdirSync(runDir).filter(name => name.startsWith("iteration-"));
-    
+    // Upload iteration snapshots to blob storage and update snapshotUrls.
+    // The exporter writes each iteration as `iteration-N.tar.gz` (a file,
+    // not a directory) — copy the bytes through to blob storage as-is.
+    const turns = runState.turns ?? [];
+    const dirEntries = readdirSync(runDir);
+    const iterationFiles = dirEntries.filter(name => /^iteration-\d+\.tar\.gz$/.test(name));
+
     // Connect to blob storage
     let blobServiceClient: BlobServiceClient;
     if (ctx.storageConnectionString) {
@@ -1952,25 +1960,21 @@ apiRoute(ctx.app, ctx.registry, {
     const containerClient = blobServiceClient.getContainerClient("snapshots");
     await containerClient.createIfNotExists();
 
-    for (const iterDir of iterationDirs) {
-      const iterMatch = iterDir.match(/^iteration-(\d+)$/);
+    for (const iterFile of iterationFiles) {
+      const iterMatch = iterFile.match(/^iteration-(\d+)\.tar\.gz$/);
       if (!iterMatch) continue;
-      
+
       const iterNum = parseInt(iterMatch[1], 10);
-      const iterPath = join(runDir, iterDir);
-      
-      // Create tar.gz from iteration directory
-      const iterArchive = join(tempDir, `iter-${iterNum}.tar.gz`);
-      execSync(`tar czf "${iterArchive}" -C "${iterPath}" .`, { stdio: "pipe" });
-      
-      // Upload to blob storage
+      const iterPath = join(runDir, iterFile);
+
+      // Upload the iteration tar.gz directly to blob storage
       const blobName = `${runDoc._id}/iteration-${iterNum}/workspace.tar.gz`;
       const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-      await blockBlobClient.uploadFile(iterArchive, {
+      await blockBlobClient.uploadFile(iterPath, {
         blobHTTPHeaders: { blobContentType: "application/gzip" },
         tags: { requestId: runDoc._id, iteration: String(iterNum) },
       });
-      
+
       // Update turn's snapshotUrl
       const turn = turns.find((t: Record<string, unknown>) => t.iteration === iterNum);
       if (turn) {
@@ -1988,7 +1992,7 @@ apiRoute(ctx.app, ctx.registry, {
       containerClient,
     });
     if (topLevelHarUrl) {
-      runDoc.harUrl = topLevelHarUrl;
+      runState.harUrl = topLevelHarUrl;
     }
 
     // Upload bundled chat export files to blob storage
@@ -2001,7 +2005,7 @@ apiRoute(ctx.app, ctx.registry, {
       containerClient,
     });
     if (topLevelChatUrl) {
-      runDoc.rawChatUrl = topLevelChatUrl;
+      runState.rawChatUrl = topLevelChatUrl;
     }
 
     // Upload bundled per-iteration tool-calls JSONL files to blob storage.
@@ -2031,14 +2035,14 @@ apiRoute(ctx.app, ctx.registry, {
       run: {
         _id: runDoc._id,
         attemptNumber: 1,
-        status: runDoc.status,
+        status: runState.status,
         logsUrl: ctx.blobStorage.getLogsBlobUrl(`${runDoc._id}/runs/${runDoc._id}/run.jsonl`),
-        ...(runDoc.outcome ? { outcome: runDoc.outcome } : {}),
-        ...(runDoc.result ? { result: runDoc.result } : {}),
-        ...(runDoc.error ? { error: runDoc.error } : {}),
-        ...(runDoc.harUrl ? { harUrl: runDoc.harUrl } : {}),
-        ...(runDoc.rawChatUrl ? { rawChatUrl: runDoc.rawChatUrl } : {}),
-        ...(runDoc.rawChatFormat ? { rawChatFormat: runDoc.rawChatFormat } : {}),
+        ...(runState.outcome ? { outcome: runState.outcome } : {}),
+        ...(runState.result ? { result: runState.result } : {}),
+        ...(runState.error ? { error: runState.error } : {}),
+        ...(runState.harUrl ? { harUrl: runState.harUrl } : {}),
+        ...(runState.rawChatUrl ? { rawChatUrl: runState.rawChatUrl } : {}),
+        ...(runState.rawChatFormat ? { rawChatFormat: runState.rawChatFormat } : {}),
         turns: turns.map((t: any) => ({
           ...t,
           timestamp: t.timestamp ? new Date(t.timestamp as string) : new Date(),
@@ -2049,12 +2053,12 @@ apiRoute(ctx.app, ctx.registry, {
     // Insert into MongoDB
     await ctx.requestCollection.insertOne(docToInsert);
 
-    console.log(`Uploaded run ${runDoc._id} with ${iterationDirs.length} iterations`);
+    console.log(`Uploaded run ${runDoc._id} with ${iterationFiles.length} iterations`);
 
     res.status(201).json({
       id: runDoc._id,
-      status: runDoc.status,
-      iterations: iterationDirs.length,
+      status: runState.status,
+      iterations: iterationFiles.length,
       message: "Run uploaded successfully",
     });
 

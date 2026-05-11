@@ -292,7 +292,8 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
   it("returns 400 when run.yaml is missing _id", async () => {
     const app = buildApp(makeRequestCollection());
     const archive = await buildTarGz({
-      "run/run.yaml": "scenario:\n  task: hi\nworkerType: coder-acp-copilot\nstatus: done\n",
+      "run/run.yaml":
+        "scenario:\n  task: hi\nworkerType: coder-acp-copilot\nrun:\n  status: done\n",
     });
 
     const res = await request(app)
@@ -307,7 +308,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     const app = buildApp(makeRequestCollection());
     const archive = await buildTarGz({
       "run/run.yaml":
-        "_id: in-flight-1\nscenario:\n  task: t\nworkerType: coder-acp-copilot\nstatus: processing\n",
+        "_id: in-flight-1\nscenario:\n  task: t\nworkerType: coder-acp-copilot\nrun:\n  status: processing\n",
     });
 
     const res = await request(app)
@@ -325,7 +326,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
 
     const archive = await buildTarGz({
       "dup-1/run.yaml":
-        "_id: dup-1\nscenario:\n  task: t\nworkerType: coder-acp-copilot\nstatus: done\n",
+        "_id: dup-1\nscenario:\n  task: t\nworkerType: coder-acp-copilot\nrun:\n  status: done\n",
     });
 
     const res = await request(app)
