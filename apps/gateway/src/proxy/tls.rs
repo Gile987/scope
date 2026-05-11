@@ -127,10 +127,8 @@ async fn relay_request_inner(
     // The guard is moved into the response-completion callback below so the
     // counter stays elevated until the entire response body has streamed to
     // the client, not just until the upstream headers arrive.
-    let in_flight_guard = crate::session::InFlightGuard::begin(
-        state.session_manager.clone(),
-        session_id.clone(),
-    );
+    let in_flight_guard =
+        crate::session::InFlightGuard::begin(state.session_manager.clone(), session_id.clone());
     if in_flight_guard.is_none() {
         anyhow::bail!("session {} no longer exists", session_id);
     }

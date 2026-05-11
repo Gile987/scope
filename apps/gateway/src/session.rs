@@ -935,8 +935,7 @@ mod tests {
             .unwrap();
 
         // Simulate a long-running streaming response: take a guard and hold it.
-        let guard =
-            InFlightGuard::begin(mgr.clone(), "s1".into()).expect("session must exist");
+        let guard = InFlightGuard::begin(mgr.clone(), "s1".into()).expect("session must exist");
         assert_eq!(mgr.in_flight_count(&"s1".into()), 1);
 
         // Sleep well past the idle timeout, then reap.
