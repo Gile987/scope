@@ -29,6 +29,10 @@ pub struct Session {
     pub plugin_settings: HashMap<String, Value>,
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub last_activity: Instant,
+    /// Number of proxy requests currently in flight for this session.
+    /// The reaper skips sessions with `in_flight > 0` so a long-running
+    /// streaming response cannot be deleted out from under the request.
+    pub in_flight: u32,
 }
 
 /// Summary returned by list / get endpoints.
@@ -138,6 +142,7 @@ impl SessionManager {
                     plugin_settings: plugin_settings.clone(),
                     started_at: chrono::Utc::now(),
                     last_activity: Instant::now(),
+                    in_flight: 0,
                 },
             );
         }
@@ -217,6 +222,42 @@ impl SessionManager {
         }
     }
 
+    /// Mark a proxy request as in flight on this session, also touching the
+    /// idle timer. Pair every call with [`Self::end_request`] (use the
+    /// [`InFlightGuard`] RAII wrapper to make this automatic).
+    ///
+    /// Returns `true` if the session was found and the counter was incremented.
+    pub fn begin_request(&self, session_id: &SessionId) -> bool {
+        let mut sessions = self.sessions_lock.write();
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.in_flight = session.in_flight.saturating_add(1);
+            session.last_activity = Instant::now();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Mark a proxy request as no longer in flight, also touching the idle
+    /// timer so the next idle window starts from request completion.
+    pub fn end_request(&self, session_id: &SessionId) {
+        let mut sessions = self.sessions_lock.write();
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.in_flight = session.in_flight.saturating_sub(1);
+            session.last_activity = Instant::now();
+        }
+    }
+
+    /// Number of in-flight requests for a session (test/diagnostic helper).
+    #[cfg(test)]
+    pub fn in_flight_count(&self, session_id: &SessionId) -> u32 {
+        self.sessions_lock
+            .read()
+            .get(session_id)
+            .map(|s| s.in_flight)
+            .unwrap_or(0)
+    }
+
     /// Get session info by ID.
     pub fn get_session(&self, session_id: &SessionId) -> Option<SessionInfo> {
         let sessions = self.sessions_lock.read();
@@ -230,13 +271,23 @@ impl SessionManager {
     }
 
     /// Reap idle sessions. Called periodically.
+    ///
+    /// Sessions with `in_flight > 0` are never reaped, regardless of their
+    /// `last_activity`. A long-running streaming response (e.g. an 8-minute
+    /// Claude completion) does not touch the session until the body fully
+    /// drains, so reaping mid-stream would tear down the `plugin`
+    /// plugin's per-session state and cause the gateway to stop injecting
+    /// the bearer token, surfacing as `407 Proxy authentication required`
+    /// from the upstream's perspective. See #818.
     pub async fn reap_idle(&self) -> Vec<SessionId> {
         let reaped: Vec<SessionId> = {
             let mut sessions = self.sessions_lock.write();
             let now = Instant::now();
             let mut reaped = Vec::new();
             sessions.retain(|id, session| {
-                if now.duration_since(session.last_activity) > self.idle_timeout {
+                if session.in_flight == 0
+                    && now.duration_since(session.last_activity) > self.idle_timeout
+                {
                     reaped.push(id.clone());
                     false
                 } else {
@@ -301,6 +352,38 @@ pub enum SessionError {
     MaxSessionsReached,
     #[error("failed to prepare rotation: {0}")]
     RotatePrepareFailed(String),
+}
+
+/// RAII guard that decrements a session's `in_flight` counter on drop.
+///
+/// Constructed via [`InFlightGuard::begin`]: increments the counter (and
+/// touches the session) on construction, decrements it on drop. This makes
+/// the in-flight tracking panic-safe and impossible to leak across early
+/// returns in the proxy hot path.
+pub struct InFlightGuard {
+    manager: Arc<SessionManager>,
+    session_id: SessionId,
+}
+
+impl InFlightGuard {
+    /// Begin tracking an in-flight request. Returns `None` if the session no
+    /// longer exists (caller should treat that as a 404 / disconnect).
+    pub fn begin(manager: Arc<SessionManager>, session_id: SessionId) -> Option<Self> {
+        if manager.begin_request(&session_id) {
+            Some(Self {
+                manager,
+                session_id,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.manager.end_request(&self.session_id);
+    }
 }
 
 #[cfg(test)]
@@ -806,5 +889,86 @@ mod tests {
         let err = mgr.rotate(&"s1".into(), 1).await.unwrap_err();
         assert!(matches!(err, SessionError::RotatePrepareFailed(_)));
         assert_eq!(cas_calls.load(Ordering::Relaxed), 0);
+    }
+
+    // ---- in-flight / reaper tests (issue #818) -----------------------------
+
+    fn make_manager_with_idle(max: usize, idle_timeout: Duration) -> SessionManager {
+        let registry = Arc::new(PluginRegistry::new(vec![]));
+        SessionManager::new(registry, idle_timeout, max, make_iteration_store())
+    }
+
+    #[tokio::test]
+    async fn reap_skips_session_with_in_flight_request() {
+        // Very short idle timeout to make the test fast.
+        let mgr = Arc::new(make_manager_with_idle(10, Duration::from_millis(20)));
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+
+        // Simulate a long-running streaming response: take a guard and hold it.
+        let guard =
+            InFlightGuard::begin(mgr.clone(), "s1".into()).expect("session must exist");
+        assert_eq!(mgr.in_flight_count(&"s1".into()), 1);
+
+        // Sleep well past the idle timeout, then reap.
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let reaped = mgr.reap_idle().await;
+        assert!(
+            reaped.is_empty(),
+            "session with in-flight request must not be reaped, got {:?}",
+            reaped
+        );
+        assert!(mgr.is_active(&"s1".into()));
+
+        // Drop the guard → counter goes to 0 and last_activity is touched.
+        drop(guard);
+        assert_eq!(mgr.in_flight_count(&"s1".into()), 0);
+
+        // Immediately reaping should still skip (just touched).
+        assert!(mgr.reap_idle().await.is_empty());
+
+        // After another idle window, the session is reaped.
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let reaped = mgr.reap_idle().await;
+        assert_eq!(reaped, vec!["s1".to_string()]);
+        assert!(!mgr.is_active(&"s1".into()));
+    }
+
+    #[tokio::test]
+    async fn in_flight_guard_balances_increment_and_decrement() {
+        let mgr = Arc::new(make_manager_with_idle(10, Duration::from_secs(300)));
+        mgr.create_session("s1".into(), HashMap::new())
+            .await
+            .unwrap();
+
+        // Two concurrent in-flight requests.
+        let g1 = InFlightGuard::begin(mgr.clone(), "s1".into()).unwrap();
+        let g2 = InFlightGuard::begin(mgr.clone(), "s1".into()).unwrap();
+        assert_eq!(mgr.in_flight_count(&"s1".into()), 2);
+
+        drop(g1);
+        assert_eq!(mgr.in_flight_count(&"s1".into()), 1);
+
+        // Even with one still in-flight, reaper must skip.
+        // (idle_timeout is 300s here so this is the "obviously safe" case.)
+        let mgr_short = Arc::new(make_manager_with_idle(10, Duration::from_millis(10)));
+        mgr_short
+            .create_session("s2".into(), HashMap::new())
+            .await
+            .unwrap();
+        let _g = InFlightGuard::begin(mgr_short.clone(), "s2".into()).unwrap();
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert!(mgr_short.reap_idle().await.is_empty());
+
+        drop(g2);
+        assert_eq!(mgr.in_flight_count(&"s1".into()), 0);
+    }
+
+    #[tokio::test]
+    async fn in_flight_guard_returns_none_for_unknown_session() {
+        let mgr = Arc::new(make_manager_with_idle(10, Duration::from_secs(300)));
+        // No create_session — id is unknown.
+        assert!(InFlightGuard::begin(mgr, "nope".into()).is_none());
     }
 }
