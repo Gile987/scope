@@ -48,13 +48,6 @@ export const ConversationTurnSchema = z
     tokenUsage: TokenUsageSchema.optional(),
     startedAt: z.coerce.date().optional(),
     durationMs: z.number().optional(),
-    toolCalls: z.array(z.object({
-      id: z.string(),
-      name: z.string(),
-      arguments: z.record(z.string(), z.unknown()),
-      response: z.string().optional(),
-      timestamp: z.string().optional(),
-    })).optional(),
     toolCallsUrl: z.string().optional(),
     toolCallCount: z.number().optional(),
     aiCallCount: z.number().optional(),

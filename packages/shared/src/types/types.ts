@@ -35,7 +35,6 @@ export interface ConversationTurn {
   tokenUsage?: TokenUsage;  // LLM token usage for this iteration
   startedAt?: Date;        // When this iteration began
   durationMs?: number;     // Wall-clock duration of this iteration in milliseconds
-  toolCalls?: ToolCall[];   // @deprecated — legacy inline tool calls. New writes use `toolCallsUrl` + `toolCallCount`. Kept for backwards-compatible reads.
   /** Blob storage URL to the per-iteration tool-calls JSONL append blob
    *  (`{requestId}/runs/{runId}/iteration-{n}/tool-calls.jsonl`). Replaces
    *  the inline `toolCalls` array so unbounded tool-call lists no longer
@@ -300,8 +299,6 @@ export interface WorkerResult {
   tokenUsage?: TokenUsage;
   /** Number of AI completion API calls made during this iteration (extracted from HAR) */
   aiCallCount?: number;
-  /** Tool calls extracted from the chat transcript export */
-  toolCalls?: ToolCall[];
   /** Path to the raw chat transcript export file on disk (for upload to blob storage) */
   rawChatFilePath?: string;
   /** Format identifier for the raw chat export */
