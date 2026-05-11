@@ -29,7 +29,7 @@ export interface ToolCall {
 
 export interface ConversationTurn {
   iteration: number;
-  codingAgentResponse: string;
+  codingAgentResponse?: string;
   judgeFeedback: string;
   snapshotUrl: string;
   passed: boolean;

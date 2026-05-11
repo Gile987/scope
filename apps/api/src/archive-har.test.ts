@@ -327,6 +327,20 @@ describe("rewriteHarUrlsForArchive — rawChatUrl", () => {
     expect(result.run!.turns![0].rawChatUrl).toBe("iteration-1.chat-export.json");
   });
 
+  it("rewrites per-turn chatResultUrl to iteration-N.chat-result.json", () => {
+    const resource = {
+      run: {
+        turns: [
+          { iteration: 1, chatResultUrl: "https://storage.blob.core.windows.net/snapshots/abc/runs/abc/iteration-1/chat-result.json" },
+          { iteration: 2, chatResultUrl: "https://storage.blob.core.windows.net/snapshots/abc/runs/abc/iteration-2/chat-result.json" },
+        ],
+      },
+    };
+    const result = rewriteHarUrlsForArchive(resource);
+    expect(result.run!.turns![0].chatResultUrl).toBe("iteration-1.chat-result.json");
+    expect(result.run!.turns![1].chatResultUrl).toBe("iteration-2.chat-result.json");
+  });
+
   it("does not mutate the original resource rawChatUrl", () => {
     const resource = {
       run: {
@@ -793,5 +807,41 @@ describe("packRunIntoTar", () => {
     const names = entries.map(e => e.name);
     expect(names).toContain("run-008/logs.jsonl");
     expect(entries.find(e => e.name === "run-008/logs.jsonl")!.data).toEqual(logData);
+  });
+
+  it("bundles per-turn IChatAgentResult2 envelope as iteration-N.chat-result.json", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const envelope1 = Buffer.from('{"metadata":{"toolCallRounds":[{"response":"hi"}]}}');
+    const envelope2 = Buffer.from('{"metadata":{"toolCallRounds":[{"response":"bye"}]}}');
+    const container = makeMockBlobContainer({
+      "run-009/runs/run-009/iteration-1/chat-result.json": { body: envelope1, length: envelope1.length },
+      "run-009/runs/run-009/iteration-2/chat-result.json": { body: envelope2, length: envelope2.length },
+    });
+
+    const run: ArchivableRun = {
+      _id: "run-009",
+      run: {
+        turns: [
+          { iteration: 1, chatResultUrl: "https://storage.blob.core.windows.net/snapshots/run-009/runs/run-009/iteration-1/chat-result.json" },
+          { iteration: 2, chatResultUrl: "https://storage.blob.core.windows.net/snapshots/run-009/runs/run-009/iteration-2/chat-result.json" },
+        ],
+      },
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-009", () => true);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    const names = entries.map(e => e.name);
+    expect(names).toContain("run-009/iteration-1.chat-result.json");
+    expect(names).toContain("run-009/iteration-2.chat-result.json");
+    expect(entries.find(e => e.name === "run-009/iteration-1.chat-result.json")!.data).toEqual(envelope1);
+    expect(entries.find(e => e.name === "run-009/iteration-2.chat-result.json")!.data).toEqual(envelope2);
+
+    const yaml = entries.find(e => e.name === "run-009/run.yaml")!.data.toString();
+    expect(yaml).toContain("iteration-1.chat-result.json");
+    expect(yaml).not.toContain("blob.core.windows.net");
   });
 });
