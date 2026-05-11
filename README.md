@@ -1,55 +1,83 @@
 # Scope Core
 
-**Scope Core** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers, evaluates results using a criteria DAG, and provides real-time log streaming — all backed by MongoDB, Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
+**Scope Core** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers (GitHub Copilot, Claude Code, VS Code Web, VS Code Electron), evaluates results using a criteria DAG, captures upstream AI traffic through a Rust TLS-intercepting gateway, and streams logs in real time — all backed by MongoDB (CosmosDB-compatible), Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
 
 ## Components
 
 | Component | Description |
 |-----------|-------------|
-| **API** | Express.js REST API — routes requests to workers, streams logs via SSE |
-| **Judge** | Evaluates completed runs against a criteria DAG using Copilot SDK |
-| **Portal** | React web UI for managing and inspecting runs |
-| **CLI** | Command-line interface for submitting runs, managing criteria, and more |
-| **coder-acp-claude-code** | Claude Code agent worker (ACP) |
-| **coder-acp-copilot** | GitHub Copilot agent worker (ACP) |
-| **report-generator** | Generates evaluation reports from completed runs |
+| **API** (`apps/api`) | Express.js REST API — orchestrates runs, manages criteria CRUD, streams logs via SSE |
+| **Judge** (`apps/judge`) | Evaluates completed runs against a criteria DAG using the Copilot SDK |
+| **Portal** (`apps/portal`) | React 19 + Vite web UI for managing runs and editing the criteria DAG |
+| **CLI** (`apps/cli`) | Commander + Ink TUI for submitting runs, streaming logs, and CI/CD automation |
+| **Gateway** (`apps/gateway`) | Rust TLS-intercepting HTTP proxy with a plugin architecture — captures HAR traffic from Electron-based agents to upstream AI providers |
+| **Scheduler** (`apps/scheduler`) | Per-worker-type queue depth scheduler that drips requests from MongoDB into Azure Storage Queues |
+| **Token Manager** (`apps/token-manager`) | Centralized GitHub token storage, validation, and round-robin distribution (Azure Key Vault / Lowkey Vault) |
+| **coder-acp-copilot** | GitHub Copilot agent worker (ACP SDK) |
+| **coder-acp-claude-code** | Claude Code agent worker (ACP SDK) |
+| **report-generator** | Post-run evaluation report generator (Copilot SDK) |
+| **model-scanners** | Feature detection for Copilot and Anthropic models |
+| **version-checkers** | Poll for new releases of agents/tools (`acp-copilot`, `claude-code`, `vscode-web`, `vscode-electron`) |
+| **key-updaters** | GitHub auth cookie management for the VS Code Web worker |
 
 ## Architecture
 
+For the full system overview, see [docs/architecture/overview.md](docs/architecture/overview.md).
+
 ```mermaid
 flowchart LR
-    Client([Client / CLI])
+    Client([CLI])
     Portal([Portal])
     API[API]
     Judge[Judge]
+    Scheduler[Scheduler]
+    GW["AI Gateway<br/><i>Rust TLS proxy</i>"]
+    TM[Token Manager]
 
-    subgraph Queues
-        Q1[claude-code]
-        Q2[copilot]
+    subgraph Queues["Azure Storage Queues"]
+        Q1[copilot]
+        Q2[claude-code]
         Q3[vscode-web]
+        Q4[vscode-electron]
     end
 
-    subgraph Workers
-        W1[coder-acp-claude-code]
-        W2[coder-acp-copilot]
+    subgraph Workers["Coding Agent Workers"]
+        W1[coder-acp-copilot]
+        W2[coder-acp-claude-code]
+    end
+
+    subgraph AI["AI Providers"]
+        Copilot[GitHub Copilot API]
+        Anthropic[Anthropic API]
     end
 
     MongoDB[(MongoDB)]
     Redis[(Redis Pub/Sub)]
     Blob[(Blob Storage)]
+    KV[(Key Vault)]
 
     Client -->|REST| API
     Portal -->|REST| API
     API -->|SSE| Client
-    API --> Q1 & Q2 & Q3
+    API -->|SSE| Portal
+    API -->|persist requests| MongoDB
+    Scheduler -->|poll| MongoDB
+    Scheduler -->|enqueue| Q1 & Q2 & Q3 & Q4
     Q1 --> W1
     Q2 --> W2
     Q3 --> W3
-    W1 & W2 & W3 -->|status + logs| MongoDB
-    W1 & W2 & W3 -->|real-time logs| Redis
-    W1 & W2 & W3 -->|workspace snapshots| Blob
+    Q4 --> W4
+    W1 & W2 & W3 & W4 -->|status + results| MongoDB
+    W1 & W2 & W3 & W4 -->|real-time logs| Redis
+    W1 & W2 & W3 & W4 -->|workspace snapshots| Blob
+    W1 & W2 & W3 & W4 -->|fetch tokens| TM
+    TM <-->|store/sync| KV
+    W4 -->|TLS intercept + HAR| GW
+    GW --> Copilot
+    GW --> Anthropic
+    W1 & W2 & W3 -->|invoke| Judge
+    Judge -->|persist scores| MongoDB
     Redis -->|subscribe| API
-    Judge -->|evaluate| MongoDB
 ```
 
 ## Quick Start
@@ -89,12 +117,13 @@ pnpm open:portal
 ### Other useful commands
 
 ```bash
-# Start only infrastructure services (MongoDB, Redis, Azurite)
+# Start only infrastructure services (MongoDB, Redis, Azurite, Lowkey Vault)
 pnpm docker:up:infra
 
 # Run individual services locally (after starting infra)
 pnpm dev:api
 pnpm dev:portal
+pnpm dev:token-manager
 pnpm dev:coder-acp-copilot
 pnpm dev:coder-acp-claude-code
 ```
@@ -191,13 +220,15 @@ pnpm cli agent version list -i coder-acp-copilot -o json
 
 ## Configuration
 
-The `config/` directory contains YAML-based configuration for the evaluation system:
+Personas, scenarios, criteria, and prompt features are stored in **MongoDB** as the source of truth — they can be exported/imported as YAML for portability and version control. The `config/` directory contains the canonical YAML examples:
 
 | Directory | Purpose |
 |-----------|---------|
-| `config/criteria/` | Evaluation criteria definitions (used by the Judge DAG) |
-| `config/personas/` | Judge personas (e.g. `demanding-senior`, `friendly-senior`) |
-| `config/scenarios/` | Benchmark scenario definitions |
+| `config/criteria/` | Evaluation criteria forming a DAG (consumed by the Judge) |
+| `config/personas/` | Reviewer personas (e.g. `demanding-senior`, `friendly-senior`, `vibe-coder`) |
+| `config/scenarios/` | Benchmark scenario / task definitions |
+| `config/prompt-features/` | Feature flags tracking what capabilities agents request |
+| `config/lowkey-vault/` | Lowkey Vault import templates for local dev |
 | `config/traits.yaml` | Trait dimensions (personality, experience, verbosity, type) |
 
 ## Documentation
@@ -220,34 +251,49 @@ Infrastructure provisioning (AKS cluster, Azure resources) is managed in the [sc
 ```
 scope-core/
 ├── apps/
-│   ├── api/                          # REST API + SSE
-│   ├── cli/                          # CLI (commander + ink TUI)
-│   ├── judge/                        # Criteria DAG evaluator
-│   ├── portal/                       # React + Vite web UI
+│   ├── api/                                    # REST API + SSE
+│   ├── cli/                                    # CLI (commander + ink TUI)
+│   ├── gateway/                                # AI Gateway — Rust TLS proxy with plugin architecture
+│   ├── judge/                                  # Criteria DAG evaluator
+│   ├── portal/                                 # React + Vite web UI
+│   ├── scheduler/                              # Queue-depth scheduler (MongoDB → Azure Queues)
+│   ├── token-manager/                          # Token storage / validation / distribution
+│   ├── key-updaters/
+│   │   └── github-cookie-updater/              # Refreshes GitHub auth cookies for VS Code Web
 │   ├── model-scanners/
-│   │   ├── anthropic/                # Anthropic model scanner
-│   │   └── copilot/                  # Copilot model scanner
-│   ├── token-manager/                # Token management service
+│   │   ├── anthropic/                          # Anthropic model scanner
+│   │   └── copilot/                            # Copilot model scanner
+│   ├── version-checkers/
+│   │   ├── acp-copilot/                        # Copilot ACP version polling
+│   │   ├── claude-code/                        # Claude Code version polling
+│   │   ├── vscode-electron/                    # VS Code Electron version polling
+│   │   └── vscode-web/                         # VS Code Web version polling
 │   └── workers/
-│       ├── coder-acp-claude-code/    # Claude Code worker (ACP)
-│       ├── coder-acp-copilot/        # Copilot worker (ACP)
-│       └── report-generator/         # Report generation worker
+│       ├── coder-acp-claude-code/              # Claude Code worker (ACP)
+│       ├── coder-acp-copilot/                  # Copilot worker (ACP)
+│       └── report-generator/                   # Report generation worker
 ├── packages/
-│   ├── shared/                       # Shared library (criteria graph, MongoDB, Redis, etc.)
-│   ├── db-migrations/                # Database migration scripts
-│   └── model-scanning/               # Model scanning library
+│   ├── shared/                                 # Shared library (types, models, queue/blob/redis clients)
+│   ├── copilot-driver-ext/                     # VS Code extension exposing Copilot Chat over HTTP
+│   ├── db-migrations/                          # MongoDB migration framework (mongo-migrate-ts)
+│   ├── github-auth/                            # GitHub OAuth / device-code utilities
+│   ├── model-scanning/                         # Shared model scanning logic
+│   └── version-checking/                       # Version comparison utilities
 ├── config/
-│   ├── criteria/                     # Evaluation criteria YAML definitions
-│   ├── personas/                     # Judge persona configurations
-│   ├── scenarios/                    # Benchmark scenario definitions
-│   └── traits.yaml                   # Trait dimensions
+│   ├── criteria/                               # Evaluation criteria YAML definitions
+│   ├── personas/                               # Reviewer persona configurations
+│   ├── scenarios/                              # Benchmark scenario definitions
+│   ├── prompt-features/                        # Prompt feature flag definitions
+│   ├── lowkey-vault/                           # Lowkey Vault import templates (local dev)
+│   └── traits.yaml                             # Trait dimensions
 ├── deploy/
-│   ├── base/                         # Kustomize base manifests
-│   ├── overlays/                     # Environment overlays (integration, preview, prod)
-│   ├── image-automation/             # FluxCD image automation
-│   └── pr-envs/                      # PR preview environments
-├── docs/                             # Architecture & research documentation
-├── scripts/                          # Utility scripts
+│   ├── base/                                   # Kustomize base manifests (services + workers)
+│   ├── overlays/                               # Environment overlays (integration, preview, prod)
+│   ├── image-automation/                       # FluxCD ImageUpdateAutomation + ImagePolicy
+│   └── pr-envs/                                # PR preview environments
+├── docs/                                       # Architecture & research documentation
+├── infra/                                      # Bicep infrastructure (CI/CD identity, etc.)
+├── scripts/                                    # Utility scripts
 ├── docker-compose.yml
 └── package.json
 ```
