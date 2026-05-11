@@ -87,8 +87,11 @@ function makeContainerClient(container: string) {
       return makeBlockBlobClient(container, name);
     },
     getAppendBlobClient(name: string) {
-      // BlobStorage.getLogsBlobUrl uses this just to compute a URL.
-      return { url: blobUrl(container, name) };
+      // Delegate to the same façade as block-blobs so importer code that
+      // writes via getBlockBlobClient and reader code that downloads via
+      // getAppendBlobClient share a single in-memory blob. BlobStorage's
+      // getLogsBlobUrl also calls this purely for the `.url` field.
+      return makeBlockBlobClient(container, name);
     },
   };
 }
@@ -499,10 +502,10 @@ describe("run import/export — round-trip (export → import)", () => {
       expect(entries[entryName]).toEqual(blobStore.get(srcKey));
     }
 
-    // 2. Re-import into a fresh blob store + Mongo. Importer ingests
-    // HAR / chat-export / tool-calls; chat-result and logs.jsonl are
-    // intentionally not yet wired through and are dropped on import — the
-    // separate test below pins that behaviour.
+    // 2. Re-import into a fresh blob store + Mongo. Importer ingests every
+    // bundled artifact: HAR, chat-export, tool-calls, chat-result and
+    // logs.jsonl. The dedicated round-trip test below pins the chat-result
+    // and logs.jsonl paths specifically.
     blobStore.clear();
     const targetReqs = makeRequestCollection();
     const importApp = buildApp(targetReqs);
@@ -522,6 +525,9 @@ describe("run import/export — round-trip (export → import)", () => {
       [`snapshots/${id}/chat-export.json`]: blobs[`snapshots/${id}/run.chat-export.json`],
       [`snapshots/${id}/iteration-1/tool-calls.jsonl`]:
         blobs[`snapshots/${id}/iteration-1/tool-calls.jsonl`],
+      [`snapshots/${id}/iteration-1/chat-result.json`]:
+        blobs[`snapshots/${id}/iteration-1/chat-result.json`],
+      [`logs/${id}/runs/${id}/run.jsonl`]: blobs[`logs/${id}/runs/${id}/run.jsonl`],
     };
     for (const [k, v] of Object.entries(expectedReuploads)) {
       expect(blobStore.get(k), `expected reupload at ${k}`).toEqual(v);
@@ -531,6 +537,7 @@ describe("run import/export — round-trip (export → import)", () => {
     const reinserted = targetReqs.docs.get(id);
     expect(reinserted.run.harUrl).toMatch(new RegExp(`/snapshots/${id}/capture\\.har$`));
     expect(reinserted.run.rawChatUrl).toMatch(new RegExp(`/snapshots/${id}/chat-export\\.json$`));
+    expect(reinserted.run.logsUrl).toMatch(new RegExp(`/logs/${id}/runs/${id}/run\\.jsonl$`));
     expect(reinserted.run.turns[0].harUrl).toMatch(
       new RegExp(`/snapshots/${id}/iteration-1/capture\\.har$`),
     );
@@ -540,22 +547,27 @@ describe("run import/export — round-trip (export → import)", () => {
     expect(reinserted.run.turns[0].toolCallsUrl).toMatch(
       new RegExp(`/snapshots/${id}/iteration-1/tool-calls\\.jsonl$`),
     );
+    expect(reinserted.run.turns[0].chatResultUrl).toMatch(
+      new RegExp(`/snapshots/${id}/iteration-1/chat-result\\.json$`),
+    );
   });
 
-  it("documents that chat-result and logs.jsonl are dropped on import (asymmetry vs export)", async () => {
-    // The export side bundles iteration-N.chat-result.json and logs.jsonl
-    // entries into the archive (see prior test), but the upload handler has
-    // no detect+upload helper for either, so they silently disappear on
-    // re-import. This test pins that behaviour so any future importer
-    // change either keeps it explicit or fails here, prompting an update.
+  it("round-trips per-iteration chat-result and run-level logs.jsonl", async () => {
+    // Pinned-down round-trip for the two artifacts that historically were
+    // packed into the archive but dropped on import. They now ride through
+    // both directions; this test guards against regressing back to the
+    // asymmetric behaviour.
     const id = "asym-1";
     const fixture: any = makeFixtureRun(id);
     fixture.run.logsUrl = blobUrl("logs", `${id}/runs/${id}/run.jsonl`);
     fixture.run.turns[0].chatResultUrl = blobUrl("snapshots", `${id}/iteration-1/chat-result.json`);
 
-    blobStore.set(`snapshots/${id}/iteration-1/workspace.tar.gz`, await buildTarGz({ "x.txt": "x" }));
-    blobStore.set(`snapshots/${id}/iteration-1/chat-result.json`, Buffer.from('{"r":1}'));
-    blobStore.set(`logs/${id}/runs/${id}/run.jsonl`, Buffer.from('{"level":"info"}\n'));
+    const innerIterTar = await buildTarGz({ "x.txt": "x" });
+    const chatResultBytes = Buffer.from('{"r":1}');
+    const logsBytes = Buffer.from('{"level":"info","message":"hi"}\n');
+    blobStore.set(`snapshots/${id}/iteration-1/workspace.tar.gz`, innerIterTar);
+    blobStore.set(`snapshots/${id}/iteration-1/chat-result.json`, chatResultBytes);
+    blobStore.set(`logs/${id}/runs/${id}/run.jsonl`, logsBytes);
 
     const sourceReqs = makeRequestCollection();
     sourceReqs.docs.set(id, fixture);
@@ -571,8 +583,8 @@ describe("run import/export — round-trip (export → import)", () => {
       });
     expect(exportRes.status).toBe(200);
     const archive = await readTarGz(exportRes.body);
-    expect(archive[`${id}/iteration-1.chat-result.json`]).toBeDefined();
-    expect(archive[`${id}/logs.jsonl`]).toBeDefined();
+    expect(archive[`${id}/iteration-1.chat-result.json`]).toEqual(chatResultBytes);
+    expect(archive[`${id}/logs.jsonl`]).toEqual(logsBytes);
 
     blobStore.clear();
     const targetReqs = makeRequestCollection();
@@ -582,16 +594,19 @@ describe("run import/export — round-trip (export → import)", () => {
       .attach("archive", exportRes.body, "archive.tar.gz");
     expect(importRes.status).toBe(201);
 
+    // chat-result lands at the canonical per-iteration blob and the turn
+    // points at the new URL.
     const reinserted = targetReqs.docs.get(id);
-    // chat-result is not re-uploaded. The exporter rewrites the URL to a
-    // relative archive path (`iteration-1.chat-result.json`); since the
-    // importer has no helper for it, that broken relative string survives
-    // on the turn and no blob is re-uploaded.
-    expect(reinserted.run.turns[0].chatResultUrl).toBe("iteration-1.chat-result.json");
-    expect([...blobStore.keys()].some(k => k.endsWith("chat-result.json"))).toBe(false);
+    expect(blobStore.get(`snapshots/${id}/iteration-1/chat-result.json`)).toEqual(chatResultBytes);
+    expect(reinserted.run.turns[0].chatResultUrl).toMatch(
+      new RegExp(`/snapshots/${id}/iteration-1/chat-result\\.json$`),
+    );
 
-    // logs.jsonl is not re-uploaded; the importer only sets a fresh logsUrl
-    // pointing at the (empty) per-attempt logs blob.
-    expect([...blobStore.keys()].some(k => k.startsWith("logs/"))).toBe(false);
+    // logs.jsonl is re-uploaded under the canonical per-attempt logs path
+    // and run.logsUrl points at it.
+    expect(blobStore.get(`logs/${id}/runs/${id}/run.jsonl`)).toEqual(logsBytes);
+    expect(reinserted.run.logsUrl).toMatch(
+      new RegExp(`/logs/${id}/runs/${id}/run\\.jsonl$`),
+    );
   });
 });

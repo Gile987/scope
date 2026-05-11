@@ -291,6 +291,57 @@ export async function uploadBundledToolCallsFiles(opts: {
   }
 }
 
+/** Describes a per-iteration chat-result JSON file found in an extracted archive directory. */
+export interface DetectedChatResultFile {
+  fileName: string;
+  /** Iteration number — chat-result is always per-iteration. */
+  iteration: number;
+}
+
+/**
+ * Scan a list of filenames and return chat-result JSON files that follow the
+ * bundled naming convention: `iteration-{N}.chat-result.json`.
+ */
+export function detectBundledChatResultFiles(fileNames: string[]): DetectedChatResultFile[] {
+  const results: DetectedChatResultFile[] = [];
+  for (const name of fileNames) {
+    const m = name.match(/^iteration-(\d+)\.chat-result\.json$/);
+    if (m) {
+      results.push({ fileName: name, iteration: parseInt(m[1], 10) });
+    }
+  }
+  return results;
+}
+
+/**
+ * Upload detected chat-result JSON files from an extracted archive directory
+ * to blob storage. Mutates each matching turn's `chatResultUrl` to the new blob URL.
+ */
+export async function uploadBundledChatResultFiles(opts: {
+  chatResultFiles: DetectedChatResultFile[];
+  runDir: string;
+  runId: string;
+  turns: Array<{ iteration: number; chatResultUrl?: string; [key: string]: unknown }>;
+  containerClient: BlobUploader;
+}): Promise<void> {
+  const { chatResultFiles, runDir, runId, turns, containerClient } = opts;
+  const { join } = await import("node:path");
+
+  for (const cr of chatResultFiles) {
+    const filePath = join(runDir, cr.fileName);
+    const blobName = `${runId}/iteration-${cr.iteration}/chat-result.json`;
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    await blockBlobClient.uploadFile(filePath, {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+      tags: { requestId: runId, iteration: String(cr.iteration) },
+    });
+    const turn = turns.find(t => t.iteration === cr.iteration);
+    if (turn) {
+      turn.chatResultUrl = blockBlobClient.url;
+    }
+  }
+}
+
 /** Minimal interface for blob download needed by packRunIntoTar. */
 export interface BlobDownloader {
   getBlockBlobClient(blobName: string): {

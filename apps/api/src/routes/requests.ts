@@ -47,10 +47,12 @@ import { buildGroupingPipeline } from "../grouping.js";
 import { resolveSkillSpecs } from "../utils/skill-helpers.js";
 import {
   detectBundledChatFiles,
+  detectBundledChatResultFiles,
   detectBundledHarFiles,
   detectBundledToolCallsFiles,
   packRunIntoTar,
   uploadBundledChatFiles,
+  uploadBundledChatResultFiles,
   uploadBundledHarFiles,
   uploadBundledToolCallsFiles,
 } from "../archive-har.js";
@@ -1958,6 +1960,8 @@ apiRoute(ctx.app, ctx.registry, {
     }
     const containerClient = blobServiceClient.getContainerClient("snapshots");
     await containerClient.createIfNotExists();
+    const logsContainerClient = blobServiceClient.getContainerClient("logs");
+    await logsContainerClient.createIfNotExists();
 
     for (const iterFile of iterationFiles) {
       const iterMatch = iterFile.match(/^iteration-(\d+)\.tar\.gz$/);
@@ -2017,6 +2021,32 @@ apiRoute(ctx.app, ctx.registry, {
       turns,
       containerClient,
     });
+
+    // Upload bundled per-iteration chat-result JSON files to blob storage.
+    // Mutates each matching turn's `chatResultUrl` in place.
+    const detectedChatResultFiles = detectBundledChatResultFiles(readdirSync(runDir));
+    await uploadBundledChatResultFiles({
+      chatResultFiles: detectedChatResultFiles,
+      runDir,
+      runId: runDoc._id,
+      turns,
+      containerClient,
+    });
+
+    // Re-upload the bundled run.jsonl into the logs container at the
+    // canonical per-attempt location so downloaded logs survive the
+    // round-trip. Re-imported runs are terminal, so a one-shot block-blob
+    // write is fine even though the live path uses an append blob — the
+    // download side reads via the blob client, which is type-agnostic.
+    const logsArchivePath = join(runDir, "logs.jsonl");
+    if (existsSync(logsArchivePath)) {
+      const logsBlobName = `${runDoc._id}/runs/${runDoc._id}/run.jsonl`;
+      const logsBlobClient = logsContainerClient.getBlockBlobClient(logsBlobName);
+      await logsBlobClient.uploadFile(logsArchivePath, {
+        blobHTTPHeaders: { blobContentType: "application/x-ndjson" },
+        tags: { requestId: runDoc._id },
+      });
+    }
 
     // Prepare document for insertion. The schema parse already produced
     // properly-typed/coerced values, so the doc shape lines up with
