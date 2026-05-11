@@ -10,7 +10,8 @@
 | **Judge** (`apps/judge`) | Evaluates completed runs against a criteria DAG using the Copilot SDK |
 | **Portal** (`apps/portal`) | React 19 + Vite web UI for managing runs and editing the criteria DAG |
 | **CLI** (`apps/cli`) | Commander + Ink TUI for submitting runs, streaming logs, and CI/CD automation |
-| **Gateway** (`apps/gateway`) | Rust TLS-intercepting HTTP proxy with a plugin architecture — captures HAR traffic from Electron-based agents to upstream AI providers |
+| **AI Gateway** (`apps/gateway`) | Rust TLS-intercepting HTTP proxy with a plugin architecture — captures HAR traffic from Electron-based agents to upstream AI providers |
+| **MCP Gateway** | Per-worker [MCPJungle](https://github.com/mcpjungle/MCPJungle) sidecar that aggregates stdio + remote MCP servers behind a single streamable HTTP endpoint, enabling ACP workers to use stdio-only servers (see [docs/architecture/mcp-gateway.md](docs/architecture/mcp-gateway.md)) |
 | **Scheduler** (`apps/scheduler`) | Per-worker-type queue depth scheduler that drips requests from MongoDB into Azure Storage Queues |
 | **Token Manager** (`apps/token-manager`) | Centralized GitHub token storage, validation, and round-robin distribution (Azure Key Vault / Lowkey Vault) |
 | **coder-acp-copilot** | GitHub Copilot agent worker (ACP SDK) |
@@ -41,9 +42,20 @@ flowchart LR
         Q4[vscode-electron]
     end
 
-    subgraph Workers["Coding Agent Workers"]
+    subgraph Workers["Coding Agent Workers (each with MCP Gateway sidecar)"]
         W1[coder-acp-copilot]
+        MCP1["MCP Gateway<br/><i>MCPJungle</i>"]
         W2[coder-acp-claude-code]
+        MCP2["MCP Gateway<br/><i>MCPJungle</i>"]
+        MCP4["MCP Gateway<br/><i>MCPJungle</i>"]
+        W1 -.->|tool calls| MCP1
+        W2 -.->|tool calls| MCP2
+        W4 -.->|tool calls| MCP4
+    end
+
+    subgraph MCPServers["MCP Servers"]
+        StdioMCP["stdio servers<br/><i>(filesystem, etc.)</i>"]
+        RemoteMCP["remote HTTP servers<br/><i>(context7, etc.)</i>"]
     end
 
     subgraph AI["AI Providers"]
@@ -75,6 +87,8 @@ flowchart LR
     W4 -->|TLS intercept + HAR| GW
     GW --> Copilot
     GW --> Anthropic
+    MCP1 & MCP2 & MCP4 --> StdioMCP
+    MCP1 & MCP2 & MCP4 --> RemoteMCP
     W1 & W2 & W3 -->|invoke| Judge
     Judge -->|persist scores| MongoDB
     Redis -->|subscribe| API
