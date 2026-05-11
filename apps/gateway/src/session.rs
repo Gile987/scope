@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use parking_lot::RwLock;
 use serde::Serialize;
 use serde_json::Value;
+use tracing::{debug, info};
 
 use crate::iteration_store::IterationStore;
 use crate::plugin::{PluginRegistry, SessionId};
@@ -232,8 +233,17 @@ impl SessionManager {
         if let Some(session) = sessions.get_mut(session_id) {
             session.in_flight = session.in_flight.saturating_add(1);
             session.last_activity = Instant::now();
+            debug!(
+                session_id = %session_id,
+                in_flight = session.in_flight,
+                "begin_request: incremented in-flight counter"
+            );
             true
         } else {
+            debug!(
+                session_id = %session_id,
+                "begin_request: session not found (already reaped or never created)"
+            );
             false
         }
     }
@@ -245,6 +255,11 @@ impl SessionManager {
         if let Some(session) = sessions.get_mut(session_id) {
             session.in_flight = session.in_flight.saturating_sub(1);
             session.last_activity = Instant::now();
+            debug!(
+                session_id = %session_id,
+                in_flight = session.in_flight,
+                "end_request: decremented in-flight counter"
+            );
         }
     }
 
@@ -285,11 +300,24 @@ impl SessionManager {
             let now = Instant::now();
             let mut reaped = Vec::new();
             sessions.retain(|id, session| {
-                if session.in_flight == 0
-                    && now.duration_since(session.last_activity) > self.idle_timeout
-                {
-                    reaped.push(id.clone());
-                    false
+                let idle_for = now.duration_since(session.last_activity);
+                if idle_for > self.idle_timeout {
+                    if session.in_flight == 0 {
+                        reaped.push(id.clone());
+                        false
+                    } else {
+                        // Idle window elapsed but a request is still streaming;
+                        // keep the session alive. This is the load-bearing branch
+                        // for the long-running-response fix — surface it at INFO
+                        // so we can confirm the guard is firing in production.
+                        info!(
+                            session_id = %id,
+                            in_flight = session.in_flight,
+                            idle_secs = idle_for.as_secs(),
+                            "reap_idle: skipping idle session with in-flight requests"
+                        );
+                        true
+                    }
                 } else {
                     true
                 }
