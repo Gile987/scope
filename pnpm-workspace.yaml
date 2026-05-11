@@ -1,17 +1,26 @@
 packages:
-  - "apps/api"
-  - "apps/key-updaters/*"
-  - "apps/cli"
-  - "apps/judge"
-  - "apps/portal"
-  - "apps/scheduler"
-  - "apps/token-manager"
-  - "apps/workers/*"
-  - "apps/model-scanners/*"
-  - "apps/version-checkers/*"
-  - "packages/shared"
-  - "packages/version-checking"
-  - "packages/github-auth"
-  - "packages/model-scanning"
-  - "packages/db-migrations"
-  - "packages/copilot-driver-ext"
+  - apps/api
+  - apps/key-updaters/*
+  - apps/cli
+  - apps/judge
+  - apps/portal
+  - apps/scheduler
+  - apps/token-manager
+  - apps/workers/*
+  - apps/model-scanners/*
+  - apps/version-checkers/*
+  - packages/shared
+  - packages/version-checking
+  - packages/github-auth
+  - packages/model-scanning
+  - packages/db-migrations
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
+
+onlyBuiltDependencies:
+  - '@vscode/vsce-sign'
+  - cpu-features
+  - esbuild
+  - keytar
+  - protobufjs
+  - ssh2
