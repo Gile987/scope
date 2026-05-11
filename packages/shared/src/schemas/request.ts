@@ -37,7 +37,7 @@ export const CriterionResultSchema = z
 export const ConversationTurnSchema = z
   .object({
     iteration: z.number(),
-    codingAgentResponse: z.string(),
+    codingAgentResponse: z.string().optional(),
     judgeFeedback: z.string(),
     snapshotUrl: z.string(),
     passed: z.boolean(),
@@ -60,6 +60,8 @@ export const ConversationTurnSchema = z
     aiCallCount: z.number().optional(),
     rawChatUrl: z.string().optional(),
     rawChatFormat: z.string().optional(),
+    chatResultUrl: z.string().optional(),
+    chatResultFormat: z.string().optional(),
   })
   .openapi("ConversationTurn");
 

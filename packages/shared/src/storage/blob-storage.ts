@@ -416,6 +416,29 @@ export class BlobStorage {
   }
 
   /**
+   * Uploads an in-memory JSON-serializable value (or a pre-serialized JSON
+   * string) to the snapshots container as a single block blob. Overwrites if
+   * the blob already exists. Returns the blob URL.
+   *
+   * Useful when the data is already in memory (e.g. migrations rewriting
+   * documents) so callers don't need to round-trip through a temp file.
+   */
+  async uploadJson(
+    blobName: string,
+    data: unknown,
+  ): Promise<string> {
+    await this.ensureContainer();
+
+    const body = typeof data === "string" ? data : JSON.stringify(data);
+    const buf = Buffer.from(body, "utf-8");
+    const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
+    await blockBlobClient.uploadData(buf, {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+    });
+    return blockBlobClient.url;
+  }
+
+  /**
    * Downloads a snapshot from blob storage and extracts it to the target directory.
    */
   async downloadAndExtractSnapshot(

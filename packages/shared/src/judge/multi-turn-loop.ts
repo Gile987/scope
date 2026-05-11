@@ -149,7 +149,7 @@ export async function runMultiTurnLoop(
 
     // Step 1: Call the coding agent
     await iterLog("info", "Calling coding agent...");
-    let codingResponse: string;
+    let codingResponse: string | undefined;
     let turnHarUrl: string | undefined;
     let turnTokenUsage: TokenUsage | undefined;
     let turnAiCallCount: number | undefined;
@@ -157,6 +157,8 @@ export async function runMultiTurnLoop(
     let turnToolCallCount: number | undefined;
     let turnRawChatUrl: string | undefined;
     let turnRawChatFormat: string | undefined;
+    let turnChatResultUrl: string | undefined;
+    let turnChatResultFormat: string | undefined;
     const turnVideoUrls: string[] = [];
     try {
       const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
@@ -236,6 +238,25 @@ export async function runMultiTurnLoop(
           await iterLog("warn", `Failed to upload raw chat transcript: ${msg}`);
         }
       }
+
+      // Upload chat result envelope (e.g. VS Code's IChatAgentResult2) for
+      // post-hoc diagnostics. Stored as a separate blob so it never bloats
+      // the request document — see growth-ecosystems/scope-core#811.
+      if (workerResult.chatResultFilePath) {
+        try {
+          const blobName = `${requestId}/runs/${runId}/iteration-${iteration}/chat-result.json`;
+          turnChatResultUrl = await blobStorage.uploadFile(
+            workerResult.chatResultFilePath,
+            blobName,
+            "application/json"
+          );
+          turnChatResultFormat = workerResult.chatResultFormat;
+          await iterLog("info", "Chat result envelope uploaded", { chatResultUrl: turnChatResultUrl });
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await iterLog("warn", `Failed to upload chat result envelope: ${msg}`);
+        }
+      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       await iterLog("error", `Coding agent failed: ${errorMsg}`, { error: errorMsg });
@@ -311,7 +332,7 @@ export async function runMultiTurnLoop(
     }
 
     await iterLog("info", "Coding agent completed", {
-      responseLength: codingResponse.length,
+      responseLength: codingResponse?.length ?? 0,
     });
 
     // Step 2: Snapshot workspace to blob storage
@@ -331,7 +352,7 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so video/HAR URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
-        codingAgentResponse: codingResponse,
+        ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: `Snapshot upload failed: ${errorMsg}`,
         snapshotUrl: "",
         passed: false,
@@ -342,6 +363,8 @@ export async function runMultiTurnLoop(
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
         ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
         ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+        ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -365,7 +388,7 @@ export async function runMultiTurnLoop(
 
       const turn: ConversationTurn = {
         iteration,
-        codingAgentResponse: codingResponse,
+        ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: "No criteria — judge evaluation skipped",
         snapshotUrl,
         passed: true,
@@ -380,6 +403,8 @@ export async function runMultiTurnLoop(
         ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
         ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
         ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+        ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
       };
       turns.push(turn);
       if (onTurnComplete) {
@@ -390,7 +415,7 @@ export async function runMultiTurnLoop(
         turns,
         passed: true,
         hadError: false,
-        finalResult: codingResponse,
+        finalResult: codingResponse ?? "",
       };
     }
 
@@ -417,7 +442,7 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so video/snapshot URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
-        codingAgentResponse: codingResponse,
+        ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: `Judge evaluation failed: ${errorMsg}`,
         snapshotUrl,
         passed: false,
@@ -432,6 +457,8 @@ export async function runMultiTurnLoop(
         ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
         ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
         ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+        ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -466,7 +493,7 @@ export async function runMultiTurnLoop(
     // Step 4: Record the turn
     const turn: ConversationTurn = {
       iteration,
-      codingAgentResponse: codingResponse,
+      ...(codingResponse && { codingAgentResponse: codingResponse }),
       judgeFeedback,
       snapshotUrl,
       passed: judgePassed,
@@ -482,6 +509,8 @@ export async function runMultiTurnLoop(
       ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
       ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
       ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+      ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+      ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
     };
     turns.push(turn);
 
@@ -499,7 +528,7 @@ export async function runMultiTurnLoop(
         turns,
         passed: true,
         hadError: false,
-        finalResult: codingResponse,
+        finalResult: codingResponse ?? "",
       } as MultiTurnResult;
     }
 

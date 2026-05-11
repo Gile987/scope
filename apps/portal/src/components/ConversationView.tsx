@@ -310,7 +310,8 @@ function SegmentBlock({ segment, turn }: { segment: ConversationSegment; turn: C
 }
 
 /** Agent response card — right aligned */
-function AgentResponseBlock({ content, turn }: { content: string; turn: ConversationTurn }) {
+function AgentResponseBlock({ content, turn }: { content: string | undefined; turn: ConversationTurn }) {
+  const hasContent = typeof content === "string" && content.length > 0;
   return (
     <div className="flex justify-end">
       <Card className={cn(
@@ -327,9 +328,15 @@ function AgentResponseBlock({ content, turn }: { content: string; turn: Conversa
               {new Date(turn.timestamp).toLocaleTimeString()}
             </span>
           </div>
-          <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
-            <MarkdownRenderer>{content}</MarkdownRenderer>
-          </div>
+          {hasContent ? (
+            <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
+              <MarkdownRenderer>{content}</MarkdownRenderer>
+            </div>
+          ) : (
+            <p className="text-xs italic text-muted-foreground">
+              No assistant response captured — see raw chat / HAR for the full transcript.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

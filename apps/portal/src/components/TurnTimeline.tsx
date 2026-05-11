@@ -171,9 +171,15 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                 {/* Coding agent response */}
                 <div>
                   <h4 className="text-sm font-medium mb-1">Coding Agent Response</h4>
-                  <div className="prose prose-sm dark:prose-invert max-w-none bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto">
-                    <MarkdownRenderer>{turn.codingAgentResponse}</MarkdownRenderer>
-                  </div>
+                  {turn.codingAgentResponse ? (
+                    <div className="prose prose-sm dark:prose-invert max-w-none bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto">
+                      <MarkdownRenderer>{turn.codingAgentResponse}</MarkdownRenderer>
+                    </div>
+                  ) : (
+                    <p className="text-xs italic text-muted-foreground">
+                      No assistant response captured — see raw chat / HAR for the full transcript.
+                    </p>
+                  )}
                 </div>
 
                 <Separator />

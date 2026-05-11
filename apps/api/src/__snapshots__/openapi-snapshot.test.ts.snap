@@ -298,6 +298,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "aiCallCount": {
             "type": "number",
           },
+          "chatResultFormat": {
+            "type": "string",
+          },
+          "chatResultUrl": {
+            "type": "string",
+          },
           "codingAgentResponse": {
             "type": "string",
           },
@@ -392,7 +398,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "iteration",
-          "codingAgentResponse",
           "judgeFeedback",
           "snapshotUrl",
           "passed",
