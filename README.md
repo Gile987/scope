@@ -4,6 +4,17 @@
 
 **Scope Core** is a self-service, Kubernetes-native platform for measuring the agentic experience of AI coding agents. Any team member can submit runs, manage criteria, and inspect results through the Portal or CLI without operator involvement. It orchestrates coding tasks across multiple agent workers (GitHub Copilot, Claude Code, VS Code Electron), evaluates results using a criteria DAG, captures upstream AI traffic through a Rust TLS-intercepting gateway, and streams logs in real time — all backed by MongoDB (CosmosDB-compatible), Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
 
+## Key Features
+
+- **Self-service** — Any team member can submit runs, edit criteria, manage scenarios and personas, and inspect results through the Portal or CLI without operator involvement. The CLI maintains feature parity with the Portal so power users and CI/CD pipelines have first-class access too.
+- **Centralized queue scheduling** — A dedicated [scheduler](apps/scheduler/) ([docs](docs/architecture/queue-scheduler.md)) decouples request ordering from message delivery. MongoDB stores priority and pause/resume state; Azure Storage Queues are kept deliberately shallow so scheduling decisions take effect within seconds and re-prioritization is always possible.
+- **Run priorities** — Every request carries a root-level `priority` field (default `0`, higher dispatched first). Priority is editable on `pending` and `paused` requests via single and bulk REST endpoints, with a Portal UI offering −10…+10 presets and ±1/±5 increments.
+- **Out-of-band (OOB) request support** — Because the scheduler dispatches by priority on every tick, OOB requests submitted with a high priority jump ahead of the pending queue and reach a worker on the next dispatch — without disturbing in-flight work or requiring a separate execution path.
+- **Low-dimensional feature-space MDP modelisation** — Runs are aggregated into a Markov Decision Process state-transition graph ([apps/api/src/criteria-mdp.ts](apps/api/src/criteria-mdp.ts), Portal `/criteria/mdp` view) over composite criteria state vectors. The space can be projected to any chosen subset of criteria to produce a sub-MDP, and start states are derived from extracted prompt features.
+- **Cross-scenario analysis** — Combining **prompt-feature extraction** (stored on `TaskPromptDocument` and used to type the MDP start nodes), the **criteria DAG** as a trajectory ontology, and the **MDP** built across all runs makes it possible to compare agent trajectories across heterogeneous scenarios in a common state space rather than per-scenario in isolation.
+- **Test variations support** — *Upcoming.* Compare a baseline profile against alternate profiles to analyse the impact of skills, extensions, and documentation changes on coding-agent outcomes.
+- **Experiment analysis** — *Upcoming.* Dedicated experiment-level analysis (grouping runs into experiments and comparing them as cohorts) is not yet implemented.
+
 ## Components
 
 | Component | Description |
@@ -21,17 +32,6 @@
 | **report-generator** | Post-run evaluation report generator (Copilot SDK) |
 | **model-scanners** | Feature detection for Copilot and Anthropic models |
 | **version-checkers** | Poll for new releases of agents/tools (`acp-copilot`, `claude-code`, `vscode-electron`) |
-
-## Key Features
-
-- **Self-service** — Any team member can submit runs, edit criteria, manage scenarios and personas, and inspect results through the Portal or CLI without operator involvement. The CLI maintains feature parity with the Portal so power users and CI/CD pipelines have first-class access too.
-- **Centralized queue scheduling** — A dedicated [scheduler](apps/scheduler/) ([docs](docs/architecture/queue-scheduler.md)) decouples request ordering from message delivery. MongoDB stores priority and pause/resume state; Azure Storage Queues are kept deliberately shallow so scheduling decisions take effect within seconds and re-prioritization is always possible.
-- **Run priorities** — Every request carries a root-level `priority` field (default `0`, higher dispatched first). Priority is editable on `pending` and `paused` requests via single and bulk REST endpoints, with a Portal UI offering −10…+10 presets and ±1/±5 increments.
-- **Out-of-band (OOB) request support** — Because the scheduler dispatches by priority on every tick, OOB requests submitted with a high priority jump ahead of the pending queue and reach a worker on the next dispatch — without disturbing in-flight work or requiring a separate execution path.
-- **Low-dimensional feature-space MDP modelisation** — Runs are aggregated into a Markov Decision Process state-transition graph ([apps/api/src/criteria-mdp.ts](apps/api/src/criteria-mdp.ts), Portal `/criteria/mdp` view) over composite criteria state vectors. The space can be projected to any chosen subset of criteria to produce a sub-MDP, and start states are derived from extracted prompt features.
-- **Cross-scenario analysis** — Combining **prompt-feature extraction** (stored on `TaskPromptDocument` and used to type the MDP start nodes), the **criteria DAG** as a trajectory ontology, and the **MDP** built across all runs makes it possible to compare agent trajectories across heterogeneous scenarios in a common state space rather than per-scenario in isolation.
-- **Test variations support** — *Upcoming.* Compare a baseline profile against alternate profiles to analyse the impact of skills, extensions, and documentation changes on coding-agent outcomes.
-- **Experiment analysis** — *Upcoming.* Dedicated experiment-level analysis (grouping runs into experiments and comparing them as cohorts) is not yet implemented.
 
 ## Architecture
 
