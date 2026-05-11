@@ -1,6 +1,8 @@
 # Scope Core
 
-**Scope Core** is a Kubernetes-native platform for benchmarking AI coding agents. It orchestrates coding tasks across multiple agent workers (GitHub Copilot, Claude Code, VS Code Electron), evaluates results using a criteria DAG, captures upstream AI traffic through a Rust TLS-intercepting gateway, and streams logs in real time — all backed by MongoDB (CosmosDB-compatible), Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
+> **Benchmark any AI coding agent. At scale. On your terms.**
+
+**Scope Core** is a self-service, Kubernetes-native platform for benchmarking AI coding agents. Any team member can submit runs, manage criteria, and inspect results through the Portal or CLI without operator involvement. It orchestrates coding tasks across multiple agent workers (GitHub Copilot, Claude Code, VS Code Electron), evaluates results using a criteria DAG, captures upstream AI traffic through a Rust TLS-intercepting gateway, and streams logs in real time — all backed by MongoDB (CosmosDB-compatible), Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
 
 ## Components
 
@@ -22,6 +24,7 @@
 
 ## Key Features
 
+- **Self-service** — Any team member can submit runs, edit criteria, manage scenarios and personas, and inspect results through the Portal or CLI without operator involvement. The CLI maintains feature parity with the Portal so power users and CI/CD pipelines have first-class access too.
 - **Centralized queue scheduling** — A dedicated [scheduler](apps/scheduler/) ([docs](docs/architecture/queue-scheduler.md)) decouples request ordering from message delivery. MongoDB stores priority and pause/resume state; Azure Storage Queues are kept deliberately shallow so scheduling decisions take effect within seconds and re-prioritization is always possible.
 - **Run priorities** — Every request carries a root-level `priority` field (default `0`, higher dispatched first). Priority is editable on `pending` and `paused` requests via single and bulk REST endpoints, with a Portal UI offering −10…+10 presets and ±1/±5 increments.
 - **Out-of-band (OOB) request support** — Because the scheduler dispatches by priority on every tick, OOB requests submitted with a high priority jump ahead of the pending queue and reach a worker on the next dispatch — without disturbing in-flight work or requiring a separate execution path.
