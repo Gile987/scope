@@ -61,7 +61,7 @@ flowchart TB
 
 ### Worker pod egress
 
-Each ACP worker pod ships an **MCP Gateway** sidecar ([MCPJungle](https://github.com/mcpjungle/MCPJungle)) that aggregates stdio + remote HTTP MCP servers behind one streamable HTTP endpoint. The Electron worker additionally routes its HTTPS traffic through the shared **AI Gateway** (Rust TLS proxy) to record HAR transcripts of upstream Copilot/Anthropic calls.
+Each ACP worker pod ships an **MCP Gateway** sidecar ([MCPJungle](https://github.com/mcpjungle/MCPJungle)) that aggregates stdio + remote HTTP MCP servers behind one streamable HTTP endpoint. The Electron worker additionally routes its HTTPS traffic through the shared **AI Gateway** (Rust TLS proxy) to record HAR transcripts of upstream Copilot/Anthropic calls — the gateway persists per-worker session state to Redis so multiple replicas can run for HA.
 
 ```mermaid
 flowchart LR
@@ -73,6 +73,7 @@ flowchart LR
     end
 
     GW["AI Gateway<br/><i>shared Rust TLS proxy</i>"]
+    Redis[(Redis<br/><i>HA session state</i>)]
 
     subgraph AI["AI Providers"]
         direction TB
@@ -87,6 +88,7 @@ flowchart LR
     end
 
     Worker -->|"HTTPS<br/>(Electron worker only)"| GW
+    GW <-->|"session state"| Redis
     GW --> Copilot
     GW --> Anthropic
     MCP --> StdioMCP
