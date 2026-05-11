@@ -264,6 +264,8 @@ function makeFixtureRun(id = "run-fixture-1") {
           iteration: 1,
           timestamp: new Date("2026-01-01T00:01:00Z"),
           snapshotUrl: blobUrl("snapshots", `${id}/iteration-1/workspace.tar.gz`),
+          judgeFeedback: "looks good",
+          passed: true,
         },
       ],
     },
@@ -308,7 +310,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     const app = buildApp(makeRequestCollection());
     const archive = await buildTarGz({
       "run/run.yaml":
-        "_id: in-flight-1\nscenario:\n  task: t\nworkerType: coder-acp-copilot\nrun:\n  status: processing\n",
+        "_id: in-flight-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: in-flight-1\n  attemptNumber: 1\n  status: processing\n",
     });
 
     const res = await request(app)
@@ -326,7 +328,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
 
     const archive = await buildTarGz({
       "dup-1/run.yaml":
-        "_id: dup-1\nscenario:\n  task: t\nworkerType: coder-acp-copilot\nrun:\n  status: done\n",
+        "_id: dup-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: dup-1\n  attemptNumber: 1\n  status: done\n",
     });
 
     const res = await request(app)
@@ -335,6 +337,30 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
 
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/already exists/i);
+  });
+
+  it("returns 400 with structured details when run.yaml fails schema validation", async () => {
+    const app = buildApp(makeRequestCollection());
+
+    // scenario.criteria must be string[]; sending number[] is a type
+    // violation that the legacy presence checks would have missed.
+    const archive = await buildTarGz({
+      "bad/run.yaml":
+        "_id: bad-1\nscenario:\n  task: t\n  criteria: [1, 2]\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: bad-1\n  attemptNumber: 1\n  status: done\n",
+    });
+
+    const res = await request(app)
+      .post("/api/v1/runs/upload")
+      .attach("archive", archive, "archive.tar.gz");
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/run\.yaml/i);
+    expect(Array.isArray(res.body.details)).toBe(true);
+    expect(res.body.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: expect.stringMatching(/scenario\.criteria/) }),
+      ]),
+    );
   });
 });
 

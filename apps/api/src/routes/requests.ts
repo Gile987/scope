@@ -1890,36 +1890,33 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Parse run.yaml
     const runYamlContent = await readFile(runYamlPath, "utf-8");
-    let runDoc: Record<string, any>;
+    let runDocRaw: unknown;
     try {
-      runDoc = yamlParse(runYamlContent) as Record<string, any>;
+      runDocRaw = yamlParse(runYamlContent) as unknown;
     } catch (parseErr) {
       res.status(400).json({ error: `Failed to parse run.yaml: ${parseErr}` });
       return;
     }
 
-    // Per-attempt fields live under run.* (migration 014). The exporter
-    // writes a RequestDocument verbatim, so the importer must read them
-    // from the same place.
-    const runState: Record<string, any> = (runDoc.run ?? {}) as Record<string, any>;
-
-    // Validate required fields
-    if (!runDoc._id) {
-      res.status(400).json({ error: "Invalid run.yaml: missing _id field" });
+    // Validate the parsed YAML against the same schema used elsewhere for
+    // RequestDocument, plus a required `run` sub-document (the exporter
+    // always writes one, and the importer needs `run.status` to enforce
+    // the terminal-only rule below).
+    const ImportSchema = RequestResponseSchema.extend({ run: RunStateSchema });
+    const parsed = ImportSchema.safeParse(runDocRaw);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map(i => ({
+        path: i.path.join(".") || "<root>",
+        message: i.message,
+      }));
+      res.status(400).json({
+        error: `Invalid run.yaml: ${issues.map(i => `${i.path}: ${i.message}`).join("; ")}`,
+        details: issues,
+      });
       return;
     }
-    if (!runDoc.scenario) {
-      res.status(400).json({ error: "Invalid run.yaml: missing scenario field" });
-      return;
-    }
-    if (!runDoc.workerType) {
-      res.status(400).json({ error: "Invalid run.yaml: missing workerType field" });
-      return;
-    }
-    if (!runState.status) {
-      res.status(400).json({ error: "Invalid run.yaml: missing run.status field" });
-      return;
-    }
+    const runDoc = parsed.data;
+    const runState = runDoc.run;
 
     // Validate status is terminal (cannot import in-flight runs)
     const terminalStatuses = ["done"];
@@ -1943,7 +1940,9 @@ apiRoute(ctx.app, ctx.registry, {
     // Upload iteration snapshots to blob storage and update snapshotUrls.
     // The exporter writes each iteration as `iteration-N.tar.gz` (a file,
     // not a directory) — copy the bytes through to blob storage as-is.
-    const turns = runState.turns ?? [];
+    // Clone turns so we can mutate snapshotUrl/harUrl/etc. on each entry
+    // without touching the immutable parsed value.
+    const turns = (runState.turns ?? []).map(t => ({ ...t }));
     const dirEntries = readdirSync(runDir);
     const iterationFiles = dirEntries.filter(name => /^iteration-\d+\.tar\.gz$/.test(name));
 
@@ -1976,7 +1975,7 @@ apiRoute(ctx.app, ctx.registry, {
       });
 
       // Update turn's snapshotUrl
-      const turn = turns.find((t: Record<string, unknown>) => t.iteration === iterNum);
+      const turn = turns.find(t => t.iteration === iterNum);
       if (turn) {
         turn.snapshotUrl = blockBlobClient.url;
       }
@@ -2019,14 +2018,16 @@ apiRoute(ctx.app, ctx.registry, {
       containerClient,
     });
 
-    // Prepare document for insertion
+    // Prepare document for insertion. The schema parse already produced
+    // properly-typed/coerced values, so the doc shape lines up with
+    // RequestDocument without further hand-rolled conversions.
     const docToInsert: RequestDocument = {
       _id: runDoc._id,
       scenario: runDoc.scenario,
       workerType: runDoc.workerType as WorkerType,
-      createdAt: runDoc.createdAt ? new Date(runDoc.createdAt) : new Date(),
+      createdAt: runDoc.createdAt ?? new Date(),
       priority: runDoc.priority ?? 0,
-      updatedAt: runDoc.updatedAt ? new Date(runDoc.updatedAt) : undefined,
+      ...(runDoc.updatedAt ? { updatedAt: runDoc.updatedAt } : {}),
       ...(runDoc.maxIterations ? { maxIterations: runDoc.maxIterations } : {}),
       ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
       ...(runDoc.persona ? { persona: runDoc.persona } : {}),
@@ -2043,10 +2044,7 @@ apiRoute(ctx.app, ctx.registry, {
         ...(runState.harUrl ? { harUrl: runState.harUrl } : {}),
         ...(runState.rawChatUrl ? { rawChatUrl: runState.rawChatUrl } : {}),
         ...(runState.rawChatFormat ? { rawChatFormat: runState.rawChatFormat } : {}),
-        turns: turns.map((t: any) => ({
-          ...t,
-          timestamp: t.timestamp ? new Date(t.timestamp as string) : new Date(),
-        })),
+        turns,
       },
     };
 
