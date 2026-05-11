@@ -68,6 +68,14 @@ function makeBlockBlobClient(container: string, name: string) {
       const { readFileSync } = await import("fs");
       blobStore.set(key, readFileSync(localPath));
     },
+    async uploadStream(stream: NodeJS.ReadableStream) {
+      // Streaming upload — consume the Readable into a Buffer and stash.
+      const chunks: Buffer[] = [];
+      for await (const c of stream as AsyncIterable<Buffer | string>) {
+        chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+      }
+      blobStore.set(key, Buffer.concat(chunks));
+    },
     async upload(data: Buffer | string, length: number) {
       const buf = typeof data === "string" ? Buffer.from(data) : data;
       blobStore.set(key, buf.subarray(0, length));
@@ -284,7 +292,9 @@ beforeEach(() => {
 describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
   it("returns 400 when run.yaml is missing", async () => {
     const app = buildApp(makeRequestCollection());
-    const archive = await buildTarGz({ "junk.txt": "no run here" });
+    // A subdir without run.yaml inside — pipeline ingests no artifacts and
+    // the finalize step rejects the empty subdir.
+    const archive = await buildTarGz({ "orphan/junk.txt": "no run here" });
 
     const res = await request(app)
       .post("/api/v1/runs/upload")
@@ -312,7 +322,9 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
   it("returns 400 for in-flight (non-terminal) runs", async () => {
     const app = buildApp(makeRequestCollection());
     const archive = await buildTarGz({
-      "run/run.yaml":
+      // Subdir name must match the run.yaml _id — the importer enforces this
+      // since blob URLs are derived from the prefix before run.yaml is parsed.
+      "in-flight-1/run.yaml":
         "_id: in-flight-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: in-flight-1\n  attemptNumber: 1\n  status: processing\n",
     });
 
@@ -621,13 +633,13 @@ describe("batch run import (POST /api/v1/runs/upload-batch)", () => {
 
   it("returns 400 when the batch archive contains no run subdirectories", async () => {
     const app = buildApp(makeRequestCollection());
-    // Tar with only a stray top-level file — no <runId>/run.yaml inside.
+    // Tar with only a stray top-level file — no <runId>/ subtree.
     const archive = await buildTarGz({ "stray.txt": "no run here" });
     const res = await request(app)
       .post("/api/v1/runs/upload-batch")
       .attach("archive", archive, "batch.tar.gz");
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/no run subdirectories/i);
+    expect(res.body.error).toMatch(/must live under a <runId>\/ subdirectory/i);
   });
 
   it("round-trips a batch archive containing two runs", async () => {
