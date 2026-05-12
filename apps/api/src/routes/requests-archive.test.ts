@@ -696,14 +696,25 @@ describe("run import/export — round-trip (export → import)", () => {
   });
 
   it("preserves all top-level + run-level optional fields and the per-attempt run._id", async () => {
-    // Regression test: the previous import path built docToInsert with an
-    // explicit allowlist of fields, silently dropping every optional we
-    // didn't think to enumerate (model, agentVersion, taskPromptId,
-    // run.os, run.workerVersion, run.aiCallCount, run.startedAt,
-    // run.finishedAt, …). It also clobbered the per-attempt run._id with
-    // the request _id, breaking the dual-id contract that retries depend
-    // on. This fixture exercises the full optional surface and asserts
-    // it survives a real export → import round-trip.
+    // Symmetric round-trip guard. Builds a fixture that exercises every
+    // optional field RequestResponseSchema + RunStateSchema know about,
+    // plus every artifact type the exporter knows how to pack. Then:
+    //
+    //   1. export → import into a fresh target
+    //   2. deep-equal the round-tripped Mongo doc against the source,
+    //      excluding ONLY the fields whose values must legitimately
+    //      change on import (per-environment blob URLs).
+    //   3. snapshot the source blob set, and assert every byte made it
+    //      back to a target blob with identical bytes (catches the case
+    //      where the exporter starts packing a new artifact type that
+    //      the importer drops on the floor).
+    //
+    // Adding a new optional field to the schema, or a new artifact type
+    // to packRunIntoTar, will fail this test unless either:
+    //   a) the importer round-trips it (preferred), or
+    //   b) the field is added to FIELDS_THAT_MAY_DIVERGE below with a
+    //      one-line justification, OR a new entry is added to
+    //      `expectedTarEntries` if a new artifact type is introduced.
     const requestId = "rich-1";
     const runId = "run-attempt-rich-1"; // ← deliberately ≠ requestId
     const fixture: any = {
@@ -729,38 +740,62 @@ describe("run import/export — round-trip (export → import)", () => {
         status: "done",
         outcome: "succeeded",
         result: "everything worked",
+        // Source URLs use the importer's canonical paths so the byte-
+        // equal blob check below has a stable baseline.
         logsUrl: blobUrl("logs", `${requestId}/runs/${runId}/run.jsonl`),
+        harUrl: blobUrl("snapshots", `${requestId}/capture.har`),
+        rawChatUrl: blobUrl("snapshots", `${requestId}/chat-export.json`),
         updatedAt: new Date("2026-05-11T23:04:47.446Z"),
         startedAt: new Date("2026-05-11T23:04:37.172Z"),
         finishedAt: new Date("2026-05-11T23:04:47.446Z"),
         workerVersion: "copilot-unknown-unknown-unknown",
         aiCallCount: 2,
         os: { platform: "linux", release: "6.6.114.1", arch: "x64" },
+        tokenUsage: { promptTokens: 16, completionTokens: 397, totalTokens: 413 },
         turns: [
           {
             iteration: 1,
             timestamp: new Date("2026-05-11T23:04:47.430Z"),
             snapshotUrl: blobUrl("snapshots", `${requestId}/iteration-1/workspace.tar.gz`),
+            harUrl: blobUrl("snapshots", `${requestId}/iteration-1/capture.har`),
+            rawChatUrl: blobUrl("snapshots", `${requestId}/iteration-1/chat-export.json`),
+            chatResultUrl: blobUrl("snapshots", `${requestId}/iteration-1/chat-result.json`),
+            toolCallsUrl: blobUrl("snapshots", `${requestId}/iteration-1/tool-calls.jsonl`),
             judgeFeedback: "ok",
             passed: true,
+            startedAt: new Date("2026-05-11T23:04:37.226Z"),
+            durationMs: 10204,
+            tokenUsage: { promptTokens: 16, completionTokens: 397, totalTokens: 413 },
+            aiCallCount: 2,
+            toolCallCount: 1,
           },
         ],
       },
     };
 
-    // Seed source side with an iteration tarball + logs.jsonl so the
-    // export carries real bytes (logs.jsonl is the artifact whose blob
-    // path embeds the per-attempt run._id, so the round-trip is the
-    // strongest test of the dual-id flow).
-    const innerIterTar = await buildTarGz({ "x.txt": "x" });
-    const logsBytes = Buffer.from('{"level":"info","message":"rich"}\n');
-    blobStore.set(`snapshots/${requestId}/iteration-1/workspace.tar.gz`, innerIterTar);
-    blobStore.set(`logs/${requestId}/runs/${runId}/run.jsonl`, logsBytes);
+    // Seed source blobs. One of every artifact type the exporter packs.
+    // If a new entry name appears in packRunIntoTar (apps/api/src/archive-har.ts)
+    // without a corresponding entry here, the `expectedTarEntries` assertion
+    // below will fail and force the author to wire it through the importer.
+    const innerIterTar = await buildTarGz({ "x.txt": "iteration-1 contents" });
+    const sourceBlobs: Record<string, Buffer> = {
+      [`snapshots/${requestId}/iteration-1/workspace.tar.gz`]: innerIterTar,
+      [`snapshots/${requestId}/iteration-1/capture.har`]: Buffer.from('{"log":{"iter":1}}'),
+      [`snapshots/${requestId}/capture.har`]: Buffer.from('{"log":{"top":true}}'),
+      [`snapshots/${requestId}/iteration-1/chat-export.json`]: Buffer.from('{"chat":"iter"}'),
+      [`snapshots/${requestId}/chat-export.json`]: Buffer.from('{"chat":"top"}'),
+      [`snapshots/${requestId}/iteration-1/chat-result.json`]: Buffer.from('{"result":"iter"}'),
+      [`snapshots/${requestId}/iteration-1/tool-calls.jsonl`]:
+        Buffer.from('{"tool":"a"}\n{"tool":"b"}\n'),
+      [`logs/${requestId}/runs/${runId}/run.jsonl`]:
+        Buffer.from('{"level":"info","message":"rich"}\n'),
+    };
+    for (const [k, v] of Object.entries(sourceBlobs)) blobStore.set(k, v);
 
     const sourceReqs = makeRequestCollection();
     sourceReqs.docs.set(requestId, fixture);
 
-    // Export.
+    // ── Export ────────────────────────────────────────────────────────
     const exportApp = buildApp(sourceReqs);
     const exportRes = await request(exportApp)
       .get(`/api/v1/requests/${requestId}/archive`)
@@ -771,50 +806,116 @@ describe("run import/export — round-trip (export → import)", () => {
         res.on("end", () => cb(null, Buffer.concat(chunks)));
       });
     expect(exportRes.status).toBe(200);
+    const archiveBuf: Buffer = exportRes.body;
 
-    // Re-import into a fresh target.
+    // Pin the exact set of tar entries the export produces. If anyone
+    // adds a new entry to packRunIntoTar without updating this test or
+    // the importer's canonicalBlobTarget(), this fails loudly.
+    const tarEntries = await readTarGz(archiveBuf);
+    const expectedTarEntries = [
+      `${requestId}/run.yaml`,
+      `${requestId}/iteration-1.tar.gz`,
+      `${requestId}/iteration-1.har`,
+      `${requestId}/run.har`,
+      `${requestId}/iteration-1.chat-export.json`,
+      `${requestId}/run.chat-export.json`,
+      `${requestId}/iteration-1.chat-result.json`,
+      `${requestId}/iteration-1.tool-calls.jsonl`,
+      `${requestId}/logs.jsonl`,
+    ];
+    expect(Object.keys(tarEntries).sort()).toEqual(expectedTarEntries.sort());
+
+    // ── Re-import into a fresh target ─────────────────────────────────
     blobStore.clear();
     const targetReqs = makeRequestCollection();
     const importApp = buildApp(targetReqs);
     const importRes = await request(importApp)
       .post("/api/v1/runs/upload")
-      .attach("archive", exportRes.body, "archive.tar.gz");
+      .attach("archive", archiveBuf, "archive.tar.gz");
     expect(importRes.status).toBe(201);
 
-    // ── Assertions: every populated field must round-trip. ──────────────
-    const r = targetReqs.docs.get(requestId);
-    expect(r._id).toBe(requestId);
-    expect(r.workerType).toBe("coder-acp-copilot");
-    expect(r.model).toBe("claude-haiku-4.5");
-    expect(r.agentVersion).toBe("copilot-dev");
-    expect(r.taskPromptId).toBe("20d3f8aa-e072-588c-8f68-b5eadfcd8028");
-    expect(r.mcpServers).toEqual(["github", "filesystem"]);
-    expect(r.skillRevisions).toEqual(["org/skill@rev1"]);
-    expect(r.extensions).toEqual(["ms-python.python"]);
-    expect(r.profileId).toBe("profile-rich");
-    expect(r.profileVersionId).toBe("profile-rich-v1");
-    expect(r.maxIterations).toBe(1);
-    expect(r.submissionId).toBe("sub-rich-1");
+    // ── Assertion 1: deep-equal Mongo doc with explicit exclusions ───
+    //
+    // The fields below MUST diverge between source and target — list
+    // each one with its justification. Any other divergence is a bug.
+    const FIELDS_THAT_MAY_DIVERGE = new Set<string>([
+      // Per-environment blob URLs. Source URLs point at the source
+      // storage account; the importer rewrites them to point at the
+      // target's storage account but at the same canonical paths.
+      // Path equivalence is asserted separately in Assertion 3.
+      "run.logsUrl",
+      "run.harUrl",
+      "run.rawChatUrl",
+      // Same reasoning, per-turn.
+      "run.turns.*.snapshotUrl",
+      "run.turns.*.harUrl",
+      "run.turns.*.rawChatUrl",
+      "run.turns.*.chatResultUrl",
+      "run.turns.*.toolCallsUrl",
+    ]);
+    function stripDivergent(obj: unknown, prefix = ""): unknown {
+      if (Array.isArray(obj)) {
+        return obj.map((v, _i) => stripDivergent(v, `${prefix}.*`.replace(/^\.\*$/, "*")));
+      }
+      if (obj && typeof obj === "object" && !(obj instanceof Date)) {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+          const path = prefix ? `${prefix}.${k}` : k;
+          if (FIELDS_THAT_MAY_DIVERGE.has(path)) continue;
+          out[k] = stripDivergent(v, path);
+        }
+        return out;
+      }
+      return obj;
+    }
+    const target = targetReqs.docs.get(requestId);
+    expect(stripDivergent(target)).toEqual(stripDivergent(fixture));
 
-    // Per-attempt run._id is preserved (NOT clobbered with requestId).
-    expect(r.run._id).toBe(runId);
-    expect(r.run._id).not.toBe(requestId);
-    expect(r.run.attemptNumber).toBe(2);
-    expect(r.run.status).toBe("done");
-    expect(r.run.outcome).toBe("succeeded");
-    expect(r.run.result).toBe("everything worked");
-    expect(r.run.workerVersion).toBe("copilot-unknown-unknown-unknown");
-    expect(r.run.aiCallCount).toBe(2);
-    expect(r.run.os).toEqual({ platform: "linux", release: "6.6.114.1", arch: "x64" });
-    expect(r.run.startedAt).toEqual(new Date("2026-05-11T23:04:37.172Z"));
-    expect(r.run.finishedAt).toEqual(new Date("2026-05-11T23:04:47.446Z"));
+    // ── Assertion 2: per-attempt run._id is preserved ────────────────
+    // Singled out because the previous code clobbered it with requestId
+    // and stripDivergent would have caught it as a value mismatch but
+    // the message would have been buried in a 200-line diff. Pin it.
+    expect(target.run._id).toBe(runId);
+    expect(target.run._id).not.toBe(requestId);
 
-    // logs.jsonl is staged then uploaded to the dual-id path (NOT
-    // ${requestId}/runs/${requestId}/...).
-    expect(blobStore.get(`logs/${requestId}/runs/${runId}/run.jsonl`)).toEqual(logsBytes);
-    expect(blobStore.has(`logs/${requestId}/runs/${requestId}/run.jsonl`)).toBe(false);
-    expect(r.run.logsUrl).toMatch(
+    // ── Assertion 3: every source blob round-trips byte-equal ────────
+    //
+    // Compare by content. For each source blob, the same bytes must
+    // appear in the target blob store. We compare by SHA so the test
+    // doesn't need to know the source→target path mapping (the importer
+    // canonicalises some paths) — if the exporter adds a new artifact
+    // that doesn't reach the importer, the SHA multisets diverge.
+    const { createHash } = await import("crypto");
+    const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+    const sourceShas = [...Object.values(sourceBlobs)].map(sha).sort();
+    const targetShas = [...blobStore.values()].map(sha).sort();
+    expect(targetShas).toEqual(sourceShas);
+
+    // ── Assertion 4: per-environment URL paths land where canonical ──
+    // Pinned explicitly because Assertion 1 strips them.
+    expect(target.run.logsUrl).toMatch(
       new RegExp(`/logs/${requestId}/runs/${runId}/run\\.jsonl$`),
+    );
+    expect(target.run.harUrl).toMatch(
+      new RegExp(`/snapshots/${requestId}/capture\\.har$`),
+    );
+    expect(target.run.rawChatUrl).toMatch(
+      new RegExp(`/snapshots/${requestId}/chat-export\\.json$`),
+    );
+    expect(target.run.turns[0].snapshotUrl).toMatch(
+      new RegExp(`/snapshots/${requestId}/iteration-1/workspace\\.tar\\.gz$`),
+    );
+    expect(target.run.turns[0].harUrl).toMatch(
+      new RegExp(`/snapshots/${requestId}/iteration-1/capture\\.har$`),
+    );
+    expect(target.run.turns[0].rawChatUrl).toMatch(
+      new RegExp(`/snapshots/${requestId}/iteration-1/chat-export\\.json$`),
+    );
+    expect(target.run.turns[0].chatResultUrl).toMatch(
+      new RegExp(`/snapshots/${requestId}/iteration-1/chat-result\\.json$`),
+    );
+    expect(target.run.turns[0].toolCallsUrl).toMatch(
+      new RegExp(`/snapshots/${requestId}/iteration-1/tool-calls\\.jsonl$`),
     );
   });
 });
