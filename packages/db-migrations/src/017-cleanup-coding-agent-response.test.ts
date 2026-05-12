@@ -341,6 +341,51 @@ describe("migration 017: CleanupCodingAgentResponse", () => {
           $set: { "result": "wrap up" },
         });
       });
+
+      it("preserves runtime invariant: run.result mirrors the last cleaned turn's text", async () => {
+        // Two envelope turns with DIFFERENT final-response strings, plus a
+        // top-level run.result that's also envelope-shaped. The migration
+        // must set run.result to the LAST turn's extracted value (not
+        // re-extract from the result envelope independently) — that's the
+        // runtime invariant maintained by the multi-turn loop, where
+        // run.result is assigned `codingResponse` of the last passing turn.
+        const turn1Envelope = JSON.stringify({
+          metadata: { toolCallRounds: [{ response: "first turn", toolCalls: [] }] },
+        });
+        const turn2Envelope = JSON.stringify({
+          metadata: { toolCallRounds: [{ response: "second turn", toolCalls: [] }] },
+        });
+        // Note: result envelope intentionally has DIFFERENT text — if the
+        // migration extracts from it independently, this test fails.
+        const resultEnvelope = JSON.stringify({
+          metadata: { toolCallRounds: [{ response: "drift from independent extraction", toolCalls: [] }] },
+        });
+        const docs = [
+          {
+            _id: makeObjectId("req-INV"),
+            run: {
+              _id: makeObjectId("run-INV"),
+              result: resultEnvelope,
+              turns: [
+                { iteration: 1, codingAgentResponse: turn1Envelope },
+                { iteration: 2, codingAgentResponse: turn2Envelope },
+              ],
+            },
+          },
+        ];
+        const uploader = makeUploader();
+        const db = makeMockDb(docs, []) as any;
+
+        await new CleanupCodingAgentResponse(uploader).up(db);
+
+        const [ops] = db._reqCol.bulkWrite.mock.calls[0];
+        // The single updateOne carries: both turn rewrites + run.result set
+        // to the LAST turn's extracted text ("second turn"), not the
+        // result envelope's drifted text.
+        expect(ops[0].updateOne.update.$set["run.result"]).toBe("second turn");
+        expect(ops[0].updateOne.update.$set["run.turns.0.codingAgentResponse"]).toBe("first turn");
+        expect(ops[0].updateOne.update.$set["run.turns.1.codingAgentResponse"]).toBe("second turn");
+      });
     });
   });
 

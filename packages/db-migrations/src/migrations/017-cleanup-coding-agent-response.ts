@@ -31,11 +31,16 @@
  *
  * 2. **Top-level `result` field** (`requests.run.result`, `runs.result`)
  *    - **IChatAgentResult2 envelope** (same root cause: the runtime used
- *      to dump the full envelope into `result` too) → extract via
- *      `extractFinalResponse()` and `$set` / `$unset`. No new blob is
- *      uploaded — the per-iteration blob from step 1 is canonical and a
- *      duplicate top-level blob would just be redundant.
- *    - Other strings are left alone (they're already well-formed prose).
+ *      to dump the full envelope into `result` too) → replace with the
+ *      cleaned `codingAgentResponse` of the last touched turn (preserves
+ *      the runtime invariant `run.result === codingAgentResponse of last
+ *      passing turn`). If no turn was touched this pass (idempotent
+ *      re-run, or turns were already clean), fall back to extracting
+ *      from the result envelope independently. `$unset` if extraction
+ *      yields nothing. No new blob upload — the per-iteration blob from
+ *      step 1 is the canonical persistent copy.
+ *    - Other strings are left alone (they're already well-formed prose,
+ *      e.g. error messages or "Max iterations reached" sentinels).
  *
  * The migration **fails fast** if no blob uploader can be built from
  * env (`STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONNECTION_STRING`,
@@ -260,89 +265,37 @@ function resolveIds(
   return { requestId: String(requestId), runId: String(runId) };
 }
 
-/** Scan a collection for envelope-shaped strings at `resultPath` (the
- *  top-level `RunState.result` field) and replace them with the extracted
- *  final response text — mirroring the post-#813 runtime behaviour. No
- *  blob upload: the per-iteration blobs from `cleanupCollection` are the
- *  canonical persistent copy of the envelope. */
-async function cleanupResultField(
-  col: Collection,
-  resultPath: string,
-  label: string,
-): Promise<{ docs: number; extracted: number; unset: number }> {
-  let docsModified = 0;
-  let extractedCount = 0;
-  let unsetCount = 0;
-  let processed = 0;
-  let batch: AnyBulkWriteOperation[] = [];
-
-  const filter = { [resultPath]: { $type: "string" } };
-  const projection: Record<string, 1> = { _id: 1, [resultPath]: 1 };
-  const cursor = col.find(filter, { projection, batchSize: 50 });
-
-  for await (const doc of cursor) {
-    const value = resultPath
-      .split(".")
-      .reduce<any>((acc, key) => (acc == null ? undefined : acc[key]), doc);
-
-    if (!isEnvelopeString(value)) continue;
-
-    const extracted = extractFromEnvelopeString(value);
-    const update: { $set?: Record<string, string>; $unset?: Record<string, ""> } = {};
-    if (extracted) {
-      update.$set = { [resultPath]: extracted };
-      extractedCount++;
-    } else {
-      update.$unset = { [resultPath]: "" };
-      unsetCount++;
-    }
-
-    batch.push({ updateOne: { filter: { _id: doc._id }, update } });
-
-    if (batch.length >= BATCH_SIZE) {
-      docsModified += await executeBulkWithRetry(col, batch, label);
-      processed += batch.length;
-      batch = [];
-      if (processed % 100 === 0) {
-        console.log(`  ${label}: processed ${processed} docs, modified ${docsModified}, extracted ${extractedCount}, unset ${unsetCount}`);
-      }
-      await sleep(INTER_BATCH_DELAY_MS);
-    }
-  }
-
-  if (batch.length > 0) {
-    docsModified += await executeBulkWithRetry(col, batch, label);
-    processed += batch.length;
-  }
-
-  console.log(
-    `  ${label}: done — processed ${processed} docs, modified ${docsModified}, extracted ${extractedCount}, unset ${unsetCount}`,
-  );
-  return { docs: docsModified, extracted: extractedCount, unset: unsetCount };
-}
-
 async function cleanupCollection(
   col: Collection,
   collection: "requests" | "runs",
   turnsPath: string,
+  resultPath: string,
   uploader: EnvelopeUploader | null,
   label: string,
-): Promise<{ docs: number; turnsCleaned: number; envelopesUploaded: number; envelopesSkipped: number }> {
+): Promise<{ docs: number; turnsCleaned: number; envelopesUploaded: number; envelopesSkipped: number; resultsCleaned: number }> {
   let docsModified = 0;
   let turnsCleaned = 0;
   let envelopesUploaded = 0;
   let envelopesSkipped = 0;
+  let resultsCleaned = 0;
   let processed = 0;
   let batch: AnyBulkWriteOperation[] = [];
 
-  // Only consider documents with at least one string-typed codingAgentResponse.
+  // Match docs where either:
+  //   - any turn carries a string-typed codingAgentResponse, or
+  //   - the top-level result field is a string (we'll filter to
+  //     envelope-shaped strings in code).
+  // The runtime invariant (`run.result === codingAgentResponse of last
+  // passing turn`) means most docs match both, but the union covers
+  // already-half-cleaned docs from earlier migration runs too.
   const filter = {
-    [turnsPath]: {
-      $elemMatch: { codingAgentResponse: { $type: "string" } },
-    },
+    $or: [
+      { [turnsPath]: { $elemMatch: { codingAgentResponse: { $type: "string" } } } },
+      { [resultPath]: { $type: "string" } },
+    ],
   };
 
-  const projection: Record<string, 1> = { _id: 1, [turnsPath]: 1 };
+  const projection: Record<string, 1> = { _id: 1, [turnsPath]: 1, [resultPath]: 1 };
   if (collection === "requests") projection["run._id"] = 1;
   if (collection === "runs") projection["requestId"] = 1;
 
@@ -352,63 +305,105 @@ async function cleanupCollection(
     const turns: any[] | undefined = turnsPath
       .split(".")
       .reduce<any>((acc, key) => (acc == null ? undefined : acc[key]), doc);
-    if (!Array.isArray(turns) || turns.length === 0) continue;
-
     const ids = resolveIds(doc, collection);
 
     const unset: Record<string, ""> = {};
     const set: Record<string, string> = {};
     let perDocCount = 0;
+    // Tracks the most recent extracted text we wrote to a turn during
+    // this doc's pass. Used to keep the runtime invariant
+    // `run.result === codingAgentResponse of last passing turn` intact:
+    // when we rewrite the top-level result field below we copy this value
+    // rather than re-extracting from the result envelope independently.
+    let lastExtractedTurnText: string | undefined;
 
-    for (let i = 0; i < turns.length; i++) {
-      const turn = turns[i];
-      const value = turn?.codingAgentResponse;
+    if (Array.isArray(turns) && turns.length > 0) {
+      for (let i = 0; i < turns.length; i++) {
+        const turn = turns[i];
+        const value = turn?.codingAgentResponse;
 
-      if (isEmptyString(value)) {
-        unset[`${turnsPath}.${i}.codingAgentResponse`] = "";
-        perDocCount++;
-        continue;
-      }
-
-      if (!isEnvelopeString(value)) continue;
-
-      // Envelope: rescue to blob (if path derivable), then replace the
-      // inline value with the extracted final response so the document
-      // matches the post-#813 shape that new electron runs produce.
-      // (`up()` guarantees `uploader` is non-null at this point.)
-      const iteration = typeof turn?.iteration === "number" ? turn.iteration : null;
-      const extracted = extractFromEnvelopeString(value);
-      const fieldPath = `${turnsPath}.${i}.codingAgentResponse`;
-      const applyExtractedText = () => {
-        if (extracted) set[fieldPath] = extracted;
-        else unset[fieldPath] = "";
-      };
-
-      if (uploader && ids && iteration !== null) {
-        const blobName = `${ids.requestId}/runs/${ids.runId}/iteration-${iteration}/chat-result.json`;
-        try {
-          const url = await uploader.upload(blobName, value);
-          set[`${turnsPath}.${i}.chatResultUrl`] = url;
-          set[`${turnsPath}.${i}.chatResultFormat`] = "IChatAgentResult2";
-          applyExtractedText();
-          envelopesUploaded++;
+        if (isEmptyString(value)) {
+          unset[`${turnsPath}.${i}.codingAgentResponse`] = "";
           perDocCount++;
-        } catch (err: any) {
-          // Leave inline so a future re-run can retry. Don't $set/$unset.
-          envelopesSkipped++;
-          console.log(`  ${label}: envelope upload failed for ${blobName}, leaving inline: ${err?.message ?? err}`);
+          continue;
         }
-      } else {
-        // ids/iteration unrecoverable — the blob path can't be derived.
-        // We still replace the inline envelope with the extracted text
-        // (or $unset if extraction yielded nothing): the giant string keeps
-        // blowing past the 2 MB document limit and prose is far better
-        // than nothing for the portal.
-        applyExtractedText();
-        envelopesSkipped++;
-        perDocCount++;
-        console.log(`  ${label}: blob path unrecoverable for ${turnsPath}[${i}] (no runId/iteration), replacing inline envelope with extracted text only`);
+
+        if (!isEnvelopeString(value)) continue;
+
+        // Envelope: rescue to blob (if path derivable), then replace the
+        // inline value with the extracted final response so the document
+        // matches the post-#813 shape that new electron runs produce.
+        // (`up()` guarantees `uploader` is non-null at this point.)
+        const iteration = typeof turn?.iteration === "number" ? turn.iteration : null;
+        const extracted = extractFromEnvelopeString(value);
+        const fieldPath = `${turnsPath}.${i}.codingAgentResponse`;
+        const applyExtractedText = () => {
+          if (extracted) {
+            set[fieldPath] = extracted;
+            lastExtractedTurnText = extracted;
+          } else {
+            unset[fieldPath] = "";
+            // A turn with an unparseable envelope counts as "last cleaned"
+            // for the purpose of mirroring the runtime invariant on
+            // run.result — even if the value is undefined.
+            lastExtractedTurnText = undefined;
+          }
+        };
+
+        if (uploader && ids && iteration !== null) {
+          const blobName = `${ids.requestId}/runs/${ids.runId}/iteration-${iteration}/chat-result.json`;
+          try {
+            const url = await uploader.upload(blobName, value);
+            set[`${turnsPath}.${i}.chatResultUrl`] = url;
+            set[`${turnsPath}.${i}.chatResultFormat`] = "IChatAgentResult2";
+            applyExtractedText();
+            envelopesUploaded++;
+            perDocCount++;
+          } catch (err: any) {
+            // Leave inline so a future re-run can retry. Don't $set/$unset.
+            envelopesSkipped++;
+            console.log(`  ${label}: envelope upload failed for ${blobName}, leaving inline: ${err?.message ?? err}`);
+          }
+        } else {
+          // ids/iteration unrecoverable — the blob path can't be derived.
+          // We still replace the inline envelope with the extracted text
+          // (or $unset if extraction yielded nothing): the giant string keeps
+          // blowing past the 2 MB document limit and prose is far better
+          // than nothing for the portal.
+          applyExtractedText();
+          envelopesSkipped++;
+          perDocCount++;
+          console.log(`  ${label}: blob path unrecoverable for ${turnsPath}[${i}] (no runId/iteration), replacing inline envelope with extracted text only`);
+        }
       }
+    }
+
+    // Top-level result field: same root cause (electron runtime used to
+    // dump the full envelope here too). Mirror runtime semantics: when a
+    // turn was just cleaned, copy its extracted text so the document
+    // honours `run.result === turns[last_passing].codingAgentResponse`.
+    // Otherwise (no turns touched this pass) extract independently from
+    // the result envelope. Either way, no new blob upload — the
+    // per-iteration blob is the canonical persistent copy.
+    const resultValue = resultPath
+      .split(".")
+      .reduce<any>((acc, key) => (acc == null ? undefined : acc[key]), doc);
+    if (isEnvelopeString(resultValue)) {
+      let resultText: string | undefined;
+      if (perDocCount > 0) {
+        // A turn was cleaned this pass — use its extracted text to keep
+        // the runtime invariant intact. May be undefined if the last
+        // cleaned turn's envelope yielded nothing.
+        resultText = lastExtractedTurnText;
+      } else {
+        // Standalone broken result (idempotent re-run, or turns were
+        // already clean). Fall back to extracting from the envelope.
+        resultText = extractFromEnvelopeString(resultValue);
+      }
+      if (resultText) set[resultPath] = resultText;
+      else unset[resultPath] = "";
+      resultsCleaned++;
+      perDocCount++;
     }
 
     if (perDocCount === 0) continue;
@@ -437,9 +432,9 @@ async function cleanupCollection(
   }
 
   console.log(
-    `  ${label}: done — processed ${processed} docs, modified ${docsModified}, turns cleaned ${turnsCleaned}, envelopes uploaded ${envelopesUploaded}, envelopes skipped ${envelopesSkipped}`,
+    `  ${label}: done — processed ${processed} docs, modified ${docsModified}, turns cleaned ${turnsCleaned}, envelopes uploaded ${envelopesUploaded}, envelopes skipped ${envelopesSkipped}, results cleaned ${resultsCleaned}`,
   );
-  return { docs: docsModified, turnsCleaned, envelopesUploaded, envelopesSkipped };
+  return { docs: docsModified, turnsCleaned, envelopesUploaded, envelopesSkipped, resultsCleaned };
 }
 
 export class CleanupCodingAgentResponse implements MigrationInterface {
@@ -458,25 +453,17 @@ export class CleanupCodingAgentResponse implements MigrationInterface {
       db.collection("requests"),
       "requests",
       "run.turns",
+      "run.result",
       uploader,
-      "requests — codingAgentResponse cleanup",
+      "requests — codingAgentResponse + run.result cleanup",
     );
     await cleanupCollection(
       db.collection("runs"),
       "runs",
       "turns",
-      uploader,
-      "runs — codingAgentResponse cleanup",
-    );
-    await cleanupResultField(
-      db.collection("requests"),
-      "run.result",
-      "requests — run.result cleanup",
-    );
-    await cleanupResultField(
-      db.collection("runs"),
       "result",
-      "runs — result cleanup",
+      uploader,
+      "runs — codingAgentResponse + result cleanup",
     );
   }
 
