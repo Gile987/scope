@@ -694,6 +694,129 @@ describe("run import/export — round-trip (export → import)", () => {
       new RegExp(`/logs/${id}/runs/${id}/run\\.jsonl$`),
     );
   });
+
+  it("preserves all top-level + run-level optional fields and the per-attempt run._id", async () => {
+    // Regression test: the previous import path built docToInsert with an
+    // explicit allowlist of fields, silently dropping every optional we
+    // didn't think to enumerate (model, agentVersion, taskPromptId,
+    // run.os, run.workerVersion, run.aiCallCount, run.startedAt,
+    // run.finishedAt, …). It also clobbered the per-attempt run._id with
+    // the request _id, breaking the dual-id contract that retries depend
+    // on. This fixture exercises the full optional surface and asserts
+    // it survives a real export → import round-trip.
+    const requestId = "rich-1";
+    const runId = "run-attempt-rich-1"; // ← deliberately ≠ requestId
+    const fixture: any = {
+      _id: requestId,
+      scenario: { task: "do a thing", criteria: ["c1", "c2"] },
+      workerType: "coder-acp-copilot",
+      model: "claude-haiku-4.5",
+      agentVersion: "copilot-dev",
+      taskPromptId: "20d3f8aa-e072-588c-8f68-b5eadfcd8028",
+      mcpServers: ["github", "filesystem"],
+      skillRevisions: ["org/skill@rev1"],
+      extensions: ["ms-python.python"],
+      profileId: "profile-rich",
+      profileVersionId: "profile-rich-v1",
+      createdAt: new Date("2026-05-11T23:03:37.140Z"),
+      updatedAt: new Date("2026-05-11T23:04:47.446Z"),
+      maxIterations: 1,
+      priority: 0,
+      submissionId: "sub-rich-1",
+      run: {
+        _id: runId,
+        attemptNumber: 2, // ← not 1; previous code hard-coded 1
+        status: "done",
+        outcome: "succeeded",
+        result: "everything worked",
+        logsUrl: blobUrl("logs", `${requestId}/runs/${runId}/run.jsonl`),
+        updatedAt: new Date("2026-05-11T23:04:47.446Z"),
+        startedAt: new Date("2026-05-11T23:04:37.172Z"),
+        finishedAt: new Date("2026-05-11T23:04:47.446Z"),
+        workerVersion: "copilot-unknown-unknown-unknown",
+        aiCallCount: 2,
+        os: { platform: "linux", release: "6.6.114.1", arch: "x64" },
+        turns: [
+          {
+            iteration: 1,
+            timestamp: new Date("2026-05-11T23:04:47.430Z"),
+            snapshotUrl: blobUrl("snapshots", `${requestId}/iteration-1/workspace.tar.gz`),
+            judgeFeedback: "ok",
+            passed: true,
+          },
+        ],
+      },
+    };
+
+    // Seed source side with an iteration tarball + logs.jsonl so the
+    // export carries real bytes (logs.jsonl is the artifact whose blob
+    // path embeds the per-attempt run._id, so the round-trip is the
+    // strongest test of the dual-id flow).
+    const innerIterTar = await buildTarGz({ "x.txt": "x" });
+    const logsBytes = Buffer.from('{"level":"info","message":"rich"}\n');
+    blobStore.set(`snapshots/${requestId}/iteration-1/workspace.tar.gz`, innerIterTar);
+    blobStore.set(`logs/${requestId}/runs/${runId}/run.jsonl`, logsBytes);
+
+    const sourceReqs = makeRequestCollection();
+    sourceReqs.docs.set(requestId, fixture);
+
+    // Export.
+    const exportApp = buildApp(sourceReqs);
+    const exportRes = await request(exportApp)
+      .get(`/api/v1/requests/${requestId}/archive`)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(exportRes.status).toBe(200);
+
+    // Re-import into a fresh target.
+    blobStore.clear();
+    const targetReqs = makeRequestCollection();
+    const importApp = buildApp(targetReqs);
+    const importRes = await request(importApp)
+      .post("/api/v1/runs/upload")
+      .attach("archive", exportRes.body, "archive.tar.gz");
+    expect(importRes.status).toBe(201);
+
+    // ── Assertions: every populated field must round-trip. ──────────────
+    const r = targetReqs.docs.get(requestId);
+    expect(r._id).toBe(requestId);
+    expect(r.workerType).toBe("coder-acp-copilot");
+    expect(r.model).toBe("claude-haiku-4.5");
+    expect(r.agentVersion).toBe("copilot-dev");
+    expect(r.taskPromptId).toBe("20d3f8aa-e072-588c-8f68-b5eadfcd8028");
+    expect(r.mcpServers).toEqual(["github", "filesystem"]);
+    expect(r.skillRevisions).toEqual(["org/skill@rev1"]);
+    expect(r.extensions).toEqual(["ms-python.python"]);
+    expect(r.profileId).toBe("profile-rich");
+    expect(r.profileVersionId).toBe("profile-rich-v1");
+    expect(r.maxIterations).toBe(1);
+    expect(r.submissionId).toBe("sub-rich-1");
+
+    // Per-attempt run._id is preserved (NOT clobbered with requestId).
+    expect(r.run._id).toBe(runId);
+    expect(r.run._id).not.toBe(requestId);
+    expect(r.run.attemptNumber).toBe(2);
+    expect(r.run.status).toBe("done");
+    expect(r.run.outcome).toBe("succeeded");
+    expect(r.run.result).toBe("everything worked");
+    expect(r.run.workerVersion).toBe("copilot-unknown-unknown-unknown");
+    expect(r.run.aiCallCount).toBe(2);
+    expect(r.run.os).toEqual({ platform: "linux", release: "6.6.114.1", arch: "x64" });
+    expect(r.run.startedAt).toEqual(new Date("2026-05-11T23:04:37.172Z"));
+    expect(r.run.finishedAt).toEqual(new Date("2026-05-11T23:04:47.446Z"));
+
+    // logs.jsonl is staged then uploaded to the dual-id path (NOT
+    // ${requestId}/runs/${requestId}/...).
+    expect(blobStore.get(`logs/${requestId}/runs/${runId}/run.jsonl`)).toEqual(logsBytes);
+    expect(blobStore.has(`logs/${requestId}/runs/${requestId}/run.jsonl`)).toBe(false);
+    expect(r.run.logsUrl).toMatch(
+      new RegExp(`/logs/${requestId}/runs/${runId}/run\\.jsonl$`),
+    );
+  });
 });
 
 describe("batch run import (POST /api/v1/runs/upload-batch)", () => {

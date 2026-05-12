@@ -6,7 +6,7 @@ import { BlobServiceClient, BlockBlobClient, RestError } from "@azure/storage-bl
 import { DefaultAzureCredential } from "@azure/identity";
 import { createGzip, createGunzip } from "zlib";
 import { join, basename } from "path";
-import { createReadStream, rmSync, existsSync } from "fs";
+import { createReadStream, createWriteStream, mkdtempSync, rmSync, existsSync } from "fs";
 import { pack as tarPack, extract as tarExtract } from "tar-stream";
 import { parse as yamlParse } from "yaml";
 import { tmpdir } from "os";
@@ -1882,15 +1882,27 @@ interface PendingRun {
   iterationCount: number;
   /** Per-entry upload errors, surfaced as a single per-run failure at finalize. */
   uploadErrors: string[];
+  /**
+   * Path to a tmp file holding logs.jsonl bytes. The blob's canonical path
+   * embeds the per-attempt `run._id` (`{requestId}/runs/{runId}/run.jsonl`)
+   * which we don't know until run.yaml has been parsed. So we stage the
+   * bytes locally during the streaming pass and upload them in finalize
+   * once we know the right destination path.
+   */
+  logsTempPath?: string;
 }
 
 /**
- * Best-effort delete of every blob this run uploaded. Called when a run's
- * finalize step fails (validation, duplicate _id, Mongo insert, …) or when
- * the streaming pipeline aborts mid-archive. Errors are swallowed — we've
- * already failed the import, the goal is just to minimise orphaned blobs.
+ * Best-effort delete of every blob this run uploaded plus any staged
+ * logs.jsonl tmp file. Called when a run's finalize step fails (validation,
+ * duplicate _id, …) or when the streaming pipeline aborts mid-archive.
+ * Errors are swallowed — we've already failed the import, the goal is just
+ * to minimise orphaned blobs and tmp files.
  */
 async function cleanupRunBlobs(run: PendingRun): Promise<void> {
+  if (run.logsTempPath && existsSync(run.logsTempPath)) {
+    try { rmSync(run.logsTempPath, { force: true }); } catch { /* swallow */ }
+  }
   if (run.uploadedBlobs.length === 0) return;
   await Promise.allSettled(run.uploadedBlobs.map(c => c.deleteIfExists()));
 }
@@ -1915,7 +1927,10 @@ function canonicalBlobTarget(
   if (m) return { container: "snapshots", blobPath: `${runId}/iteration-${m[1]}/chat-result.json`, contentType: "application/json", iteration: Number(m[1]) };
   m = filename.match(/^iteration-(\d+)\.tool-calls\.jsonl$/);
   if (m) return { container: "snapshots", blobPath: `${runId}/iteration-${m[1]}/tool-calls.jsonl`, contentType: "application/x-ndjson", iteration: Number(m[1]) };
-  if (filename === "logs.jsonl") return { container: "logs", blobPath: `${runId}/runs/${runId}/run.jsonl`, contentType: "application/x-ndjson" };
+  // logs.jsonl is intentionally NOT mapped here. Its canonical blob path
+  // embeds the per-attempt `run._id` from run.yaml, which we don't know
+  // during the streaming pass. The pipeline stages it to a tmp file and
+  // uploads it in finalize once the yaml has been parsed.
   return null;
 }
 
@@ -1934,7 +1949,11 @@ function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
  * resulting Mongo document. Throws ImportError on validation/conflict
  * failures (mapped to HTTP status by the caller).
  */
-async function finalizePendingRun(prefix: string, run: PendingRun): Promise<ImportSuccess> {
+async function finalizePendingRun(
+  prefix: string,
+  run: PendingRun,
+  blobServiceClient: BlobServiceClient,
+): Promise<ImportSuccess> {
   if (run.uploadErrors.length > 0) {
     throw new ImportError(500, `Blob upload failures: ${run.uploadErrors.join("; ")}`);
   }
@@ -1965,10 +1984,10 @@ async function finalizePendingRun(prefix: string, run: PendingRun): Promise<Impo
   const runDoc = parsed.data;
   const runState = runDoc.run;
 
-  // The exporter always names the wrapping directory after `run._id`. If
-  // the prefix on the wire diverges, refuse — otherwise the blobs we just
-  // streamed live under the wrong runId and the inserted Mongo document
-  // would point at nothing.
+  // The exporter always names the wrapping directory after the request's
+  // top-level `_id`. If the prefix on the wire diverges, refuse — otherwise
+  // the blobs we just streamed live under the wrong requestId and the
+  // inserted Mongo document would point at nothing.
   if (runDoc._id !== prefix) {
     throw new ImportError(
       400,
@@ -1993,6 +2012,34 @@ async function finalizePendingRun(prefix: string, run: PendingRun): Promise<Impo
     );
   }
 
+  // logs.jsonl was staged to a tmp file during the streaming pass because
+  // its canonical blob path embeds the per-attempt `run._id` which only
+  // becomes known after yaml parse. Upload it now to the right destination
+  // and record the new URL on runState.
+  let newLogsUrl: string | undefined;
+  if (run.logsTempPath) {
+    const logsContainer = blobServiceClient.getContainerClient("logs");
+    const logsBlobPath = `${runDoc._id}/runs/${runState._id}/run.jsonl`;
+    const logsClient = logsContainer.getBlockBlobClient(logsBlobPath);
+    try {
+      await logsClient.uploadStream(
+        createReadStream(run.logsTempPath),
+        undefined,
+        undefined,
+        {
+          blobHTTPHeaders: { blobContentType: "application/x-ndjson" },
+          tags: { requestId: runDoc._id, runId: runState._id },
+          conditions: { ifNoneMatch: "*" },
+        },
+      );
+      run.uploadedBlobs.push(logsClient);
+      newLogsUrl = logsClient.url;
+    } finally {
+      try { rmSync(run.logsTempPath, { force: true }); } catch { /* swallow */ }
+      run.logsTempPath = undefined;
+    }
+  }
+
   // Resolve per-turn URLs from the artifacts we streamed.
   const turns = (runState.turns ?? []).map(t => ({ ...t }));
   for (const turn of turns) {
@@ -2013,28 +2060,26 @@ async function finalizePendingRun(prefix: string, run: PendingRun): Promise<Impo
   const topChat = run.artifacts.get("run.chat-export.json");
   if (topChat) runState.rawChatUrl = topChat;
 
+  // Build the document by spreading the validated yaml — zod has already
+  // stripped any unknown fields, so what's in `runDoc` is exactly the
+  // optional surface we care to preserve (taskPromptId, model, agentVersion,
+  // mcpServers, skillRevisions, extensions, profileId, profileVersionId,
+  // run.os, run.workerVersion, run.aiCallCount, run.startedAt,
+  // run.finishedAt, …). The previous allowlist construction silently
+  // dropped all of these on round-trip.
   const docToInsert: RequestDocument = {
-    _id: runDoc._id,
-    scenario: runDoc.scenario,
+    ...(runDoc as unknown as RequestDocument),
     workerType: runDoc.workerType as WorkerType,
     createdAt: runDoc.createdAt ?? new Date(),
     priority: runDoc.priority ?? 0,
-    ...(runDoc.updatedAt ? { updatedAt: runDoc.updatedAt } : {}),
-    ...(runDoc.maxIterations ? { maxIterations: runDoc.maxIterations } : {}),
-    ...(runDoc.personaInstructions ? { personaInstructions: runDoc.personaInstructions } : {}),
-    ...(runDoc.persona ? { persona: runDoc.persona } : {}),
-    ...(runDoc.submissionId ? { submissionId: runDoc.submissionId } : { submissionId: uuidv4() }),
+    ...(runDoc.submissionId ? {} : { submissionId: uuidv4() }),
     run: {
-      _id: runDoc._id,
-      attemptNumber: 1,
-      status: runState.status,
-      logsUrl: ctx.blobStorage.getLogsBlobUrl(`${runDoc._id}/runs/${runDoc._id}/run.jsonl`),
-      ...(runState.outcome ? { outcome: runState.outcome } : {}),
-      ...(runState.result ? { result: runState.result } : {}),
-      ...(runState.error ? { error: runState.error } : {}),
+      ...(runState as unknown as RunState),
+      // Per-attempt `run._id` is preserved from the yaml (NOT clobbered
+      // with the request `_id`) so retries / history demotion still work.
+      logsUrl: newLogsUrl ?? runState.logsUrl,
       ...(runState.harUrl ? { harUrl: runState.harUrl } : {}),
       ...(runState.rawChatUrl ? { rawChatUrl: runState.rawChatUrl } : {}),
-      ...(runState.rawChatFormat ? { rawChatFormat: runState.rawChatFormat } : {}),
       turns,
     },
   };
@@ -2062,6 +2107,10 @@ async function streamArchiveImport(
   await snapshotsContainer.createIfNotExists();
   const logsContainer = blobServiceClient.getContainerClient("logs");
   await logsContainer.createIfNotExists();
+
+  // Per-import scratch dir for staging logs.jsonl entries (one file per
+  // run). Removed in finally regardless of outcome.
+  const importTmpDir = mkdtempSync(join(tmpdir(), "scope-import-"));
 
   const pending = new Map<string, PendingRun>();
   const extractErrors: string[] = [];
@@ -2100,6 +2149,25 @@ async function streamArchiveImport(
         })
         .catch(err => {
           run!.uploadErrors.push(`run.yaml read: ${err.message ?? err}`);
+          next();
+        });
+      return;
+    }
+
+    // logs.jsonl is staged to a tmp file because its destination blob path
+    // embeds the per-attempt `run._id` which only becomes known after yaml
+    // parse. The bytes still flow as a stream — just to disk first, then
+    // back out to Azure during finalize — so this doesn't blow up memory.
+    if (filename === "logs.jsonl") {
+      const tmpPath = join(importTmpDir, `${prefix}-logs.jsonl`);
+      const ws = createWriteStream(tmpPath);
+      pipeline(entryStream as Readable, ws)
+        .then(() => {
+          run!.logsTempPath = tmpPath;
+          next();
+        })
+        .catch(err => {
+          run!.uploadErrors.push(`logs.jsonl read: ${err.message ?? err}`);
           next();
         });
       return;
@@ -2152,35 +2220,41 @@ async function streamArchiveImport(
     // Best-effort cleanup of every artifact we managed to upload before
     // re-throwing so the caller surfaces the failure to the client.
     await Promise.allSettled([...pending.values()].map(cleanupRunBlobs));
+    try { rmSync(importTmpDir, { recursive: true, force: true }); } catch { /* swallow */ }
     throw err;
   }
 
   if (extractErrors.length > 0 && pending.size === 0) {
     // Entire archive was malformed — surface as a single import failure.
+    try { rmSync(importTmpDir, { recursive: true, force: true }); } catch { /* swallow */ }
     throw new ImportError(400, extractErrors.join("; "));
   }
 
   const imported: ImportSuccess[] = [];
   const failed: ImportFailure[] = [];
-  for (const [prefix, run] of pending) {
-    try {
-      imported.push(await finalizePendingRun(prefix, run));
-    } catch (err) {
-      // Per-run failure — delete this run's blobs so a bad run.yaml or a
-      // duplicate _id never leaves orphans behind. Other runs in the batch
-      // are unaffected (cleanup is scoped to `run.uploadedBlobs`).
-      await cleanupRunBlobs(run);
-      if (err instanceof ImportError) {
-        failed.push({
-          id: prefix,
-          error: err.message,
-          statusCode: err.statusCode,
-          ...(err.details ? { details: err.details } : {}),
-        });
-      } else {
-        failed.push({ id: prefix, error: err instanceof Error ? err.message : String(err), statusCode: 500 });
+  try {
+    for (const [prefix, run] of pending) {
+      try {
+        imported.push(await finalizePendingRun(prefix, run, blobServiceClient));
+      } catch (err) {
+        // Per-run failure — delete this run's blobs so a bad run.yaml or a
+        // duplicate _id never leaves orphans behind. Other runs in the batch
+        // are unaffected (cleanup is scoped to `run.uploadedBlobs`).
+        await cleanupRunBlobs(run);
+        if (err instanceof ImportError) {
+          failed.push({
+            id: prefix,
+            error: err.message,
+            statusCode: err.statusCode,
+            ...(err.details ? { details: err.details } : {}),
+          });
+        } else {
+          failed.push({ id: prefix, error: err instanceof Error ? err.message : String(err), statusCode: 500 });
+        }
       }
     }
+  } finally {
+    try { rmSync(importTmpDir, { recursive: true, force: true }); } catch { /* swallow */ }
   }
 
   return { imported, failed };
