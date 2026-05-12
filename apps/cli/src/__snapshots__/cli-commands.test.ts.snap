@@ -617,6 +617,12 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
+      "upload-batch": {
+        "options": [
+          "--dry-run",
+          "--url",
+        ],
+      },
     },
   },
   "skill": {

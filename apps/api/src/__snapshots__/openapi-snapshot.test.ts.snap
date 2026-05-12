@@ -7535,6 +7535,22 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/runs/upload-batch": {
+      "post": {
+        "responses": {
+          "207": {
+            "description": "Multi-status: 201 if all runs imported, 400 if none imported, 207 if partial",
+          },
+          "400": {
+            "description": "No archive uploaded, empty archive, or all runs failed",
+          },
+        },
+        "summary": "Import batch run archive",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/skill-revisions/by-ref/{ref}(*)": {
       "get": {
         "responses": {
