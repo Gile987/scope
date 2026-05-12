@@ -23,12 +23,15 @@
  *           on the turn so callers can fetch the envelope on demand.
  *        c. `$unset` `codingAgentResponse`.
  *      If the upload fails the envelope is preserved inline so the
- *      migration can be re-run later. If no uploader is configured the
- *      envelope is also preserved inline (re-run with AZURE_STORAGE_*
- *      env set to rescue). Only when a runId/iteration cannot be
- *      derived (truly unrecoverable blob path) is the inline value
+ *      migration can be re-run later. If a runId/iteration cannot be
+ *      derived (truly unrecoverable blob path) the inline value is
  *      dropped — at that point it is already lost for joins and the
  *      giant string keeps blowing past the 2 MB document limit.
+ *
+ * The migration **fails fast** if no blob uploader can be built from
+ * env (`STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONNECTION_STRING`,
+ * or `AZURE_STORAGE_ACCOUNT_NAME` + managed identity) — running it
+ * uploader-less would silently destroy data.
  *
  * Idempotent: legitimate prose responses are never matched (the matchers
  * require the value to look like a JSON object, not just mention the key
@@ -233,6 +236,7 @@ async function cleanupCollection(
       if (!isEnvelopeString(value)) continue;
 
       // Envelope: try to rescue to blob, then $set + $unset.
+      // (`up()` guarantees `uploader` is non-null at this point.)
       const iteration = typeof turn?.iteration === "number" ? turn.iteration : null;
       if (uploader && ids && iteration !== null) {
         const blobName = `${ids.requestId}/runs/${ids.runId}/iteration-${iteration}/chat-result.json`;
@@ -248,21 +252,10 @@ async function cleanupCollection(
           envelopesSkipped++;
           console.log(`  ${label}: envelope upload failed for ${blobName}, leaving inline: ${err?.message ?? err}`);
         }
-      } else if (!uploader) {
-        // Cleanup-only mode (AZURE_STORAGE_* env not configured). Preserve
-        // the inline envelope — dropping it would silently destroy the only
-        // copy we have. The 2 MB document hazard is real but operator-
-        // fixable; data loss is not. Re-running with an uploader configured
-        // will rescue these envelopes to blob storage.
-        envelopesSkipped++;
-        if (envelopesSkipped <= 3) {
-          console.log(`  ${label}: no uploader configured — leaving envelope inline at ${turnsPath}[${i}] (set AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT_NAME and re-run)`);
-        }
       } else {
-        // Uploader is configured but ids/iteration are missing — the blob
-        // path is unrecoverable. Drop the inline value: it's already lost
-        // as far as joins go (no runId means we can't link it back), and
-        // the giant string keeps blowing past the 2 MB document limit.
+        // ids/iteration unrecoverable — the blob path can't be derived.
+        // Drop the inline value: it's already lost as far as joins go,
+        // and the giant string keeps blowing past the 2 MB document limit.
         unset[`${turnsPath}.${i}.codingAgentResponse`] = "";
         envelopesSkipped++;
         perDocCount++;
@@ -309,8 +302,8 @@ export class CleanupCodingAgentResponse implements MigrationInterface {
   async up(db: Db): Promise<void> {
     const uploader = this.uploader ?? buildUploaderFromEnv();
     if (!uploader) {
-      console.log(
-        "  no AZURE_STORAGE_* env configured — falling back to cleanup-only (envelopes will be dropped, not uploaded)",
+      throw new Error(
+        "migration 017: no blob uploader configured \u2014 set STORAGE_CONNECTION_STRING, AZURE_STORAGE_CONNECTION_STRING, or AZURE_STORAGE_ACCOUNT_NAME so inline IChatAgentResult2 envelopes can be rescued to blob storage. Without one, this migration would silently lose data.",
       );
     }
     await cleanupCollection(

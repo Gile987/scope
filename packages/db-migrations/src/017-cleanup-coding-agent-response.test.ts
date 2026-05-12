@@ -149,7 +149,7 @@ describe("migration 017: CleanupCodingAgentResponse", () => {
       expect(db._reqCol.bulkWrite).not.toHaveBeenCalled();
     });
 
-    it("preserves inline envelope when no uploader is available (cleanup-only mode)", async () => {
+    it("throws when no uploader is available (fail-fast: prevents silent data loss)", async () => {
       const docs = [
         {
           _id: makeObjectId(1),
@@ -160,18 +160,24 @@ describe("migration 017: CleanupCodingAgentResponse", () => {
       ];
       const db = makeMockDb(docs, []) as any;
 
-      // No uploader injected and no env vars set in test → cleanup-only.
-      const prev = { conn: process.env.AZURE_STORAGE_CONNECTION_STRING, account: process.env.AZURE_STORAGE_ACCOUNT_NAME };
+      // No uploader injected and no env vars set → up() must throw.
+      const prev = {
+        conn: process.env.AZURE_STORAGE_CONNECTION_STRING,
+        storage: process.env.STORAGE_CONNECTION_STRING,
+        account: process.env.AZURE_STORAGE_ACCOUNT_NAME,
+      };
       delete process.env.AZURE_STORAGE_CONNECTION_STRING;
+      delete process.env.STORAGE_CONNECTION_STRING;
       delete process.env.AZURE_STORAGE_ACCOUNT_NAME;
       try {
-        await new CleanupCodingAgentResponse().up(db);
+        await expect(new CleanupCodingAgentResponse().up(db)).rejects.toThrow(/no blob uploader configured/);
       } finally {
         if (prev.conn) process.env.AZURE_STORAGE_CONNECTION_STRING = prev.conn;
+        if (prev.storage) process.env.STORAGE_CONNECTION_STRING = prev.storage;
         if (prev.account) process.env.AZURE_STORAGE_ACCOUNT_NAME = prev.account;
       }
 
-      // Envelope must NOT be unset — re-running with an uploader should rescue it.
+      // Documents must NOT have been touched.
       expect(db._reqCol.bulkWrite).not.toHaveBeenCalled();
     });
 
