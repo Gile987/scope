@@ -36,7 +36,7 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
   const [acceptedChildren, setAcceptedChildren] = useState<string[]>([]);
 
   // Fetch existing criteria to detect duplicate IDs (uses same cache as CriteriaPicker)
-  const { data: existingCriteria = [] } = useQuery({
+  const { data: existingCriteria = [], isLoading: criteriaLoading } = useQuery({
     queryKey: ["criteria"],
     queryFn: () => api.listCriteria(),
   });
@@ -47,7 +47,7 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
     () => existingCriteria.some((c) => c.id === id.trim()),
     [id, existingCriteria],
   );
-  const canContinue = behavior.trim().length > 0 && id.trim().length > 0 && idValid && !idExists;
+  const canContinue = behavior.trim().length > 0 && id.trim().length > 0 && idValid && !idExists && !criteriaLoading;
 
   // Auto-suggest ID from behavior (unless manually edited)
   const handleBehaviorChange = useCallback(
@@ -182,6 +182,7 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
     // Computed
     idValid,
     idExists,
+    criteriaLoading,
     canContinue,
 
     // Callbacks

@@ -22,6 +22,7 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
     setIdManuallyEdited,
     idValid,
     idExists,
+    criteriaLoading,
     dependsOn,
     setDependsOn,
   } = wizard;
@@ -73,6 +74,11 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
         {id && idValid && idExists && (
           <p className="text-xs text-destructive">
             Criteria "{id}" already exists — choose a different ID
+          </p>
+        )}
+        {id && idValid && criteriaLoading && (
+          <p className="text-xs text-muted-foreground">
+            Checking ID availability…
           </p>
         )}
         <p className="text-xs text-muted-foreground">
