@@ -103,9 +103,10 @@ describe("migration 017: CleanupCodingAgentResponse", () => {
         $set: {
           "run.turns.0.chatResultUrl": "https://blobs/id-req-A/runs/id-run-A/iteration-4/chat-result.json",
           "run.turns.0.chatResultFormat": "IChatAgentResult2",
-        },
-        $unset: {
-          "run.turns.0.codingAgentResponse": "",
+          // Migration mirrors the runtime extractFinalResponse() behaviour:
+          // the inline string is replaced with the final assistant text
+          // (last toolCallRound's response) rather than $unset.
+          "run.turns.0.codingAgentResponse": "wrap up",
         },
       });
     });
@@ -196,10 +197,12 @@ describe("migration 017: CleanupCodingAgentResponse", () => {
 
       await new CleanupCodingAgentResponse(uploader).up(db);
 
+      // Blob path can't be derived — no upload — but we still extract the
+      // final assistant text and $set it in place of the giant envelope.
       expect(uploader.upload).not.toHaveBeenCalled();
       const [ops] = db._reqCol.bulkWrite.mock.calls[0];
       expect(ops[0].updateOne.update).toEqual({
-        $unset: { "run.turns.0.codingAgentResponse": "" },
+        $set: { "run.turns.0.codingAgentResponse": "wrap up" },
       });
     });
 
@@ -248,10 +251,10 @@ describe("migration 017: CleanupCodingAgentResponse", () => {
         $set: {
           "turns.1.chatResultUrl": "https://blobs/req-X/runs/id-run-X/iteration-2/chat-result.json",
           "turns.1.chatResultFormat": "IChatAgentResult2",
+          "turns.1.codingAgentResponse": "wrap up",
         },
         $unset: {
           "turns.0.codingAgentResponse": "",
-          "turns.1.codingAgentResponse": "",
         },
       });
     });
@@ -263,6 +266,81 @@ describe("migration 017: CleanupCodingAgentResponse", () => {
       expect(uploader.upload).not.toHaveBeenCalled();
       expect(db._reqCol.bulkWrite).not.toHaveBeenCalled();
       expect(db._runsCol.bulkWrite).not.toHaveBeenCalled();
+    });
+
+    describe("top-level result field", () => {
+      it("extracts the final response from an envelope-shaped run.result on requests", async () => {
+        const docs = [
+          { _id: makeObjectId("req-R"), run: { _id: makeObjectId("run-R"), result: ENVELOPE } },
+        ];
+        const uploader = makeUploader();
+        const db = makeMockDb(docs, []) as any;
+
+        await new CleanupCodingAgentResponse(uploader).up(db);
+
+        // No new blob upload for the top-level field — per-iteration blobs
+        // are the canonical persistent copy.
+        expect(uploader.upload).not.toHaveBeenCalled();
+
+        // First bulkWrite call is the codingAgentResponse pass (no envelope
+        // turns here so it's not invoked); the top-level pass is the only
+        // writer. Find the call carrying $set on `run.result`.
+        const allOps = db._reqCol.bulkWrite.mock.calls.flatMap((c: any[]) => c[0]);
+        const resultOps = allOps.filter((o: any) => o.updateOne.update.$set?.["run.result"] !== undefined);
+        expect(resultOps).toHaveLength(1);
+        expect(resultOps[0].updateOne.update).toEqual({
+          $set: { "run.result": "wrap up" },
+        });
+      });
+
+      it("$unsets run.result when the envelope yields no extractable text", async () => {
+        const empty = JSON.stringify({
+          timings: { totalElapsed: 1 },
+          metadata: { toolCallRounds: [], renderedUserMessage: [] },
+        });
+        const docs = [
+          { _id: makeObjectId("req-E"), run: { result: empty } },
+        ];
+        const uploader = makeUploader();
+        const db = makeMockDb(docs, []) as any;
+
+        await new CleanupCodingAgentResponse(uploader).up(db);
+
+        const allOps = db._reqCol.bulkWrite.mock.calls.flatMap((c: any[]) => c[0]);
+        const resultOps = allOps.filter((o: any) => o.updateOne.update.$unset?.["run.result"] !== undefined);
+        expect(resultOps).toHaveLength(1);
+        expect(resultOps[0].updateOne.update).toEqual({
+          $unset: { "run.result": "" },
+        });
+      });
+
+      it("leaves prose result strings untouched", async () => {
+        const docs = [
+          { _id: makeObjectId("req-P"), run: { result: "All Azure migration work was completed." } },
+        ];
+        const uploader = makeUploader();
+        const db = makeMockDb(docs, []) as any;
+
+        await new CleanupCodingAgentResponse(uploader).up(db);
+        expect(db._reqCol.bulkWrite).not.toHaveBeenCalled();
+      });
+
+      it("extracts top-level result on the runs history collection too", async () => {
+        const docs = [
+          { _id: makeObjectId("run-H"), requestId: "req-H", result: ENVELOPE },
+        ];
+        const uploader = makeUploader();
+        const db = makeMockDb([], docs) as any;
+
+        await new CleanupCodingAgentResponse(uploader).up(db);
+
+        const allOps = db._runsCol.bulkWrite.mock.calls.flatMap((c: any[]) => c[0]);
+        const resultOps = allOps.filter((o: any) => o.updateOne.update.$set?.["result"] !== undefined);
+        expect(resultOps).toHaveLength(1);
+        expect(resultOps[0].updateOne.update).toEqual({
+          $set: { "result": "wrap up" },
+        });
+      });
     });
   });
 

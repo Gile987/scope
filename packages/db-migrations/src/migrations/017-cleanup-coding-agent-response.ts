@@ -2,31 +2,40 @@
 // Licensed under the MIT License.
 
 /**
- * Migration: clean up `codingAgentResponse` on existing turns and rescue any
- * inline IChatAgentResult2 envelope to a per-iteration blob.
+ * Migration: bring legacy electron runs up to the post-#813 shape.
  *
- * Two cases on `requests.run.turns[i].codingAgentResponse` and
- * `runs.turns[i].codingAgentResponse`:
+ * Two distinct fixes, applied to both `requests` (current attempt at
+ * `run.*`) and `runs` (history attempts at top level):
  *
- *   1. **Empty string** → `$unset` the field. The portal then renders its
+ * 1. **Per-turn `codingAgentResponse`**
+ *    - **Empty string** → `$unset`. The portal then renders its
  *      "no response captured" placeholder consistently with the new
  *      optional shape introduced in growth-ecosystems/scope-core#811.
- *
- *   2. **Bloated IChatAgentResult2 envelope** (the #808 root cause: turns
- *      produced before #811 by the electron worker stored
- *      `JSON.stringify(IChatAgentResult2)` here — typically hundreds of KB
- *      of `toolCallRounds`, `toolCallResults`, `renderedUserMessage`, …):
- *        a. Re-upload to
- *           `{requestId}/runs/{runId}/iteration-{n}/chat-result.json` in
- *           the `snapshots` container.
+ *    - **IChatAgentResult2 envelope** (the #808 root cause — the electron
+ *      worker used to store `JSON.stringify(IChatAgentResult2)` here,
+ *      hundreds of KB of `toolCallRounds`, `toolCallResults`,
+ *      `renderedUserMessage`, …):
+ *        a. Re-upload to `{requestId}/runs/{runId}/iteration-{n}/chat-result.json`
+ *           in the `snapshots` container.
  *        b. `$set` `chatResultUrl` + `chatResultFormat = "IChatAgentResult2"`
  *           on the turn so callers can fetch the envelope on demand.
- *        c. `$unset` `codingAgentResponse`.
- *      If the upload fails the envelope is preserved inline so the
+ *        c. Run the same `extractFinalResponse()` logic as the runtime
+ *           fix (#813) on the parsed envelope and `$set`
+ *           `codingAgentResponse` to the extracted text (capped at
+ *           `MAX_RESPONSE_LENGTH`). If extraction yields nothing,
+ *           `$unset` instead so the UI shows its "missing" placeholder.
+ *      If the blob upload fails the envelope is preserved inline so the
  *      migration can be re-run later. If a runId/iteration cannot be
- *      derived (truly unrecoverable blob path) the inline value is
- *      dropped — at that point it is already lost for joins and the
- *      giant string keeps blowing past the 2 MB document limit.
+ *      derived (blob path unrecoverable) we still extract the text and
+ *      `$set` / `$unset` accordingly — the giant inline JSON has to go.
+ *
+ * 2. **Top-level `result` field** (`requests.run.result`, `runs.result`)
+ *    - **IChatAgentResult2 envelope** (same root cause: the runtime used
+ *      to dump the full envelope into `result` too) → extract via
+ *      `extractFinalResponse()` and `$set` / `$unset`. No new blob is
+ *      uploaded — the per-iteration blob from step 1 is canonical and a
+ *      duplicate top-level blob would just be redundant.
+ *    - Other strings are left alone (they're already well-formed prose).
  *
  * The migration **fails fast** if no blob uploader can be built from
  * env (`STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONNECTION_STRING`,
@@ -40,6 +49,12 @@
  *
  * `down()` cannot reconstruct inline values — the blobs persist but the
  * document-side field rewrite is one-way.
+ *
+ * The `extractFinalResponse()` helper below is intentionally a pinned
+ * copy of the runtime version at
+ * `apps/workers/coder-vscode-electron-driver-ext/src/extract-final-response.ts`.
+ * Migrations should not chase upstream behaviour changes — they need
+ * to mean exactly what they meant the day they were written.
  */
 
 import type { Db, Collection, AnyBulkWriteOperation } from "mongodb";
@@ -86,6 +101,67 @@ function isEnvelopeString(value: unknown): boolean {
     value.includes('"renderedUserMessage"') ||
     /^\{"timings":/.test(value)
   );
+}
+
+// ---------------------------------------------------------------------------
+// extractFinalResponse — pinned copy of the runtime version. See header
+// docstring for why we don't import it from the worker package.
+// ---------------------------------------------------------------------------
+
+/** Hard cap on the extracted text length. Mirrors the runtime constant. */
+const MAX_RESPONSE_LENGTH = 8 * 1024;
+
+function truncate(s: string): string {
+  if (s.length <= MAX_RESPONSE_LENGTH) return s;
+  const marker = `\n\n[truncated — original ${s.length} chars; full transcript in rawChatUrl]`;
+  return s.slice(0, MAX_RESPONSE_LENGTH - marker.length) + marker;
+}
+
+/** Mirrors `apps/workers/coder-vscode-electron-driver-ext/src/extract-final-response.ts`. */
+function extractFinalResponse(result: unknown): string | undefined {
+  if (result == null) return undefined;
+  if (typeof result === "string") {
+    return result.trim().length > 0 ? truncate(result) : undefined;
+  }
+  if (typeof result !== "object") return undefined;
+
+  const obj = result as Record<string, unknown>;
+  const metadata = obj.metadata as Record<string, unknown> | undefined;
+
+  const toolCallRounds = metadata?.toolCallRounds;
+  if (Array.isArray(toolCallRounds) && toolCallRounds.length > 0) {
+    for (let i = toolCallRounds.length - 1; i >= 0; i--) {
+      const r = toolCallRounds[i] as Record<string, unknown> | undefined;
+      const response = r?.response;
+      if (typeof response === "string" && response.trim().length > 0) {
+        return truncate(response);
+      }
+    }
+  }
+
+  const summaries = metadata?.summaries;
+  if (Array.isArray(summaries) && summaries.length > 0) {
+    for (let i = summaries.length - 1; i >= 0; i--) {
+      const s = summaries[i] as Record<string, unknown> | undefined;
+      const text = s?.text;
+      if (typeof text === "string" && text.trim().length > 0) {
+        return truncate(text);
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Parse an envelope-shaped string and run extractFinalResponse on it.
+ *  Returns undefined for unparseable strings or empty extractions. */
+function extractFromEnvelopeString(value: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  return extractFinalResponse(parsed);
 }
 
 /** Minimal blob upload abstraction so tests can inject a stub. */
@@ -184,6 +260,67 @@ function resolveIds(
   return { requestId: String(requestId), runId: String(runId) };
 }
 
+/** Scan a collection for envelope-shaped strings at `resultPath` (the
+ *  top-level `RunState.result` field) and replace them with the extracted
+ *  final response text — mirroring the post-#813 runtime behaviour. No
+ *  blob upload: the per-iteration blobs from `cleanupCollection` are the
+ *  canonical persistent copy of the envelope. */
+async function cleanupResultField(
+  col: Collection,
+  resultPath: string,
+  label: string,
+): Promise<{ docs: number; extracted: number; unset: number }> {
+  let docsModified = 0;
+  let extractedCount = 0;
+  let unsetCount = 0;
+  let processed = 0;
+  let batch: AnyBulkWriteOperation[] = [];
+
+  const filter = { [resultPath]: { $type: "string" } };
+  const projection: Record<string, 1> = { _id: 1, [resultPath]: 1 };
+  const cursor = col.find(filter, { projection, batchSize: 50 });
+
+  for await (const doc of cursor) {
+    const value = resultPath
+      .split(".")
+      .reduce<any>((acc, key) => (acc == null ? undefined : acc[key]), doc);
+
+    if (!isEnvelopeString(value)) continue;
+
+    const extracted = extractFromEnvelopeString(value);
+    const update: { $set?: Record<string, string>; $unset?: Record<string, ""> } = {};
+    if (extracted) {
+      update.$set = { [resultPath]: extracted };
+      extractedCount++;
+    } else {
+      update.$unset = { [resultPath]: "" };
+      unsetCount++;
+    }
+
+    batch.push({ updateOne: { filter: { _id: doc._id }, update } });
+
+    if (batch.length >= BATCH_SIZE) {
+      docsModified += await executeBulkWithRetry(col, batch, label);
+      processed += batch.length;
+      batch = [];
+      if (processed % 100 === 0) {
+        console.log(`  ${label}: processed ${processed} docs, modified ${docsModified}, extracted ${extractedCount}, unset ${unsetCount}`);
+      }
+      await sleep(INTER_BATCH_DELAY_MS);
+    }
+  }
+
+  if (batch.length > 0) {
+    docsModified += await executeBulkWithRetry(col, batch, label);
+    processed += batch.length;
+  }
+
+  console.log(
+    `  ${label}: done — processed ${processed} docs, modified ${docsModified}, extracted ${extractedCount}, unset ${unsetCount}`,
+  );
+  return { docs: docsModified, extracted: extractedCount, unset: unsetCount };
+}
+
 async function cleanupCollection(
   col: Collection,
   collection: "requests" | "runs",
@@ -235,37 +372,48 @@ async function cleanupCollection(
 
       if (!isEnvelopeString(value)) continue;
 
-      // Envelope: try to rescue to blob, then $set + $unset.
+      // Envelope: rescue to blob (if path derivable), then replace the
+      // inline value with the extracted final response so the document
+      // matches the post-#813 shape that new electron runs produce.
       // (`up()` guarantees `uploader` is non-null at this point.)
       const iteration = typeof turn?.iteration === "number" ? turn.iteration : null;
+      const extracted = extractFromEnvelopeString(value);
+      const fieldPath = `${turnsPath}.${i}.codingAgentResponse`;
+      const applyExtractedText = () => {
+        if (extracted) set[fieldPath] = extracted;
+        else unset[fieldPath] = "";
+      };
+
       if (uploader && ids && iteration !== null) {
         const blobName = `${ids.requestId}/runs/${ids.runId}/iteration-${iteration}/chat-result.json`;
         try {
           const url = await uploader.upload(blobName, value);
           set[`${turnsPath}.${i}.chatResultUrl`] = url;
           set[`${turnsPath}.${i}.chatResultFormat`] = "IChatAgentResult2";
-          unset[`${turnsPath}.${i}.codingAgentResponse`] = "";
+          applyExtractedText();
           envelopesUploaded++;
           perDocCount++;
         } catch (err: any) {
-          // Leave inline so a future re-run can retry. Don't $unset.
+          // Leave inline so a future re-run can retry. Don't $set/$unset.
           envelopesSkipped++;
           console.log(`  ${label}: envelope upload failed for ${blobName}, leaving inline: ${err?.message ?? err}`);
         }
       } else {
         // ids/iteration unrecoverable — the blob path can't be derived.
-        // Drop the inline value: it's already lost as far as joins go,
-        // and the giant string keeps blowing past the 2 MB document limit.
-        unset[`${turnsPath}.${i}.codingAgentResponse`] = "";
+        // We still replace the inline envelope with the extracted text
+        // (or $unset if extraction yielded nothing): the giant string keeps
+        // blowing past the 2 MB document limit and prose is far better
+        // than nothing for the portal.
+        applyExtractedText();
         envelopesSkipped++;
         perDocCount++;
-        console.log(`  ${label}: dropping inline envelope at ${turnsPath}[${i}] — no runId/iteration available, blob path unrecoverable`);
+        console.log(`  ${label}: blob path unrecoverable for ${turnsPath}[${i}] (no runId/iteration), replacing inline envelope with extracted text only`);
       }
     }
 
     if (perDocCount === 0) continue;
 
-    const update: { $unset?: Record<string, "">; $set?: Record<string, string> } = {};
+    const update: { $unset?: Record<string, "">; $set?: Record<string, unknown> } = {};
     if (Object.keys(unset).length > 0) update.$unset = unset;
     if (Object.keys(set).length > 0) update.$set = set;
 
@@ -319,6 +467,16 @@ export class CleanupCodingAgentResponse implements MigrationInterface {
       "turns",
       uploader,
       "runs — codingAgentResponse cleanup",
+    );
+    await cleanupResultField(
+      db.collection("requests"),
+      "run.result",
+      "requests — run.result cleanup",
+    );
+    await cleanupResultField(
+      db.collection("runs"),
+      "result",
+      "runs — result cleanup",
     );
   }
 
