@@ -44,7 +44,7 @@ function ensureDependenciesExist(
 function ensureAcyclicCriteria(criteria: CriteriaGraphNode[]): void {
   new DependencyGraph(
     criteria.map((criterion) => ({
-      id: criterion.id,
+      ...criterion,
       dependsOn: criterion.dependsOn ?? [],
     })),
   );
@@ -160,17 +160,17 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
-    let removedInvalidSeed = true;
-    while (removedInvalidSeed) {
-      removedInvalidSeed = false;
+    let hasSeedValidationChanges = true;
+    while (hasSeedValidationChanges) {
+      hasSeedValidationChanges = false;
       const availableIds = new Set([...existingIds, ...pendingSeeds.keys()]);
 
-      for (const [id, config] of [...pendingSeeds.entries()]) {
+      for (const [id, config] of pendingSeeds) {
         try {
           ensureDependenciesExist(config.dependsOn, availableIds);
         } catch (err) {
           pendingSeeds.delete(id);
-          removedInvalidSeed = true;
+          hasSeedValidationChanges = true;
           errors.push(`Failed to seed ${id}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
