@@ -107,18 +107,20 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
     const updatePosition = () => {
       const rect = inputRef.current!.getBoundingClientRect();
       setDropdownStyle((prev) => {
-        const nextStyle = {
+        const nextStyle: React.CSSProperties = {
           position: "fixed",
           top: rect.bottom + 4,
           left: rect.left,
           width: rect.width,
           zIndex: 50,
-        } satisfies React.CSSProperties;
+        };
 
         if (
+          prev.position === nextStyle.position &&
           prev.top === nextStyle.top &&
           prev.left === nextStyle.left &&
-          prev.width === nextStyle.width
+          prev.width === nextStyle.width &&
+          prev.zIndex === nextStyle.zIndex
         ) {
           return prev;
         }
