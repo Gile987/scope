@@ -4,7 +4,6 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { CriteriaPicker } from "@/components/CriteriaPicker";
 import type { CriteriaWizardState } from "@/hooks/useCriteriaWizard";
 
 interface CriteriaWizardStep1Props {
@@ -23,8 +22,6 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
     idValid,
     idExists,
     criteriaLoading,
-    dependsOn,
-    setDependsOn,
   } = wizard;
 
   return (
@@ -85,17 +82,6 @@ export function CriteriaWizardStep1({ wizard, idPrefix = "" }: CriteriaWizardSte
           {id && !wizard.idManuallyEdited
             ? "Auto-generated from behavior — edit to customize"
             : "This ID will be attached to evaluations when the judge evaluates them as positive"}
-        </p>
-      </div>
-
-      {/* Parent dependencies */}
-      <div className="space-y-2">
-        <Label className="text-sm font-semibold">
-          Parents <span className="font-normal text-muted-foreground">(optional)</span>
-        </Label>
-        <CriteriaPicker selected={dependsOn} onChange={setDependsOn} />
-        <p className="text-xs text-muted-foreground">
-          Criteria that must pass before this one is evaluated
         </p>
       </div>
     </div>
