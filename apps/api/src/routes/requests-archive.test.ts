@@ -68,7 +68,16 @@ function makeBlockBlobClient(container: string, name: string) {
       const { readFileSync } = await import("fs");
       blobStore.set(key, readFileSync(localPath));
     },
-    async uploadStream(stream: NodeJS.ReadableStream) {
+    async uploadStream(stream: NodeJS.ReadableStream, _bufferSize?: number, _maxConcurrency?: number, opts?: { conditions?: { ifNoneMatch?: string } }) {
+      // Honor If-None-Match: "*" → fail if the blob already exists. The
+      // import pipeline relies on this to refuse clobbering an existing
+      // run's data when a duplicate `_id` is uploaded.
+      if (opts?.conditions?.ifNoneMatch === "*" && blobStore.has(key)) {
+        throw new RestError(`Blob already exists: ${key}`, {
+          statusCode: 412,
+          code: "BlobAlreadyExists",
+        });
+      }
       // Streaming upload — consume the Readable into a Buffer and stash.
       const chunks: Buffer[] = [];
       for await (const c of stream as AsyncIterable<Buffer | string>) {
@@ -79,6 +88,10 @@ function makeBlockBlobClient(container: string, name: string) {
     async upload(data: Buffer | string, length: number) {
       const buf = typeof data === "string" ? Buffer.from(data) : data;
       blobStore.set(key, buf.subarray(0, length));
+    },
+    async deleteIfExists() {
+      const existed = blobStore.delete(key);
+      return { succeeded: existed };
     },
   };
 }
@@ -376,6 +389,66 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
         expect.objectContaining({ path: expect.stringMatching(/scenario\.criteria/) }),
       ]),
     );
+  });
+
+  it("cleans up uploaded blobs when run.yaml fails schema validation", async () => {
+    // Pre-condition: blob store starts empty (beforeEach clears it).
+    const app = buildApp(makeRequestCollection());
+
+    // Archive carries a real iteration tarball alongside an invalid yaml.
+    // The streaming pipeline uploads the iteration blob *before* finalize
+    // gets a chance to validate the yaml — so the only thing standing
+    // between us and an orphan is cleanupRunBlobs in the finalize catch.
+    const innerIterTar = await buildTarGz({ "hello.txt": "iter-1 contents" });
+    const archive = await buildTarGz({
+      "bad-cleanup/run.yaml":
+        "_id: bad-cleanup\nscenario:\n  task: t\n  criteria: [1, 2]\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: bad-cleanup\n  attemptNumber: 1\n  status: done\n",
+      "bad-cleanup/iteration-1.tar.gz": innerIterTar,
+    });
+
+    const res = await request(app)
+      .post("/api/v1/runs/upload")
+      .attach("archive", archive, "archive.tar.gz");
+
+    expect(res.status).toBe(400);
+    // The iteration blob was uploaded mid-stream, but the finalize-time
+    // schema rejection must have triggered cleanupRunBlobs and deleted it.
+    expect(blobStore.has("snapshots/bad-cleanup/iteration-1/workspace.tar.gz")).toBe(false);
+    // Belt and braces: nothing else got left behind under that prefix.
+    for (const key of blobStore.keys()) {
+      expect(key.includes("bad-cleanup")).toBe(false);
+    }
+  });
+
+  it("does not clobber existing run blobs when uploading a duplicate _id", async () => {
+    // Pre-seed Mongo + blob store as if `dup-noclob` had been imported
+    // previously. The retry archive contains *different* iteration bytes;
+    // the ifNoneMatch guard on uploadStream must refuse to overwrite, and
+    // the per-run cleanup must not delete the existing blob either.
+    const reqs = makeRequestCollection();
+    reqs.docs.set("dup-noclob", { _id: "dup-noclob", run: { status: "done" } });
+    const app = buildApp(reqs);
+
+    const originalIterBytes = Buffer.from("ORIGINAL iteration contents");
+    const originalBlobKey = "snapshots/dup-noclob/iteration-1/workspace.tar.gz";
+    blobStore.set(originalBlobKey, originalIterBytes);
+
+    const replacementIterTar = await buildTarGz({ "evil.txt": "REPLACEMENT bytes" });
+    const archive = await buildTarGz({
+      "dup-noclob/run.yaml":
+        "_id: dup-noclob\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: dup-noclob\n  attemptNumber: 1\n  status: done\n",
+      "dup-noclob/iteration-1.tar.gz": replacementIterTar,
+    });
+
+    const res = await request(app)
+      .post("/api/v1/runs/upload")
+      .attach("archive", archive, "archive.tar.gz");
+
+    // Status may be 409 (Mongo dup wins the race) or 500 (uploadStream's
+    // 412 surfaces as a per-run upload failure first). Either way the
+    // critical invariant is the existing blob bytes are untouched.
+    expect([409, 500]).toContain(res.status);
+    expect(blobStore.get(originalBlobKey)).toEqual(originalIterBytes);
   });
 });
 

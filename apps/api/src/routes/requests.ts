@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import multer from "multer";
-import { BlobServiceClient, RestError } from "@azure/storage-blob";
+import { BlobServiceClient, BlockBlobClient, RestError } from "@azure/storage-blob";
 import { DefaultAzureCredential } from "@azure/identity";
 import { createGzip, createGunzip } from "zlib";
 import { join, basename } from "path";
@@ -1871,10 +1871,28 @@ interface PendingRun {
   yamlBuf?: Buffer;
   /** Maps tar-entry filename (without the `<runId>/` prefix) → uploaded blob URL. */
   artifacts: Map<string, string>;
+  /**
+   * BlockBlobClient handles for every artifact we successfully uploaded for
+   * this run. Used to cleanup-on-failure: if `finalizePendingRun` rejects
+   * (bad yaml, duplicate _id, …) we delete these blobs so a failed import
+   * never leaves orphans behind.
+   */
+  uploadedBlobs: BlockBlobClient[];
   /** Number of iteration-N.tar.gz entries seen for this run. */
   iterationCount: number;
   /** Per-entry upload errors, surfaced as a single per-run failure at finalize. */
   uploadErrors: string[];
+}
+
+/**
+ * Best-effort delete of every blob this run uploaded. Called when a run's
+ * finalize step fails (validation, duplicate _id, Mongo insert, …) or when
+ * the streaming pipeline aborts mid-archive. Errors are swallowed — we've
+ * already failed the import, the goal is just to minimise orphaned blobs.
+ */
+async function cleanupRunBlobs(run: PendingRun): Promise<void> {
+  if (run.uploadedBlobs.length === 0) return;
+  await Promise.allSettled(run.uploadedBlobs.map(c => c.deleteIfExists()));
 }
 
 /**
@@ -2070,7 +2088,7 @@ async function streamArchiveImport(
 
     let run = pending.get(prefix);
     if (!run) {
-      run = { artifacts: new Map(), iterationCount: 0, uploadErrors: [] };
+      run = { artifacts: new Map(), uploadedBlobs: [], iterationCount: 0, uploadErrors: [] };
       pending.set(prefix, run);
     }
 
@@ -2106,9 +2124,17 @@ async function streamArchiveImport(
       .uploadStream(entryStream as Readable, undefined, undefined, {
         blobHTTPHeaders: { blobContentType: target.contentType },
         tags,
+        // Refuse to clobber an existing blob. If a run with this `_id` was
+        // already imported, its artifacts are at the same canonical paths;
+        // overwriting them before we discover the duplicate via Mongo would
+        // destroy live data. With this guard the upload fails fast (412)
+        // and the per-run cleanup just deletes whatever fresh blobs we did
+        // manage to write, leaving the existing run intact.
+        conditions: { ifNoneMatch: "*" },
       })
       .then(() => {
         run!.artifacts.set(filename, blockBlobClient.url);
+        run!.uploadedBlobs.push(blockBlobClient);
         if (target.isIteration) run!.iterationCount++;
         next();
       })
@@ -2119,7 +2145,15 @@ async function streamArchiveImport(
       });
   });
 
-  await pipeline(archiveStream, createGunzip(), extract);
+  try {
+    await pipeline(archiveStream, createGunzip(), extract);
+  } catch (err) {
+    // Pipeline aborted mid-archive (network drop, malformed gzip, etc.).
+    // Best-effort cleanup of every artifact we managed to upload before
+    // re-throwing so the caller surfaces the failure to the client.
+    await Promise.allSettled([...pending.values()].map(cleanupRunBlobs));
+    throw err;
+  }
 
   if (extractErrors.length > 0 && pending.size === 0) {
     // Entire archive was malformed — surface as a single import failure.
@@ -2132,6 +2166,10 @@ async function streamArchiveImport(
     try {
       imported.push(await finalizePendingRun(prefix, run));
     } catch (err) {
+      // Per-run failure — delete this run's blobs so a bad run.yaml or a
+      // duplicate _id never leaves orphans behind. Other runs in the batch
+      // are unaffected (cleanup is scoped to `run.uploadedBlobs`).
+      await cleanupRunBlobs(run);
       if (err instanceof ImportError) {
         failed.push({
           id: prefix,
