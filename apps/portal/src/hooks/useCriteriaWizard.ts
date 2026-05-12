@@ -101,20 +101,22 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
     mutationFn: api.createCriterion,
     onSuccess: async (data) => {
       // Update accepted children to depend on the new criterion
-      for (const childId of acceptedChildren) {
-        try {
-          const child = await api.getCriterion(childId);
-          const existingDeps = child.dependsOn ?? [];
-          if (!existingDeps.includes(data.id)) {
-            await api.updateCriterion(childId, {
-              dependsOn: [...existingDeps, data.id],
-            });
+      await Promise.allSettled(
+        acceptedChildren.map(async (childId) => {
+          try {
+            const child = await api.getCriterion(childId);
+            const existingDeps = child.dependsOn ?? [];
+            if (!existingDeps.includes(data.id)) {
+              await api.updateCriterion(childId, {
+                dependsOn: [...existingDeps, data.id],
+              });
+            }
+          } catch {
+            // Non-blocking: child update failure doesn't prevent success
+            console.warn(`Failed to update child criterion ${childId}`);
           }
-        } catch {
-          // Non-blocking: child update failure doesn't prevent success
-          console.warn(`Failed to update child criterion ${childId}`);
-        }
-      }
+        }),
+      );
       queryClient.invalidateQueries({ queryKey: ["criteria"] });
       toast.success(`Criterion "${data.id}" created`);
       onSuccess(data.id);

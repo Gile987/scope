@@ -30,7 +30,7 @@ export function formatId(id: string): string {
 export function slugify(text: string): string {
   return text
     .toLowerCase()
-    .replace(/['']/g, "")
+    .replace(/['’]/g, "")
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^[^a-z]+/, "")
     .replace(/_+/g, "_")

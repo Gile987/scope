@@ -57,6 +57,10 @@ describe("slugify", () => {
     expect(slugify("it's working")).toBe("its_working");
   });
 
+  it("removes unicode apostrophes", () => {
+    expect(slugify("it’s working")).toBe("its_working");
+  });
+
   it("truncates to 40 characters", () => {
     const long = "a".repeat(50);
     expect(slugify(long)).toHaveLength(40);

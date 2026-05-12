@@ -102,24 +102,48 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
 
   useEffect(() => {
     if (!open || !inputRef.current) return;
+    let rafId: number | undefined;
 
     const updatePosition = () => {
       const rect = inputRef.current!.getBoundingClientRect();
-      setDropdownStyle({
-        position: "fixed",
-        top: rect.bottom + 4,
-        left: rect.left,
-        width: rect.width,
-        zIndex: 50,
+      setDropdownStyle((prev) => {
+        const nextStyle = {
+          position: "fixed",
+          top: rect.bottom + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 50,
+        } satisfies React.CSSProperties;
+
+        if (
+          prev.top === nextStyle.top &&
+          prev.left === nextStyle.left &&
+          prev.width === nextStyle.width
+        ) {
+          return prev;
+        }
+
+        return nextStyle;
+      });
+    };
+
+    const scheduleUpdatePosition = () => {
+      if (rafId !== undefined) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = undefined;
+        updatePosition();
       });
     };
     updatePosition();
 
-    window.addEventListener("scroll", updatePosition, true);
-    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", scheduleUpdatePosition, true);
+    window.addEventListener("resize", scheduleUpdatePosition);
     return () => {
-      window.removeEventListener("scroll", updatePosition, true);
-      window.removeEventListener("resize", updatePosition);
+      if (rafId !== undefined) {
+        window.cancelAnimationFrame(rafId);
+      }
+      window.removeEventListener("scroll", scheduleUpdatePosition, true);
+      window.removeEventListener("resize", scheduleUpdatePosition);
     };
   }, [open]);
 
