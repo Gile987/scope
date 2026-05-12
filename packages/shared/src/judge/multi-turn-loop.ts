@@ -108,7 +108,6 @@ export async function runMultiTurnLoop(
 
   const turns: ConversationTurn[] = [];
   let nextPrompt = task;
-  const startTime = Date.now();
 
   await log("info", `Starting multi-turn loop (max ${maxIterations} iterations)`, {
     criteria,
@@ -127,18 +126,6 @@ export async function runMultiTurnLoop(
     // those from inside workers) carry iteration context for the CLI to display.
     const iterLog: typeof log = async (level, message, data) =>
       log(level, message, { ...data, iteration });
-
-    // Check timeout
-    const elapsed = Date.now() - startTime;
-    if (elapsed > MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS) {
-      await iterLog("warn", `Multi-turn loop timed out after ${Math.round(elapsed / 1000)}s`, { elapsedMs: elapsed });
-      return {
-        turns,
-        passed: false,
-        hadError: true,
-        finalResult: `Timed out after ${iteration - 1} iterations (${Math.round(elapsed / 1000)}s)`,
-      };
-    }
 
     const iterationStartedAt = new Date();
 
@@ -538,6 +525,26 @@ export async function runMultiTurnLoop(
       feedback: judgeFeedback.substring(0, 500),
     });
     nextPrompt = judgeFeedback;
+
+    // Per-iteration timeout: if this iteration alone exceeded the budget,
+    // abort the loop rather than starting another iteration that is likely
+    // to overrun as well. The completed iteration's turn is preserved.
+    const iterationElapsedMs = Date.now() - iterationStartedAt.getTime();
+    if (iterationElapsedMs > MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS) {
+      const elapsedSec = Math.round(iterationElapsedMs / 1000);
+      const budgetSec = Math.round(MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS / 1000);
+      await iterLog(
+        "warn",
+        `Iteration ${iteration} exceeded timeout (${elapsedSec}s > ${budgetSec}s)`,
+        { elapsedMs: iterationElapsedMs, budgetMs: MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS },
+      );
+      return {
+        turns,
+        passed: false,
+        hadError: true,
+        finalResult: `Iteration ${iteration} exceeded timeout (${elapsedSec}s > ${budgetSec}s)`,
+      };
+    }
   }
 
   // Max iterations exhausted
