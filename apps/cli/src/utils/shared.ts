@@ -29,10 +29,31 @@ export const ENV_VARS = {
     description: 'Default API base URL used by the -u, --url option of every command',
     default: 'http://localhost:3100',
   },
+  SCOPE_API_PORT: {
+    description: 'When SCOPE_API_URL is unset, derive it as http://localhost:$SCOPE_API_PORT (useful for local docker-compose setups)',
+  },
   SCOPE_MT_DOWNLOAD_OUTPUT_DIR: {
     description: 'Default download directory for `run get` / `run watch` when --download-output-dir is omitted',
   },
 } as const;
+
+/**
+ * Derive the default `SCOPE_API_URL` from `SCOPE_API_PORT` when `SCOPE_API_URL`
+ * is not already set. Useful for local docker-compose setups where the API
+ * port is the only piece of configuration that varies.
+ *
+ * Mutates `env` in place when a port is present and the port string is purely
+ * numeric. Whitespace around `SCOPE_API_PORT` is tolerated; non-numeric values
+ * are ignored so a typo doesn't silently produce an unreachable URL.
+ *
+ * Idempotent: if `SCOPE_API_URL` is already defined, `env` is left untouched.
+ */
+export function applyApiPortFallback(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.SCOPE_API_URL || !env.SCOPE_API_PORT) return;
+  const port = env.SCOPE_API_PORT.trim();
+  if (!/^\d+$/.test(port)) return;
+  env.SCOPE_API_URL = `http://localhost:${port}`;
+}
 
 // Output format definitions with descriptions and categories
 export const OUTPUT_FORMATS = {
