@@ -35,5 +35,5 @@ describe("OpenAPI spec snapshot", () => {
 
     // Snapshot the full spec — catches dropped routes, changed schemas, etc.
     expect(doc).toMatchSnapshot();
-  });
+  }, 30_000); // index.ts pulls in the entire route surface; 5s default is too tight under full-suite load.
 });

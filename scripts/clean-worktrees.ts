@@ -10,7 +10,7 @@
 //
 // Usage:
 //   npx tsx scripts/clean-worktrees.ts
-//   pnpm clean:worktrees
+//   pnpm worktrees:clean:worktrees
 // =============================================================================
 
 import { execSync } from "child_process";

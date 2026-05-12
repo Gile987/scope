@@ -184,6 +184,11 @@ services:
   gateway:
     build:
       target: dev
+    # Cold cargo build can take 4-5 minutes on first run; the base
+    # `start_period: 120s` is enough once the target/ cache is populated
+    # but not on a fresh container. Bump it for the dev profile only.
+    healthcheck:
+      start_period: 360s
     develop:
       watch:
         - action: sync
