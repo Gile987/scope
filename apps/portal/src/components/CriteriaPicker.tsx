@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { data: criteria = [], isLoading } = useQuery({
@@ -45,10 +47,13 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
     setHighlightIdx(0);
   }, [suggestions]);
 
-  // Close dropdown on outside click
+  // Close dropdown on outside click (checks both input area and portal dropdown)
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inContainer = containerRef.current?.contains(target);
+      const inDropdown = dropdownRef.current?.contains(target);
+      if (!inContainer && !inDropdown) {
         setOpen(false);
       }
     };
@@ -91,12 +96,39 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
     }
   };
 
+  // Compute fixed position for portal-based dropdown so it isn't clipped by
+  // overflow-y-auto scroll containers (e.g. dialogs).
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+
+  useEffect(() => {
+    if (!open || !inputRef.current) return;
+
+    const updatePosition = () => {
+      const rect = inputRef.current!.getBoundingClientRect();
+      setDropdownStyle({
+        position: "fixed",
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 50,
+      });
+    };
+    updatePosition();
+
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [open]);
+
   if (isLoading) {
     return <Skeleton className="h-9 w-full" />;
   }
 
   return (
-    <div ref={containerRef} className="relative space-y-2">
+    <div ref={containerRef} className="space-y-2">
       {/* Selected badges */}
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
@@ -134,9 +166,9 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
         className="h-9 font-mono text-sm"
       />
 
-      {/* Dropdown suggestions */}
-      {open && suggestions.length > 0 && (
-        <div className="absolute z-50 top-full mt-1 w-full rounded-md border bg-popover shadow-md">
+      {/* Dropdown suggestions (portal-based to avoid clipping by scroll containers) */}
+      {open && suggestions.length > 0 && createPortal(
+        <div ref={dropdownRef} style={dropdownStyle} className="rounded-md border bg-popover shadow-md">
           <div className="max-h-48 overflow-y-auto p-1">
             {suggestions.map((c, idx) => (
               <button
@@ -156,13 +188,15 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
               </button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
-      {open && query && suggestions.length === 0 && (
-        <div className="absolute z-50 top-full mt-1 w-full rounded-md border bg-popover shadow-md p-3 text-sm text-muted-foreground text-center">
+      {open && query && suggestions.length === 0 && createPortal(
+        <div style={dropdownStyle} className="rounded-md border bg-popover shadow-md p-3 text-sm text-muted-foreground text-center">
           No matching criteria
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
