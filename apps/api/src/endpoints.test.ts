@@ -154,6 +154,18 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(409);
     });
+
+    it("returns 400 for self-referential dependencies", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/api/v1/criteria")
+        .send({ id: "self_ref", prompt: "Self ref", dependsOn: ["self_ref"] });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("A criterion cannot depend on itself");
+      expect(mocks.criteriaCollection.insertOne).not.toHaveBeenCalled();
+    });
   });
 
   describe("GET /api/v1/criteria/:id", () => {
@@ -198,6 +210,78 @@ describe("API Endpoints", () => {
         .send({ prompt: "Nope" });
 
       expect(res.status).toBe(404);
+    });
+
+    it("returns 400 when an update introduces a 2-node cycle", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue({
+        id: "a",
+        prompt: "A",
+        dependsOn: [],
+        createdAt: new Date(),
+      });
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        project: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([
+          { id: "a", dependsOn: [] },
+          { id: "b", dependsOn: ["a"] },
+        ]),
+      });
+
+      const res = await request(app)
+        .put("/api/v1/criteria/a")
+        .send({ dependsOn: ["b"] });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("Cycle detected in dependencies");
+      expect(mocks.criteriaCollection.updateOne).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 when an update introduces a longer cycle", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue({
+        id: "a",
+        prompt: "A",
+        dependsOn: [],
+        createdAt: new Date(),
+      });
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        project: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([
+          { id: "a", dependsOn: [] },
+          { id: "b", dependsOn: ["a"] },
+          { id: "c", dependsOn: ["b"] },
+        ]),
+      });
+
+      const res = await request(app)
+        .put("/api/v1/criteria/a")
+        .send({ dependsOn: ["c"] });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("Cycle detected in dependencies");
+      expect(mocks.criteriaCollection.updateOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("POST /api/v1/criteria/seed", () => {
+    it("reports cycle validation errors without writing invalid criteria", async () => {
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        project: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/criteria/seed")
+        .send({
+          criteria: [
+            { id: "a", prompt: "A", dependsOn: ["b"] },
+            { id: "b", prompt: "B", dependsOn: ["a"] },
+          ],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.seeded).toBe(0);
+      expect(res.body.errors).toContain("Failed to seed criteria batch: Cycle detected in dependencies");
+      expect(mocks.criteriaCollection.updateOne).not.toHaveBeenCalled();
     });
   });
 

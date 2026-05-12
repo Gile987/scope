@@ -6,6 +6,7 @@ import {
   CreateCriteriaInputSchema,
   CriteriaGraphSchema,
   CriteriaResponseSchema,
+  DependencyGraph,
   UpdateCriteriaInputSchema,
 } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
@@ -13,6 +14,48 @@ import type { CriteriaDocument, RouteContext } from "../route-context.js";
 import { computeMdp } from "../criteria-mdp.js";
 import type { MdpAnalyzableRun } from "../criteria-mdp.js";
 import { generateCriteriaPrompt, isLlmAvailable } from "../llm.js";
+
+type CriteriaGraphNode = Pick<CriteriaDocument, "id" | "dependsOn">;
+
+function normalizeDependsOn(dependsOn: unknown): string[] {
+  if (!Array.isArray(dependsOn)) {
+    return [];
+  }
+  return dependsOn.map((dependency) => String(dependency).trim()).filter(Boolean);
+}
+
+function ensureNoSelfReference(id: string, dependsOn: string[]): void {
+  if (dependsOn.includes(id)) {
+    throw new Error("A criterion cannot depend on itself");
+  }
+}
+
+function ensureDependenciesExist(
+  dependsOn: string[],
+  availableIds: ReadonlySet<string>,
+): void {
+  for (const dependencyId of dependsOn) {
+    if (!availableIds.has(dependencyId)) {
+      throw new Error(`Dependency '${dependencyId}' does not exist`);
+    }
+  }
+}
+
+function ensureAcyclicCriteria(criteria: CriteriaGraphNode[]): void {
+  new DependencyGraph(
+    criteria.map((criterion) => ({
+      id: criterion.id,
+      dependsOn: criterion.dependsOn ?? [],
+    })),
+  );
+}
+
+async function loadActiveCriteria(ctx: RouteContext): Promise<CriteriaGraphNode[]> {
+  return ctx.criteriaCollection
+    .find({ deletedAt: { $exists: false } })
+    .project({ _id: 0, id: 1, dependsOn: 1 })
+    .toArray() as Promise<CriteriaGraphNode[]>;
+}
 
 export function registerCriteriaRoutes(ctx: RouteContext): void {
 
@@ -88,22 +131,82 @@ apiRoute(ctx.app, ctx.registry, {
     const { criteria } = req.body;
     let seeded = 0;
     const errors: string[] = [];
+    const activeCriteria = await loadActiveCriteria(ctx);
+    const existingIds = new Set(activeCriteria.map((criterion) => criterion.id));
+    const pendingSeeds = new Map<string, { id: string; prompt: string; dependsOn: string[] }>();
 
     for (const config of criteria) {
       if (!config.id || !config.prompt) {
         errors.push("Skipping entry without id or prompt");
         continue;
       }
+
+      const id = config.id.trim();
+      if (existingIds.has(id) || pendingSeeds.has(id)) {
+        continue;
+      }
+
+      const dependsOn = normalizeDependsOn(config.dependsOn);
+
+      try {
+        ensureNoSelfReference(id, dependsOn);
+        pendingSeeds.set(id, {
+          id,
+          prompt: config.prompt.trim(),
+          dependsOn,
+        });
+      } catch (err) {
+        errors.push(`Failed to seed ${id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    let removedInvalidSeed = true;
+    while (removedInvalidSeed) {
+      removedInvalidSeed = false;
+      const availableIds = new Set([...existingIds, ...pendingSeeds.keys()]);
+
+      for (const [id, config] of [...pendingSeeds.entries()]) {
+        try {
+          ensureDependenciesExist(config.dependsOn, availableIds);
+        } catch (err) {
+          pendingSeeds.delete(id);
+          removedInvalidSeed = true;
+          errors.push(`Failed to seed ${id}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    if (pendingSeeds.size > 0) {
+      try {
+        ensureAcyclicCriteria([...activeCriteria, ...pendingSeeds.values()]);
+      } catch (err) {
+        errors.push(`Failed to seed criteria batch: ${err instanceof Error ? err.message : String(err)}`);
+        pendingSeeds.clear();
+      }
+    }
+
+    for (const config of criteria) {
+      if (!config.id || !config.prompt) {
+        continue;
+      }
+
+      const id = config.id.trim();
+      const dependsOn = normalizeDependsOn(config.dependsOn);
+      const shouldSeedExisting = existingIds.has(id);
+      const shouldSeedNew = pendingSeeds.has(id);
+
+      if (!shouldSeedExisting && !shouldSeedNew) {
+        continue;
+      }
+
       try {
         await ctx.criteriaCollection.updateOne(
-          { id: config.id.trim() },
+          { id },
           {
             $setOnInsert: {
-              id: config.id.trim(),
+              id,
               prompt: config.prompt.trim(),
-              dependsOn: Array.isArray(config.dependsOn)
-                ? config.dependsOn.map((d: any) => String(d).trim())
-                : [],
+              dependsOn,
               createdAt: new Date(),
             },
           },
@@ -111,7 +214,7 @@ apiRoute(ctx.app, ctx.registry, {
         );
         seeded++;
       } catch (err) {
-        errors.push(`Failed to seed ${config.id}: ${err}`);
+        errors.push(`Failed to seed ${id}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -305,22 +408,25 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    // Validate dependency references
-    for (const depId of dependsOn) {
-      const dep = await ctx.criteriaCollection.findOne({
-        id: depId,
-        deletedAt: { $exists: false },
-      });
-      if (!dep) {
-        res.status(400).json({ error: `Dependency '${depId}' does not exist` });
-        return;
-      }
+    const normalizedDependsOn = normalizeDependsOn(dependsOn);
+
+    try {
+      ensureNoSelfReference(id, normalizedDependsOn);
+      const activeCriteria = await loadActiveCriteria(ctx);
+      ensureDependenciesExist(normalizedDependsOn, new Set(activeCriteria.map((criterion) => criterion.id)));
+      ensureAcyclicCriteria([
+        ...activeCriteria,
+        { id, dependsOn: normalizedDependsOn },
+      ]);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      return;
     }
 
     const doc: CriteriaDocument = {
       id,
       prompt: prompt.trim(),
-      dependsOn,
+      dependsOn: normalizedDependsOn,
       createdAt: new Date(),
     };
 
@@ -360,23 +466,25 @@ apiRoute(ctx.app, ctx.registry, {
       update.prompt = prompt.trim();
     }
     if (dependsOn !== undefined) {
-      // Validate dependency references
-      for (const depId of dependsOn) {
-        const dep = await ctx.criteriaCollection.findOne({
-          id: depId,
-          deletedAt: { $exists: false },
-        });
-        if (!dep) {
-          res.status(400).json({ error: `Dependency '${depId}' does not exist` });
-          return;
-        }
-      }
-      // Self-reference check
-      if (dependsOn.includes(id)) {
-        res.status(400).json({ error: "A criterion cannot depend on itself" });
+      const normalizedDependsOn = normalizeDependsOn(dependsOn);
+
+      try {
+        ensureNoSelfReference(id, normalizedDependsOn);
+        const activeCriteria = await loadActiveCriteria(ctx);
+        ensureDependenciesExist(normalizedDependsOn, new Set(activeCriteria.map((criterion) => criterion.id)));
+        ensureAcyclicCriteria(
+          activeCriteria.map((criterion) =>
+            criterion.id === id
+              ? { ...criterion, dependsOn: normalizedDependsOn }
+              : criterion,
+          ),
+        );
+      } catch (err) {
+        res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         return;
       }
-      update.dependsOn = dependsOn;
+
+      update.dependsOn = normalizedDependsOn;
     }
 
     await ctx.criteriaCollection.updateOne(

@@ -100,6 +100,7 @@ Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API su
 Criteria are reusable evaluation rules stored in the database and optionally defined in `config/criteria/*.yaml`. They support:
 
 - **DAG dependencies** — criterion A can depend on criterion B (B must pass before A is evaluated)
+- **Write-time DAG validation** — API create, update, and bulk seed operations reject self-references and dependency cycles before criteria are persisted
 - **AI-generated prompts** — natural language behavior descriptions can be converted to evaluation prompts via LLM
 - **Traits** — reusable labels for filtering and composition (e.g., `has_azure`, `has_node`)
 
