@@ -26,6 +26,18 @@ export function formatId(id: string): string {
   return id.slice(0, 8);
 }
 
+/** Convert a behavior description to a snake_case ID suggestion */
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^[^a-z]+/, "")
+    .replace(/_+/g, "_")
+    .replace(/_$/, "")
+    .slice(0, 40);
+}
+
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const seconds = Math.floor(ms / 1000);

@@ -13,10 +13,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle, SlidersHorizontal, X, Save } from "lucide-react";
+import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle, SlidersHorizontal, X, Save, Plus } from "lucide-react";
 import { WORKER_TYPES, type CodingAgent, type McpServerDocument, type ProfileWithVersion, type ProfileVersionDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
+import { CreateCriterionDialog } from "@/components/CreateCriterionDialog";
 import { SkillPicker, parseSkillSpec } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { Stepper } from "@/components/Stepper";
@@ -44,6 +45,9 @@ export function SubmitRun() {
   const [maxIterations, setMaxIterations] = useState<number>(10);
   const [occurrences, setOccurrences] = useState<number>(5);
   const [priority, setPriority] = useState<number>(0);
+
+  // Inline criteria creation dialog
+  const [createCriterionOpen, setCreateCriterionOpen] = useState(false);
 
   // MCP servers
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -398,11 +402,28 @@ export function SubmitRun() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="criteria">
-                  Criteria {maxIterations !== 1 && "* "}
-                  <span className="text-muted-foreground font-normal">(select from registry)</span>
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="criteria">
+                    Criteria {maxIterations !== 1 && "* "}
+                    <span className="text-muted-foreground font-normal">(select from registry)</span>
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 h-7 text-xs"
+                    onClick={() => setCreateCriterionOpen(true)}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    New…
+                  </Button>
+                </div>
                 <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
+                <CreateCriterionDialog
+                  open={createCriterionOpen}
+                  onOpenChange={setCreateCriterionOpen}
+                  onCreated={(id) => setPickedCriteria((prev) => [...prev, id])}
+                />
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Info className="h-3.5 w-3.5 shrink-0" />
                   Required when max iterations &gt; 1. Optional for single-iteration runs (no judge evaluation).
