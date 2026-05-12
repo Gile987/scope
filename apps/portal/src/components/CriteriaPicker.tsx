@@ -219,7 +219,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
       )}
 
       {open && query && suggestions.length === 0 && createPortal(
-        <div style={dropdownStyle} className="rounded-md border bg-popover shadow-md p-3 text-sm text-muted-foreground text-center">
+        <div ref={dropdownRef} style={dropdownStyle} className="rounded-md border bg-popover shadow-md p-3 text-sm text-muted-foreground text-center">
           No matching criteria
         </div>,
         document.body,
