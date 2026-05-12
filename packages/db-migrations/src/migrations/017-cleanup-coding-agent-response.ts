@@ -23,9 +23,12 @@
  *           on the turn so callers can fetch the envelope on demand.
  *        c. `$unset` `codingAgentResponse`.
  *      If the upload fails the envelope is preserved inline so the
- *      migration can be re-run later. If no runId / iteration is available
- *      the inline value is dropped (already broken — busts the 2 MB doc
- *      limit on every write).
+ *      migration can be re-run later. If no uploader is configured the
+ *      envelope is also preserved inline (re-run with AZURE_STORAGE_*
+ *      env set to rescue). Only when a runId/iteration cannot be
+ *      derived (truly unrecoverable blob path) is the inline value
+ *      dropped — at that point it is already lost for joins and the
+ *      giant string keeps blowing past the 2 MB document limit.
  *
  * Idempotent: legitimate prose responses are never matched (the matchers
  * require the value to look like a JSON object, not just mention the key
@@ -109,9 +112,18 @@ class AzureEnvelopeUploader implements EnvelopeUploader {
 
 /** Build an EnvelopeUploader from environment variables. Returns `null` if
  *  blob storage is not configured — the migration then falls back to
- *  cleanup-only. */
+ *  cleanup-only.
+ *
+ *  Env precedence matches the API (`apps/api/src/index.ts`):
+ *    1. STORAGE_CONNECTION_STRING (the convention used by docker-compose
+ *       and K8s secrets across the rest of the platform)
+ *    2. AZURE_STORAGE_CONNECTION_STRING (alternate naming)
+ *    3. AZURE_STORAGE_ACCOUNT_NAME + DefaultAzureCredential (managed
+ *       identity in production). */
 function buildUploaderFromEnv(): EnvelopeUploader | null {
-  const conn = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  const conn =
+    process.env.STORAGE_CONNECTION_STRING ||
+    process.env.AZURE_STORAGE_CONNECTION_STRING;
   const account = process.env.AZURE_STORAGE_ACCOUNT_NAME;
   let client: BlobServiceClient;
   if (conn) {
@@ -236,13 +248,25 @@ async function cleanupCollection(
           envelopesSkipped++;
           console.log(`  ${label}: envelope upload failed for ${blobName}, leaving inline: ${err?.message ?? err}`);
         }
+      } else if (!uploader) {
+        // Cleanup-only mode (AZURE_STORAGE_* env not configured). Preserve
+        // the inline envelope — dropping it would silently destroy the only
+        // copy we have. The 2 MB document hazard is real but operator-
+        // fixable; data loss is not. Re-running with an uploader configured
+        // will rescue these envelopes to blob storage.
+        envelopesSkipped++;
+        if (envelopesSkipped <= 3) {
+          console.log(`  ${label}: no uploader configured — leaving envelope inline at ${turnsPath}[${i}] (set AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT_NAME and re-run)`);
+        }
       } else {
-        // No blob path possible (no uploader, missing ids, or no iteration).
-        // Drop the inline value — it's already lost as far as queries go,
-        // and the giant string keeps blowing past the 2 MB document limit.
+        // Uploader is configured but ids/iteration are missing — the blob
+        // path is unrecoverable. Drop the inline value: it's already lost
+        // as far as joins go (no runId means we can't link it back), and
+        // the giant string keeps blowing past the 2 MB document limit.
         unset[`${turnsPath}.${i}.codingAgentResponse`] = "";
         envelopesSkipped++;
         perDocCount++;
+        console.log(`  ${label}: dropping inline envelope at ${turnsPath}[${i}] — no runId/iteration available, blob path unrecoverable`);
       }
     }
 

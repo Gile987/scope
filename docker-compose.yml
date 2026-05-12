@@ -160,6 +160,7 @@ services:
       dockerfile: apps/api/Dockerfile
       target: builder
     environment:
+      <<: *common-env
       MONGO_CONNECTION_STRING: mongodb://mongodb:27017
       MONGO_DATABASE: requests-db
     depends_on:

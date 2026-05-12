@@ -149,7 +149,7 @@ describe("migration 017: CleanupCodingAgentResponse", () => {
       expect(db._reqCol.bulkWrite).not.toHaveBeenCalled();
     });
 
-    it("drops inline envelope when no uploader is available (cleanup-only mode)", async () => {
+    it("preserves inline envelope when no uploader is available (cleanup-only mode)", async () => {
       const docs = [
         {
           _id: makeObjectId(1),
@@ -171,6 +171,26 @@ describe("migration 017: CleanupCodingAgentResponse", () => {
         if (prev.account) process.env.AZURE_STORAGE_ACCOUNT_NAME = prev.account;
       }
 
+      // Envelope must NOT be unset — re-running with an uploader should rescue it.
+      expect(db._reqCol.bulkWrite).not.toHaveBeenCalled();
+    });
+
+    it("drops inline envelope when uploader is configured but ids/iteration are unrecoverable", async () => {
+      const docs = [
+        {
+          _id: makeObjectId(1),
+          run: { _id: makeObjectId(1), turns: [
+            // No iteration field → blob path is unrecoverable
+            { codingAgentResponse: ENVELOPE },
+          ] },
+        },
+      ];
+      const uploader = makeUploader();
+      const db = makeMockDb(docs, []) as any;
+
+      await new CleanupCodingAgentResponse(uploader).up(db);
+
+      expect(uploader.upload).not.toHaveBeenCalled();
       const [ops] = db._reqCol.bulkWrite.mock.calls[0];
       expect(ops[0].updateOne.update).toEqual({
         $unset: { "run.turns.0.codingAgentResponse": "" },
