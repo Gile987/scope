@@ -418,7 +418,7 @@ export function SubmitRun() {
                     New…
                   </Button>
                 </div>
-                <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
+                <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} inputId="criteria" />
                 <CreateCriterionDialog
                   open={createCriterionOpen}
                   onOpenChange={setCreateCriterionOpen}

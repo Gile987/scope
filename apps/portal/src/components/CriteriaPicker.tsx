@@ -14,9 +14,11 @@ interface CriteriaPickerProps {
   onChange: (ids: string[]) => void;
   /** IDs that were AI-suggested — shown with a sparkle indicator */
   aiSuggested?: string[];
+  /** HTML id for the underlying input — enables label-to-control association */
+  inputId?: string;
 }
 
-export function CriteriaPicker({ selected, onChange, aiSuggested = [] }: CriteriaPickerProps) {
+export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }: CriteriaPickerProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -120,6 +122,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [] }: Criteri
       {/* Typeahead input */}
       <Input
         ref={inputRef}
+        id={inputId}
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
