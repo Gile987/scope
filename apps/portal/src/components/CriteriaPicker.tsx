@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, type KeyboardEvent, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -77,7 +77,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
     onChange(selected.filter((s) => s !== id));
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setHighlightIdx((i) => Math.min(i + 1, suggestions.length - 1));
@@ -98,7 +98,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
 
   // Compute fixed position for portal-based dropdown so it isn't clipped by
   // overflow-y-auto scroll containers (e.g. dialogs).
-  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+  const [dropdownStyle, setDropdownStyle] = useState<CSSProperties>({});
 
   useEffect(() => {
     if (!open || !inputRef.current) return;
@@ -107,7 +107,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
     const updatePosition = () => {
       const rect = inputRef.current!.getBoundingClientRect();
       setDropdownStyle((prev) => {
-        const nextStyle: React.CSSProperties = {
+        const nextStyle: CSSProperties = {
           position: "fixed",
           top: rect.bottom + 4,
           left: rect.left,
