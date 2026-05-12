@@ -5,7 +5,7 @@
 import dotenv from "dotenv";
 import { Command } from "commander";
 import { configureHelp, generateOutputFormatsHelp, generateEnvVarsHelp } from "./utils/helpFormatter.js";
-import { OUTPUT_FORMATS, ENV_VARS } from "./utils/shared.js";
+import { OUTPUT_FORMATS, ENV_VARS, applyApiPortFallback } from "./utils/shared.js";
 import { registerRunCommands } from "./commands/run.js";
 import { registerCriteriaCommands } from "./commands/criteria.js";
 import { registerPromptFeatureCommands } from "./commands/prompt-feature.js";
@@ -20,6 +20,13 @@ import { registerTaskPromptCommands } from "./commands/task-prompt.js";
 import { registerProfileCommands } from "./commands/profile.js";
 
 dotenv.config();
+
+// If SCOPE_API_URL is not already set but SCOPE_API_PORT is (e.g. when the API
+// is running locally on a non-default port via docker-compose), derive a
+// default SCOPE_API_URL of http://localhost:$SCOPE_API_PORT. Must run before
+// any command module captures `process.env.SCOPE_API_URL` as its option
+// default.
+applyApiPortFallback();
 
 export const program = new Command();
 
