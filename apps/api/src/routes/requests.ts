@@ -2060,6 +2060,21 @@ async function finalizePendingRun(
   const topChat = run.artifacts.get("run.chat-export.json");
   if (topChat) runState.rawChatUrl = topChat;
 
+  // Materialize the task-prompt entity for this run. The submission flow
+  // (POST /api/v1/requests) goes through `taskPromptStore.findOrCreate` so
+  // every run has a row in the `task-prompts` collection that backs
+  // features, report triggers, group-by-task, the runs-list task filter and
+  // the criteria/MDP analysis. Imported runs used to skip this step:
+  // `taskPromptId` was preserved from `run.yaml` but no row was ever
+  // created, leaving a dangling reference that joined to nothing.
+  //
+  // `findOrCreate` is idempotent and content-addressed (UUIDv5 from the
+  // trimmed task text) — when the imported `taskPromptId` is correct it
+  // simply matches the returned `_id`; when it is missing or stale we
+  // overwrite it with the canonical id.
+  const taskPrompt = await ctx.taskPromptStore.findOrCreate(runDoc.scenario.task);
+  const resolvedTaskPromptId = taskPrompt._id;
+
   // Build the document by spreading the validated yaml — zod has already
   // stripped any unknown fields, so what's in `runDoc` is exactly the
   // optional surface we care to preserve (taskPromptId, model, agentVersion,
@@ -2072,6 +2087,7 @@ async function finalizePendingRun(
     workerType: runDoc.workerType as WorkerType,
     createdAt: runDoc.createdAt ?? new Date(),
     priority: runDoc.priority ?? 0,
+    taskPromptId: resolvedTaskPromptId,
     ...(runDoc.submissionId ? {} : { submissionId: uuidv4() }),
     run: {
       ...(runState as unknown as RunState),

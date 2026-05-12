@@ -24,6 +24,7 @@ import { Readable } from "stream";
 import { gzipSync, gunzipSync } from "zlib";
 import { pack as tarPack, extract as tarExtract } from "tar-stream";
 import { RestError } from "@azure/storage-blob";
+import { computeTaskPromptId } from "shared";
 
 extendZodWithOpenApi(z);
 
@@ -213,7 +214,32 @@ async function readTarGz(buf: Buffer): Promise<Record<string, Buffer>> {
 
 // ─── App harness ────────────────────────────────────────────────────────────
 
-function buildApp(reqCollection: ReturnType<typeof makeRequestCollection>): Express {
+function makeTaskPromptStore() {
+  // Content-addressed in-memory implementation that mirrors the production
+  // TaskPromptStore.findOrCreate semantics: same text always resolves to
+  // the same UUIDv5 and the document is created on first sight, returned
+  // on subsequent calls. The importer relies on this to materialize a
+  // task-prompt entity for every imported run.
+  const docs = new Map<string, { _id: string; text: string; createdAt: Date }>();
+  return {
+    docs,
+    findOrCreate: vi.fn(async (text: string) => {
+      const trimmed = text.trim();
+      const id = computeTaskPromptId(trimmed);
+      const existing = docs.get(id);
+      if (existing) return existing;
+      const doc = { _id: id, text: trimmed, createdAt: new Date() };
+      docs.set(id, doc);
+      return doc;
+    }),
+    get: vi.fn(async (id: string) => docs.get(id) ?? null),
+  };
+}
+
+function buildApp(
+  reqCollection: ReturnType<typeof makeRequestCollection>,
+  taskPromptStore: ReturnType<typeof makeTaskPromptStore> = makeTaskPromptStore(),
+): Express {
   const app = express();
   app.use(express.json({ limit: "10mb" }));
 
@@ -240,7 +266,7 @@ function buildApp(reqCollection: ReturnType<typeof makeRequestCollection>): Expr
     skillRevisionCollection: {} as any,
     profileCollection: {} as any,
     profileVersionCollection: {} as any,
-    taskPromptStore: {} as any,
+    taskPromptStore,
     skillRevisionStore: {} as any,
     skillResolver: {} as any,
     mcpSecretClient: null,
@@ -723,7 +749,10 @@ describe("run import/export — round-trip (export → import)", () => {
       workerType: "coder-acp-copilot",
       model: "claude-haiku-4.5",
       agentVersion: "copilot-dev",
-      taskPromptId: "20d3f8aa-e072-588c-8f68-b5eadfcd8028",
+      // Canonical UUIDv5 for the task text — must equal the value the
+      // importer derives via taskPromptStore.findOrCreate(scenario.task)
+      // for the symmetric-round-trip guard below to hold.
+      taskPromptId: computeTaskPromptId("do a thing"),
       mcpServers: ["github", "filesystem"],
       skillRevisions: ["org/skill@rev1"],
       extensions: ["ms-python.python"],
@@ -917,6 +946,137 @@ describe("run import/export — round-trip (export → import)", () => {
     expect(target.run.turns[0].toolCallsUrl).toMatch(
       new RegExp(`/snapshots/${requestId}/iteration-1/tool-calls\\.jsonl$`),
     );
+  });
+});
+
+describe("run import — task-prompt entity creation (#832)", () => {
+  // Task-prompt entities back features, report triggers, group-by-task,
+  // the runs-list task filter and the criteria/MDP analysis. The submission
+  // flow (POST /api/v1/requests) materializes them via
+  // taskPromptStore.findOrCreate(scenario.task). Imported runs used to skip
+  // this step entirely \u2014 `taskPromptId` was preserved from `run.yaml` but
+  // no row was ever created, leaving a dangling reference.
+
+  function makeMinimalUploadYaml(id: string, task: string, taskPromptId?: string) {
+    const lines = [
+      `_id: ${id}`,
+      `scenario:`,
+      `  task: ${JSON.stringify(task)}`,
+      `  criteria: []`,
+      `workerType: coder-acp-copilot`,
+      `createdAt: 2026-01-01T00:00:00Z`,
+      ...(taskPromptId ? [`taskPromptId: ${taskPromptId}`] : []),
+      `run:`,
+      `  _id: ${id}`,
+      `  attemptNumber: 1`,
+      `  status: done`,
+    ];
+    return lines.join("\n") + "\n";
+  }
+
+  it("creates a task-prompt entity for the imported run's scenario.task", async () => {
+    const task = "Build an Express API";
+    const id = "tp-create-1";
+    const expectedId = computeTaskPromptId(task);
+
+    const taskPromptStore = makeTaskPromptStore();
+    const reqCollection = makeRequestCollection();
+    const app = buildApp(reqCollection, taskPromptStore);
+
+    const archive = await buildTarGz({
+      [`${id}/run.yaml`]: makeMinimalUploadYaml(id, task),
+    });
+    const res = await request(app)
+      .post("/api/v1/runs/upload")
+      .attach("archive", archive, "archive.tar.gz");
+
+    expect(res.status).toBe(201);
+    // findOrCreate was invoked with the run's scenario.task.
+    expect(taskPromptStore.findOrCreate).toHaveBeenCalledWith(task);
+    // A row now exists in the task-prompts collection at the canonical id.
+    expect(taskPromptStore.docs.get(expectedId)).toMatchObject({ _id: expectedId, text: task });
+    // The inserted request points at it.
+    const inserted = reqCollection.docs.get(id);
+    expect(inserted.taskPromptId).toBe(expectedId);
+  });
+
+  it("reuses an existing task prompt and does not create a duplicate", async () => {
+    const task = "Already known task";
+    const expectedId = computeTaskPromptId(task);
+
+    const taskPromptStore = makeTaskPromptStore();
+    // Pre-seed the store as if a previous submission/import had created it.
+    const original = { _id: expectedId, text: task, createdAt: new Date("2025-01-01T00:00:00Z") };
+    taskPromptStore.docs.set(expectedId, original);
+
+    const reqCollection = makeRequestCollection();
+    const app = buildApp(reqCollection, taskPromptStore);
+
+    const archive = await buildTarGz({
+      [`tp-reuse-1/run.yaml`]: makeMinimalUploadYaml("tp-reuse-1", task),
+    });
+    const res = await request(app)
+      .post("/api/v1/runs/upload")
+      .attach("archive", archive, "archive.tar.gz");
+
+    expect(res.status).toBe(201);
+    expect(taskPromptStore.docs.size).toBe(1);
+    // The existing document was returned (createdAt unchanged).
+    expect(taskPromptStore.docs.get(expectedId)).toBe(original);
+    expect(reqCollection.docs.get("tp-reuse-1").taskPromptId).toBe(expectedId);
+  });
+
+  it("repairs a stale taskPromptId in run.yaml with the canonical UUIDv5", async () => {
+    // Older exports may carry a taskPromptId that does not match
+    // computeTaskPromptId(scenario.task) (e.g. taken from a renamed task or
+    // a pre-content-addressed era). The importer must rewrite it so the
+    // row it just created is the one the run links to.
+    const task = "do a thing";
+    const id = "tp-repair-1";
+    const expectedId = computeTaskPromptId(task);
+    const staleId = "00000000-0000-0000-0000-000000000bad";
+    expect(staleId).not.toBe(expectedId);
+
+    const taskPromptStore = makeTaskPromptStore();
+    const reqCollection = makeRequestCollection();
+    const app = buildApp(reqCollection, taskPromptStore);
+
+    const archive = await buildTarGz({
+      [`${id}/run.yaml`]: makeMinimalUploadYaml(id, task, staleId),
+    });
+    const res = await request(app)
+      .post("/api/v1/runs/upload")
+      .attach("archive", archive, "archive.tar.gz");
+
+    expect(res.status).toBe(201);
+    expect(reqCollection.docs.get(id).taskPromptId).toBe(expectedId);
+  });
+
+  it("batch import dedupes shared task texts to a single task-prompt entity", async () => {
+    const task = "shared task across runs";
+    const expectedId = computeTaskPromptId(task);
+    const taskPromptStore = makeTaskPromptStore();
+    const reqCollection = makeRequestCollection();
+    const app = buildApp(reqCollection, taskPromptStore);
+
+    const archive = await buildTarGz({
+      [`bd-1/run.yaml`]: makeMinimalUploadYaml("bd-1", task),
+      [`bd-2/run.yaml`]: makeMinimalUploadYaml("bd-2", task),
+      [`bd-3/run.yaml`]: makeMinimalUploadYaml("bd-3", task),
+    });
+    const res = await request(app)
+      .post("/api/v1/runs/upload-batch")
+      .attach("archive", archive, "batch.tar.gz");
+
+    expect(res.status).toBe(201);
+    expect(res.body.imported).toHaveLength(3);
+    // findOrCreate is called once per run, but dedupes to a single row.
+    expect(taskPromptStore.findOrCreate).toHaveBeenCalledTimes(3);
+    expect(taskPromptStore.docs.size).toBe(1);
+    expect(taskPromptStore.docs.has(expectedId)).toBe(true);
+    for (const id of ["bd-1", "bd-2", "bd-3"]) {
+      expect(reqCollection.docs.get(id).taskPromptId).toBe(expectedId);
+    }
   });
 });
 
