@@ -52,7 +52,15 @@ PROJECT_NAME   = env.get('COMPOSE_PROJECT_NAME', 'scope-mt-app')
 # files from deploy/base/ without pulling in Azure-only resources (ASO,
 # ExternalSecrets, ClusterSecretStore).
 # ---------------------------------------------------------------------------
-k8s_yaml(local('kustomize build --load-restrictor=LoadRestrictionsNone deploy/overlays/local', quiet=True))
+# Base manifests use ${ACR_LOGIN_SERVER}/scoped/<name> as image placeholders
+# (FluxCD image automation). Kustomize's images transformer can't parse these
+# as valid references, so we sed-replace them to short names that match
+# docker_build() refs.
+k8s_yaml(local(
+    "kustomize build --load-restrictor=LoadRestrictionsNone deploy/overlays/local" +
+    " | sed 's|${ACR_LOGIN_SERVER}/scoped/|scoped/|g'",
+    quiet=True,
+))
 
 # ---------------------------------------------------------------------------
 # Image builds with live_update (hot reload)
@@ -242,11 +250,3 @@ k8s_resource('report-generator',
     resource_deps=['mongodb', 'redis', 'azurite', 'api'],
     labels=['workers'],
 )
-
-# --- KEDA ScaledObjects (informational, no build) ---
-for name in [
-    'coder-acp-copilot-scaler',
-    'coder-acp-claude-code-scaler',
-    'report-generator-scaler',
-]:
-    k8s_resource(name, labels=['keda'])
