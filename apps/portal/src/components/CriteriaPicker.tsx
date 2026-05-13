@@ -112,7 +112,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
           top: rect.bottom + 4,
           left: rect.left,
           width: rect.width,
-          zIndex: 50,
+          zIndex: 100,
         };
 
         if (
