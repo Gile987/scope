@@ -62,6 +62,10 @@ k8s_yaml(local(
     quiet=True,
 ))
 
+# Re-run kustomize when overlay or base manifests change
+watch_file('deploy/overlays/local')
+watch_file('deploy/base')
+
 # ---------------------------------------------------------------------------
 # Image builds with live_update (hot reload)
 # ---------------------------------------------------------------------------
