@@ -194,7 +194,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
 
       {/* Dropdown suggestions (portal-based to avoid clipping by scroll containers) */}
       {open && suggestions.length > 0 && createPortal(
-        <div ref={dropdownRef} style={dropdownStyle} className="rounded-md border bg-popover shadow-md">
+        <div ref={dropdownRef} data-criteria-picker-portal style={dropdownStyle} className="rounded-md border bg-popover shadow-md">
           <div className="max-h-48 overflow-y-auto p-1">
             {suggestions.map((c, idx) => (
               <button
@@ -219,7 +219,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
       )}
 
       {open && query && suggestions.length === 0 && createPortal(
-        <div ref={dropdownRef} style={dropdownStyle} className="rounded-md border bg-popover shadow-md p-3 text-sm text-muted-foreground text-center">
+        <div ref={dropdownRef} data-criteria-picker-portal style={dropdownStyle} className="rounded-md border bg-popover shadow-md p-3 text-sm text-muted-foreground text-center">
           No matching criteria
         </div>,
         document.body,

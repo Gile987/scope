@@ -37,7 +37,20 @@ export function CreateCriterionDialog({ open, onOpenChange, onCreated }: CreateC
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className="max-w-2xl max-h-[90vh] overflow-y-auto"
+        onPointerDownOutside={(e) => {
+          // Prevent dialog dismiss when clicking on CriteriaPicker portal dropdowns
+          if ((e.target as HTMLElement).closest?.("[data-criteria-picker-portal]")) {
+            e.preventDefault();
+          }
+        }}
+        onInteractOutside={(e) => {
+          if ((e.target as HTMLElement).closest?.("[data-criteria-picker-portal]")) {
+            e.preventDefault();
+          }
+        }}
+      >
         {wizard.step === 1 ? (
           <>
             <DialogHeader>
