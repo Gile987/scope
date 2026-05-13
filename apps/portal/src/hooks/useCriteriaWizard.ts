@@ -66,9 +66,14 @@ export function useCriteriaWizard({ initialDependsOn = [], onSuccess }: UseCrite
     onSuccess: (data) => {
       setPrompt(data.prompt);
       setAiGenerated(true);
-      // Optionally update ID if not manually edited
+      // Optionally update ID if not manually edited and suggestion is valid + unique
       if (!idManuallyEdited && data.suggestedId) {
-        setId(data.suggestedId);
+        const suggested = data.suggestedId;
+        const valid = /^[a-z][a-z0-9_]*$/.test(suggested);
+        const exists = existingCriteria.some((c) => c.id === suggested);
+        if (valid && !exists) {
+          setId(suggested);
+        }
       }
       // Merge suggested parents into dependsOn (additive with manual picks)
       if (data.suggestedParents?.length) {
