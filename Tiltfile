@@ -149,8 +149,8 @@ scope_build(
 
 # --- DB Migrations ---
 scope_build(
-    'scoped/db-migrations', '.', 'apps/api/Dockerfile', target='builder',
-    deps=['packages/db-migrations/src', 'packages/db-migrations/package.json', 'packages/shared/src'],
+    'scoped/db-migrations', '.', 'packages/db-migrations/Dockerfile',
+    deps=['packages/db-migrations/src', 'packages/db-migrations/package.json'],
 )
 
 # --- Workers (all deployed; KEDA scales from 0 based on queue depth) ---
@@ -197,6 +197,7 @@ scope_build(
 k8s_resource('mongodb',     port_forwards=['%d:27017' % MONGODB_PORT], labels=['infra'])
 k8s_resource('redis',       port_forwards=['%d:6379' % REDIS_PORT],    labels=['infra'])
 k8s_resource('azurite',     labels=['infra'])
+k8s_resource('azurite-init', resource_deps=['azurite'], labels=['infra'])
 k8s_resource('lowkey-vault', labels=['infra'])
 
 # --- Core services ---
@@ -226,7 +227,7 @@ k8s_resource('portal',
 )
 k8s_resource('gateway',
     port_forwards=['%d:18000' % GATEWAY_PORT],
-    resource_deps=['azurite', 'redis'],
+    resource_deps=['azurite-init', 'redis'],
     labels=['core'],
 )
 k8s_resource('db-migration',
