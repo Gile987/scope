@@ -10,11 +10,8 @@
 #   ./scripts/k3d-setup.sh          # creates cluster + installs KEDA
 #
 # Usage:
-#   worktree-env && tilt up                              # core services
-#   worktree-env && tilt up -- --copilot                 # + Copilot worker
-#   worktree-env && tilt up -- --claude-code             # + Claude Code worker
-#   worktree-env && tilt up -- --electron                # + VS Code Electron worker
-#   worktree-env && tilt up -- --copilot --claude-code   # multiple workers
+#   worktree-env && tilt up          # all services (workers scale from 0 via KEDA)
+#   worktree-env && tilt down        # tear down
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -48,24 +45,9 @@ GATEWAY_PORT   = int(env.get('GATEWAY_API_PORT', '18900'))
 PROJECT_NAME   = env.get('COMPOSE_PROJECT_NAME', 'scope-mt-app')
 
 # ---------------------------------------------------------------------------
-# Parse CLI args for worker profiles
-# ---------------------------------------------------------------------------
-config.define_bool('copilot')
-config.define_bool('claude-code')
-config.define_bool('vscode-web')
-config.define_bool('electron')
-config.define_bool('report')
-config.define_bool('all-workers')
-cfg = config.parse()
-
-enable_copilot   = cfg.get('copilot', False) or cfg.get('all-workers', False)
-enable_claude    = cfg.get('claude-code', False) or cfg.get('all-workers', False)
-enable_vscode    = cfg.get('vscode-web', False) or cfg.get('all-workers', False)
-enable_electron  = cfg.get('electron', False) or cfg.get('all-workers', False)
-enable_report    = cfg.get('report', False) or cfg.get('all-workers', False)
-
-# ---------------------------------------------------------------------------
 # Apply Kustomize manifests
+# All workers are deployed with KEDA minReplicaCount=0. They scale up
+# automatically when messages arrive in their Azurite queues.
 # ---------------------------------------------------------------------------
 k8s_yaml(kustomize('deploy/overlays/local'))
 
@@ -149,54 +131,49 @@ docker_build(
     target='builder',
 )
 
-# --- Workers (conditionally built) ---
-if enable_copilot:
-    docker_build(
-        'scoped/coder-acp-copilot',
-        '.',
-        dockerfile='apps/workers/coder-acp-copilot/Dockerfile',
-        target='dev',
-        live_update=[
-            sync('apps/workers/coder-acp-copilot/src', '/app/apps/workers/coder-acp-copilot/src'),
-            sync('packages/shared/src', '/app/packages/shared/src'),
-            sync('config', '/app/config'),
-        ],
-    )
+# --- Workers (all deployed; KEDA scales from 0 based on queue depth) ---
+docker_build(
+    'scoped/coder-acp-copilot',
+    '.',
+    dockerfile='apps/workers/coder-acp-copilot/Dockerfile',
+    target='dev',
+    live_update=[
+        sync('apps/workers/coder-acp-copilot/src', '/app/apps/workers/coder-acp-copilot/src'),
+        sync('packages/shared/src', '/app/packages/shared/src'),
+        sync('config', '/app/config'),
+    ],
+)
 
-if enable_claude:
-    docker_build(
-        'scoped/coder-acp-claude-code',
-        '.',
-        dockerfile='apps/workers/coder-acp-claude-code/Dockerfile',
-        target='dev',
-        live_update=[
-            sync('apps/workers/coder-acp-claude-code/src', '/app/apps/workers/coder-acp-claude-code/src'),
-            sync('packages/shared/src', '/app/packages/shared/src'),
-            sync('config', '/app/config'),
-        ],
-    )
+docker_build(
+    'scoped/coder-acp-claude-code',
+    '.',
+    dockerfile='apps/workers/coder-acp-claude-code/Dockerfile',
+    target='dev',
+    live_update=[
+        sync('apps/workers/coder-acp-claude-code/src', '/app/apps/workers/coder-acp-claude-code/src'),
+        sync('packages/shared/src', '/app/packages/shared/src'),
+        sync('config', '/app/config'),
+    ],
+)
 
-if enable_vscode:
-    docker_build(
-        '.',
-    )
+docker_build(
+    '.',
+)
 
-if enable_electron:
-    docker_build(
-        '.',
-    )
+docker_build(
+    '.',
+)
 
-if enable_report:
-    docker_build(
-        'scoped/report-generator',
-        '.',
-        dockerfile='apps/workers/report-generator/Dockerfile',
-        target='dev',
-        live_update=[
-            sync('apps/workers/report-generator/src', '/app/apps/workers/report-generator/src'),
-            sync('packages/shared/src', '/app/packages/shared/src'),
-        ],
-    )
+docker_build(
+    'scoped/report-generator',
+    '.',
+    dockerfile='apps/workers/report-generator/Dockerfile',
+    target='dev',
+    live_update=[
+        sync('apps/workers/report-generator/src', '/app/apps/workers/report-generator/src'),
+        sync('packages/shared/src', '/app/packages/shared/src'),
+    ],
+)
 
 # ---------------------------------------------------------------------------
 # Resource configuration: port forwards, labels, dependencies
@@ -243,44 +220,25 @@ k8s_resource('db-migration',
     labels=['core'],
 )
 
-# --- Workers (only configure resources if enabled) ---
-worker_labels = ['workers']
-
-if enable_copilot:
-    k8s_resource('coder-acp-copilot',
-        resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
-        labels=worker_labels,
-    )
-else:
-    k8s_resource('coder-acp-copilot', auto_init=False, labels=worker_labels)
-
-if enable_claude:
-    k8s_resource('coder-acp-claude-code',
-        resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
-        labels=worker_labels,
-    )
-else:
-    k8s_resource('coder-acp-claude-code', auto_init=False, labels=worker_labels)
-
-if enable_vscode:
-        resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
-        labels=worker_labels,
-    )
-else:
-
-if enable_electron:
-        resource_deps=['mongodb', 'redis', 'azurite', 'judge', 'gateway'],
-        labels=worker_labels,
-    )
-else:
-
-if enable_report:
-    k8s_resource('report-generator',
-        resource_deps=['mongodb', 'redis', 'azurite', 'api'],
-        labels=worker_labels,
-    )
-else:
-    k8s_resource('report-generator', auto_init=False, labels=worker_labels)
+# --- Workers (KEDA scales from 0 — images are pre-built, pods created on demand) ---
+k8s_resource('coder-acp-copilot',
+    resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
+    labels=['workers'],
+)
+k8s_resource('coder-acp-claude-code',
+    resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
+    labels=['workers'],
+)
+    resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
+    labels=['workers'],
+)
+    resource_deps=['mongodb', 'redis', 'azurite', 'judge', 'gateway'],
+    labels=['workers'],
+)
+k8s_resource('report-generator',
+    resource_deps=['mongodb', 'redis', 'azurite', 'api'],
+    labels=['workers'],
+)
 
 # --- KEDA ScaledObjects (informational, no build) ---
 for name in [
