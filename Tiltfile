@@ -48,8 +48,11 @@ PROJECT_NAME   = env.get('COMPOSE_PROJECT_NAME', 'scope-mt-app')
 # Apply Kustomize manifests
 # All workers are deployed with KEDA minReplicaCount=0. They scale up
 # automatically when messages arrive in their Azurite queues.
+# --load-restrictor=LoadRestrictionsNone allows cherry-picking individual
+# files from deploy/base/ without pulling in Azure-only resources (ASO,
+# ExternalSecrets, ClusterSecretStore).
 # ---------------------------------------------------------------------------
-k8s_yaml(kustomize('deploy/overlays/local'))
+k8s_yaml(local('kustomize build --load-restrictor=LoadRestrictionsNone deploy/overlays/local', quiet=True))
 
 # ---------------------------------------------------------------------------
 # Image builds with live_update (hot reload)
