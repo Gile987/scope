@@ -45,8 +45,8 @@ graph TB
     CLI[CLI]
     Entra[Entra ID<br/>login.microsoftonline.com]
 
-    Browser -->|HTTPS, Bearer| AppRouting
-    CLI -->|HTTPS, Bearer| AppRouting
+    Browser -->|HTTPS, Bearer| Ingress
+    CLI -->|HTTPS, Bearer| Ingress
 
     Browser -. MSAL redirect .-> Entra
     CLI -. device code .-> Entra
@@ -54,16 +54,16 @@ graph TB
     Entra -. JWT .-> CLI
 
     subgraph AKS
-        AppRouting[Azure App Routing<br/>NGINX Ingress + Let's Encrypt TLS]
-        AppRouting -->|/api/*, /health, /ready, /about, /openapi.json, /api-docs| APISvc[api ClusterIP]
-        AppRouting -->|/* | PortalSvc[portal ClusterIP<br/>SPA only]
+        Ingress[Cluster ingress<br/>TLS termination + path routing<br/>see Ingress section]
+        Ingress -->|/api/*, /health, /ready, /about, /openapi.json, /api-docs| APISvc[api ClusterIP]
+        Ingress -->|/* | PortalSvc[portal ClusterIP<br/>SPA only]
         APISvc --> APIPod[api pod<br/>JWT validation middleware]
     end
 
     APIPod -. JWKS fetch .-> Entra
 ```
 
-Single public hostname per environment. App Routing terminates TLS and routes by path. API is `ClusterIP` only — no longer publicly reachable on its own. Portal pod's nginx becomes a static SPA server.
+Single public hostname per environment. The cluster ingress terminates TLS and routes by path. API is `ClusterIP` only — no longer publicly reachable on its own. Portal pod's nginx becomes a static SPA server. The specific ingress technology is an open decision — see the [Ingress](#ingress) section below.
 
 ## Components
 
@@ -139,28 +139,61 @@ Local-dev override: `SCOPE_AUTH_DISABLED=true` skips `auth login` and sends no `
 
 The existing CLI HTTP client is augmented to attach `Authorization: Bearer` from the token cache (or `SCOPE_TOKEN`) on every request. SSE commands append `?access_token=` to the SSE URL.
 
-### Ingress: Azure App Routing
+### Ingress
 
-Cluster-level: enable Azure's managed NGINX Ingress + cert-manager add-on once per AKS cluster:
+We need an HTTPS-terminating cluster ingress before any Entra work — Entra rejects non-`https` redirect URIs. Today there is none ([deploy/base/api.yaml](../../deploy/base/api.yaml) and [deploy/base/portal.yaml](../../deploy/base/portal.yaml) are raw `LoadBalancer` Services, plain HTTP).
 
-```bash
-az aks approuting enable --resource-group <rg> --name <cluster>
-```
+#### Landscape (May 2026)
 
-This is **not** a FluxCD-managed change — it's a one-time Bicep update (probably in [growth-ecosystems/scope-core-infra](https://github.com/growth-ecosystems/scope-core-infra) — to be confirmed) or a manual `az` step.
+The Kubernetes SIG Network and Security Response Committee [announced the retirement of the upstream Ingress NGINX project](https://www.kubernetes.dev/blog/2025/11/12/ingress-nginx-retirement/), with maintenance ending March 2026. Azure's NGINX-based App Routing add-on receives **critical security patches only through November 2026**, after which it is unsupported. AKS is steering users to either the Gateway API or Application Gateway for Containers.
 
-Manifest changes in this repo:
+Three realistic options:
+
+| Option | Status | Notes |
+|---|---|---|
+| **A. App Routing add-on with NGINX** (`webapprouting.kubernetes.azure.com`) | GA, **deprecated** | Simplest path. Sunset Nov 2026 — forces a second migration within ~6 months. cert-manager-style TLS + Azure DNS integration available. |
+| **B. App Routing Gateway API implementation** (`approuting-istio`) | **Preview** | Long-term Microsoft direction. Deploys an Istio control plane (`istiod` in `aks-istio-system`). Per docs: "Azure DNS and TLS certificate management via the application routing add-on is currently not supported for the Kubernetes Gateway API" — TLS requires a manual SecretProviderClass-from-Key-Vault pattern. |
+| **C. Application Gateway for Containers (AGC)** | **GA** | Azure-managed L7, no NGINX/Istio in cluster. Supports both Ingress v1 and Gateway API. More Azure-side resources to provision (AGC resource, ALB controller, frontend) but no preview risk and no scheduled deprecation. |
+
+#### Recommendation
+
+**Option C — Application Gateway for Containers**.
+
+Reasons:
+- GA today, no preview SLA risk.
+- Survives the November 2026 NGINX sunset without re-migration.
+- No Istio control plane in-cluster (lighter than Option B).
+- Speaks both APIs, so we can start with `Ingress` resources matching the path rules below and migrate to `HTTPRoute`/`Gateway` later without re-architecting application manifests.
+
+Option A is defensible only if the team accepts a tracked follow-up to migrate by November 2026. Option B is not recommended until it reaches GA and managed TLS lands.
+
+**This decision belongs to the design-doc review.** The rest of this section assumes Option C; sub-sections that differ per option call it out.
+
+#### Cluster-level enablement (Option C)
+
+Provisioned in [growth-ecosystems/scope-core-infra](https://github.com/growth-ecosystems/scope-core-infra) (the AKS cluster lives in `infra/bicep/kubernetes.bicep` there — confirmed not currently configured). Required additions:
+
+- An **Application Gateway for Containers** Azure resource (and an `associations` subresource bound to the cluster's VNet).
+- The **ALB Controller** Helm chart installed into the cluster (`alb-controller` namespace), authenticated via workload identity.
+- A frontend with a public IP and a DNS label.
+- TLS certs sourced from Azure Key Vault via `SecretProviderClass` (CSI Secrets Store), already used elsewhere in this codebase — see [deploy/base/external-secret.yaml](../../deploy/base/external-secret.yaml) and [deploy/base/secret-store.yaml](../../deploy/base/secret-store.yaml).
+
+This is a Bicep + manual `helm install` step done once per cluster, not a FluxCD-managed change.
+
+#### Manifest changes in this repo
+
+The table is the same regardless of option — only the Ingress class and TLS annotations change.
 
 | File | Change |
 |---|---|
 | [deploy/base/api.yaml](../../deploy/base/api.yaml) | `type: LoadBalancer` → `type: ClusterIP`; remove DNS annotations. |
 | [deploy/base/portal.yaml](../../deploy/base/portal.yaml) | `type: LoadBalancer` → `type: ClusterIP`; remove `azure-dns-label-name` annotation. |
-| `deploy/base/ingress.yaml` (new) | Single `Ingress` resource, `ingressClassName: webapprouting.kubernetes.azure.com`, path rules below, SSE annotations, `cert-manager.io/cluster-issuer` annotation. |
-| `deploy/base/cluster-issuer.yaml` (new) | Let's Encrypt `ClusterIssuer` (HTTP01 solver — works for `cloudapp.azure.com` since the LB has a public IP). |
-| [deploy/overlays/integration/](../../deploy/overlays/integration/), [prod/](../../deploy/overlays/prod/), [preview/](../../deploy/overlays/preview/) | Patch the Ingress host per env. |
+| `deploy/base/ingress.yaml` (new) | One resource: `Ingress` for Options A/C, or `Gateway` + `HTTPRoute` for Option B. Path rules and TLS config per option below. |
+| `deploy/base/cluster-issuer.yaml` (new, Option A only) | Let's Encrypt `ClusterIssuer` (HTTP01). Not needed for B or C — they source certs from Key Vault. |
+| [deploy/overlays/integration/](../../deploy/overlays/integration/), [prod/](../../deploy/overlays/prod/), [preview/](../../deploy/overlays/preview/) | Patch the host per env. |
 | [apps/portal/nginx.conf](../../apps/portal/nginx.conf) | Strip the `/api/*`, `/health`, `/ready`, `/about`, `/api-docs`, `/openapi.json` reverse-proxy blocks. Keep only the SPA fallback. |
 
-Path rules on the Ingress:
+Path rules (same for all options):
 
 ```
 /api/*         → api Service:80
@@ -172,20 +205,25 @@ Path rules on the Ingress:
 /*             → portal Service:80
 ```
 
-SSE-critical annotations:
+#### SSE compatibility (per option)
 
-```yaml
-nginx.ingress.kubernetes.io/proxy-buffering: "off"
-nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-```
+Server-Sent Events streams must not be buffered, and idle timeouts must exceed our longest stream.
+
+- **Option A (NGINX):**
+  ```yaml
+  nginx.ingress.kubernetes.io/proxy-buffering: "off"
+  nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  ```
+- **Option B (Istio Gateway API):** Istio does not buffer SSE by default; the relevant timeout is `Gateway`-level (`infrastructure.parametersRef` → ConfigMap with the gateway customization allow list). Confirm with a smoke test.
+- **Option C (AGC):** AGC does not buffer SSE responses. Idle timeout is configurable via the `BackendTrafficPolicy` CRD (`alb.networking.azure.io`).
 
 #### DNS cutover
 
-Azure DNS labels are sticky to a Service. App Routing brings its own LB, so `scope-int.westus3.cloudapp.azure.com` must be released from the current Portal LB and assigned to the App Routing LB.
+Azure DNS labels (`*.cloudapp.azure.com`) are sticky to a Service. The new ingress (whichever option) brings its own LB / frontend, so `scope-int.westus3.cloudapp.azure.com` must be released from the current Portal LB and re-assigned.
 
 - **Int**: hostname swap with brief downtime is acceptable. Single-step cutover.
-- **Prod**: introduce `scope-v2.westus3.cloudapp.azure.com` on App Routing first, validate, then swap. Zero-downtime.
+- **Prod**: introduce `scope-v2.westus3.cloudapp.azure.com` on the new ingress first, validate, then swap. Zero-downtime.
 
 ## Sequence diagrams
 
@@ -261,7 +299,7 @@ Each phase is a separate worktree + PR off `main`.
 | # | Branch | Description |
 |---|---|---|
 | 0a | `docs/user-auth-design` | This document. |
-| 0b | `infra/app-routing-ingress` | Enable App Routing on AKS, add `Ingress` + `ClusterIssuer`, switch API/Portal Services to `ClusterIP`, slim down [apps/portal/nginx.conf](../../apps/portal/nginx.conf), DNS cutover for int. **No Entra yet** — cluster runs HTTPS but unauthenticated. |
+| 0b | `infra/ingress` | Pick an ingress option (see [Ingress](#ingress)) and deploy it. Recommended: Application Gateway for Containers. Provision the Azure-side resource and ALB controller in [scope-core-infra](https://github.com/growth-ecosystems/scope-core-infra), then in this repo add the `Ingress` (or `Gateway`+`HTTPRoute`) manifest, switch API/Portal Services to `ClusterIP`, slim down [apps/portal/nginx.conf](../../apps/portal/nginx.conf), and cut DNS over for int. **No Entra yet** — cluster runs HTTPS but unauthenticated. |
 | 1 | `feat/api-auth-middleware` | Entra JWT validation, `req.user`, SSE cookie route, `AUTH_DISABLED` bypass. Updates [ENV_VARIABLES.md](../../ENV_VARIABLES.md). |
 | 2 | `feat/portal-login` (parallel with 3) | MSAL SPA flow, fetch wrapper, signed-in UI. |
 | 3 | `feat/cli-auth` (parallel with 2) | `pnpm cli auth login/logout/status`, token cache, `SCOPE_TOKEN` override. |
@@ -271,7 +309,8 @@ Dependency order: **0a → 0b → 1 → (2 ∥ 3) → 4**.
 
 ## Open questions
 
-- **App Routing enablement ownership.** Does scope-core or [scope-core-infra](https://github.com/growth-ecosystems/scope-core-infra) own the AKS Bicep that enables the App Routing add-on? If the latter, Phase 0b splits across two repos.
+- **Ingress option.** A vs B vs C — see the [Ingress](#ingress) section. Recommended: C (Application Gateway for Containers). This decision must be made in this PR's review.
+- **Cluster infra ownership.** Phase 0b touches both repos: AKS-side enablement (AGC resource, ALB controller, workload identity) lives in [scope-core-infra](https://github.com/growth-ecosystems/scope-core-infra), Kubernetes manifests live here. The infra PR must be applied to the cluster before this repo's manifests are reconciled by FluxCD, otherwise the `Ingress` resource sits pending.
 - **App registration ownership.** Who creates and admins the three Entra app registrations? Need a tenant admin to grant consent on `access_as_user`.
 - **Allowed users.** v1 lets any tenant member sign in. Do we want to restrict to a specific Entra security group's `groups` claim before exposing to a wider tenant?
 - **CI service principal.** Phase 4 (or a follow-up) needs a service principal for headless CI calls to the API. Decide between client-credentials (preferred) vs a long-lived PAT-style scope token.
@@ -284,4 +323,7 @@ Dependency order: **0a → 0b → 1 → (2 ∥ 3) → 4**.
 - Deployment model: [docs/architecture/deployment.md](deployment.md)
 - Token Manager (agent-side auth, distinct from this): [docs/architecture/token-manager.md](token-manager.md)
 - MSAL.js: <https://learn.microsoft.com/entra/identity-platform/msal-overview>
-- Azure App Routing: <https://learn.microsoft.com/azure/aks/app-routing>
+- Application Gateway for Containers: <https://learn.microsoft.com/azure/application-gateway/for-containers/overview>
+- App Routing add-on with NGINX (deprecated path): <https://learn.microsoft.com/azure/aks/app-routing>
+- App Routing Gateway API implementation (preview): <https://learn.microsoft.com/azure/aks/app-routing-gateway-api>
+- Ingress NGINX retirement announcement: <https://www.kubernetes.dev/blog/2025/11/12/ingress-nginx-retirement/>
