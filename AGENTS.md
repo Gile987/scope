@@ -165,6 +165,7 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/app-design.md](docs/architecture/app-design.md) | Data models, API design, package dependency graph |
 | [docs/architecture/vscode-web-worker.md](docs/architecture/vscode-web-worker.md) | XState chat machine, GitHub auth flow, ARIA snapshots |
 | [docs/architecture/token-manager.md](docs/architecture/token-manager.md) | Token storage, validation, round-robin distribution |
+| [docs/architecture/user-auth-github.md](docs/architecture/user-auth-github.md) | User authentication via GitHub App (design) — Portal, API, CLI |
 | [docs/architecture/criteria-provider.md](docs/architecture/criteria-provider.md) | CriteriaProvider abstraction, filesystem vs REST backends |
 | [docs/architecture/skills.md](docs/architecture/skills.md) | Agent Skills spec, registration, resolution, delivery |
 | [docs/architecture/db-migrations.md](docs/architecture/db-migrations.md) | MongoDB migration framework |
