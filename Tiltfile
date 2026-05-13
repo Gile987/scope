@@ -62,6 +62,26 @@ k8s_yaml(local(
     quiet=True,
 ))
 
+# KEDA operator runs in the keda namespace but needs to reach Azurite (in scoped
+# namespace) via the short hostname "azurite" so the Azure Queue SDK auth works.
+# Azurite rejects requests whose Host header uses FQDN. An ExternalName Service
+# in the keda namespace lets KEDA resolve "azurite" to the scoped-namespace Service.
+k8s_yaml(blob("""
+apiVersion: v1
+kind: Service
+metadata:
+  name: azurite
+  namespace: keda
+spec:
+  type: ExternalName
+  externalName: azurite.scoped.svc.cluster.local
+  ports:
+    - port: 10001
+      name: queue
+    - port: 10000
+      name: blob
+"""))
+
 # Re-run kustomize when overlay or base manifests change
 watch_file('deploy/overlays/local')
 watch_file('deploy/base')
@@ -75,12 +95,13 @@ watch_file('deploy/base')
 
 K3D_CLUSTER = 'scoped'
 
-def scope_build(ref, context, dockerfile, target='', deps=[], live_update_syncs=[]):
+def scope_build(ref, context, dockerfile, target='', deps=[], live_update_syncs=[], build_args={}):
     """Build an image with docker (legacy) and import into k3d."""
     target_arg = '--target %s' % target if target else ''
+    args_str = ' '.join(['--build-arg %s=%s' % (k, v) for k, v in build_args.items()])
     # Podman stores images with docker.io/ prefix; k3d needs that to find them.
-    cmd = 'docker build -t $EXPECTED_REF -f %s %s %s && k3d image import docker.io/$EXPECTED_REF -c %s' % (
-        dockerfile, target_arg, context, K3D_CLUSTER,
+    cmd = 'docker build -t $EXPECTED_REF -f %s %s %s %s && k3d image import docker.io/$EXPECTED_REF -c %s' % (
+        dockerfile, target_arg, args_str, context, K3D_CLUSTER,
     )
     custom_build(
         ref,
@@ -164,21 +185,34 @@ scope_build(
     ],
 )
 
-scope_build(
-    'scoped/coder-acp-claude-code', '.', 'apps/workers/coder-acp-claude-code/Dockerfile', target='dev',
-    deps=['apps/workers/coder-acp-claude-code/src', 'apps/workers/coder-acp-claude-code/package.json', 'packages/shared/src', 'config'],
-    live_update_syncs=[
-        sync('apps/workers/coder-acp-claude-code/src', '/app/apps/workers/coder-acp-claude-code/src'),
-        sync('packages/shared/src', '/app/packages/shared/src'),
-        sync('config', '/app/config'),
-    ],
-)
+# Workers that require version build-args — only build when the env vars are set.
+# Set these in .env or export them before running `tilt up`.
+_claude_code_version = env.get('CLAUDE_CODE_ACP_VERSION', '')
+_vscode_version = env.get('VSCODE_VERSION', '')
+_copilot_chat_version = env.get('COPILOT_CHAT_VERSION', '')
 
-scope_build(
-)
+if _claude_code_version:
+    scope_build(
+        'scoped/coder-acp-claude-code', '.', 'apps/workers/coder-acp-claude-code/Dockerfile', target='dev',
+        deps=['apps/workers/coder-acp-claude-code/src', 'apps/workers/coder-acp-claude-code/package.json', 'packages/shared/src', 'config'],
+        build_args={'CLAUDE_CODE_ACP_VERSION': _claude_code_version},
+        live_update_syncs=[
+            sync('apps/workers/coder-acp-claude-code/src', '/app/apps/workers/coder-acp-claude-code/src'),
+            sync('packages/shared/src', '/app/packages/shared/src'),
+            sync('config', '/app/config'),
+        ],
+    )
 
-scope_build(
-)
+if _vscode_version:
+    _vscode_web_args = {'VSCODE_VERSION': _vscode_version}
+    if _copilot_chat_version:
+        _vscode_web_args['COPILOT_CHAT_VERSION'] = _copilot_chat_version
+    scope_build(
+        build_args=_vscode_web_args,
+    )
+    scope_build(
+        build_args=_vscode_web_args,
+    )
 
 scope_build(
     'scoped/report-generator', '.', 'apps/workers/report-generator/Dockerfile', target='dev',
@@ -240,16 +274,22 @@ k8s_resource('coder-acp-copilot',
     resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
     labels=['workers'],
 )
-k8s_resource('coder-acp-claude-code',
-    resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
-    labels=['workers'],
-)
-    resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
-    labels=['workers'],
-)
-    resource_deps=['mongodb', 'redis', 'azurite', 'judge', 'gateway'],
-    labels=['workers'],
-)
+if _claude_code_version:
+    k8s_resource('coder-acp-claude-code',
+        resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
+        labels=['workers'],
+    )
+else:
+    k8s_resource('coder-acp-claude-code', auto_init=False, labels=['workers-disabled'])
+
+if _vscode_version:
+        resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
+        labels=['workers'],
+    )
+        resource_deps=['mongodb', 'redis', 'azurite', 'judge', 'gateway'],
+        labels=['workers'],
+    )
+else:
 k8s_resource('report-generator',
     resource_deps=['mongodb', 'redis', 'azurite', 'api'],
     labels=['workers'],
