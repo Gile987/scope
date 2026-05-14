@@ -9,12 +9,14 @@
 #   brew install k3d kubectl helm
 #
 # Usage:
-#   ./scripts/k3d-setup.sh                    # default cluster name
-#   ./scripts/k3d-setup.sh my-cluster         # custom cluster name
+#   ./scripts/k3d-setup.sh                              # default cluster + namespace
+#   ./scripts/k3d-setup.sh my-cluster                   # custom cluster name
+#   ./scripts/k3d-setup.sh my-cluster my-namespace      # custom cluster + namespace
 # =============================================================================
 set -euo pipefail
 
 CLUSTER_NAME="${1:-scoped}"
+NAMESPACE="${2:-scoped}"
 KEDA_VERSION="2.16.1"
 
 # Colors
@@ -52,13 +54,13 @@ info "Setting kubectl context to k3d-$CLUSTER_NAME..."
 kubectl config use-context "k3d-$CLUSTER_NAME"
 
 # ---------------------------------------------------------------------------
-# Create the scoped namespace
+# Create the namespace (supports multiple worktrees with different namespaces)
 # ---------------------------------------------------------------------------
-if kubectl get namespace scoped >/dev/null 2>&1; then
-    info "Namespace 'scoped' already exists."
+if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+    info "Namespace '$NAMESPACE' already exists."
 else
-    info "Creating namespace 'scoped'..."
-    kubectl create namespace scoped
+    info "Creating namespace '$NAMESPACE'..."
+    kubectl create namespace "$NAMESPACE"
 fi
 
 # ---------------------------------------------------------------------------

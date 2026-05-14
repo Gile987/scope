@@ -44,6 +44,10 @@ REDIS_PORT     = int(env.get('REDIS_PORT', '6300'))
 GATEWAY_PORT   = int(env.get('GATEWAY_API_PORT', '18900'))
 PROJECT_NAME   = env.get('COMPOSE_PROJECT_NAME', 'scope-mt-app')
 
+# Namespace derived from project name — each worktree gets its own namespace
+# so multiple worktrees can run against the same k3d cluster simultaneously.
+NAMESPACE      = env.get('TILT_NAMESPACE', 'scoped')
+
 # Workers that require version build-args — only build when the env vars are set.
 # Set these in .env or export them before running `tilt up`.
 # (Declared here because the k8s_yaml filter below uses them.)
@@ -79,14 +83,17 @@ _filter_args = ' '.join(['--exclude-name %s' % n for n in _exclude_names])
 k8s_yaml(local(
     "kustomize build --load-restrictor=LoadRestrictionsNone deploy/overlays/local" +
     " | sed 's|${ACR_LOGIN_SERVER}/scoped/|scoped/|g'" +
+    " | sed 's|namespace: scoped|namespace: %s|g'" % NAMESPACE +
     (" | python3 scripts/filter-k8s-yaml.py " + _filter_args if _filter_args else ''),
     quiet=True,
 ))
 
-# KEDA operator runs in the keda namespace but needs to reach Azurite (in scoped
-# namespace) via the short hostname "azurite" so the Azure Queue SDK auth works.
-# Azurite rejects requests whose Host header uses FQDN. An ExternalName Service
-# in the keda namespace lets KEDA resolve "azurite" to the scoped-namespace Service.
+# KEDA operator runs in the keda namespace but needs to reach Azurite (in the
+# worker namespace) via the short hostname "azurite" so the Azure Queue SDK auth
+# works. Azurite rejects requests whose Host header uses FQDN. An ExternalName
+# Service in the keda namespace lets KEDA resolve "azurite" to the correct namespace.
+# NOTE: With multiple worktrees, the last Tilt to deploy wins for KEDA queue
+# polling. All other resources are namespace-isolated and safe to run concurrently.
 k8s_yaml(blob("""
 apiVersion: v1
 kind: Service
@@ -95,13 +102,13 @@ metadata:
   namespace: keda
 spec:
   type: ExternalName
-  externalName: azurite.scoped.svc.cluster.local
+  externalName: azurite.%s.svc.cluster.local
   ports:
     - port: 10001
       name: queue
     - port: 10000
       name: blob
-"""))
+""" % NAMESPACE))
 
 # Re-run kustomize when overlay or base manifests change
 watch_file('deploy/overlays/local')
