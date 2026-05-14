@@ -16,6 +16,7 @@ import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
+import type { VisibilityHeartbeat } from "./visibility-heartbeat.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
@@ -63,7 +64,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   protected async handleRequest(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void> {
@@ -80,7 +81,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         messageRunId,
         currentRunId,
       });
-      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
     // If the request was paused while sitting in the queue, discard the
@@ -90,7 +91,54 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         `[${this.workerName}] Request ${requestDoc._id} is paused — discarding queue message`,
       );
       await log("info", `Request paused — discarding queue message`);
-      await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    // Redelivery fail-fast: if the run is already in "processing" state, the
+    // message was redelivered after a crash (or heartbeat false-negative)
+    // mid-execution. Don't silently restart — that would wipe run.turns,
+    // overwrite run.startedAt, and burn a fresh round of LLM/judge tokens.
+    // Mark the run as failed atomically (gated on the current run._id and
+    // status="processing" so we don't race a still-live original worker or
+    // a concurrent retry) and delete the message. The user can opt into a
+    // clean restart via the explicit POST /requests/:id/retry endpoint,
+    // which properly demotes the failed run to history.
+    if (requestDoc.run?.status === "processing") {
+      const claim = await withRetry(() => this.collection.findOneAndUpdate(
+        {
+          _id: requestDoc._id,
+          "run._id": requestDoc.run!._id,
+          "run.status": "processing",
+        } as any,
+        {
+          $set: {
+            "run.status": "done",
+            "run.outcome": "failed",
+            "run.error": "Worker crashed or queue message was redelivered while run was in 'processing' state",
+            "run.finishedAt": new Date(),
+            "run.updatedAt": new Date(),
+            updatedAt: new Date(),
+          },
+        } as any,
+      ));
+      if (claim) {
+        console.warn(
+          `[${this.workerName}] Redelivery detected for ${requestDoc._id} (runId=${requestDoc.run!._id}) — marked run as failed`,
+        );
+        await log(
+          "error",
+          "Run marked failed: queue message was redelivered while run was already in 'processing' state (likely worker crash). Use the retry endpoint to start a new attempt.",
+          { final: true, runId: requestDoc.run!._id },
+        );
+      } else {
+        // Status changed under us (a concurrent retry already demoted this
+        // run, or the original worker just finished). Nothing to do — just
+        // drop the duplicate message.
+        console.log(
+          `[${this.workerName}] Redelivery for ${requestDoc._id} but run state changed concurrently — discarding`,
+        );
+      }
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
     // Resolve MCP server slugs to configs via API
@@ -165,7 +213,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolved extensions: ${extensionConfigs.map(e => e.version ? `${e.id}@${e.version}` : e.id).join(", ")}`);
     }
 
-    await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs, extensionConfigs);
+    await this.processMultiTurn(requestDoc, message, heartbeat, log, mcpServerConfigs, skillConfigs, extensionConfigs);
   }
 
   /**
@@ -231,7 +279,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   private async processMultiTurn(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     mcpServerConfigs?: McpServerConfig[],
     skillConfigs?: SkillConfig[],
@@ -266,21 +314,6 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         },
       }
     ));
-
-    // Extend queue message visibility for long-running multi-turn.
-    // updateMessage returns a new pop receipt that must be used for subsequent operations.
-    const visibilityTimeout = MULTI_TURN_DEFAULTS.VISIBILITY_TIMEOUT_SECONDS;
-    try {
-      const updateResponse = await this.queueClient.updateMessage(
-        message.messageId,
-        currentPopReceipt,
-        message.messageText,
-        visibilityTimeout
-      );
-      currentPopReceipt = updateResponse.popReceipt!;
-    } catch (error) {
-      console.warn(`[${this.workerName}] Failed to extend message visibility: ${error}`);
-    }
 
     await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
       criteria: requestDoc.scenario.criteria,
@@ -410,6 +443,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // Fire-and-forget report generation
     await this.triggerReportGeneration(requestId);
 
-    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    // Stop the heartbeat before deleting so the pop receipt is stable —
+    // a tick landing between read and delete would invalidate it. The
+    // base class also calls stop() in its finally block (it's idempotent).
+    const finalPopReceipt = heartbeat.stop();
+    await this.safeDeleteMessage(message.messageId, finalPopReceipt);
   }
 }

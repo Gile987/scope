@@ -380,6 +380,34 @@ describe("request schemas", () => {
       const result = ListRequestsQuerySchema.parse({ status: "done" });
       expect(result.status).toBe("done");
     });
+
+    it("accepts last-page query flag", () => {
+      const result = ListRequestsQuerySchema.parse({ last: "true" });
+      expect(result.last).toBe("true");
+    });
+
+    it("accepts iteration-count filters with operators", () => {
+      const result = ListRequestsQuerySchema.parse({
+        turns: "5",
+        turnsOp: "gte",
+        maxIterations: "10",
+        maxIterationsOp: "lte",
+      });
+      expect(result.turns).toBe(5);
+      expect(result.turnsOp).toBe("gte");
+      expect(result.maxIterations).toBe(10);
+      expect(result.maxIterationsOp).toBe("lte");
+    });
+
+    it("rejects invalid operator", () => {
+      expect(() =>
+        ListRequestsQuerySchema.parse({ turns: "1", turnsOp: "ne" }),
+      ).toThrow();
+    });
+
+    it("rejects negative turns", () => {
+      expect(() => ListRequestsQuerySchema.parse({ turns: "-1" })).toThrow();
+    });
   });
 
   describe("BulkResubmitInputSchema", () => {

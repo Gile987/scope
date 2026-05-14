@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp } from "@/types";
 
 import { qs } from "./url";
 
@@ -27,7 +27,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   /** List runs with cursor-based pagination */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; profileId?: string; limit?: number; after?: string; before?: string }): Promise<CursorPaginatedResponse<Run>> => {
+  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; profileId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {
     return request(`/requests${qs({
       worker: opts?.worker,
       taskPromptId: opts?.taskPromptId,
@@ -36,14 +36,19 @@ export const api = {
       criteria: opts?.criteria,
       submissionId: opts?.submissionId,
       profileId: opts?.profileId,
+      turns: opts?.turns !== undefined ? String(opts.turns) : undefined,
+      turnsOp: opts?.turns !== undefined ? opts?.turnsOp : undefined,
+      maxIterations: opts?.maxIterations !== undefined ? String(opts.maxIterations) : undefined,
+      maxIterationsOp: opts?.maxIterations !== undefined ? opts?.maxIterationsOp : undefined,
       limit: opts?.limit ? String(opts.limit) : undefined,
       after: opts?.after,
       before: opts?.before,
+      last: opts?.last ? "true" : undefined,
     })}`);
   },
 
   /** List runs grouped by task or submissionId, with cursor-based pagination */
-  listRunGroups: (opts: { groupBy: "task" | "submissionId" | "profile"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; limit?: number; after?: string; before?: string }): Promise<CursorPaginatedResponse<RunGroup>> => {
+  listRunGroups: (opts: { groupBy: "task" | "submissionId" | "profile"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
     return request(`/requests${qs({
       groupBy: opts.groupBy,
       worker: opts.worker,
@@ -52,9 +57,14 @@ export const api = {
       outcome: opts.outcome,
       criteria: opts.criteria,
       submissionId: opts.submissionId,
+      turns: opts.turns !== undefined ? String(opts.turns) : undefined,
+      turnsOp: opts.turns !== undefined ? opts.turnsOp : undefined,
+      maxIterations: opts.maxIterations !== undefined ? String(opts.maxIterations) : undefined,
+      maxIterationsOp: opts.maxIterations !== undefined ? opts.maxIterationsOp : undefined,
       limit: opts.limit ? String(opts.limit) : undefined,
       after: opts.after,
       before: opts.before,
+      last: opts.last ? "true" : undefined,
     })}`);
   },
 
@@ -173,6 +183,11 @@ export const api = {
   harUrl: (id: string, iteration?: number): string => {
     const qs = iteration ? `?iteration=${iteration}` : "";
     return `${BASE}/requests/${id}/har${qs}`;
+  },
+
+  /** Get tool-calls JSONL download URL for a per-iteration turn */
+  toolCallsUrl: (id: string, iteration: number): string => {
+    return `${BASE}/requests/${id}/tool-calls?iteration=${iteration}`;
   },
 
   /** Get full run archive download URL (.tar.gz with run.yaml + iteration snapshots) */

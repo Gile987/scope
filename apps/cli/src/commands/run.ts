@@ -340,6 +340,8 @@ run
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
   .option("--submission-id <id>", "Filter by submission ID")
+  .option("--turns <expr>", "Filter by actual turns (e.g. '>=5', '<=10', '=3')")
+  .option("--max-iterations <expr>", "Filter by configured maxIterations (e.g. '>=5', '<=10', '=3')")
   .option("--include-deleted", "Include soft-deleted runs")
 )
   .action(async (options) => {
@@ -352,6 +354,25 @@ run
       }
       if (options.submissionId) {
         params.set("submissionId", options.submissionId);
+      }
+      const parseIterExpr = (raw: string, name: string): { op: "eq" | "gte" | "lte"; value: number } => {
+        const m = /^(>=|<=|=)?\s*(\d+)$/.exec(String(raw).trim());
+        if (!m) {
+          throw new Error(`Invalid ${name} expression '${raw}'. Use forms like '>=5', '<=10', '=3', or '5'.`);
+        }
+        const opSym = m[1] ?? "=";
+        const op = opSym === ">=" ? "gte" : opSym === "<=" ? "lte" : "eq";
+        return { op, value: Number(m[2]) };
+      };
+      if (options.turns !== undefined) {
+        const { op, value } = parseIterExpr(options.turns, "--turns");
+        params.set("turns", String(value));
+        params.set("turnsOp", op);
+      }
+      if (options.maxIterations !== undefined) {
+        const { op, value } = parseIterExpr(options.maxIterations, "--max-iterations");
+        params.set("maxIterations", String(value));
+        params.set("maxIterationsOp", op);
       }
       if (options.includeDeleted) {
         params.set("includeDeleted", "true");
@@ -748,6 +769,85 @@ run
     }
   });
 
+run
+  .command("upload-batch")
+  .description("Upload a batch run archive (multiple runs in one .tar.gz, as produced by 'run download-batch')")
+  .argument("<path>", "Path to batch .tar.gz archive")
+  .option("--dry-run", "Preview what would be uploaded without sending")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .action(async (inputPath: string, options) => {
+    const { url, dryRun } = options;
+
+    try {
+      const resolvedPath = resolve(inputPath);
+      if (!existsSync(resolvedPath)) {
+        console.error(errorText(`Path not found: ${resolvedPath}`));
+        process.exit(1);
+      }
+      if (!resolvedPath.endsWith(".tar.gz")) {
+        console.error(errorText("Input must be a .tar.gz batch archive"));
+        process.exit(1);
+      }
+
+      const archiveStats = statSync(resolvedPath);
+      const archiveSizeKB = Math.round(archiveStats.size / 1024);
+
+      console.log(`${label('Archive:')} ${value(resolvedPath)}`);
+      console.log(`${label('Size:')} ${value(`${archiveSizeKB} KB`)}`);
+      console.log();
+
+      if (dryRun) {
+        console.log(warnBanner("Dry run - no data will be uploaded"));
+        console.log(`Would upload to: ${normalizeUrl(url)}/api/v1/runs/upload-batch`);
+        return;
+      }
+
+      console.log(`${label('Uploading to')} ${value(normalizeUrl(url))}...`);
+
+      const formData = new FormData();
+      const archiveBuffer = readFileSync(resolvedPath);
+      const blob = new Blob([archiveBuffer], { type: "application/gzip" });
+      formData.append("archive", blob, basename(resolvedPath));
+
+      const response = await fetch(`${normalizeUrl(url)}/api/v1/runs/upload-batch`, {
+        method: "POST",
+        body: formData,
+      });
+
+      // 201 = all imported, 207 = partial, 400 = none / bad input
+      if (response.status === 400) {
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        console.error(errorText(`Error: ${errorData.error || response.statusText}`));
+        process.exit(1);
+      }
+
+      const result = await response.json() as {
+        imported: { id: string; status: string; iterations: number }[];
+        failed: { id?: string; error: string; statusCode: number }[];
+      };
+
+      console.log();
+      if (result.imported.length > 0) {
+        console.log(successText(`Imported ${result.imported.length} run(s):`));
+        for (const r of result.imported) {
+          console.log(`  ${value(r.id)} — ${r.status} (${r.iterations} iter)`);
+        }
+      }
+      if (result.failed.length > 0) {
+        console.log();
+        console.log(warnBanner(`${result.failed.length} run(s) failed:`));
+        for (const f of result.failed) {
+          console.log(`  ${errorText(f.id ?? '<unknown>')} — [${f.statusCode}] ${f.error}`);
+        }
+        // Exit non-zero on partial failure so CI / scripts notice.
+        process.exit(1);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 // ─── Run-retry-attempts (issue #658) ──────────────────────────────────────
 
 run
@@ -779,7 +879,7 @@ run
       console.log(successText("Retry started"));
       console.log(`${label('Request ID:')} ${value(result.requestId)}`);
       console.log(`${label('New run ID:')} ${value(result.runId)}`);
-      console.log(`${label('Attempt:')} ${value(result.attemptNumber)}`);
+      console.log(`${label('Attempt:')} ${value(String(result.attemptNumber))}`);
       printFollowUpCommands(result.requestId);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);

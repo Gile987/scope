@@ -84,7 +84,8 @@ services:
       retries: 5
 
   # Lowkey Vault (Azure Key Vault emulator)
-  # Persists vault state via export/import. On first start, seeds from import.json.hbs.
+  # Persists vault state via export/import. On first start, seeds export.json
+  # inline so remote Docker daemon setups don't depend on bind-mounted files.
   lowkey-vault:
     image: nagyesta/lowkey-vault:7.2.0-ubi10-minimal
     ports:
@@ -97,16 +98,13 @@ services:
         --LOWKEY_VAULT_NAMES=-
         --LOWKEY_IMPORT_LOCATION=/import/export.json
         --LOWKEY_EXPORT_LOCATION=/import/export.json
-        --LOWKEY_IMPORT_TEMPLATE_HOST=lowkey-vault
-        --LOWKEY_IMPORT_TEMPLATE_PORT=8443
     volumes:
       - lowkey_vault_data:/import
-      - ./config/lowkey-vault/import.json.hbs:/import/seed.json.hbs:ro
     entrypoint:
       [
         "/bin/sh",
         "-c",
-        "[ -f /import/export.json ] || cp /import/seed.json.hbs /import/export.json; exec java -jar /lowkey-vault.jar $$LOWKEY_ARGS",
+        "[ -f /import/export.json ] || printf '%s\n' '{\"vaults\":[{\"attributes\":{\"baseUri\":\"https://lowkey-vault:8443\",\"recoveryLevel\":\"Recoverable+Purgeable\",\"recoverableDays\":90,\"created\":0,\"deleted\":null},\"keys\":{},\"secrets\":{},\"certificates\":{}}]}' > /import/export.json; exec java -jar /lowkey-vault.jar $$LOWKEY_ARGS",
       ]
     healthcheck:
       test: ["CMD", "curl", "-fk", "https://localhost:8443/ping"]
@@ -405,14 +403,13 @@ services:
         soft: 65536
         hard: 65536
     volumes:
-      - ./apps/gateway/config/default.yaml:/config/proxy.yaml:ro
       - gateway_cert:/certs
     ports:
       - "${GATEWAY_API_PORT:-18900}:18000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18000/health || exit 1"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 12
       start_period: 120s
     depends_on:
@@ -427,7 +424,7 @@ services:
       context: .
       dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
       args:
-        CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION}
+        CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION:-}
     profiles: [claude-code]
     environment:
       <<: *worker-env
@@ -437,10 +434,8 @@ services:
       # DevProxy integration (enabled by default when using claude-code profile)
       DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
       DEV_PROXY_API_URL: http://devproxy-claude-code:18897
+      DEV_PROXY_URL: http://devproxy-claude-code:18000
       DEV_PROXY_HAR_DIR: /har-output
-      HTTP_PROXY: http://devproxy-claude-code:18000
-      HTTPS_PROXY: http://devproxy-claude-code:18000
-      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-claude-code,mcp-gateway-claude-code"
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
       MCP_GATEWAY_URL: http://mcp-gateway-claude-code:8080
     volumes:
@@ -516,6 +511,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/coder-acp-copilot/Dockerfile
+      args:
+        COPILOT_CLI_VERSION: ${COPILOT_CLI_VERSION:-}
     profiles: [copilot]
     environment:
       <<: *worker-env
@@ -525,10 +522,8 @@ services:
       # DevProxy integration (enabled by default when using copilot profile)
       DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
       DEV_PROXY_API_URL: http://devproxy-copilot:18897
+      DEV_PROXY_URL: http://devproxy-copilot:18000
       DEV_PROXY_HAR_DIR: /har-output
-      HTTP_PROXY: http://devproxy-copilot:18000
-      HTTPS_PROXY: http://devproxy-copilot:18000
-      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-copilot,mcp-gateway-copilot"
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
       MCP_GATEWAY_URL: http://mcp-gateway-copilot:8080
     volumes:
@@ -545,13 +540,14 @@ services:
 
   # DevProxy sidecar for Copilot worker (HAR capture)
   devproxy-copilot:
-    image: ghcr.io/dotnet/dev-proxy:2.1.0
+    build:
+      context: ./apps/workers/coder-acp-copilot
+      dockerfile: devproxy.Dockerfile
     profiles: [copilot]
     user: "1000:1000"
     working_dir: /har-output
-    command: ["--config-file", "/config/devproxyrc.json", "--record"]
+    command: ["--config-file", "/etc/devproxy/devproxyrc.json", "--record"]
     volumes:
-      - ./apps/workers/coder-acp-copilot/devproxy-config.json:/config/devproxyrc.json:ro
       - copilot_har_output:/har-output
       - copilot_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
     ports:
@@ -561,7 +557,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 10s
+      # First run generates the root CA into the cert volume, which can
+      # take 1-2 minutes before the API listener accepts requests.
+      start_period: 180s
     depends_on:
       devproxy-copilot-init:
         condition: service_completed_successfully

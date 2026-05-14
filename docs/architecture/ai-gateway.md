@@ -215,6 +215,13 @@ sequenceDiagram
     PX->>HAR: on_exchange(id, exchange)
     Note over HAR: Append JSON line<br/>(local OR blob PUT ?comp=appendblock)
 
+    W->>API: POST /api/v1/sessions/{id}/rotate?expected=N
+    API->>SM: rotate(id, expected)
+    SM->>HAR: on_iteration_rotate(id, N+1)
+    Note over HAR: Pre-create iter-(N+1)<br/>(local file OR append blob)
+    Note over SM: CAS expected -> N+1 only after plugin prep
+    API-->>W: 200 {iteration: N+1} or 409 {iteration: actual}
+
     W->>API: POST /api/v1/sessions/{id}/stop
     API->>SM: stop_session(id)
     SM->>HAR: on_session_stop(id)
@@ -235,6 +242,7 @@ sequenceDiagram
 
 - **JSONL buffering**: Each session writes one JSON line per HTTP exchange — either to a local file or an Azure append blob depending on the configured backend.
 - **Blob retry**: `BlobWriter` retries append operations up to 20× with exponential backoff, with a per-operation timeout controlled by `plugins.har.appendTimeoutSecs` (default 120 s). If the timeout fires, the session is marked hard-failed and subsequent proxied requests receive a 502.
+- **Rotation safety**: On `POST /api/v1/sessions/{id}/rotate`, plugins prepare iteration `N+1` before the iteration CAS is applied. For HAR blob storage this means creating the append blob first, preventing a state where iteration advances but the target blob is missing.
 - **Sensitive header redaction**: When `redactCredentials` is `true` (default), headers like `authorization`, `x-github-token`, `x-api-key`, `cookie`, and `set-cookie` are redacted at write time. Secrets never reach storage.
 - **On-the-fly HAR assembly**: `GET /api/v1/sessions/{id}/har` reads the JSONL source (local file or blob download) and wraps entries in a HAR 1.2 envelope. No separate `.har` file is stored.
 - **Idempotent reads**: The JSONL source can be read multiple times (safe for retries). It is deleted on session cleanup (`DELETE /api/v1/sessions/{id}` or idle reap).

@@ -15,7 +15,6 @@ import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
 import { sanitizeHarFile, extractToolCalls } from "../har/har-parser.js";
-import type { ToolCall } from "../har/types.js";
 import { JudgeClient } from "./judge-client.js";
 
 export interface MultiTurnConfig {
@@ -109,7 +108,6 @@ export async function runMultiTurnLoop(
 
   const turns: ConversationTurn[] = [];
   let nextPrompt = task;
-  const startTime = Date.now();
 
   await log("info", `Starting multi-turn loop (max ${maxIterations} iterations)`, {
     criteria,
@@ -129,18 +127,6 @@ export async function runMultiTurnLoop(
     const iterLog: typeof log = async (level, message, data) =>
       log(level, message, { ...data, iteration });
 
-    // Check timeout
-    const elapsed = Date.now() - startTime;
-    if (elapsed > MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS) {
-      await iterLog("warn", `Multi-turn loop timed out after ${Math.round(elapsed / 1000)}s`, { elapsedMs: elapsed });
-      return {
-        turns,
-        passed: false,
-        hadError: true,
-        finalResult: `Timed out after ${iteration - 1} iterations (${Math.round(elapsed / 1000)}s)`,
-      };
-    }
-
     const iterationStartedAt = new Date();
 
     await iterLog("info", `--- Iteration ${iteration}/${maxIterations} ---`, {
@@ -150,16 +136,19 @@ export async function runMultiTurnLoop(
 
     // Step 1: Call the coding agent
     await iterLog("info", "Calling coding agent...");
-    let codingResponse: string;
+    let codingResponse: string | undefined;
     let turnHarUrl: string | undefined;
     let turnTokenUsage: TokenUsage | undefined;
     let turnAiCallCount: number | undefined;
-    let turnToolCalls: ToolCall[] | undefined;
+    let turnToolCallsUrl: string | undefined;
+    let turnToolCallCount: number | undefined;
     let turnRawChatUrl: string | undefined;
     let turnRawChatFormat: string | undefined;
+    let turnChatResultUrl: string | undefined;
+    let turnChatResultFormat: string | undefined;
     const turnVideoUrls: string[] = [];
     try {
-      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs, extensionConfigs });
+      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
       codingResponse = workerResult.response;
       turnTokenUsage = workerResult.tokenUsage;
       turnAiCallCount = workerResult.aiCallCount;
@@ -176,15 +165,24 @@ export async function runMultiTurnLoop(
           );
           await iterLog("info", "HAR file uploaded", { harUrl: turnHarUrl });
 
-          // Extract tool calls from the sanitized HAR so they are persisted on the turn
+          // Extract tool calls from the sanitized HAR and write them to a
+          // per-iteration JSONL blob alongside the HAR. Storing tool calls
+          // out-of-band keeps unbounded lists out of the request document
+          // (which is bounded to 2 MB on CosmosDB).
           try {
-            turnToolCalls = extractToolCalls(sanitizedHar);
-            if (turnToolCalls.length > 0) {
-              await iterLog("info", `Extracted ${turnToolCalls.length} tool call(s) from HAR`);
+            const extracted = extractToolCalls(sanitizedHar);
+            if (extracted.length > 0) {
+              await blobStorage.writeToolCalls(requestId, runId, iteration, extracted);
+              turnToolCallsUrl = blobStorage.getToolCallsBlobUrl(requestId, runId, iteration);
+              turnToolCallCount = extracted.length;
+              await iterLog("info", `Extracted ${extracted.length} tool call(s) from HAR`, {
+                toolCallsUrl: turnToolCallsUrl,
+                toolCallCount: turnToolCallCount,
+              });
             }
           } catch (extractError) {
             const msg = extractError instanceof Error ? extractError.message : String(extractError);
-            await iterLog("warn", `Failed to extract tool calls from HAR: ${msg}`);
+            await iterLog("warn", `Failed to extract or persist tool calls from HAR: ${msg}`);
           }
         } catch (uploadError) {
           const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
@@ -225,6 +223,25 @@ export async function runMultiTurnLoop(
         } catch (uploadError) {
           const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
           await iterLog("warn", `Failed to upload raw chat transcript: ${msg}`);
+        }
+      }
+
+      // Upload chat result envelope (e.g. VS Code's IChatAgentResult2) for
+      // post-hoc diagnostics. Stored as a separate blob so it never bloats
+      // the request document — see growth-ecosystems/scope-core#811.
+      if (workerResult.chatResultFilePath) {
+        try {
+          const blobName = `${requestId}/runs/${runId}/iteration-${iteration}/chat-result.json`;
+          turnChatResultUrl = await blobStorage.uploadFile(
+            workerResult.chatResultFilePath,
+            blobName,
+            "application/json"
+          );
+          turnChatResultFormat = workerResult.chatResultFormat;
+          await iterLog("info", "Chat result envelope uploaded", { chatResultUrl: turnChatResultUrl });
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await iterLog("warn", `Failed to upload chat result envelope: ${msg}`);
         }
       }
     } catch (error) {
@@ -302,7 +319,7 @@ export async function runMultiTurnLoop(
     }
 
     await iterLog("info", "Coding agent completed", {
-      responseLength: codingResponse.length,
+      responseLength: codingResponse?.length ?? 0,
     });
 
     // Step 2: Snapshot workspace to blob storage
@@ -322,7 +339,7 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so video/HAR URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
-        codingAgentResponse: codingResponse,
+        ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: `Snapshot upload failed: ${errorMsg}`,
         snapshotUrl: "",
         passed: false,
@@ -333,6 +350,8 @@ export async function runMultiTurnLoop(
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
         ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
         ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+        ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -356,7 +375,7 @@ export async function runMultiTurnLoop(
 
       const turn: ConversationTurn = {
         iteration,
-        codingAgentResponse: codingResponse,
+        ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: "No criteria — judge evaluation skipped",
         snapshotUrl,
         passed: true,
@@ -367,9 +386,12 @@ export async function runMultiTurnLoop(
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
         ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
         ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
-        ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
+        ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+        ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
         ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
         ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+        ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
       };
       turns.push(turn);
       if (onTurnComplete) {
@@ -380,7 +402,7 @@ export async function runMultiTurnLoop(
         turns,
         passed: true,
         hadError: false,
-        finalResult: codingResponse,
+        finalResult: codingResponse ?? "",
       };
     }
 
@@ -407,7 +429,7 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so video/snapshot URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
-        codingAgentResponse: codingResponse,
+        ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: `Judge evaluation failed: ${errorMsg}`,
         snapshotUrl,
         passed: false,
@@ -418,9 +440,12 @@ export async function runMultiTurnLoop(
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
         ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
         ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
-        ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
+        ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+        ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
         ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
         ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+        ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -455,7 +480,7 @@ export async function runMultiTurnLoop(
     // Step 4: Record the turn
     const turn: ConversationTurn = {
       iteration,
-      codingAgentResponse: codingResponse,
+      ...(codingResponse && { codingAgentResponse: codingResponse }),
       judgeFeedback,
       snapshotUrl,
       passed: judgePassed,
@@ -467,9 +492,12 @@ export async function runMultiTurnLoop(
       ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
       ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
       ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
-      ...(turnToolCalls && turnToolCalls.length > 0 && { toolCalls: turnToolCalls }),
+      ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+      ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
       ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
       ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+      ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+      ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
     };
     turns.push(turn);
 
@@ -487,7 +515,7 @@ export async function runMultiTurnLoop(
         turns,
         passed: true,
         hadError: false,
-        finalResult: codingResponse,
+        finalResult: codingResponse ?? "",
       } as MultiTurnResult;
     }
 
@@ -497,6 +525,26 @@ export async function runMultiTurnLoop(
       feedback: judgeFeedback.substring(0, 500),
     });
     nextPrompt = judgeFeedback;
+
+    // Per-iteration timeout: if this iteration alone exceeded the budget,
+    // abort the loop rather than starting another iteration that is likely
+    // to overrun as well. The completed iteration's turn is preserved.
+    const iterationElapsedMs = Date.now() - iterationStartedAt.getTime();
+    if (iterationElapsedMs > MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS) {
+      const elapsedSec = Math.round(iterationElapsedMs / 1000);
+      const budgetSec = Math.round(MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS / 1000);
+      await iterLog(
+        "warn",
+        `Iteration ${iteration} exceeded timeout (${elapsedSec}s > ${budgetSec}s)`,
+        { elapsedMs: iterationElapsedMs, budgetMs: MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS },
+      );
+      return {
+        turns,
+        passed: false,
+        hadError: true,
+        finalResult: `Iteration ${iteration} exceeded timeout (${elapsedSec}s > ${budgetSec}s)`,
+      };
+    }
   }
 
   // Max iterations exhausted

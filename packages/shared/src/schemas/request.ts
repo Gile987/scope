@@ -37,7 +37,7 @@ export const CriterionResultSchema = z
 export const ConversationTurnSchema = z
   .object({
     iteration: z.number(),
-    codingAgentResponse: z.string(),
+    codingAgentResponse: z.string().optional(),
     judgeFeedback: z.string(),
     snapshotUrl: z.string(),
     passed: z.boolean(),
@@ -55,9 +55,13 @@ export const ConversationTurnSchema = z
       response: z.string().optional(),
       timestamp: z.string().optional(),
     })).optional(),
+    toolCallsUrl: z.string().optional(),
+    toolCallCount: z.number().optional(),
     aiCallCount: z.number().optional(),
     rawChatUrl: z.string().optional(),
     rawChatFormat: z.string().optional(),
+    chatResultUrl: z.string().optional(),
+    chatResultFormat: z.string().optional(),
   })
   .openapi("ConversationTurn");
 
@@ -193,7 +197,15 @@ export const ListRequestsQuerySchema = z
     limit: z.coerce.number().int().min(1).max(100).optional(),
     after: z.string().optional(),
     before: z.string().optional(),
+    last: z.enum(["true", "false"]).optional(),
     sortBy: z.enum(["createdAt", "priority"]).optional(),
+    // Iteration-count filters. `turns` matches the actual number of turns
+    // executed (size of run.turns); `maxIterations` matches the configured
+    // upper bound. Each pairs with an operator (default "eq").
+    turns: z.coerce.number().int().min(0).optional(),
+    turnsOp: z.enum(["eq", "gte", "lte"]).optional(),
+    maxIterations: z.coerce.number().int().min(0).optional(),
+    maxIterationsOp: z.enum(["eq", "gte", "lte"]).optional(),
   })
   .openapi("ListRequestsQuery");
 

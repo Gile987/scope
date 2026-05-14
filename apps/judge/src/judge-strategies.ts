@@ -307,10 +307,11 @@ export class BundledStrategy extends JudgeStrategy {
     const historySection =
       conversationHistory.length > 0
         ? `\n## Previous Iterations\n${conversationHistory
-            .map(
-              (t) =>
-                `### Iteration ${t.iteration}\n- **Coding agent response**: ${t.codingAgentResponse.substring(0, 500)}${t.codingAgentResponse.length > 500 ? "..." : ""}\n- **Your previous feedback**: ${t.judgeFeedback.substring(0, 500)}${t.judgeFeedback.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`
-            )
+            .map((t) => {
+              const car = t.codingAgentResponse ?? "(no response captured)";
+              const fb = t.judgeFeedback;
+              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 500)}${car.length > 500 ? "..." : ""}\n- **Your previous feedback**: ${fb.substring(0, 500)}${fb.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`;
+            })
             .join("\n\n")}`
         : "";
 
@@ -562,10 +563,10 @@ export class IndependentStrategy extends JudgeStrategy {
     const historySection =
       conversationHistory.length > 0
         ? `\n## Previous Iterations (for context)\n${conversationHistory
-            .map(
-              (t) =>
-                `### Iteration ${t.iteration}\n- **Coding agent response**: ${t.codingAgentResponse.substring(0, 300)}${t.codingAgentResponse.length > 300 ? "..." : ""}\n- **Passed**: ${t.passed}`
-            )
+            .map((t) => {
+              const car = t.codingAgentResponse ?? "(no response captured)";
+              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 300)}${car.length > 300 ? "..." : ""}\n- **Passed**: ${t.passed}`;
+            })
             .join("\n\n")}`
         : "";
 

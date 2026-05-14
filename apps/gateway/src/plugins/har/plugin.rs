@@ -13,11 +13,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum::extract::{Path as AxumPath, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use parking_lot::RwLock;
+use serde::Deserialize;
 use tracing::debug;
 
 use crate::plugin::{HttpExchange, ProxyPlugin, SessionId};
@@ -30,7 +31,6 @@ struct HarSession {
     redact: bool,
     finalized: bool,
     /// Set to true when the writer reports a hard failure (blob unreachable).
-    /// The next `on_request` call will return an error, failing the run visibly.
     failed: bool,
 }
 
@@ -41,12 +41,16 @@ struct HarInner {
 }
 
 impl HarInner {
-    async fn build_har_for_session(&self, session_id: &SessionId) -> Option<super::types::Har> {
+    async fn build_har_for_session(
+        &self,
+        session_id: &SessionId,
+        iteration: u32,
+    ) -> Option<super::types::Har> {
         {
             let sessions = self.sessions.read();
             sessions.get(session_id)?;
         }
-        let mut entries = self.writer.read_entries_async(session_id).await;
+        let mut entries = self.writer.read_entries_async(session_id, iteration).await;
         // Sort by startedDateTime so concurrent appends appear chronologically.
         entries.sort_by(|a, b| a.started_date_time.cmp(&b.started_date_time));
         Some(writer::build_har(entries))
@@ -59,7 +63,7 @@ pub struct HarPlugin {
 }
 
 impl HarPlugin {
-    /// Create using a `LocalWriter` (default — no blob config required).
+    /// Create using a `LocalWriter` (local dev / tests).
     pub fn new(har_dir: std::path::PathBuf) -> Self {
         let writer = Arc::new(LocalWriter::new(har_dir));
         Self {
@@ -70,7 +74,7 @@ impl HarPlugin {
         }
     }
 
-    /// Create using a `BlobWriter`.
+    /// Create using a `BlobWriter` (production).
     pub fn new_with_blob(
         container_client: azure_storage_blobs::prelude::ContainerClient,
         append_timeout: std::time::Duration,
@@ -105,13 +109,41 @@ impl ProxyPlugin for HarPlugin {
             HarSession {
                 redact,
                 finalized: false,
-                failed: false,
+                failed: self.inner.writer.is_failed(session_id),
             },
         );
         debug!("HAR plugin: session started for {}", session_id);
     }
 
-    async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange) {
+    async fn on_iteration_rotate(
+        &self,
+        session_id: &SessionId,
+        next_iteration: u32,
+    ) -> anyhow::Result<()> {
+        self.inner
+            .writer
+            .init_iteration(session_id, next_iteration)
+            .await;
+
+        let failed = self.inner.writer.is_failed(session_id);
+        {
+            let mut sessions = self.inner.sessions.write();
+            if let Some(s) = sessions.get_mut(session_id) {
+                s.failed = failed;
+            }
+        }
+
+        if failed {
+            anyhow::bail!(
+                "HAR storage failure while preparing iteration {} for session {}",
+                next_iteration,
+                session_id
+            );
+        }
+        Ok(())
+    }
+
+    async fn on_exchange(&self, session_id: &SessionId, exchange: &HttpExchange, iteration: u32) {
         let redact = {
             let sessions = self.inner.sessions.read();
             match sessions.get(session_id) {
@@ -121,7 +153,10 @@ impl ProxyPlugin for HarPlugin {
         };
 
         let entry = super::writer::exchange_to_har_entry(exchange, redact);
-        self.inner.writer.append(session_id, &entry).await;
+        self.inner
+            .writer
+            .append(session_id, iteration, &entry)
+            .await;
 
         // After the append, propagate a hard failure into the session so the
         // next on_request call can reject the run.
@@ -166,6 +201,7 @@ impl ProxyPlugin for HarPlugin {
             sessions.remove(session_id);
         }
         self.inner.writer.close_session(session_id);
+
         debug!("HAR plugin: session cleared for {}", session_id);
     }
 
@@ -179,18 +215,29 @@ impl ProxyPlugin for HarPlugin {
     }
 }
 
-/// GET /api/v1/sessions/:id/har — build and return HAR, with degraded indicator.
+/// Query parameters for `GET /har`.
+#[derive(Deserialize)]
+struct HarQuery {
+    /// Which iteration to return (required).
+    iteration: u32,
+}
+
+/// GET /api/v1/sessions/:id/har?iteration=N — build and return HAR for an iteration.
 async fn get_har(
     AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<HarQuery>,
     State(inner): State<Arc<HarInner>>,
 ) -> impl IntoResponse {
-    match inner.build_har_for_session(&session_id).await {
+    match inner
+        .build_har_for_session(&session_id, query.iteration)
+        .await
+    {
         Some(har) => {
             let failed = inner.writer.is_failed(&session_id);
             let count = har.log.entries.len();
             debug!(
-                "HAR plugin: returning {} entries for session {} (failed={})",
-                count, session_id, failed
+                "HAR plugin: returning {} entries for session {} iter {} (failed={})",
+                count, session_id, query.iteration, failed
             );
             let body = serde_json::to_vec(&har).unwrap_or_default();
             let mut resp = axum::response::Response::builder()
@@ -245,18 +292,18 @@ mod tests {
         let sid = "10.0.0.1".to_string();
 
         plugin.on_session_start(&sid, &serde_json::json!({})).await;
-        plugin.on_exchange(&sid, &make_exchange()).await;
+        plugin.on_exchange(&sid, &make_exchange(), 1).await;
 
-        let har = plugin.inner.build_har_for_session(&sid).await.unwrap();
+        let har = plugin.inner.build_har_for_session(&sid, 1).await.unwrap();
         assert_eq!(har.log.entries.len(), 1);
 
         plugin.on_session_stop(&sid).await;
 
-        let har = plugin.inner.build_har_for_session(&sid).await.unwrap();
+        let har = plugin.inner.build_har_for_session(&sid, 1).await.unwrap();
         assert_eq!(har.log.entries.len(), 1);
 
         plugin.on_session_clear(&sid).await;
-        assert!(plugin.inner.build_har_for_session(&sid).await.is_none());
+        assert!(plugin.inner.build_har_for_session(&sid, 1).await.is_none());
     }
 
     #[tokio::test]
@@ -285,10 +332,10 @@ mod tests {
             wait_ms: 5,
             elapsed_ms: 10,
         };
-        plugin.on_exchange(&sid, &exchange).await;
+        plugin.on_exchange(&sid, &exchange, 1).await;
         plugin.on_session_stop(&sid).await;
 
-        let har = plugin.inner.build_har_for_session(&sid).await.unwrap();
+        let har = plugin.inner.build_har_for_session(&sid, 1).await.unwrap();
         let auth = har.log.entries[0]
             .request
             .headers
@@ -326,10 +373,10 @@ mod tests {
             wait_ms: 5,
             elapsed_ms: 10,
         };
-        plugin.on_exchange(&sid, &exchange).await;
+        plugin.on_exchange(&sid, &exchange, 1).await;
         plugin.on_session_stop(&sid).await;
 
-        let har = plugin.inner.build_har_for_session(&sid).await.unwrap();
+        let har = plugin.inner.build_har_for_session(&sid, 1).await.unwrap();
         let auth = har.log.entries[0]
             .request
             .headers
@@ -346,14 +393,14 @@ mod tests {
         let sid = "10.0.0.1".to_string();
 
         plugin.on_session_start(&sid, &serde_json::json!({})).await;
-        plugin.on_exchange(&sid, &make_exchange()).await;
+        plugin.on_exchange(&sid, &make_exchange(), 1).await;
         plugin.on_session_stop(&sid).await;
 
         // Restart — writer.init_session clears previous JSONL.
         plugin.on_session_start(&sid, &serde_json::json!({})).await;
         plugin.on_session_stop(&sid).await;
 
-        let har = plugin.inner.build_har_for_session(&sid).await.unwrap();
+        let har = plugin.inner.build_har_for_session(&sid, 1).await.unwrap();
         assert_eq!(har.log.entries.len(), 0);
     }
 
@@ -364,5 +411,29 @@ mod tests {
         let sid = "10.0.0.1".to_string();
         plugin.on_session_start(&sid, &serde_json::json!({})).await;
         assert!(!plugin.inner.writer.is_failed(&sid));
+    }
+
+    #[tokio::test]
+    async fn on_exchange_uses_iteration_parameter() {
+        let tmp = TempDir::new().unwrap();
+        let plugin = HarPlugin::new(tmp.path().to_path_buf());
+        let sid = "10.0.0.1".to_string();
+
+        plugin.on_session_start(&sid, &serde_json::json!({})).await;
+
+        // Exchange lands in iter-1.
+        plugin.on_exchange(&sid, &make_exchange(), 1).await;
+        let har1 = plugin.inner.build_har_for_session(&sid, 1).await.unwrap();
+        assert_eq!(har1.log.entries.len(), 1);
+
+        // Init iteration 2 on the writer and send exchange with iteration=2.
+        plugin.inner.writer.init_iteration(&sid, 2).await;
+        plugin.on_exchange(&sid, &make_exchange(), 2).await;
+
+        let har2 = plugin.inner.build_har_for_session(&sid, 2).await.unwrap();
+        assert_eq!(har2.log.entries.len(), 1);
+        // iter-1 still has 1.
+        let har1_after = plugin.inner.build_har_for_session(&sid, 1).await.unwrap();
+        assert_eq!(har1_after.log.entries.len(), 1);
     }
 }

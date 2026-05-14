@@ -15,7 +15,7 @@ async fn connect_without_session_passthrough() {
 
     // Verify no HAR data (no session was ever started)
     let resp = api_client
-        .get(gw.api_url("/api/v1/sessions/nonexistent/har"))
+        .get(gw.api_url("/api/v1/sessions/nonexistent/har?iteration=1"))
         .send()
         .await
         .unwrap();
@@ -50,7 +50,7 @@ async fn nonmatching_url_passthrough() {
 
     // HAR should be empty — no matching URLs were intercepted
     let resp = api_client
-        .get(gw.api_url(&format!("/api/v1/sessions/{}/har", session_id)))
+        .get(gw.api_url(&format!("/api/v1/sessions/{}/har?iteration=1", session_id)))
         .send()
         .await
         .unwrap();

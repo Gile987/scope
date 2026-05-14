@@ -29,7 +29,7 @@ export interface ToolCall {
 
 export interface ConversationTurn {
   iteration: number;
-  codingAgentResponse: string;
+  codingAgentResponse?: string;
   judgeFeedback: string;
   snapshotUrl: string;
   passed: boolean;
@@ -41,6 +41,12 @@ export interface ConversationTurn {
   startedAt?: string;
   durationMs?: number;
   toolCalls?: ToolCall[];
+  /** Blob storage URL to the per-iteration tool-calls JSONL append blob.
+   *  Replaces the inline `toolCalls` array for new runs. */
+  toolCallsUrl?: string;
+  /** Number of tool calls in `toolCallsUrl` — used for counts/aggregates
+   *  without fetching the JSONL blob. */
+  toolCallCount?: number;
   aiCallCount?: number;
 }
 
@@ -159,6 +165,9 @@ export const OUTCOME_LIST: RunOutcome[] = [
   "failed",
   "finished",
 ];
+
+/** Comparison operator for iteration-count filters. */
+export type IterationOp = "eq" | "gte" | "lte";
 
 // Criteria types
 export interface CriteriaConfig {

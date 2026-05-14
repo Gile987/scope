@@ -29,29 +29,37 @@ use super::types::HarEntry;
 // ---------------------------------------------------------------------------
 
 /// Backend-agnostic interface for per-session HAR entry storage.
+///
+/// Storage is organised by session and iteration:
+///   `{root}/{session_id}/iter-{N}.jsonl`
+///
+/// A new iteration file is created when `init_iteration` is called.
 #[async_trait]
 pub trait HarWriter: Send + Sync {
-    /// Serialize `entry` to JSONL and append it to the session's storage.
-    async fn append(&self, session_id: &str, entry: &HarEntry);
+    /// Serialize `entry` to JSONL and append it to the current iteration file.
+    async fn append(&self, session_id: &str, iteration: u32, entry: &HarEntry);
 
-    /// Read all entries written so far for `session_id`.
-    fn read_entries(&self, session_id: &str) -> Vec<HarEntry>;
+    /// Read all entries for a specific iteration.
+    fn read_entries(&self, session_id: &str, iteration: u32) -> Vec<HarEntry>;
 
     /// Async read variant — used by BlobWriter. Default delegates to `read_entries`.
-    async fn read_entries_async(&self, session_id: &str) -> Vec<HarEntry> {
-        self.read_entries(session_id)
+    async fn read_entries_async(&self, session_id: &str, iteration: u32) -> Vec<HarEntry> {
+        self.read_entries(session_id, iteration)
     }
 
     /// Returns `true` if a blob append permanently failed after all retries /
     /// timeout — the session is hard-failed and no further writes will succeed.
     fn is_failed(&self, session_id: &str) -> bool;
 
-    /// Called when a session starts. Implementations should initialise any
-    /// per-session state (create the file / append blob).
+    /// Called when a session starts. Creates the session directory and the
+    /// initial iteration file (iter-1).
     async fn init_session(&self, session_id: &str);
 
+    /// Called when a new iteration begins. Creates the iteration file.
+    async fn init_iteration(&self, session_id: &str, iteration: u32);
+
     /// Called when a session is stopped or cleared. Implementations should
-    /// release per-session resources (close file handles, drop state).
+    /// release per-session resources (remove directory, drop state).
     fn close_session(&self, session_id: &str);
 }
 
@@ -61,8 +69,7 @@ pub trait HarWriter: Send + Sync {
 
 /// Per-session state for the local writer.
 struct LocalSession {
-    jsonl_path: PathBuf,
-    finalized: bool,
+    session_dir: PathBuf,
 }
 
 /// Writes HAR entries as JSONL lines to local disk using `tokio::fs`.
@@ -79,47 +86,52 @@ impl LocalWriter {
         }
     }
 
-    fn jsonl_path(&self, session_id: &str) -> PathBuf {
-        self.har_dir
-            .join(format!(".session-{}.jsonl", session_id.replace(':', "_")))
+    fn session_dir(&self, session_id: &str) -> PathBuf {
+        self.har_dir.join(session_id.replace(':', "_"))
+    }
+
+    fn iter_path(&self, session_id: &str, iteration: u32) -> PathBuf {
+        self.session_dir(session_id)
+            .join(format!("iter-{}.jsonl", iteration))
     }
 }
 
 #[async_trait]
 impl HarWriter for LocalWriter {
     async fn init_session(&self, session_id: &str) {
-        let path = self.jsonl_path(session_id);
+        let session_dir = self.session_dir(session_id);
 
-        // Clean up any leftover JSONL from a prior crash.
-        let _ = tokio::fs::remove_file(&path).await;
+        // Clean up any leftover directory from a prior crash.
+        let _ = tokio::fs::remove_dir_all(&session_dir).await;
+        let _ = tokio::fs::create_dir_all(&session_dir).await;
 
-        if let Some(parent) = path.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
-        }
-
+        // Create iter-1 file.
+        let path = self.iter_path(session_id, 1);
         if let Err(e) = tokio::fs::File::create(&path).await {
             warn!("HAR local: failed to create JSONL {:?}: {}", path, e);
         }
 
         let mut sessions = self.sessions.write();
-        sessions.insert(
-            session_id.to_string(),
-            LocalSession {
-                jsonl_path: path,
-                finalized: false,
-            },
-        );
+        sessions.insert(session_id.to_string(), LocalSession { session_dir });
         debug!("HAR local: session initialised for {}", session_id);
     }
 
-    async fn append(&self, session_id: &str, entry: &HarEntry) {
-        let path = {
-            let sessions = self.sessions.read();
-            match sessions.get(session_id) {
-                Some(s) if !s.finalized => s.jsonl_path.clone(),
-                _ => return,
-            }
-        };
+    async fn init_iteration(&self, session_id: &str, iteration: u32) {
+        let path = self.iter_path(session_id, iteration);
+        if let Err(e) = tokio::fs::File::create(&path).await {
+            warn!(
+                "HAR local: failed to create iteration file {:?}: {}",
+                path, e
+            );
+        }
+        debug!(
+            "HAR local: iteration {} initialised for {}",
+            iteration, session_id
+        );
+    }
+
+    async fn append(&self, session_id: &str, iteration: u32, entry: &HarEntry) {
+        let path = self.iter_path(session_id, iteration);
 
         let Ok(json) = serde_json::to_string(entry) else {
             return;
@@ -140,12 +152,9 @@ impl HarWriter for LocalWriter {
         }
     }
 
-    fn read_entries(&self, session_id: &str) -> Vec<HarEntry> {
-        let sessions = self.sessions.read();
-        let Some(session) = sessions.get(session_id) else {
-            return Vec::new();
-        };
-        read_jsonl_entries_sync(&session.jsonl_path)
+    fn read_entries(&self, session_id: &str, iteration: u32) -> Vec<HarEntry> {
+        let path = self.iter_path(session_id, iteration);
+        read_jsonl_entries_sync(&path)
     }
 
     fn is_failed(&self, _session_id: &str) -> bool {
@@ -153,8 +162,14 @@ impl HarWriter for LocalWriter {
     }
 
     fn close_session(&self, session_id: &str) {
-        let mut sessions = self.sessions.write();
-        sessions.remove(session_id);
+        let session_dir = {
+            let mut sessions = self.sessions.write();
+            sessions.remove(session_id).map(|s| s.session_dir)
+        };
+        if let Some(dir) = session_dir {
+            // Best-effort cleanup — don't block on async in a sync context.
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 }
 
@@ -180,12 +195,9 @@ pub fn read_jsonl_entries_sync(path: &Path) -> Vec<HarEntry> {
 
 /// Per-session state for the blob writer.
 struct BlobSession {
-    /// Name of the append blob (e.g. `sessions/{sessionId}.jsonl`).
-    blob_name: String,
     /// Set to true once an append permanently fails after all retries / timeout.
     /// Once set, the HAR plugin will reject the next proxied request with a 502.
     failed: Arc<AtomicBool>,
-    finalized: bool,
 }
 
 /// Writes HAR entries as JSONL lines to an Azure append blob.
@@ -208,8 +220,8 @@ impl BlobWriter {
         }
     }
 
-    fn blob_name(session_id: &str) -> String {
-        format!("sessions/{}.jsonl", session_id)
+    fn blob_name(session_id: &str, iteration: u32) -> String {
+        format!("sessions/{}/iter-{}.jsonl", session_id, iteration)
     }
 
     /// Append `line` to the blob with exponential-backoff retries, bounded by
@@ -245,10 +257,21 @@ impl BlobWriter {
 #[async_trait]
 impl HarWriter for BlobWriter {
     async fn init_session(&self, session_id: &str) {
-        let blob_name = Self::blob_name(session_id);
-        let blob_client = self.container_client.blob_client(blob_name.clone());
+        let failed = Arc::new(AtomicBool::new(false));
+        {
+            let mut sessions = self.sessions.write();
+            sessions.insert(
+                session_id.to_string(),
+                BlobSession {
+                    failed: failed.clone(),
+                },
+            );
+        }
 
-        // Create the append blob. Idempotent — ignore "already exists" errors.
+        let blob_name = Self::blob_name(session_id, 1);
+        let blob_client = self.container_client.blob_client(blob_name);
+
+        // Create the append blob for iter-1. Idempotent — ignore "already exists" errors.
         match blob_client.put_append_blob().await {
             Ok(_) => {}
             Err(e) if e.to_string().contains("BlobAlreadyExists") => {}
@@ -257,26 +280,45 @@ impl HarWriter for BlobWriter {
                     "HAR blob: failed to create append blob for session {}: {}",
                     session_id, e
                 );
+                failed.store(true, Ordering::Relaxed);
             }
         }
-
-        let mut sessions = self.sessions.write();
-        sessions.insert(
-            session_id.to_string(),
-            BlobSession {
-                blob_name,
-                failed: Arc::new(AtomicBool::new(false)),
-                finalized: false,
-            },
-        );
         debug!("HAR blob: session initialised for {}", session_id);
     }
 
-    async fn append(&self, session_id: &str, entry: &HarEntry) {
-        let (blob_name, failed) = {
+    async fn init_iteration(&self, session_id: &str, iteration: u32) {
+        let failed = {
+            let sessions = self.sessions.read();
+            sessions.get(session_id).map(|s| s.failed.clone())
+        };
+
+        let blob_name = Self::blob_name(session_id, iteration);
+        let blob_client = self.container_client.blob_client(blob_name);
+
+        match blob_client.put_append_blob().await {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("BlobAlreadyExists") => {}
+            Err(e) => {
+                warn!(
+                    "HAR blob: failed to create append blob for session {} iter {}: {}",
+                    session_id, iteration, e
+                );
+                if let Some(failed) = failed {
+                    failed.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+        debug!(
+            "HAR blob: iteration {} initialised for {}",
+            iteration, session_id
+        );
+    }
+
+    async fn append(&self, session_id: &str, iteration: u32, entry: &HarEntry) {
+        let failed = {
             let sessions = self.sessions.read();
             match sessions.get(session_id) {
-                Some(s) if !s.finalized => (s.blob_name.clone(), s.failed.clone()),
+                Some(s) => s.failed.clone(),
                 _ => return,
             }
         };
@@ -291,6 +333,7 @@ impl HarWriter for BlobWriter {
         };
         let line = format!("{}\n", json);
 
+        let blob_name = Self::blob_name(session_id, iteration);
         let blob_client = self.container_client.blob_client(blob_name);
         if !Self::append_with_retry(&blob_client, line, self.append_timeout).await {
             warn!(
@@ -301,13 +344,13 @@ impl HarWriter for BlobWriter {
         }
     }
 
-    fn read_entries(&self, _session_id: &str) -> Vec<HarEntry> {
+    fn read_entries(&self, _session_id: &str, _iteration: u32) -> Vec<HarEntry> {
         // BlobWriter overrides read_entries_async instead.
         Vec::new()
     }
 
-    async fn read_entries_async(&self, session_id: &str) -> Vec<HarEntry> {
-        self.read_blob_entries(session_id).await
+    async fn read_entries_async(&self, session_id: &str, iteration: u32) -> Vec<HarEntry> {
+        self.read_blob_entries(session_id, iteration).await
     }
 
     fn is_failed(&self, session_id: &str) -> bool {
@@ -325,10 +368,10 @@ impl HarWriter for BlobWriter {
 }
 
 impl BlobWriter {
-    /// Read all JSONL entries for `session_id` from the append blob.
+    /// Read all JSONL entries for `session_id` iteration `iteration` from the append blob.
     /// Returns empty vec if the blob doesn't exist or can't be read.
-    pub async fn read_blob_entries(&self, session_id: &str) -> Vec<HarEntry> {
-        let blob_name = Self::blob_name(session_id);
+    pub async fn read_blob_entries(&self, session_id: &str, iteration: u32) -> Vec<HarEntry> {
+        let blob_name = Self::blob_name(session_id, iteration);
         let blob_client = self.container_client.blob_client(blob_name);
 
         let content = match blob_client.get_content().await {
@@ -419,14 +462,93 @@ mod tests {
             },
         };
 
-        writer.append("s2", &entry).await;
+        writer.append("s2", 1, &entry).await;
 
-        let entries = writer.read_entries("s2");
+        let entries = writer.read_entries("s2", 1);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].started_date_time, "2024-01-01T00:00:00Z");
 
+        // Iteration 2 should be empty before init.
+        assert!(writer.read_entries("s2", 2).is_empty());
+
         writer.close_session("s2");
-        assert!(writer.read_entries("s2").is_empty());
+        assert!(writer.read_entries("s2", 1).is_empty());
+    }
+
+    #[tokio::test]
+    async fn local_writer_multi_iteration() {
+        let dir = tempdir().unwrap();
+        let writer = LocalWriter::new(dir.path().to_path_buf());
+        writer.init_session("s-multi").await;
+
+        let entry = HarEntry {
+            started_date_time: "2024-01-01T00:00:00Z".to_string(),
+            time: 1.0,
+            request: crate::plugins::har::types::HarRequest {
+                method: "GET".to_string(),
+                url: "https://example.com/1".to_string(),
+                http_version: "HTTP/1.1".to_string(),
+                cookies: vec![],
+                headers: vec![],
+                query_string: vec![],
+                headers_size: -1,
+                body_size: 0,
+                post_data: None,
+            },
+            response: crate::plugins::har::types::HarResponse {
+                status: 200,
+                status_text: "OK".to_string(),
+                http_version: "HTTP/1.1".to_string(),
+                cookies: vec![],
+                headers: vec![],
+                content: crate::plugins::har::types::HarContent {
+                    size: 0,
+                    mime_type: "text/plain".to_string(),
+                    text: None,
+                    encoding: None,
+                },
+                headers_size: -1,
+                body_size: 0,
+                redirect_url: String::new(),
+            },
+            cache: crate::plugins::har::types::HarCache::default(),
+            timings: crate::plugins::har::types::HarTimings {
+                blocked: -1.0,
+                dns: -1.0,
+                connect: -1.0,
+                send: 0.0,
+                wait: 1.0,
+                receive: 0.0,
+                ssl: -1.0,
+            },
+        };
+
+        // Write to iter 1.
+        writer.append("s-multi", 1, &entry).await;
+        assert_eq!(writer.read_entries("s-multi", 1).len(), 1);
+
+        // Start iter 2 and write to it.
+        writer.init_iteration("s-multi", 2).await;
+        let mut entry2 = entry.clone();
+        entry2.request.url = "https://example.com/2".to_string();
+        writer.append("s-multi", 2, &entry2).await;
+
+        // Both iterations have independent entries.
+        assert_eq!(writer.read_entries("s-multi", 1).len(), 1);
+        assert_eq!(writer.read_entries("s-multi", 2).len(), 1);
+        assert_eq!(
+            writer.read_entries("s-multi", 1)[0].request.url,
+            "https://example.com/1"
+        );
+        assert_eq!(
+            writer.read_entries("s-multi", 2)[0].request.url,
+            "https://example.com/2"
+        );
+
+        // close_session removes everything.
+        writer.close_session("s-multi");
+        assert!(writer.read_entries("s-multi", 1).is_empty());
+        assert!(writer.read_entries("s-multi", 2).is_empty());
     }
 
     // -----------------------------------------------------------------------
@@ -457,9 +579,7 @@ mod tests {
         writer.sessions.write().insert(
             "s3".to_string(),
             BlobSession {
-                blob_name: "sessions/s3.jsonl".to_string(),
                 failed: failed_flag,
-                finalized: false,
             },
         );
 
@@ -473,9 +593,7 @@ mod tests {
         writer.sessions.write().insert(
             "s4".to_string(),
             BlobSession {
-                blob_name: "sessions/s4.jsonl".to_string(),
                 failed: Arc::new(AtomicBool::new(false)),
-                finalized: false,
             },
         );
 
@@ -489,9 +607,7 @@ mod tests {
         writer.sessions.write().insert(
             "s5".to_string(),
             BlobSession {
-                blob_name: "sessions/s5.jsonl".to_string(),
                 failed: Arc::new(AtomicBool::new(false)),
-                finalized: false,
             },
         );
 

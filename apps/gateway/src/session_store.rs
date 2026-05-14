@@ -10,10 +10,9 @@
 //! One Redis key is maintained per session:
 //!   `gateway:session:{sessionId}` → full session record JSON
 //!
-//! The key is set with a TTL derived from
-//! `pluginSettings.other_plugin.max_session_duration_secs` (default: 3600s).
-//! The TTL is set once at session start and never refreshed — it mirrors the
-//! absolute max session duration enforced by the other_plugin plugin.
+//! The key is set with a TTL derived from the request body's
+//! `maxSessionDurationSecs` field (default: 3600s).
+//! The TTL is set once at session start and never refreshed.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -139,12 +138,12 @@ impl SessionPersistence for SessionStore {
 }
 
 /// Extract session TTL from plugin settings.
-/// Uses `pluginSettings.other_plugin.max_session_duration_secs` when present.
-/// Falls back to 3600s (1 hour) matching the other_plugin plugin default.
+///
+/// Reads `_maxSessionDurationSecs` (injected from the request body's top-level
+/// `maxSessionDurationSecs` field). Falls back to 3600s (1 hour).
 pub fn session_ttl(plugin_settings: &HashMap<String, serde_json::Value>) -> Duration {
     plugin_settings
-        .get("other_plugin")
-        .and_then(|v| v.get("max_session_duration_secs"))
+        .get("_maxSessionDurationSecs")
         .and_then(|v| v.as_u64())
         .map(Duration::from_secs)
         .unwrap_or(Duration::from_secs(3600))
@@ -176,22 +175,16 @@ mod tests {
     }
 
     #[test]
-    fn session_ttl_reads_max_session_duration_secs() {
+    fn session_ttl_reads_top_level_max_session_duration() {
         let mut settings = HashMap::new();
-        settings.insert(
-            "other_plugin".to_string(),
-            json!({"max_session_duration_secs": 7200}),
-        );
-        assert_eq!(session_ttl(&settings), Duration::from_secs(7200));
+        settings.insert("_maxSessionDurationSecs".to_string(), json!(5400));
+        assert_eq!(session_ttl(&settings), Duration::from_secs(5400));
     }
 
     #[test]
     fn session_ttl_ignores_non_u64_value() {
         let mut settings = HashMap::new();
-        settings.insert(
-            "other_plugin".to_string(),
-            json!({"max_session_duration_secs": "not_a_number"}),
-        );
+        settings.insert("_maxSessionDurationSecs".to_string(), json!("not_a_number"));
         assert_eq!(session_ttl(&settings), Duration::from_secs(3600));
     }
 }

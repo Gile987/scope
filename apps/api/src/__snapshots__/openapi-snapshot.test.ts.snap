@@ -298,6 +298,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "aiCallCount": {
             "type": "number",
           },
+          "chatResultFormat": {
+            "type": "string",
+          },
+          "chatResultUrl": {
+            "type": "string",
+          },
           "codingAgentResponse": {
             "type": "string",
           },
@@ -348,6 +354,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "tokenUsage": {
             "$ref": "#/components/schemas/TokenUsage",
           },
+          "toolCallCount": {
+            "type": "number",
+          },
           "toolCalls": {
             "items": {
               "properties": {
@@ -377,6 +386,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "toolCallsUrl": {
+            "type": "string",
+          },
           "videoUrls": {
             "items": {
               "type": "string",
@@ -386,7 +398,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "iteration",
-          "codingAgentResponse",
           "judgeFeedback",
           "snapshotUrl",
           "passed",
@@ -6457,12 +6468,74 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           {
             "in": "query",
+            "name": "last",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
             "name": "sortBy",
             "required": false,
             "schema": {
               "enum": [
                 "createdAt",
                 "priority",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "turns",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "turnsOp",
+            "required": false,
+            "schema": {
+              "enum": [
+                "eq",
+                "gte",
+                "lte",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "maxIterations",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "maxIterationsOp",
+            "required": false,
+            "schema": {
+              "enum": [
+                "eq",
+                "gte",
+                "lte",
               ],
               "type": "string",
             },
@@ -7397,6 +7470,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/{id}/tool-calls": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "JSONL stream — one ToolCall per line",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download per-iteration tool-calls JSONL",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/{id}/video": {
       "get": {
         "parameters": [
@@ -7431,6 +7530,22 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Import run archive",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/runs/upload-batch": {
+      "post": {
+        "responses": {
+          "207": {
+            "description": "Multi-status: 201 if all runs imported, 400 if none imported, 207 if partial",
+          },
+          "400": {
+            "description": "No archive uploaded, empty archive, or all runs failed",
+          },
+        },
+        "summary": "Import batch run archive",
         "tags": [
           "Requests",
         ],
