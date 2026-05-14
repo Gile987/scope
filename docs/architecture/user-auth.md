@@ -382,15 +382,23 @@ Per CLI ↔ Portal parity in [AGENTS.md](../../AGENTS.md):
 
 ### 12. Ingress (TLS)
 
-GitHub App callback URLs require HTTPS. Today both API and Portal are plain-HTTP `LoadBalancer` Services. Switch to **Azure App Routing** (NGINX Ingress + Let's Encrypt) on AKS:
+GitHub App callback URLs require HTTPS. Today both API and Portal are plain-HTTP `LoadBalancer` Services. An HTTPS-terminating ingress is a hard prerequisite for this design, but the *specific* ingress technology is **not decided in this document** — it has its own tradeoffs and is tracked separately. Three options are on the table:
 
-- One-time `az aks approuting enable` per cluster.
-- Drop both `LoadBalancer` Services to `ClusterIP`.
-- New `Ingress` + `ClusterIssuer` in [deploy/base](../../deploy/base).
-- Path rules: `/api/*`, `/health`, `/ready`, `/about`, `/openapi.json`, `/api-docs` → api; `/*` → portal.
-- SSE annotations: `proxy-buffering: off`, `proxy-read-timeout: 3600`, `proxy-send-timeout: 3600`.
-- Slim [apps/portal/nginx.conf](../../apps/portal/nginx.conf) to SPA fallback only.
-- DNS cutover: single-step for int, zero-downtime for prod.
+| Option | Status | Note |
+|---|---|---|
+| **A. Azure App Routing add-on (NGINX)** | GA, **deprecated** | Ingress NGINX upstream retired March 2026; App Routing NGINX sunset Nov 2026. Forces a second migration in ~6 months. |
+| **B. Azure App Routing Gateway API** (`approuting-istio`) | **Preview** | Adds Istio control plane to the cluster. Managed TLS via Azure DNS / Key Vault not yet supported. |
+| **C. Application Gateway for Containers (AGC)** | **GA** | Azure-managed L7. Supports both Ingress v1 and Gateway API. No NGINX/Istio in cluster. No scheduled deprecation. |
+
+Whatever option is chosen, the auth design needs from it:
+
+- HTTPS on a stable hostname per env (`scope-int.…`, `scope.…`).
+- Path routing: `/api/*`, `/health`, `/ready`, `/about`, `/openapi.json`, `/api-docs` → api; `/*` → portal.
+- SSE-friendly buffering/timeouts (no response buffering, ≥1h read/send timeout).
+- Both Services switched to `ClusterIP` (no more public `LoadBalancer`).
+- Slimmed-down [apps/portal/nginx.conf](../../apps/portal/nginx.conf) (SPA fallback only — no `/api/*` proxy).
+
+The ingress decision must land before Phase 1 of the rollout but does not block writing the rest of the design.
 
 ### 13. Secrets
 
@@ -463,7 +471,7 @@ Each phase is a separate worktree + PR off `main`.
 | # | Branch | Description |
 |---|---|---|
 | 0 | `docs/user-auth-design` | This document. |
-| 1 | `infra/app-routing-ingress` | Enable App Routing on AKS, add `Ingress` + `ClusterIssuer`, switch API/Portal Services to `ClusterIP`, slim [apps/portal/nginx.conf](../../apps/portal/nginx.conf), DNS cutover for int. **HTTPS only — no auth yet.** |
+| 1 | `infra/https-ingress` | Stand up an HTTPS-terminating ingress (option per [§ 12 Ingress (TLS)](#12-ingress-tls)), switch API/Portal Services to `ClusterIP`, slim [apps/portal/nginx.conf](../../apps/portal/nginx.conf), DNS cutover for int. **HTTPS only — no auth yet.** |
 | 2 | `feat/api-user-model` | `User` schema (`identities[]`, `kind`) + `ApiToken` schema in [packages/shared](../../packages/shared), Mongoose models, DB migration + indexes, bootstrap admin seeding on API startup. |
 | 3 | `feat/api-github-auth` | `auth/providers/github/` + `IdentityProvider` interface, session-cookie middleware branch, OAuth endpoints, encrypted cookie, refresh-on-expiry, role helper, route-policy table, `/api/auth/me`, `AUTH_DISABLED` bypass. Still gated behind `AUTH_DISABLED=true` in deployed envs. |
 | 3b | `feat/api-cli-tokens` | Scope-token middleware branch, `/api/auth/cli/{request,poll,approve}`, `/api/tokens/*` self-service, hash storage, revocation on user disable. |
@@ -481,7 +489,7 @@ Dependency order: **0 → 1 → 2 → 3 → 3b → 4 → (5a ∥ 5b) → 6**.
 1. **Default for new logins** — auto-`active` (low friction) or `pending` (safer)? Proposed: `active` for int, `pending` for prod.
 2. **Default role** — `submitter` (matches today's open semantics) or `viewer` (stricter)? Proposed: `submitter`.
 3. **GitHub App ownership** — who owns the App registration in `growth-ecosystems`? Same person owns the secret in Key Vault.
-4. **App Routing enablement** — does scope-core or [scope-core-infra](https://github.com/growth-ecosystems/scope-core-infra) own the AKS Bicep that enables App Routing?
+4. **Ingress technology** — pick between options A/B/C in [§ 12 Ingress (TLS)](#12-ingress-tls). Must be decided before Phase 1.
 5. **Cookie encryption key rotation** — keep one active + one previous to allow zero-downtime rotation, or accept brief mass re-login on rotation?
 6. **CLI token max TTL** — cap at 1 year? Allow no-expiry tokens for service accounts only?
 
