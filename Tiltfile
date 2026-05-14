@@ -80,35 +80,20 @@ if not _vscode_version:
 
 _filter_args = ' '.join(['--exclude-name %s' % n for n in _exclude_names])
 
+# FQDN for azurite — enables KEDA (in keda namespace) to resolve azurite in
+# any worktree namespace without an ExternalName service. All consumers (workers,
+# init job, KEDA) use the same FQDN so they share the same Azurite data store.
+_azurite_fqdn = 'azurite.%s.svc.cluster.local' % NAMESPACE
+
 k8s_yaml(local(
     "kustomize build --load-restrictor=LoadRestrictionsNone deploy/overlays/local" +
     " | sed 's|${ACR_LOGIN_SERVER}/scoped/|scoped/|g'" +
     " | sed 's|namespace: scoped|namespace: %s|g'" % NAMESPACE +
+    " | sed 's|http://azurite:|http://%s:|g'" % _azurite_fqdn +
+    " | sed 's|value: azurite$|value: %s|'" % _azurite_fqdn +
     (" | python3 scripts/filter-k8s-yaml.py " + _filter_args if _filter_args else ''),
     quiet=True,
 ))
-
-# KEDA operator runs in the keda namespace but needs to reach Azurite (in the
-# worker namespace) via the short hostname "azurite" so the Azure Queue SDK auth
-# works. Azurite rejects requests whose Host header uses FQDN. An ExternalName
-# Service in the keda namespace lets KEDA resolve "azurite" to the correct namespace.
-# NOTE: With multiple worktrees, the last Tilt to deploy wins for KEDA queue
-# polling. All other resources are namespace-isolated and safe to run concurrently.
-k8s_yaml(blob("""
-apiVersion: v1
-kind: Service
-metadata:
-  name: azurite
-  namespace: keda
-spec:
-  type: ExternalName
-  externalName: azurite.%s.svc.cluster.local
-  ports:
-    - port: 10001
-      name: queue
-    - port: 10000
-      name: blob
-""" % NAMESPACE))
 
 # Re-run kustomize when overlay or base manifests change
 watch_file('deploy/overlays/local')
