@@ -7,10 +7,10 @@
 #
 # Prerequisites:
 #   brew install tilt k3d kustomize
-#   ./scripts/k3d-setup.sh          # creates cluster
+#   ./scripts/k3d-setup.sh          # creates cluster + installs KEDA
 #
 # Usage:
-#   worktree-env && tilt up          # all services (workers run at replicas=1)
+#   worktree-env && tilt up          # all services (workers scale from 0 via KEDA)
 #   worktree-env && tilt down        # tear down
 # =============================================================================
 
@@ -44,15 +44,10 @@ REDIS_PORT     = int(env.get('REDIS_PORT', '6300'))
 GATEWAY_PORT   = int(env.get('GATEWAY_API_PORT', '18900'))
 PROJECT_NAME   = env.get('COMPOSE_PROJECT_NAME', 'scope-mt-app')
 
-# Workers that require version build-args — only build when the env vars are set.
-# Set these in .env or export them before running `tilt up`.
-_claude_code_version = env.get('CLAUDE_CODE_ACP_VERSION', '')
-_vscode_version = env.get('VSCODE_VERSION', '')
-_copilot_chat_version = env.get('COPILOT_CHAT_VERSION', '')
-
 # ---------------------------------------------------------------------------
 # Apply Kustomize manifests
-# All workers are deployed with replicas=1 in local dev (no KEDA auto-scaling).
+# All workers are deployed with KEDA minReplicaCount=0. They scale up
+# automatically when messages arrive in their Azurite queues.
 # --load-restrictor=LoadRestrictionsNone allows cherry-picking individual
 # files from deploy/base/ without pulling in Azure-only resources (ASO,
 # ExternalSecrets, ClusterSecretStore).
@@ -61,27 +56,31 @@ _copilot_chat_version = env.get('COPILOT_CHAT_VERSION', '')
 # (FluxCD image automation). Kustomize's images transformer can't parse these
 # as valid references, so we sed-replace them to short names that match
 # docker_build() refs.
-#
-# The filter script removes KEDA ScaledObjects/TriggerAuthentication (not used
-# locally — workers always run at replicas=1) and any disabled worker manifests
-# whose version build-args are not set.
-_exclude_kinds = ['ScaledObject', 'TriggerAuthentication']
-_exclude_names = []
-if not _claude_code_version:
-    _exclude_names.append('coder-acp-claude-code')
-if not _vscode_version:
-
-_filter_args = ' '.join(
-    ['--exclude-kind %s' % k for k in _exclude_kinds] +
-    ['--exclude-name %s' % n for n in _exclude_names],
-)
-
 k8s_yaml(local(
     "kustomize build --load-restrictor=LoadRestrictionsNone deploy/overlays/local" +
-    " | sed 's|${ACR_LOGIN_SERVER}/scoped/|scoped/|g'" +
-    " | python3 scripts/filter-k8s-yaml.py " + _filter_args,
+    " | sed 's|${ACR_LOGIN_SERVER}/scoped/|scoped/|g'",
     quiet=True,
 ))
+
+# KEDA operator runs in the keda namespace but needs to reach Azurite (in scoped
+# namespace) via the short hostname "azurite" so the Azure Queue SDK auth works.
+# Azurite rejects requests whose Host header uses FQDN. An ExternalName Service
+# in the keda namespace lets KEDA resolve "azurite" to the scoped-namespace Service.
+k8s_yaml(blob("""
+apiVersion: v1
+kind: Service
+metadata:
+  name: azurite
+  namespace: keda
+spec:
+  type: ExternalName
+  externalName: azurite.scoped.svc.cluster.local
+  ports:
+    - port: 10001
+      name: queue
+    - port: 10000
+      name: blob
+"""))
 
 # Re-run kustomize when overlay or base manifests change
 watch_file('deploy/overlays/local')
@@ -101,14 +100,8 @@ def scope_build(ref, context, dockerfile, target='', deps=[], live_update_syncs=
     target_arg = '--target %s' % target if target else ''
     args_str = ' '.join(['--build-arg %s=%s' % (k, v) for k, v in build_args.items()])
     # Podman stores images with docker.io/ prefix; k3d needs that to find them.
-    # k3d image import can fail intermittently when concurrent builds race for
-    # the tools container, so retry up to 3 times with a short backoff.
-    cmd = (
-        'docker build -t $EXPECTED_REF -f %s %s %s %s' % (dockerfile, target_arg, args_str, context) +
-        ' && for _attempt in 1 2 3; do' +
-        ' k3d image import docker.io/$EXPECTED_REF -c %s && break' % K3D_CLUSTER +
-        ' || { echo "k3d import attempt $_attempt failed, retrying..."; sleep 3; };' +
-        ' done'
+    cmd = 'docker build -t $EXPECTED_REF -f %s %s %s %s && k3d image import docker.io/$EXPECTED_REF -c %s' % (
+        dockerfile, target_arg, args_str, context, K3D_CLUSTER,
     )
     custom_build(
         ref,
@@ -181,7 +174,7 @@ scope_build(
     deps=['packages/db-migrations/src', 'packages/db-migrations/package.json'],
 )
 
-# --- Workers (all deployed; replicas=1, no KEDA in local dev) ---
+# --- Workers (all deployed; KEDA scales from 0 based on queue depth) ---
 scope_build(
     'scoped/coder-acp-copilot', '.', 'apps/workers/coder-acp-copilot/Dockerfile', target='dev',
     deps=['apps/workers/coder-acp-copilot/src', 'apps/workers/coder-acp-copilot/package.json', 'packages/shared/src', 'config'],
@@ -192,7 +185,12 @@ scope_build(
     ],
 )
 
-# --- Conditional workers (version build-args required) ---
+# Workers that require version build-args — only build when the env vars are set.
+# Set these in .env or export them before running `tilt up`.
+_claude_code_version = env.get('CLAUDE_CODE_ACP_VERSION', '')
+_vscode_version = env.get('VSCODE_VERSION', '')
+_copilot_chat_version = env.get('COPILOT_CHAT_VERSION', '')
+
 if _claude_code_version:
     scope_build(
         'scoped/coder-acp-claude-code', '.', 'apps/workers/coder-acp-claude-code/Dockerfile', target='dev',
@@ -271,9 +269,7 @@ k8s_resource('db-migration',
     labels=['core'],
 )
 
-# --- Workers (replicas=1 in local dev, no KEDA auto-scaling) ---
-# Disabled workers' k8s manifests are filtered out by scripts/filter-k8s-yaml.py
-# so they don't appear in the Tilt UI at all.
+# --- Workers (KEDA scales from 0 — images are pre-built, pods created on demand) ---
 k8s_resource('coder-acp-copilot',
     resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
     labels=['workers'],
@@ -283,6 +279,9 @@ if _claude_code_version:
         resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
         labels=['workers'],
     )
+else:
+    k8s_resource('coder-acp-claude-code', auto_init=False, labels=['workers-disabled'])
+
 if _vscode_version:
         resource_deps=['mongodb', 'redis', 'azurite', 'judge'],
         labels=['workers'],
@@ -290,6 +289,7 @@ if _vscode_version:
         resource_deps=['mongodb', 'redis', 'azurite', 'judge', 'gateway'],
         labels=['workers'],
     )
+else:
 k8s_resource('report-generator',
     resource_deps=['mongodb', 'redis', 'azurite', 'api'],
     labels=['workers'],
