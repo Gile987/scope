@@ -67,12 +67,329 @@ apiRoute(ctx.app, ctx.registry, {
     skills: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
+    profileVersion: z.number().int().optional(),
+    baseProfileId: z.string().optional(),
+    baseProfileVersion: z.number().int().optional(),
+    profileVariations: z.array(z.object({
+      profileId: z.string(),
+      profileVersion: z.number().int().optional(),
+      label: z.string().optional(),
+    })).optional(),
   }),
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId, priority: requestedPriority } = req.body;
-    let worker = req.query.worker as string;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId, profileVersion: requestedProfileVersion, baseProfileId, baseProfileVersion, profileVariations, priority: requestedPriority } = req.body;
+    let worker = req.query.worker as string | undefined;
+
+    type VariationInput = {
+      profileId: string;
+      profileVersion?: number;
+      label?: string;
+      overrides?: {
+        model?: string;
+        agentVersion?: string;
+        mcpServers?: string[];
+        skillRevisions?: string[];
+        extensions?: string[];
+      };
+    };
+
+    const typedProfileVariations = (Array.isArray(profileVariations) ? profileVariations : []) as VariationInput[];
+    const isVariationSubmit = Boolean(baseProfileId) || typedProfileVariations.length > 0;
+
+    if (isVariationSubmit) {
+      if (!baseProfileId) {
+        res.status(400).json({ error: "baseProfileId is required when profileVariations are provided" });
+        return;
+      }
+
+      if (requestedProfileId && requestedProfileId !== baseProfileId) {
+        res.status(400).json({ error: "Use either profileId or baseProfileId/profileVariations, not both" });
+        return;
+      }
+
+      // In variation mode, controlled fields come from variation profiles + per-variation overrides.
+      if (requestedModel !== undefined || mcpServerSlugs !== undefined || skillSlugs !== undefined || extensionIds !== undefined) {
+        res.status(400).json({
+          error: "In variation mode, model/mcpServers/skills/extensions must be set via variation profile or variation overrides.",
+        });
+        return;
+      }
+
+      if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
+        res.status(400).json({ error: "scenario.task is required and must be a string" });
+        return;
+      }
+
+      if (scenarioObj.criteria !== undefined) {
+        if (!Array.isArray(scenarioObj.criteria) || !scenarioObj.criteria.every((c: unknown) => typeof c === "string")) {
+          res.status(400).json({ error: "scenario.criteria must be an array of strings" });
+          return;
+        }
+      }
+
+      const effectiveMaxIter = maxIterations ?? MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
+      if (effectiveMaxIter !== 1) {
+        if (!scenarioObj.criteria || !Array.isArray(scenarioObj.criteria) || scenarioObj.criteria.length === 0) {
+          res.status(400).json({ error: "At least one criterion is required in scenario.criteria when maxIterations > 1" });
+          return;
+        }
+      }
+
+      if (maxIterations !== undefined) {
+        if (typeof maxIterations !== "number" || maxIterations < 1 || maxIterations > 50) {
+          res.status(400).json({ error: "maxIterations must be a number between 1 and 50" });
+          return;
+        }
+      }
+
+      if (typeof count !== "number" || count < 1 || count > 10) {
+        res.status(400).json({ error: "count must be a number between 1 and 10" });
+        return;
+      }
+
+      const baseProfile = await ctx.profileCollection.findOne({
+        _id: baseProfileId,
+        deletedAt: { $exists: false },
+      });
+      if (!baseProfile) {
+        res.status(404).json({ error: `Profile not found: ${baseProfileId}` });
+        return;
+      }
+
+      const variationEntries: VariationInput[] = [
+        { profileId: baseProfileId, profileVersion: baseProfileVersion ?? requestedProfileVersion, label: "base" },
+        ...typedProfileVariations,
+      ];
+
+      if (variationEntries.length > 25) {
+        res.status(400).json({ error: "A maximum of 25 variations (including base profile) is supported" });
+        return;
+      }
+
+      const scenario: RequestDocument["scenario"] = {
+        task: scenarioObj.task as string,
+        criteria: Array.isArray(scenarioObj.criteria) ? (scenarioObj.criteria as string[]) : [],
+        ...(scenarioObj.version === "v1" || scenarioObj.version === "v2" ? { version: scenarioObj.version } : {}),
+      };
+
+      const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
+      const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
+      const taskPromptId = taskPrompt._id;
+
+      const allNewIds: string[] = [];
+      const submissionResults: Array<{ submissionId: string; profileId: string; label?: string; ids: string[] }> = [];
+
+      for (const variationEntry of variationEntries) {
+        const variationProfile = await ctx.profileCollection.findOne({
+          _id: variationEntry.profileId,
+          deletedAt: { $exists: false },
+        });
+        if (!variationProfile) {
+          res.status(404).json({ error: `Profile not found: ${variationEntry.profileId}` });
+          return;
+        }
+
+        const variationProfileVersion = await ctx.profileVersionCollection.findOne({
+          profileId: variationProfile._id,
+          version: variationEntry.profileVersion ?? variationProfile.latestVersion,
+        });
+        if (!variationProfileVersion) {
+          res.status(404).json({
+            error: `Profile version not found for profile: ${variationEntry.profileId}`,
+            requestedVersion: variationEntry.profileVersion ?? variationProfile.latestVersion,
+          });
+          return;
+        }
+
+        const variationWorkerType = variationProfileVersion.workerType as WorkerType;
+        if (!VALID_WORKERS.includes(variationWorkerType)) {
+          res.status(400).json({ error: `Invalid worker in variation profile: ${variationWorkerType}` });
+          return;
+        }
+
+        let model = variationProfileVersion.model;
+        const effectiveMcpServers = variationProfileVersion.mcpServers ?? undefined;
+        const effectiveSkills = variationProfileVersion.skillRevisions ?? undefined;
+        const effectiveExtensions = variationProfileVersion.extensions ?? undefined;
+        const requestedVariationAgentVersion = variationProfileVersion.agentVersion ?? requestedAgentVersion;
+
+        const agentDoc = await ctx.agentCollection.findOne({ _id: variationWorkerType, deletedAt: { $exists: false } });
+        if (agentDoc && agentDoc.supportedModels.length > 0) {
+          if (model && !agentDoc.supportedModels.includes(model)) {
+            res.status(400).json({
+              error: `Invalid model \"${model}\" for agent \"${variationWorkerType}\"`,
+              supportedModels: agentDoc.supportedModels,
+              variationProfileId: variationEntry.profileId,
+            });
+            return;
+          }
+          if (!model && agentDoc.defaultModel) {
+            model = agentDoc.defaultModel;
+          }
+          if (!model) {
+            res.status(400).json({
+              error: `model is required for agent \"${variationWorkerType}\". Select one of supportedModels or set a defaultModel on the agent.`,
+              supportedModels: agentDoc.supportedModels,
+              variationProfileId: variationEntry.profileId,
+            });
+            return;
+          }
+        }
+
+        let resolvedAgentVersion: string | undefined;
+        if (agentDoc) {
+          const versionResult = resolveAgentVersion(agentDoc.versions, requestedVariationAgentVersion);
+          if ("error" in versionResult) {
+            res.status(400).json({
+              error: `${versionResult.error} for agent \"${variationWorkerType}\"`,
+              activeVersions: versionResult.activeVersions,
+              variationProfileId: variationEntry.profileId,
+            });
+            return;
+          }
+          resolvedAgentVersion = versionResult.agentVersion;
+        }
+
+        let validatedMcpServers: string[] | undefined;
+        if (effectiveMcpServers !== undefined) {
+          if (!Array.isArray(effectiveMcpServers) || !effectiveMcpServers.every((s: unknown) => typeof s === "string")) {
+            res.status(400).json({ error: "mcpServers must be an array of strings (MCP server slugs)" });
+            return;
+          }
+          if (effectiveMcpServers.length > 0) {
+            const existingServers = await ctx.mcpServerCollection
+              .find({ _id: { $in: effectiveMcpServers }, deletedAt: { $exists: false } })
+              .toArray();
+            const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
+            const missingSlugs = effectiveMcpServers.filter((slug: string) => !existingSlugs.has(slug));
+            if (missingSlugs.length > 0) {
+              res.status(400).json({ error: `MCP server(s) not found: ${missingSlugs.join(", ")}` });
+              return;
+            }
+            validatedMcpServers = effectiveMcpServers;
+          }
+        }
+
+        let resolvedSkillRevisions: string[] | undefined;
+        if (effectiveSkills !== undefined) {
+          if (!Array.isArray(effectiveSkills) || !effectiveSkills.every((s: unknown) => typeof s === "string")) {
+            res.status(400).json({ error: "skills must be an array of strings (skill slugs)" });
+            return;
+          }
+          if (effectiveSkills.length > 0) {
+            const result = await resolveSkillSpecs(effectiveSkills, ctx);
+            if (result.error) {
+              const status = result.error.startsWith("Failed to resolve") ? 422 : 400;
+              res.status(status).json({ error: result.error });
+              return;
+            }
+            resolvedSkillRevisions = result.refs;
+          }
+        }
+
+        let validatedExtensions: string[] | undefined;
+        if (effectiveExtensions !== undefined) {
+          if (!Array.isArray(effectiveExtensions) || !effectiveExtensions.every((s: unknown) => typeof s === "string")) {
+            res.status(400).json({ error: "extensions must be an array of strings (extension IDs or id@version specs)" });
+            return;
+          }
+          if (effectiveExtensions.length > 0) {
+            const parsedSpecs = effectiveExtensions.map((spec: string) => parseExtensionSpec(spec));
+            const bareIds = parsedSpecs.map((s) => s.id);
+            const existingExtensions = await ctx.extensionCollection
+              .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
+              .toArray();
+            const existingIds = new Set(existingExtensions.map((e: ExtensionDocument) => e._id));
+            const missingIds = bareIds.filter((id: string) => !existingIds.has(id));
+            if (missingIds.length > 0) {
+              res.status(400).json({ error: `Extension(s) not found: ${missingIds.join(", ")}` });
+              return;
+            }
+
+            const extensionClient = new ExtensionClient("");
+            const resolvedSpecs: string[] = [];
+            for (const spec of parsedSpecs) {
+              if (spec.version) {
+                resolvedSpecs.push(`${spec.id}@${spec.version}`);
+              } else {
+                const versions = await extensionClient.getVersions(spec.id, false);
+                if (versions.length === 0) {
+                  res.status(422).json({ error: `No stable versions found for extension \"${spec.id}\"` });
+                  return;
+                }
+                resolvedSpecs.push(`${spec.id}@${versions[0].version}`);
+              }
+            }
+            validatedExtensions = resolvedSpecs;
+          }
+        }
+
+        // Submit this profile as a separate submission
+        const submissionId = uuidv4();
+        const newDocs: RequestDocument[] = [];
+        const newIds: string[] = [];
+
+        for (let i = 0; i < count; i++) {
+          const requestId = uuidv4();
+          const runId = uuidv4();
+          newIds.push(requestId);
+          allNewIds.push(requestId);
+
+          const requestDoc = {
+            _id: requestId,
+            scenario,
+            workerType: variationWorkerType,
+            taskPromptId,
+            createdAt: new Date(),
+            priority: requestedPriority ?? 0,
+            ...(model ? { model } : {}),
+            ...(maxIterations ? { maxIterations } : {}),
+            ...(personaInstructions ? { personaInstructions } : {}),
+            ...(personaObj ? { persona: personaObj } : {}),
+            ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
+            ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
+            ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
+            ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
+            ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+            profileId: variationProfile._id,
+            profileVersionId: variationProfileVersion._id,
+            profileVariation: {
+              baseProfileId,
+              profileId: variationProfile._id,
+              profileVersionId: variationProfileVersion._id,
+              ...(variationEntry.label ? { label: variationEntry.label } : {}),
+            },
+            submissionId,
+            run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
+          } as unknown as RequestDocument;
+          newDocs.push(requestDoc);
+        }
+
+        await ctx.requestCollection.insertMany(newDocs);
+
+        submissionResults.push({
+          submissionId,
+          profileId: variationProfile._id,
+          label: variationEntry.label,
+          ids: newIds,
+        });
+      }
+
+      res.status(201).json({
+        ids: allNewIds,
+        count: allNewIds.length,
+        submissions: submissionResults,
+        variationCount: variationEntries.length,
+        status: "pending",
+        mode,
+        message: `${allNewIds.length} request(s) submitted across ${submissionResults.length} profile(s)`,
+        scenario,
+        ...(maxIterations ? { maxIterations } : {}),
+      });
+      return;
+    }
 
     // --- Profile resolution: if profileId is provided, resolve the version and use its values ---
     let profileId: string | undefined;
@@ -89,10 +406,13 @@ apiRoute(ctx.app, ctx.registry, {
       }
       profileVersion = await ctx.profileVersionCollection.findOne({
         profileId: profile._id,
-        version: profile.latestVersion,
+        version: requestedProfileVersion ?? profile.latestVersion,
       });
       if (!profileVersion) {
-        res.status(404).json({ error: `Profile version not found for profile: ${requestedProfileId}` });
+        res.status(404).json({
+          error: `Profile version not found for profile: ${requestedProfileId}`,
+          requestedVersion: requestedProfileVersion ?? profile.latestVersion,
+        });
         return;
       }
       profileId = profile._id;

@@ -9,13 +9,16 @@ import { tmpdir } from "os";
 import { join, resolve, dirname, basename } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
+import React from "react";
+import { render } from "ink";
+import { DemoApp } from "../components/DemoApp.js";
 import { resolveScenarioAndPersona } from "../config-loader.js";
 import { configureHelp } from "../utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { runGetAction } from "../run-get-action.js";
-import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { normalizeUrl, printFollowUpCommands, DEFAULT_WORKERS, withOutputOption } from "../utils/shared.js";
 
 export function registerRunCommands(program: Command): void {
 const run = program
@@ -42,10 +45,12 @@ run
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--base-profile <id>", "Base profile ID used for profile variation fan-out")
+  .option("--profile-variations-file <path>", "Path to JSON file containing profile variation entries")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, baseProfile, profileVariationsFile } = options;
 
     try {
       // Resolve scenario + persona YAML if provided
@@ -104,6 +109,27 @@ run
       }
       if (agentVersion) {
         body.agentVersion = agentVersion;
+      }
+      if (baseProfile) {
+        body.profileId = baseProfile;
+      }
+
+      if (profileVariationsFile) {
+        if (!baseProfile) {
+          console.error(errorText("Error: --base-profile is required when --profile-variations-file is provided"));
+          process.exit(1);
+        }
+
+        const raw = readFileSync(resolve(profileVariationsFile), "utf8");
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) {
+          console.error(errorText("Error: profile variations file must be a JSON array"));
+          process.exit(1);
+        }
+
+        body.baseProfileId = baseProfile;
+        body.profileVariations = parsed;
+        delete body.profileId;
       }
 
       const response = await fetch(`${normalizeUrl(url)}/api/v1/requests?worker=${worker}`, {
@@ -218,7 +244,7 @@ run
   .command("status")
   .description("Get status of a request")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -265,7 +291,7 @@ run
   .command("get")
   .description("Get full details of a run")
   .requiredOption("-i, --id <id>", "Run ID")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     await runGetAction({ id: options.id, url: options.url, output: options.output });
@@ -275,7 +301,7 @@ run
   .command("logs")
   .description("Stream logs for a request")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--from-start", "Include historical logs from start")
   .action(async (options) => {
     const { id } = options;
@@ -334,7 +360,7 @@ withOutputOption(
 run
   .command("list")
   .description("List all requests")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("-w, --worker <worker>", "Filter by worker")
   .option("--submission-id <id>", "Filter by submission ID")
   .option("--turns <expr>", "Filter by actual turns (e.g. '>=5', '<=10', '=3')")
@@ -429,10 +455,39 @@ run
   });
 
 run
+  .command("demo")
+  .description("Run concurrent requests to all coders with a live TUI dashboard")
+  .requiredOption("-m, --message <message>", "Message/prompt to send to all coders")
+  .option("-c, --count <count>", "Number of requests to send to each coder", "5")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-w, --workers <workers>", "Comma-separated list of workers", DEFAULT_WORKERS.join(","))
+  .action((options) => {
+    const { message, count, url, workers: workersStr } = options;
+    const workersList = workersStr.split(",").map((w: string) => w.trim());
+    const countNum = parseInt(count, 10);
+
+    if (isNaN(countNum) || countNum < 1) {
+      console.error(errorText("Error: count must be a positive integer"));
+      process.exit(1);
+    }
+
+    console.clear();
+    const { waitUntilExit } = render(
+      React.createElement(DemoApp, {
+        apiUrl: url,
+        message,
+        count: countNum,
+        workers: workersList,
+      })
+    );
+    waitUntilExit().catch(() => {});
+  });
+
+run
   .command("delete")
   .description("Soft-delete a run (can still be listed with --include-deleted)")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     const { id, url } = options;
     try {
@@ -455,7 +510,7 @@ run
   .command("cancel")
   .description("Cancel one or more runs (marks as failed and signals active workers to exit)")
   .requiredOption("-i, --id <ids...>", "Request ID(s) to cancel")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     const { id: ids, url } = options;
     const baseUrl = normalizeUrl(url);
@@ -503,7 +558,7 @@ run
   .option("-o, --output <path>", "Output file path (default: <id>.tar.gz)")
   .option("-e, --extract", "Extract the archive after downloading")
   .option("-d, --dir <path>", "Extraction directory (implies --extract)")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     const { id, url } = options;
     const shouldExtract = options.extract || !!options.dir;
@@ -584,7 +639,7 @@ run
   .option("-o, --output <path>", "Output file path (default: batch-<timestamp>.tar.gz)")
   .option("-e, --extract", "Extract the archive after downloading")
   .option("-d, --dir <path>", "Extraction directory (implies --extract)")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     const { url } = options;
     const shouldExtract = options.extract || !!options.dir;
@@ -681,7 +736,7 @@ run
   .description("Upload a run archive to the API (previously downloaded via 'run download')")
   .argument("<path>", "Path to .tar.gz archive or extracted directory")
   .option("--dry-run", "Preview what would be uploaded without sending")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (inputPath: string, options) => {
     const { url, dryRun } = options;
 
@@ -787,7 +842,7 @@ run
   .description("Upload a batch run archive (multiple runs in one .tar.gz, as produced by 'run download-batch')")
   .argument("<path>", "Path to batch .tar.gz archive")
   .option("--dry-run", "Preview what would be uploaded without sending")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (inputPath: string, options) => {
     const { url, dryRun } = options;
 
@@ -868,7 +923,7 @@ run
   .description("Retry a request — starts a new attempt while preserving previous attempts in history")
   .requiredOption("-i, --id <id>", "Request ID")
   .option("-f, --force", "Allow retrying a successful run")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     const { id, force } = options;
     try {
@@ -907,7 +962,7 @@ run
   .command("attempts")
   .description("List all attempts for a request (current + history)")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;

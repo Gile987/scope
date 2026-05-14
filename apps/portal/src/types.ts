@@ -114,6 +114,13 @@ export interface RunState {
   postProcessorStatus?: "queued" | "processing" | "done" | "failed";
 }
 
+export interface RequestVariation {
+  baseProfileId: string;
+  profileId: string;
+  profileVersionId: string;
+  label?: string;
+}
+
 export interface Run {
   _id: string;
   id: string;
@@ -140,6 +147,7 @@ export interface Run {
   submissionId?: string;
   profileId?: string;
   profileVersionId?: string;
+  profileVariation?: RequestVariation;
 }
 
 export interface CursorPaginatedResponse<T> {

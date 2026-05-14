@@ -312,7 +312,7 @@ export function CreateProfile() {
 
       {/* Save */}
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => navigate("/profiles")}>
+        <Button variant="outline" onClick={() => navigate("/profiles")}> 
           Cancel
         </Button>
         <Button

@@ -143,6 +143,19 @@ export interface OsInfo {
   arch: string;       // os.arch() → "x64", "arm64"
 }
 
+export interface ProfileVariationInput {
+  profileId: string;
+  profileVersion?: number;
+  label?: string;
+}
+
+export interface RequestVariation {
+  baseProfileId: string;
+  profileId: string;
+  profileVersionId: string;
+  label?: string;
+}
+
 // Request document stored in MongoDB
 export interface RequestDocument {
   _id: string;  // UUID as _id (for CosmosDB sharding compatibility)
@@ -165,6 +178,7 @@ export interface RequestDocument {
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
   profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
   submissionId?: string;           // FK → SubmissionDocument._id
+  profileVariation?: RequestVariation; // Base profile + variation lineage for expanded submissions
   /** Scheduling priority. Higher = processed first. Default: 0. */
   priority: number;
   /**
