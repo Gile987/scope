@@ -86,6 +86,23 @@ export const VALID_WORKERS = [
 
 export const WorkerTypeSchema = z.enum(VALID_WORKERS);
 
+export const ProfileVariationInputSchema = z
+  .object({
+    profileId: z.string(),
+    profileVersion: z.number().int().optional(),
+    label: z.string().optional(),
+  })
+  .openapi("ProfileVariationInput");
+
+export const RequestVariationSchema = z
+  .object({
+    baseProfileId: z.string(),
+    profileId: z.string(),
+    profileVersionId: z.string(),
+    label: z.string().optional(),
+  })
+  .openapi("RequestVariation");
+
 export const CreateRequestInputSchema = z
   .object({
     scenario: ScenarioSchema,
@@ -97,6 +114,10 @@ export const CreateRequestInputSchema = z
     skillRevisions: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
     profileId: z.string().optional(),
+    profileVersion: z.number().int().optional(),
+    baseProfileId: z.string().optional(),
+    baseProfileVersion: z.number().int().optional(),
+    profileVariations: z.array(ProfileVariationInputSchema).optional(),
     priority: z.number().int().optional(),
   })
   .openapi("CreateRequestInput");
@@ -121,6 +142,7 @@ export const RequestResponseSchema = z
     profileId: z.string().optional(),
     profileVersionId: z.string().optional(),
     submissionId: z.string().optional(),
+    profileVariation: RequestVariationSchema.optional(),
     priority: z.number().int().default(0),
     // Per-attempt state lives in the run sub-document.
     run: z

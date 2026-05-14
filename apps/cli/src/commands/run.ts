@@ -45,10 +45,12 @@ run
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
+  .option("--base-profile <id>", "Base profile ID used for profile variation fan-out")
+  .option("--profile-variations-file <path>", "Path to JSON file containing profile variation entries")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, baseProfile, profileVariationsFile } = options;
 
     try {
       // Resolve scenario + persona YAML if provided
@@ -107,6 +109,27 @@ run
       }
       if (agentVersion) {
         body.agentVersion = agentVersion;
+      }
+      if (baseProfile) {
+        body.profileId = baseProfile;
+      }
+
+      if (profileVariationsFile) {
+        if (!baseProfile) {
+          console.error(errorText("Error: --base-profile is required when --profile-variations-file is provided"));
+          process.exit(1);
+        }
+
+        const raw = readFileSync(resolve(profileVariationsFile), "utf8");
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) {
+          console.error(errorText("Error: profile variations file must be a JSON array"));
+          process.exit(1);
+        }
+
+        body.baseProfileId = baseProfile;
+        body.profileVariations = parsed;
+        delete body.profileId;
       }
 
       const response = await fetch(`${normalizeUrl(url)}/api/v1/requests?worker=${worker}`, {

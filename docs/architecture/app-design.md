@@ -91,6 +91,13 @@ Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-
 4. API looks up `AgentVersion.queueName` and routes message to that queue
 5. `agentVersion` and `model` are persisted on the `RequestDocument`
 
+Profile fan-out mode is also supported for comparative runs:
+
+1. User selects a `baseProfileId` and optional `profileVariations[]`
+2. API expands one submit call into multiple requests under one `submissionId`
+3. Each expanded request resolves configuration from its variation profile, optionally pinned to a specific variation `profileVersion` (plus optional per-variation overrides)
+4. Expanded requests persist `profileId`, `profileVersionId`, and `profileVariation` lineage metadata for traceability
+
 ## Real-Time Log Streaming
 
 Workers publish log events to Redis Pub/Sub channels keyed by run ID. The API subscribes and relays them as Server-Sent Events (SSE) to CLI and Portal clients.

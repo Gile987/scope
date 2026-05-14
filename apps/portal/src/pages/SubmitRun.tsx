@@ -13,7 +13,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle, SlidersHorizontal, X, Save } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle, SlidersHorizontal, X, Save, Plus } from "lucide-react";
 import { WORKER_TYPES, type CodingAgent, type McpServerDocument, type ProfileWithVersion, type ProfileVersionDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
@@ -31,6 +37,11 @@ import {
 } from "@/components/ui/dialog";
 
 const STEPS = ["Configure", "Review & Submit"];
+
+type VariationDraft = {
+  profileId: string;
+  profileVersion?: number;
+};
 
 export function SubmitRun() {
   const navigate = useNavigate();
@@ -57,6 +68,8 @@ export function SubmitRun() {
   // Profile
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [selectedProfileVersion, setSelectedProfileVersion] = useState<number | null>(null);
+  const [variationDrafts, setVariationDrafts] = useState<VariationDraft[]>([]);
+  const [variationProfileVersions, setVariationProfileVersions] = useState<Record<string, ProfileVersionDocument[]>>({});
   const profileLocked = !!selectedProfileId;
 
   // Agent version
@@ -99,6 +112,7 @@ export function SubmitRun() {
   // When profile is selected, apply its latest version configuration
   const applyProfile = (profileId: string | null) => {
     setSelectedProfileId(profileId);
+    setVariationDrafts((prev) => prev.filter((v) => v.profileId !== profileId));
     if (!profileId) return;
     const p = (profiles as ProfileWithVersion[]).find((p) => p._id === profileId);
     if (!p?.version) return;
@@ -116,11 +130,82 @@ export function SubmitRun() {
   const clearProfile = () => {
     setSelectedProfileId(null);
     setSelectedProfileVersion(null);
+    setVariationDrafts([]);
   };
+
+  const addVariationDraft = () => {
+    setVariationDrafts((prev) => {
+      const used = new Set(prev.map((v) => v.profileId).filter(Boolean));
+      const nextProfile = (profiles as ProfileWithVersion[]).find(
+        (p) => p._id !== selectedProfileId && !used.has(p._id),
+      );
+      if (!nextProfile) {
+        toast.info("All available profiles are already used in variations.");
+        return prev;
+      }
+      return [...prev, { profileId: nextProfile._id, profileVersion: nextProfile.latestVersion }];
+    });
+  };
+
+  const updateVariationDraft = (index: number, patch: Partial<VariationDraft>) => {
+    setVariationDrafts((prev) => prev.map((draft, i) => (i === index ? { ...draft, ...patch } : draft)));
+  };
+
+  const removeVariationDraft = (index: number) => {
+    setVariationDrafts((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const getUsedVariationProfileIds = (excludeIndex?: number): Set<string> => {
+    const used = new Set<string>();
+    variationDrafts.forEach((draft, idx) => {
+      if (excludeIndex !== undefined && idx === excludeIndex) return;
+      if (draft.profileId.trim()) used.add(draft.profileId);
+    });
+    return used;
+  };
+
+  const getAvailableVariationProfiles = (excludeIndex?: number) => {
+    const used = getUsedVariationProfileIds(excludeIndex);
+    return (profiles as ProfileWithVersion[]).filter((p) => p._id !== selectedProfileId && !used.has(p._id));
+  };
+
+  useEffect(() => {
+    const profileIds = Array.from(new Set(variationDrafts.map((v) => v.profileId).filter(Boolean)));
+    profileIds.forEach((profileId) => {
+      if (variationProfileVersions[profileId] !== undefined) return;
+      api.listProfileVersions(profileId)
+        .then((versions) => {
+          setVariationProfileVersions((prev) => ({
+            ...prev,
+            [profileId]: versions,
+          }));
+        })
+        .catch(() => {
+          setVariationProfileVersions((prev) => ({
+            ...prev,
+            [profileId]: [],
+          }));
+        });
+    });
+  }, [variationDrafts, variationProfileVersions]);
 
   // Save as Profile
   const [saveProfileName, setSaveProfileName] = useState("");
   const [saveProfileOpen, setSaveProfileOpen] = useState(false);
+
+  const suggestedProfileName = () => {
+    const workerName = selectedAgent?.name ?? worker;
+    const modelName = model || selectedAgent?.defaultModel || "default-model";
+    const versionSuffix = selectedAgentVersion ? `-${selectedAgentVersion}` : "";
+    return `${workerName}-${modelName}${versionSuffix}`;
+  };
+
+  const handleSaveProfileOpenChange = (open: boolean) => {
+    setSaveProfileOpen(open);
+    if (open) {
+      setSaveProfileName(suggestedProfileName());
+    }
+  };
 
   const saveProfileMutation = useMutation({
     mutationFn: () =>
@@ -251,25 +336,46 @@ export function SubmitRun() {
 
     const criteria = pickedCriteria;
 
+    const normalizedVariationDrafts = variationDrafts.filter((v) => v.profileId.trim().length > 0);
+
+    const profileVariations = normalizedVariationDrafts.map((v) => {
+      const profile = (profiles as ProfileWithVersion[]).find((p) => p._id === v.profileId);
+      const resolvedProfileVersion = v.profileVersion ?? profile?.latestVersion;
+      return {
+        profileId: v.profileId,
+        ...(resolvedProfileVersion ? { profileVersion: resolvedProfileVersion } : {}),
+      };
+    });
+
+    const inVariationMode = selectedProfileId && profileVariations.length > 0;
+
     submitMutation.mutate({
       scenario: {
         task: task.trim(),
         criteria,
       },
-      worker,
-      ...(model ? { model } : {}),
+      ...(inVariationMode ? {} : { ...(worker ? { worker } : {}) }),
+      ...(inVariationMode ? {} : { ...(model ? { model } : {}) }),
       maxIterations,
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
-      ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
-      ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
-      ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
-      ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
-      ...(selectedProfileId ? { profileId: selectedProfileId } : {}),
-      ...(selectedProfileId && selectedProfileVersion ? {
-        profileVersionId: profileVersions.find((pv: ProfileVersionDocument) => pv.version === selectedProfileVersion)?._id
-          ?? (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.version?._id,
-      } : {}),
+      ...(inVariationMode ? {} : { ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}) }),
+      ...(inVariationMode ? {} : { ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}) }),
+      ...(inVariationMode ? {} : { ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}) }),
+      ...(inVariationMode ? {} : { ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}) }),
+      ...(inVariationMode
+        ? {
+            baseProfileId: selectedProfileId,
+            ...(selectedProfileVersion ? { baseProfileVersion: selectedProfileVersion } : {}),
+            profileVariations,
+          }
+        : {}),
+      ...(selectedProfileId && profileVariations.length === 0
+        ? {
+            profileId: selectedProfileId,
+            ...(selectedProfileVersion ? { profileVersion: selectedProfileVersion } : {}),
+          }
+        : {}),
     });
   };
 
@@ -284,12 +390,28 @@ export function SubmitRun() {
     step === 1 ? !!task.trim() : !!task.trim() && !submitMutation.isPending,
   );
 
+  const summaryBaseProfile = selectedProfileId
+    ? (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)
+    : null;
+  const summaryVariations = variationDrafts
+    .filter((v) => v.profileId.trim().length > 0)
+    .map((v) => {
+      const profile = (profiles as ProfileWithVersion[]).find((p) => p._id === v.profileId);
+
+      return {
+        ...v,
+        profileName: profile?.name ?? v.profileId,
+        profileVersion: v.profileVersion ?? profile?.latestVersion,
+      };
+    });
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">New Run</h1>
-        <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
-      </div>
+    <TooltipProvider>
+      <div className="max-w-2xl mx-auto space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">New Run</h1>
+          <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
+        </div>
 
       <Stepper steps={STEPS} currentStep={step} />
 
@@ -381,7 +503,9 @@ export function SubmitRun() {
 
               <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="maxIterations">Max Iterations</Label>
+                  <Label htmlFor="maxIterations">
+                    <span className="text-muted-foreground">Max iterations</span>
+                  </Label>
                   <Input
                     id="maxIterations"
                     type="number"
@@ -454,44 +578,180 @@ export function SubmitRun() {
                 </CardTitle>
                 <CardDescription>Select a profile to pre-fill agent configuration</CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 {selectedProfileId ? (
                   <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary" className="text-sm">
-                        {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
-                      </Badge>
-                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={clearProfile}>
-                        <X className="h-3 w-3" />
-                      </Button>
-                      <span className="text-xs text-muted-foreground">Agent config locked by profile</span>
-                    </div>
-                    {profileVersions.length > 1 && selectedProfileVersion && (
+                    <div className="grid grid-cols-[minmax(0,5fr)_minmax(0,2fr)_auto] items-end gap-2">
                       <div className="space-y-1">
-                        <Label className="text-xs">Version</Label>
-                        <Select
-                          value={String(selectedProfileVersion)}
-                          onValueChange={(v) => changeProfileVersion(Number(v))}
-                        >
-                          <SelectTrigger className="w-48">
-                            <SelectValue />
+                        <Label className="text-xs">Base Profile</Label>
+                        <Select value={selectedProfileId} onValueChange={applyProfile}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select profile" />
                           </SelectTrigger>
                           <SelectContent>
-                            {profileVersions
-                              .slice()
-                              .sort((a: ProfileVersionDocument, b: ProfileVersionDocument) => b.version - a.version)
-                              .map((v: ProfileVersionDocument) => (
-                                <SelectItem key={v.version} value={String(v.version)}>
-                                  v{v.version}
-                                  {v.version === (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.latestVersion
-                                    ? " (latest)"
-                                    : ""}
-                                </SelectItem>
-                              ))}
+                            {(profiles as ProfileWithVersion[]).map((p) => (
+                              <SelectItem key={p._id} value={p._id}>
+                                {p.name} <span className="text-muted-foreground ml-1">v{p.latestVersion}</span>
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
-                    )}
+                      <div className="space-y-1">
+                        <Label className="text-xs">Version</Label>
+                        <Select
+                          value={String(
+                            selectedProfileVersion ??
+                              (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.latestVersion ??
+                              "",
+                          )}
+                          onValueChange={(v) => changeProfileVersion(Number(v))}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select version" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(profileVersions.length > 0
+                              ? profileVersions.slice().sort((a: ProfileVersionDocument, b: ProfileVersionDocument) => b.version - a.version)
+                              : [{
+                                  version:
+                                    selectedProfileVersion ??
+                                    (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.latestVersion ??
+                                    0,
+                                }]
+                            ).map((v) => (
+                              <SelectItem key={v.version} value={String(v.version)}>
+                                v{v.version}
+                                {v.version === (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.latestVersion
+                                  ? " (latest)"
+                                  : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button type="button" variant="ghost" size="icon" className="h-9 w-9" onClick={clearProfile}>
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <span className="text-xs text-muted-foreground">Agent config locked by profile</span>
+
+                    <Separator />
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-sm">Variations</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Add additional profiles to run as variations under this base profile.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={addVariationDraft}
+                          disabled={getAvailableVariationProfiles().length === 0}
+                          className="gap-1.5"
+                        >
+                          <Plus className="h-4 w-4" /> Add Variation
+                        </Button>
+                      </div>
+
+                      {getAvailableVariationProfiles().length === 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          All available profiles are already used in variations.
+                        </p>
+                      )}
+
+                      {variationDrafts.length === 0 && (
+                        <p className="text-sm text-muted-foreground">No variations yet. Submitting now runs only the base profile.</p>
+                      )}
+
+                      {variationDrafts.map((draft, index) => (
+                        <div key={index} className="rounded-md border">
+                          {(() => {
+                            const selectedVariationProfile = (profiles as ProfileWithVersion[]).find((p) => p._id === draft.profileId);
+                            const availableProfiles = getAvailableVariationProfiles(index);
+                            const hasAvailableProfiles = availableProfiles.length > 0;
+                            const variationVersionOptions = (() => {
+                              if (!draft.profileId) return [] as number[];
+                              const fetched = variationProfileVersions[draft.profileId] ?? [];
+                              if (fetched.length > 0) {
+                                return fetched.map((v) => v.version).sort((a, b) => b - a);
+                              }
+                              return selectedVariationProfile?.latestVersion ? [selectedVariationProfile.latestVersion] : [];
+                            })();
+
+                            return (
+                              <div className="p-3">
+                                <div className="flex items-end gap-2">
+                                  <div className="flex-1 space-y-1">
+                                    <Label className="text-xs">Variation #{index + 1} Profile</Label>
+                                    <Select
+                                      value={draft.profileId || undefined}
+                                      onValueChange={(value) => {
+                                        const selectedProfile = (profiles as ProfileWithVersion[]).find((p) => p._id === value);
+                                        updateVariationDraft(index, {
+                                          profileId: value,
+                                          profileVersion: selectedProfile?.latestVersion,
+                                        });
+                                      }}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Select profile" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {availableProfiles.map((p) => (
+                                          <SelectItem key={p._id} value={p._id}>
+                                            {p.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    {!draft.profileId && hasAvailableProfiles && (
+                                      <p className="text-xs text-muted-foreground">Select a profile for this variation.</p>
+                                    )}
+                                    {!hasAvailableProfiles && !draft.profileId && (
+                                      <p className="text-xs text-muted-foreground">No profile available for this variation.</p>
+                                    )}
+                                  </div>
+                                  <div className="w-40 space-y-1">
+                                    <Label className="text-xs">Version</Label>
+                                    <Select
+                                      value={String(draft.profileVersion ?? variationVersionOptions[0] ?? "")}
+                                      onValueChange={(value) => updateVariationDraft(index, { profileVersion: Number(value) })}
+                                      disabled={!draft.profileId}
+                                    >
+                                      <SelectTrigger className="w-full">
+                                        <SelectValue placeholder={draft.profileId ? "Select version" : "Select profile first"} />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {variationVersionOptions.map((version) => (
+                                          <SelectItem key={version} value={String(version)}>
+                                            v{version}
+                                            {version === selectedVariationProfile?.latestVersion ? " (latest)" : ""}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-9 w-9"
+                                    onClick={() => removeVariationDraft(index)}
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <Select onValueChange={applyProfile}>
@@ -659,7 +919,7 @@ export function SubmitRun() {
           {/* Continue */}
           <div className="flex justify-between">
             {!profileLocked && worker && model ? (
-              <Dialog open={saveProfileOpen} onOpenChange={setSaveProfileOpen}>
+              <Dialog open={saveProfileOpen} onOpenChange={handleSaveProfileOpenChange}>
                 <DialogTrigger asChild>
                   <Button type="button" variant="outline" className="gap-1.5">
                     <Save className="h-4 w-4" /> Save as Profile
@@ -722,13 +982,22 @@ export function SubmitRun() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="grid grid-cols-[8rem_1fr] gap-y-2">
-                {selectedProfileId && (
+                {selectedProfileId && summaryVariations.length === 0 && (
                   <>
                     <span className="text-muted-foreground">Profile</span>
-                    <Badge variant="secondary" className="font-mono text-xs w-fit">
-                      {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
-                      {selectedProfileVersion ? ` v${selectedProfileVersion}` : ""}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="font-medium truncate max-w-xs cursor-help">{summaryBaseProfile?.name ?? selectedProfileId}</span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{summaryBaseProfile?.name ?? selectedProfileId}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    {selectedProfileVersion && (
+                      <span className="text-muted-foreground">v{selectedProfileVersion}</span>
+                    )}
+                    </div>
                   </>
                 )}
                 <span className="text-muted-foreground">Task</span>
@@ -805,6 +1074,49 @@ export function SubmitRun() {
             </CardContent>
           </Card>
 
+          {selectedProfileId && summaryVariations.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Profile Variations</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-[8rem_1fr] gap-y-2 text-sm">
+                  <span className="text-muted-foreground">Base profile</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="font-medium truncate max-w-xs cursor-help">{summaryBaseProfile?.name ?? selectedProfileId}</span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{summaryBaseProfile?.name ?? selectedProfileId}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    {selectedProfileVersion && (
+                      <span className="text-muted-foreground">v{selectedProfileVersion}</span>
+                    )}
+                  </div>
+
+                  {summaryVariations.map((variation, index) => (
+                    <>
+                      <span className="text-muted-foreground">Variation {index + 1}</span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="font-medium truncate max-w-xs cursor-help">{variation.profileName}</span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{variation.profileName}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                        {variation.profileVersion && <span className="text-muted-foreground">v{variation.profileVersion}</span>}
+                      </div>
+                    </>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Prompt Features */}
           {createTaskPromptMutation.isPending && (
             <Card>
@@ -867,5 +1179,6 @@ export function SubmitRun() {
         </form>
       )}
     </div>
+    </TooltipProvider>
   );
 }
