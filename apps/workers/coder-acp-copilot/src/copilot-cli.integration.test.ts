@@ -167,7 +167,7 @@ describe("coder-acp-copilot integration", async () => {
   // Tool availability: each tool gets its own test for CI visibility
   // -----------------------------------------------------------------------
 
-  for (const tool of ["pwsh", "python3", "git", "uv", "node", "dotnet"]) {
+  for (const tool of ["pwsh", "python3", "git", "uv", "node", "go", "dotnet", "rustc", "cargo", "java", "mvn", "gradle"]) {
     it.skipIf(!dockerAvailable)(
       `has ${tool} in PATH`,
       { timeout: 30_000 },

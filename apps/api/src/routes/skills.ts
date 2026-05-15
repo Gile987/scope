@@ -21,6 +21,33 @@ export function registerSkillsRoutes(ctx: RouteContext): void {
 // Skills API
 // =====================================================================
 
+// Upload a skill archive to blob storage. Shared by manual /resolve and
+// the auto-resolve triggered after a skill is created or imported.
+const uploadSkillArchive = async (archiveName: string, data: Buffer): Promise<string> => {
+  if (!ctx.storageConnectionString && !ctx.storageAccountName) {
+    throw new Error("Blob storage not configured — cannot store skill archives");
+  }
+
+  let blobServiceClient: BlobServiceClient;
+  if (ctx.storageConnectionString) {
+    blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
+  } else {
+    const credential = new DefaultAzureCredential();
+    blobServiceClient = new BlobServiceClient(
+      `https://${ctx.storageAccountName}.blob.core.windows.net`,
+      credential
+    );
+  }
+
+  const containerClient = blobServiceClient.getContainerClient("skill-archives");
+  await containerClient.createIfNotExists();
+  const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
+  await blockBlobClient.upload(data, data.length, {
+    blobHTTPHeaders: { blobContentType: "application/gzip" },
+  });
+  return blockBlobClient.url;
+};
+
 // List all skills (with optional ?q= text search)
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
@@ -276,6 +303,8 @@ apiRoute(ctx.app, ctx.registry, {
       const now = new Date();
       const existing = await ctx.skillCollection.findOne({ _id });
 
+      let responseSkill: SkillDocument & { id: string };
+      let status = 200;
       if (existing) {
         // Upsert: un-delete if soft-deleted, update fields
         await ctx.skillCollection.updateOne(
@@ -293,7 +322,7 @@ apiRoute(ctx.app, ctx.registry, {
           }
         );
         const updated = await ctx.skillCollection.findOne({ _id });
-        res.json({ ...updated, id: updated!._id });
+        responseSkill = { ...(updated as SkillDocument), id: updated!._id };
       } else {
         const skillDoc: SkillDocument = {
           _id,
@@ -305,8 +334,21 @@ apiRoute(ctx.app, ctx.registry, {
           createdAt: now,
         };
         await ctx.skillCollection.insertOne(skillDoc as any);
-        res.status(201).json({ ...skillDoc, id: skillDoc._id });
+        responseSkill = { ...skillDoc, id: skillDoc._id };
+        status = 201;
       }
+
+      // Auto-resolve from GitHub so the user doesn't need to click "Resolve".
+      // Failures are non-fatal: the skill is already saved and the user can
+      // retry resolution manually via POST /skills/:id/resolve.
+      try {
+        await ctx.skillResolver.resolve(source, skillName, ctx.skillRevisionStore, uploadSkillArchive);
+      } catch (resolveError) {
+        const message = resolveError instanceof Error ? resolveError.message : String(resolveError);
+        console.warn(`Auto-resolve failed for skill ${_id}: ${message}`);
+      }
+
+      res.status(status).json(responseSkill);
     } catch (error) {
       next(error);
     }
@@ -506,33 +548,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
 
-      // Upload archive to blob storage
-      const uploadArchive = async (archiveName: string, data: Buffer): Promise<string> => {
-        if (!ctx.storageConnectionString && !ctx.storageAccountName) {
-          throw new Error("Blob storage not configured — cannot store skill archives");
-        }
-
-        let blobServiceClient: BlobServiceClient;
-        if (ctx.storageConnectionString) {
-          blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
-        } else {
-          const credential = new DefaultAzureCredential();
-          blobServiceClient = new BlobServiceClient(
-            `https://${ctx.storageAccountName}.blob.core.windows.net`,
-            credential
-          );
-        }
-
-        const containerClient = blobServiceClient.getContainerClient("skill-archives");
-        await containerClient.createIfNotExists();
-        const blockBlobClient = containerClient.getBlockBlobClient(archiveName);
-        await blockBlobClient.upload(data, data.length, {
-          blobHTTPHeaders: { blobContentType: "application/gzip" },
-        });
-        return blockBlobClient.url;
-      };
-
-      const revision = await ctx.skillResolver.resolve(skill.source, skill.skillName, ctx.skillRevisionStore, uploadArchive);
+      const revision = await ctx.skillResolver.resolve(skill.source, skill.skillName, ctx.skillRevisionStore, uploadSkillArchive);
       res.json(revision);
     } catch (error) {
       next(error);

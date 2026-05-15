@@ -74,7 +74,7 @@ erDiagram
 
 ### 1. Registration
 
-Skills are registered via the API by providing a GitHub source (`owner/repo`) and skill name. The API fetches the `SKILL.md` from GitHub, parses its YAML frontmatter (name, description, license, compatibility, etc.), and stores both the skill record and an initial revision.
+Skills are registered via the API by providing a GitHub source (`owner/repo`) and skill name. The API stores the skill record and immediately attempts to auto-resolve it: it fetches `SKILL.md` from GitHub at the latest commit, parses its YAML frontmatter (name, description, license, compatibility, etc.), uploads a tar.gz archive of the skill directory to Blob Storage, and creates the first `SkillRevision`. If auto-resolution fails (e.g., GitHub 404, network error), the skill record is still saved and the user can retry via `POST /api/v1/skills/:id/resolve`.
 
 ### 2. Resolution (Submit Time)
 

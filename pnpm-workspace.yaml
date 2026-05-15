@@ -1,25 +1,39 @@
 packages:
-  - "apps/api"
-  - "apps/key-updaters/*"
-  - "apps/cli"
-  - "apps/judge"
-  - "apps/portal"
-  - "apps/scheduler"
-  - "apps/token-manager"
-  - "apps/workers/*"
-  - "apps/model-scanners/*"
-  - "apps/version-checkers/*"
-  - "packages/shared"
-  - "packages/version-checking"
-  - "packages/github-auth"
-  - "packages/model-scanning"
-  - "packages/db-migrations"
-  - "packages/copilot-driver-ext"
-
+  - apps/api
+  - apps/key-updaters/*
+  - apps/cli
+  - apps/judge
+  - apps/portal
+  - apps/scheduler
+  - apps/token-manager
+  - apps/workers/*
+  - apps/model-scanners/*
+  - apps/version-checkers/*
+  - packages/shared
+  - packages/version-checking
+  - packages/github-auth
+  - packages/model-scanning
+  - packages/db-migrations
 # Runtime language version pinning (for worker Docker images)
 # - python: 3.x (system package)
 # - node: 24 (coder-acp workers)
 # - powershell: 7.4.14
 # - uv: 0.10.0
+# - go: 1.26.3
 # - dotnet: 8.0.111
+# - rustup: stable (installed via rustup, which provides the latest stable Rust toolchain)
+# - java: 21 (Eclipse Temurin 21.0.4)
+# - maven: 3.9.8
+# - gradle: 8.12
 # - pnpm: 10.29.1
+
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
+
+onlyBuiltDependencies:
+  - '@vscode/vsce-sign'
+  - cpu-features
+  - esbuild
+  - keytar
+  - protobufjs
+  - ssh2

@@ -48,9 +48,16 @@ export function SkillDetail() {
 
   const resolveMutation = useMutation({
     mutationFn: () => api.resolveSkill(slug!),
-    onSuccess: () => {
+    onSuccess: (revision) => {
       queryClient.invalidateQueries({ queryKey: ["skill-revisions", slug] });
-      toast.success("Skill resolved — new revision created");
+      if (revision.validationWarnings?.length) {
+        for (const warning of revision.validationWarnings) {
+          toast.warning(warning);
+        }
+        toast.success("Skill resolved with warnings — new revision created");
+      } else {
+        toast.success("Skill resolved — new revision created");
+      }
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to resolve skill");
@@ -230,6 +237,14 @@ export function SkillDetail() {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+              {latestRevision?.validationWarnings && latestRevision.validationWarnings.length > 0 && (
+                <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-2.5 space-y-1">
+                  <span className="text-xs font-medium text-yellow-600 dark:text-yellow-400">⚠ Validation Warnings</span>
+                  {latestRevision.validationWarnings.map((w, i) => (
+                    <div key={i} className="text-xs text-yellow-700 dark:text-yellow-300">{w}</div>
+                  ))}
                 </div>
               )}
               <div>
