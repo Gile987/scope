@@ -78,7 +78,7 @@ Skills are registered via the API by providing a GitHub source (`owner/repo`) an
 
 #### Discovery
 
-`GET /api/v1/skills/discover?source=owner/repo` scans the repository's well-known skill directories (`skills/`, `.agents/skills/`, `.github/skills/`, `.claude/skills/`, `.copilot/skills/`, `.roo/skills/`, `.cursor/skills/`, and the repo root) and returns every directory containing a `SKILL.md`, with frontmatter (name, description) parsed best-effort. The portal exposes this as a multi-step import wizard: the user enters a repository, picks one or more discovered skills, and the wizard fires parallel `POST /api/v1/skills` requests with per-skill progress feedback. Returns `404` if the repository does not exist, `400` for malformed sources, and `502` for upstream GitHub errors.
+`GET /api/v1/skills/discover?source=owner/repo` lists every `SKILL.md` found under well-known directories (`skills/`, `.agents/skills/`, `.github/skills/`, `.claude/skills/`, `.copilot/skills/`, `.roo/skills/`, `.cursor/skills/`, and the repo root). Implementation: a single recursive Trees API call to enumerate the repo, then per-skill best-effort frontmatter parsing via `raw.githubusercontent.com` (which doesn't count against the API rate limit). The portal exposes this as a multi-step import wizard: the user enters a repository, picks one or more discovered skills, and the wizard fires parallel `POST /api/v1/skills` requests with per-skill progress feedback. Returns `404` if the repository does not exist, `400` for malformed sources, and `502` for upstream GitHub errors (including rate limits — set `GITHUB_TOKEN` on the API to raise the limit).
 
 ### 2. Resolution (Submit Time)
 

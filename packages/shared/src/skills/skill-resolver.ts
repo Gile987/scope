@@ -195,113 +195,94 @@ export class SkillResolver {
   /**
    * List all skills available in a repo by scanning well-known directories.
    *
-   * For each well-known directory (`skills/`, `.agents/skills/`, etc.), enumerates
-   * its subdirectories and reports any that contain a `SKILL.md` file. Frontmatter
-   * (name, description) is parsed best-effort — if parsing fails the entry is still
-   * returned with `skillName` only.
+   * Uses the GitHub Trees API recursively (a single API call) to enumerate the
+   * entire repo, then filters for `SKILL.md` files inside well-known parent
+   * directories. Frontmatter (name, description) is parsed best-effort in
+   * parallel — if a fetch fails (rate limit, etc.) the entry is still returned
+   * with `skillName` only.
    *
-   * @throws if the repo itself cannot be accessed (404 / network error).
+   * @throws if the repo itself cannot be accessed (404, rate limit, etc.).
    */
   async discoverSkills(source: string): Promise<SkillDiscoveryEntry[]> {
+    // 1. Get the default branch (a single repo metadata call).
+    const repoRes = await fetch(`${this.githubApiUrl}/repos/${source}`, { headers: this.headers });
+    if (repoRes.status === 404) {
+      throw new Error(`Repository "${source}" not found`);
+    }
+    if (!repoRes.ok) {
+      const detail = await this.formatGitHubError(repoRes);
+      throw new Error(`Failed to access repository "${source}": ${detail}`);
+    }
+    const repoJson = await repoRes.json() as { default_branch?: string };
+    const branch = repoJson.default_branch ?? 'main';
+
+    // 2. Fetch the recursive tree (a single API call).
+    const treeUrl = `${this.githubApiUrl}/repos/${source}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
+    const treeRes = await fetch(treeUrl, { headers: this.headers });
+    if (!treeRes.ok) {
+      const detail = await this.formatGitHubError(treeRes);
+      throw new Error(`Failed to list ${source} tree: ${detail}`);
+    }
+    const treeJson = await treeRes.json() as {
+      tree?: Array<{ path: string; type: 'blob' | 'tree' }>;
+      truncated?: boolean;
+    };
+    if (!treeJson.tree) return [];
+
+    // 3. Filter for SKILL.md files inside well-known parent dirs.
     const seen = new Set<string>();
-    const results: SkillDiscoveryEntry[] = [];
-    let repoAccessible = false;
+    const candidates: SkillDiscoveryEntry[] = [];
+    for (const entry of treeJson.tree) {
+      if (entry.type !== 'blob') continue;
+      if (!entry.path.endsWith('/SKILL.md') && entry.path !== 'SKILL.md') continue;
 
-    for (const searchDir of SKILL_SEARCH_DIRS) {
-      const dirPath = searchDir || "";
-      const url = dirPath
-        ? `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(dirPath)}`
-        : `${this.githubApiUrl}/repos/${source}/contents`;
+      const skillPath = entry.path === 'SKILL.md' ? '' : entry.path.slice(0, -'/SKILL.md'.length);
+      const parentDir = skillPath.includes('/') ? skillPath.slice(0, skillPath.lastIndexOf('/')) : '';
+      const skillName = skillPath.includes('/') ? skillPath.slice(skillPath.lastIndexOf('/') + 1) : skillPath;
 
-      let listingRes: Response;
-      try {
-        listingRes = await fetch(url, { headers: this.headers });
-      } catch {
-        continue;
-      }
+      // Match against well-known parent directories.
+      if (!SKILL_SEARCH_DIRS.includes(parentDir)) continue;
+      // Skip dot-prefixed dirs at the repo root (e.g. .github/workflows/SKILL.md if any).
+      if (!parentDir && skillName.startsWith('.')) continue;
+      if (!skillName) continue;
 
-      if (listingRes.status === 404) {
-        // The directory doesn't exist; the repo itself may still exist.
-        // Probe the repo on the first 404 to distinguish "no skills here" from "no repo".
-        if (!repoAccessible) {
-          const repoRes = await fetch(`${this.githubApiUrl}/repos/${source}`, { headers: this.headers });
-          if (repoRes.status === 404) {
-            throw new Error(`Repository "${source}" not found`);
-          }
-          if (!repoRes.ok) {
-            throw new Error(`Failed to access repository "${source}": ${repoRes.status} ${repoRes.statusText}`);
-          }
-          repoAccessible = true;
-        }
-        continue;
-      }
+      if (seen.has(skillPath)) continue;
+      seen.add(skillPath);
 
-      if (!listingRes.ok) {
-        // Treat non-OK responses (rate limit, auth, etc.) as fatal.
-        throw new Error(`Failed to list ${source}/${dirPath || "(root)"}: ${listingRes.status} ${listingRes.statusText}`);
-      }
-      repoAccessible = true;
-
-      const entries = await listingRes.json() as Array<{
-        name: string;
-        path: string;
-        type: 'file' | 'dir';
-      }>;
-      if (!Array.isArray(entries)) continue;
-
-      for (const entry of entries) {
-        if (entry.type !== 'dir') continue;
-        // Skip well-known non-skill directories at the repo root.
-        if (!searchDir && entry.name.startsWith('.')) continue;
-
-        const skillMdUrl = `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(`${entry.path}/SKILL.md`)}`;
-        let skillMdRes: Response;
-        try {
-          skillMdRes = await fetch(skillMdUrl, { headers: this.headers });
-        } catch {
-          continue;
-        }
-        if (!skillMdRes.ok) continue;
-
-        const dedupeKey = entry.path;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-
-        const result: SkillDiscoveryEntry = {
-          skillName: entry.name,
-          skillPath: entry.path,
-        };
-
-        // Best-effort frontmatter parse for name/description.
-        try {
-          const fileJson = await skillMdRes.json() as { content?: string; encoding?: string; download_url?: string };
-          let content: string | null = null;
-          if (fileJson.content && fileJson.encoding === 'base64') {
-            content = Buffer.from(fileJson.content, 'base64').toString('utf-8');
-          } else if (fileJson.download_url) {
-            const dl = await fetch(fileJson.download_url, { headers: this.headers });
-            if (dl.ok) content = await dl.text();
-          }
-          if (content) {
-            const parsed = parseSkillMd(content);
-            if (parsed.frontmatter.name) result.name = parsed.frontmatter.name;
-            if (parsed.frontmatter.description) result.description = parsed.frontmatter.description;
-          }
-        } catch {
-          // Non-fatal: return the entry without metadata.
-        }
-
-        results.push(result);
-      }
+      candidates.push({ skillName, skillPath });
     }
 
-    if (!repoAccessible) {
-      // No well-known directory existed and the repo probe never ran (all fetches threw).
-      throw new Error(`Failed to access repository "${source}"`);
-    }
+    // 4. Best-effort parallel frontmatter fetch (raw.githubusercontent.com avoids
+    //    counting against the API rate limit).
+    await Promise.all(
+      candidates.map(async (c) => {
+        try {
+          const rawUrl = `https://raw.githubusercontent.com/${source}/${encodeURIComponent(branch)}/${encodeGitHubPath(`${c.skillPath}/SKILL.md`)}`;
+          const res = await fetch(rawUrl);
+          if (!res.ok) return;
+          const content = await res.text();
+          const parsed = parseSkillMd(content);
+          if (parsed.frontmatter.name) c.name = parsed.frontmatter.name;
+          if (parsed.frontmatter.description) c.description = parsed.frontmatter.description;
+        } catch {
+          // Non-fatal: return entry without metadata.
+        }
+      })
+    );
 
-    results.sort((a, b) => a.skillName.localeCompare(b.skillName));
-    return results;
+    candidates.sort((a, b) => a.skillName.localeCompare(b.skillName));
+    return candidates;
+  }
+
+  /** Format a non-OK GitHub response, surfacing rate-limit info when possible. */
+  private async formatGitHubError(res: Response): Promise<string> {
+    const remaining = res.headers.get('x-ratelimit-remaining');
+    if (res.status === 403 && remaining === '0') {
+      return `403 rate limit exceeded — set GITHUB_TOKEN to raise the limit`;
+    }
+    let body = '';
+    try { body = (await res.text()).slice(0, 200); } catch { /* ignore */ }
+    return `${res.status} ${res.statusText}${body ? ` — ${body}` : ''}`;
   }
 
   /**

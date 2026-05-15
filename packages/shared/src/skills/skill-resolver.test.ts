@@ -58,17 +58,29 @@ describe("SkillResolver.discoverSkills", () => {
   });
 
   /** Helper: build a Response-like stub. */
-  function jsonResponse(status: number, body: unknown): Response {
+  function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): Response {
     return {
       ok: status >= 200 && status < 300,
       status,
       statusText: status === 200 ? "OK" : "Error",
+      headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
       json: async () => body,
       text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
     } as unknown as Response;
   }
 
-  it("returns skills found in the skills/ directory with frontmatter parsed", async () => {
+  function textResponse(status: number, body: string): Response {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? "OK" : "Error",
+      headers: { get: () => null },
+      json: async () => { throw new Error("not json"); },
+      text: async () => body,
+    } as unknown as Response;
+  }
+
+  it("uses the Trees API and returns SKILL.md entries with frontmatter parsed", async () => {
     const skillMd = `---
 name: vector-search
 description: Vector search skill
@@ -77,22 +89,23 @@ description: Vector search skill
 # Vector Search`;
     const fetchMock = vi.fn(async (input: string) => {
       const url = String(input);
-      // First call: list skills/
-      if (url.endsWith("/contents/skills")) {
-        return jsonResponse(200, [
-          { name: "vector-search", path: "skills/vector-search", type: "dir" },
-          { name: "README.md", path: "skills/README.md", type: "file" },
-        ]);
+      if (url === "https://api.github.com/repos/owner/repo") {
+        return jsonResponse(200, { default_branch: "main" });
       }
-      // Probe SKILL.md
-      if (url.endsWith("/contents/skills/vector-search/SKILL.md")) {
+      if (url.includes("/git/trees/main?recursive=1")) {
         return jsonResponse(200, {
-          content: Buffer.from(skillMd).toString("base64"),
-          encoding: "base64",
+          tree: [
+            { path: "README.md", type: "blob" },
+            { path: "skills/vector-search/SKILL.md", type: "blob" },
+            { path: "skills/vector-search/script.py", type: "blob" },
+            { path: "skills/README.md", type: "blob" }, // not in a skill dir → ignored
+          ],
         });
       }
-      // Other well-known dirs return 404 (and so does the root listing)
-      return jsonResponse(404, { message: "Not Found" });
+      if (url === "https://raw.githubusercontent.com/owner/repo/main/skills/vector-search/SKILL.md") {
+        return textResponse(200, skillMd);
+      }
+      throw new Error(`unexpected fetch ${url}`);
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
@@ -109,11 +122,7 @@ description: Vector search skill
   });
 
   it("throws when the repository does not exist", async () => {
-    const fetchMock = vi.fn(async (input: string) => {
-      const url = String(input);
-      // All directory listings 404, then repo probe also 404
-      return jsonResponse(404, { message: "Not Found" });
-    });
+    const fetchMock = vi.fn(async () => jsonResponse(404, { message: "Not Found" }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     await expect(resolver.discoverSkills("owner/missing")).rejects.toThrow(
@@ -121,60 +130,65 @@ description: Vector search skill
     );
   });
 
-  it("returns an entry without metadata when frontmatter parsing fails", async () => {
-    const fetchMock = vi.fn(async (input: string) => {
-      const url = String(input);
-      if (url.endsWith("/contents/skills")) {
-        return jsonResponse(200, [
-          { name: "broken", path: "skills/broken", type: "dir" },
-        ]);
-      }
-      if (url.endsWith("/contents/skills/broken/SKILL.md")) {
-        // Return body with no frontmatter
-        return jsonResponse(200, {
-          content: Buffer.from("just markdown, no frontmatter").toString("base64"),
-          encoding: "base64",
-        });
-      }
-      return jsonResponse(404, { message: "Not Found" });
-    });
+  it("surfaces a helpful message on rate-limit (403 with x-ratelimit-remaining: 0)", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(403, { message: "rate limit exceeded" }, { "x-ratelimit-remaining": "0" })
+    );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const results = await resolver.discoverSkills("owner/repo");
-    expect(results).toHaveLength(1);
-    expect(results[0].skillName).toBe("broken");
-    expect(results[0].skillPath).toBe("skills/broken");
+    await expect(resolver.discoverSkills("owner/repo")).rejects.toThrow(/rate limit exceeded/i);
   });
 
-  it("deduplicates skills found in multiple well-known directories", async () => {
+  it("returns an entry without metadata when the raw frontmatter fetch fails", async () => {
     const fetchMock = vi.fn(async (input: string) => {
       const url = String(input);
-      if (url.endsWith("/contents/skills")) {
-        return jsonResponse(200, [
-          { name: "dup", path: "skills/dup", type: "dir" },
-        ]);
+      if (url === "https://api.github.com/repos/owner/repo") {
+        return jsonResponse(200, { default_branch: "main" });
       }
-      if (url.endsWith("/contents/skills/dup/SKILL.md")) {
-        return jsonResponse(200, { content: Buffer.from("# dup").toString("base64"), encoding: "base64" });
+      if (url.includes("/git/trees/main?recursive=1")) {
+        return jsonResponse(200, {
+          tree: [{ path: "skills/broken/SKILL.md", type: "blob" }],
+        });
       }
-      // .agents/skills also has 'dup' at a different path — should still appear (different skillPath)
-      if (url.endsWith("/contents/.agents/skills")) {
-        return jsonResponse(200, [
-          { name: "dup", path: ".agents/skills/dup", type: "dir" },
-        ]);
+      // Raw fetch fails (e.g. throttled CDN) — should be best-effort.
+      if (url.startsWith("https://raw.githubusercontent.com/")) {
+        return textResponse(403, "");
       }
-      if (url.endsWith("/contents/.agents/skills/dup/SKILL.md")) {
-        return jsonResponse(200, { content: Buffer.from("# dup").toString("base64"), encoding: "base64" });
-      }
-      return jsonResponse(404, { message: "Not Found" });
+      throw new Error(`unexpected fetch ${url}`);
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const results = await resolver.discoverSkills("owner/repo");
-    // Two different paths → two entries (dedupe is by path, not by skillName)
-    expect(results).toHaveLength(2);
-    expect(results.map(r => r.skillPath).sort()).toEqual([
+    expect(results).toEqual([{ skillName: "broken", skillPath: "skills/broken" }]);
+  });
+
+  it("matches skills across multiple well-known directories", async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url === "https://api.github.com/repos/owner/repo") {
+        return jsonResponse(200, { default_branch: "main" });
+      }
+      if (url.includes("/git/trees/main?recursive=1")) {
+        return jsonResponse(200, {
+          tree: [
+            { path: "skills/dup/SKILL.md", type: "blob" },
+            { path: ".agents/skills/dup/SKILL.md", type: "blob" },
+            { path: "skills/another/SKILL.md", type: "blob" },
+            { path: "node_modules/foo/SKILL.md", type: "blob" }, // not a well-known dir → ignored
+          ],
+        });
+      }
+      if (url.startsWith("https://raw.githubusercontent.com/")) {
+        return textResponse(200, "# no frontmatter");
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const results = await resolver.discoverSkills("owner/repo");
+    expect(results.map((r) => r.skillPath).sort()).toEqual([
       ".agents/skills/dup",
+      "skills/another",
       "skills/dup",
     ]);
   });
