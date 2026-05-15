@@ -202,7 +202,7 @@ async function initializeClients(): Promise<void> {
   heartbeatStore = new RedisHeartbeatStore({
     redisHost: process.env.REDIS_HOST || "",
     redisPort: parseInt(process.env.REDIS_PORT || "6300", 10),
-    redisPassword: process.env.REDIS_PASSWORD,
+    redisPassword: process.env.REDIS_PASSWORD || "",
   });
 }
 
