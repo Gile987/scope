@@ -33,6 +33,18 @@ interface SkillFileEntry {
   content: string;    // File content (text)
 }
 
+/** A skill discovered by scanning a repo's well-known directories */
+export interface SkillDiscoveryEntry {
+  /** Directory name of the skill (last path segment) */
+  skillName: string;
+  /** Full path within the repo where the skill directory lives */
+  skillPath: string;
+  /** Display name from SKILL.md frontmatter (best-effort) */
+  name?: string;
+  /** Description from SKILL.md frontmatter (best-effort) */
+  description?: string;
+}
+
 /**
  * Well-known directories to search for skills in a GitHub repo,
  * per the skills.sh CLI discovery order.
@@ -178,6 +190,118 @@ export class SkillResolver {
     }
 
     return null;
+  }
+
+  /**
+   * List all skills available in a repo by scanning well-known directories.
+   *
+   * For each well-known directory (`skills/`, `.agents/skills/`, etc.), enumerates
+   * its subdirectories and reports any that contain a `SKILL.md` file. Frontmatter
+   * (name, description) is parsed best-effort — if parsing fails the entry is still
+   * returned with `skillName` only.
+   *
+   * @throws if the repo itself cannot be accessed (404 / network error).
+   */
+  async discoverSkills(source: string): Promise<SkillDiscoveryEntry[]> {
+    const seen = new Set<string>();
+    const results: SkillDiscoveryEntry[] = [];
+    let repoAccessible = false;
+
+    for (const searchDir of SKILL_SEARCH_DIRS) {
+      const dirPath = searchDir || "";
+      const url = dirPath
+        ? `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(dirPath)}`
+        : `${this.githubApiUrl}/repos/${source}/contents`;
+
+      let listingRes: Response;
+      try {
+        listingRes = await fetch(url, { headers: this.headers });
+      } catch {
+        continue;
+      }
+
+      if (listingRes.status === 404) {
+        // The directory doesn't exist; the repo itself may still exist.
+        // Probe the repo on the first 404 to distinguish "no skills here" from "no repo".
+        if (!repoAccessible) {
+          const repoRes = await fetch(`${this.githubApiUrl}/repos/${source}`, { headers: this.headers });
+          if (repoRes.status === 404) {
+            throw new Error(`Repository "${source}" not found`);
+          }
+          if (!repoRes.ok) {
+            throw new Error(`Failed to access repository "${source}": ${repoRes.status} ${repoRes.statusText}`);
+          }
+          repoAccessible = true;
+        }
+        continue;
+      }
+
+      if (!listingRes.ok) {
+        // Treat non-OK responses (rate limit, auth, etc.) as fatal.
+        throw new Error(`Failed to list ${source}/${dirPath || "(root)"}: ${listingRes.status} ${listingRes.statusText}`);
+      }
+      repoAccessible = true;
+
+      const entries = await listingRes.json() as Array<{
+        name: string;
+        path: string;
+        type: 'file' | 'dir';
+      }>;
+      if (!Array.isArray(entries)) continue;
+
+      for (const entry of entries) {
+        if (entry.type !== 'dir') continue;
+        // Skip well-known non-skill directories at the repo root.
+        if (!searchDir && entry.name.startsWith('.')) continue;
+
+        const skillMdUrl = `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(`${entry.path}/SKILL.md`)}`;
+        let skillMdRes: Response;
+        try {
+          skillMdRes = await fetch(skillMdUrl, { headers: this.headers });
+        } catch {
+          continue;
+        }
+        if (!skillMdRes.ok) continue;
+
+        const dedupeKey = entry.path;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+
+        const result: SkillDiscoveryEntry = {
+          skillName: entry.name,
+          skillPath: entry.path,
+        };
+
+        // Best-effort frontmatter parse for name/description.
+        try {
+          const fileJson = await skillMdRes.json() as { content?: string; encoding?: string; download_url?: string };
+          let content: string | null = null;
+          if (fileJson.content && fileJson.encoding === 'base64') {
+            content = Buffer.from(fileJson.content, 'base64').toString('utf-8');
+          } else if (fileJson.download_url) {
+            const dl = await fetch(fileJson.download_url, { headers: this.headers });
+            if (dl.ok) content = await dl.text();
+          }
+          if (content) {
+            const parsed = parseSkillMd(content);
+            if (parsed.frontmatter.name) result.name = parsed.frontmatter.name;
+            if (parsed.frontmatter.description) result.description = parsed.frontmatter.description;
+          }
+        } catch {
+          // Non-fatal: return the entry without metadata.
+        }
+
+        results.push(result);
+      }
+    }
+
+    if (!repoAccessible) {
+      // No well-known directory existed and the repo probe never ran (all fetches threw).
+      throw new Error(`Failed to access repository "${source}"`);
+    }
+
+    results.sort((a, b) => a.skillName.localeCompare(b.skillName));
+    return results;
   }
 
   /**

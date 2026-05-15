@@ -86,3 +86,14 @@ export interface SkillSearchResult {
   internal: boolean;              // true if already in our DB
   installs?: number;              // Install count from skills.sh (external only)
 }
+
+/**
+ * A skill discovered by enumerating the well-known directories of a GitHub repo.
+ * Returned by the skill discovery endpoint to power the multi-skill import wizard.
+ */
+export interface SkillDiscoveryResult {
+  skillName: string;              // Directory name (last path segment)
+  skillPath: string;              // Full path within the repo
+  name?: string;                  // Display name from SKILL.md frontmatter (best-effort)
+  description?: string;           // Description from SKILL.md frontmatter (best-effort)
+}

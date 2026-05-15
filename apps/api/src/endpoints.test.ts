@@ -744,6 +744,45 @@ describe("API Endpoints", () => {
     });
   });
 
+  describe("GET /api/v1/skills/discover", () => {
+    it("returns 400 when source query parameter is missing", async () => {
+      const res = await request(app).get("/api/v1/skills/discover");
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when source is malformed", async () => {
+      const res = await request(app).get("/api/v1/skills/discover?source=not-a-repo");
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 200 with the list of discovered skills", async () => {
+      const discovered = [
+        { skillName: "vector-search", skillPath: "skills/vector-search", name: "Vector Search", description: "Embeddings" },
+        { skillName: "indexing", skillPath: "skills/indexing" },
+      ];
+      mocks.skillResolver.discoverSkills = vi.fn().mockResolvedValue(discovered);
+
+      const res = await request(app).get("/api/v1/skills/discover?source=Azure/documentdb-agent-kit");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual(discovered);
+      expect(mocks.skillResolver.discoverSkills).toHaveBeenCalledWith("Azure/documentdb-agent-kit");
+    });
+
+    it("returns 404 when the repository is not found", async () => {
+      mocks.skillResolver.discoverSkills = vi.fn().mockRejectedValue(new Error('Repository "owner/missing" not found'));
+
+      const res = await request(app).get("/api/v1/skills/discover?source=owner/missing");
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 502 on other GitHub errors", async () => {
+      mocks.skillResolver.discoverSkills = vi.fn().mockRejectedValue(new Error("rate limit exceeded"));
+
+      const res = await request(app).get("/api/v1/skills/discover?source=owner/repo");
+      expect(res.status).toBe(502);
+    });
+  });
+
   // ===================================================================
   // Prompt Features endpoints
   // ===================================================================

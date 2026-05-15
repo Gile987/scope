@@ -65,3 +65,12 @@ export const SkillSearchResultSchema = z
     installs: z.number().optional(),
   })
   .openapi("SkillSearchResult");
+
+export const SkillDiscoveryResultSchema = z
+  .object({
+    skillName: z.string(),
+    skillPath: z.string(),
+    name: z.string().optional(),
+    description: z.string().optional(),
+  })
+  .openapi("SkillDiscoveryResult");

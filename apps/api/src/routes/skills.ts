@@ -10,6 +10,7 @@ import {
   SkillResponseSchema,
   SkillRevisionResponseSchema,
   SkillSearchResultSchema,
+  SkillDiscoveryResultSchema,
 } from "shared";
 import type { SkillDocument, SkillSearchResult } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
@@ -207,6 +208,49 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       res.json(externalResults.slice(0, limit));
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+// Discover skills available in a GitHub repo by scanning well-known directories.
+// MUST be defined before /:id(*) to avoid being caught by the wildcard.
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/skills/discover",
+  tags: ["Skills"],
+  summary: "Discover skills in a GitHub repository",
+  query: z.object({ source: z.string() }),
+  response: z.array(SkillDiscoveryResultSchema),
+  errorResponses: {
+    400: { description: "Missing or malformed source parameter" },
+    404: { description: "Repository not found" },
+    502: { description: "GitHub API error" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const source = (req.query.source as string | undefined)?.trim();
+      if (!source) {
+        res.status(400).json({ error: "Query parameter 'source' is required (e.g. 'owner/repo')" });
+        return;
+      }
+      if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source)) {
+        res.status(400).json({ error: "source must be in the form 'owner/repo'" });
+        return;
+      }
+
+      try {
+        const results = await ctx.skillResolver.discoverSkills(source);
+        res.json(results);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/not found/i.test(message)) {
+          res.status(404).json({ error: message });
+          return;
+        }
+        res.status(502).json({ error: `GitHub discovery failed: ${message}` });
+      }
     } catch (error) {
       next(error);
     }

@@ -801,6 +801,14 @@ export interface SkillSearchResult {
   installs?: number;
 }
 
+/** A skill discovered by enumerating a GitHub repo's well-known directories */
+export interface SkillDiscoveryResult {
+  skillName: string;
+  skillPath: string;
+  name?: string;
+  description?: string;
+}
+
 // =============================================================================
 // VS Code extension types
 // =============================================================================

@@ -76,6 +76,10 @@ erDiagram
 
 Skills are registered via the API by providing a GitHub source (`owner/repo`) and skill name. The API stores the skill record and immediately attempts to auto-resolve it: it fetches `SKILL.md` from GitHub at the latest commit, parses its YAML frontmatter (name, description, license, compatibility, etc.), uploads a tar.gz archive of the skill directory to Blob Storage, and creates the first `SkillRevision`. If auto-resolution fails (e.g., GitHub 404, network error), the skill record is still saved and the user can retry via `POST /api/v1/skills/:id/resolve`.
 
+#### Discovery
+
+`GET /api/v1/skills/discover?source=owner/repo` scans the repository's well-known skill directories (`skills/`, `.agents/skills/`, `.github/skills/`, `.claude/skills/`, `.copilot/skills/`, `.roo/skills/`, `.cursor/skills/`, and the repo root) and returns every directory containing a `SKILL.md`, with frontmatter (name, description) parsed best-effort. The portal exposes this as a multi-step import wizard: the user enters a repository, picks one or more discovered skills, and the wizard fires parallel `POST /api/v1/skills` requests with per-skill progress feedback. Returns `404` if the repository does not exist, `400` for malformed sources, and `502` for upstream GitHub errors.
+
 ### 2. Resolution (Submit Time)
 
 When a run is submitted with skill slugs (e.g., `owner/repo/skillName`), the API resolves each slug to the latest `skillRevision` ref (`owner/repo/skillName@commitHash`). These immutable refs are stored on the run document.
