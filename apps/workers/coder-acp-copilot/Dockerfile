@@ -5,7 +5,7 @@ FROM node:24-slim AS base
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 
-# Install system tools for coding agents: Python, uv, git, PowerShell, .NET, Java, Maven, Gradle
+# Install system tools for coding agents: Python, uv, git, PowerShell, Go, .NET, Rust, Java, Maven, Gradle
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
   unzip \
     && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
     && ARCH=$(dpkg --print-architecture) \
-    && case "$ARCH" in amd64) PS_ARCH=x64; DOTNET_ARCH=x64; JAVA_ARCH=x64;; arm64) PS_ARCH=arm64; DOTNET_ARCH=arm64; JAVA_ARCH=aarch64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
+  && case "$ARCH" in amd64) PS_ARCH=x64; DOTNET_ARCH=x64; JAVA_ARCH=x64;; arm64) PS_ARCH=arm64; DOTNET_ARCH=arm64; JAVA_ARCH=aarch64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
     && curl -fsSL -o /tmp/powershell.tar.gz \
       "https://github.com/PowerShell/PowerShell/releases/download/v7.4.14/powershell-7.4.14-linux-${PS_ARCH}.tar.gz" \
     && mkdir -p /opt/microsoft/powershell/7 \
@@ -30,6 +30,13 @@ RUN apt-get update && apt-get install -y \
     && rm /tmp/dotnet-sdk.tar.gz \
     && chmod +x /opt/dotnet/dotnet \
     && ln -s /opt/dotnet/dotnet /usr/local/bin/dotnet \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
+    && GO_ARCH=$(dpkg --print-architecture) \
+    && curl -fsSL -o /tmp/go.tar.gz \
+      "https://go.dev/dl/go1.26.3.linux-${GO_ARCH}.tar.gz" \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz \
+    && ln -s /usr/local/go/bin/go /usr/local/bin/go \
     && curl -fsSL -o /tmp/java.tar.gz \
       "https://api.adoptium.net/v3/binary/version/jdk-21.0.4+7/linux/${JAVA_ARCH}/jdk/hotspot/normal/eclipse" \
     && mkdir -p /opt/java \
@@ -53,7 +60,7 @@ RUN apt-get update && apt-get install -y \
     && ln -s /opt/gradle/gradle-8.12/bin/gradle /usr/local/bin/gradle \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PATH="/root/.local/bin:$PATH"
+ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
 
 # --- Builder stage: compile TypeScript ---
 FROM base AS builder

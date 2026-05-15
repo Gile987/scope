@@ -58,6 +58,7 @@ export interface SkillRevisionDocument {
   archiveUrl: string;             // Blob storage URL to the skill directory tar.gz
 
   // Housekeeping
+  validationWarnings?: string[];    // Non-blocking validation warnings (e.g. name-dir mismatch)
   resolvedAt: Date;               // When the skill was fetched/resolved
   createdAt: Date;
 }

@@ -2413,6 +2413,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "source": {
             "type": "string",
           },
+          "validationWarnings": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
         },
         "required": [
           "_id",
