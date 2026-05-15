@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import type { RunStatus, RunOutcome } from "@/types";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info" | "purple";
@@ -22,7 +23,12 @@ const outcomeConfig: Record<RunOutcome, { label: string; variant: BadgeVariant }
 
 export function StatusBadge({ status }: { status: RunStatus }) {
   const config = statusConfig[status] ?? { label: status, variant: "outline" as const };
-  return <Badge variant={config.variant}>{config.label}</Badge>;
+  // Pulse the badge while a run is actively processing so it's visually
+  // obvious the worker is still alive (vs. stuck "Processing" forever after
+  // a crash). Default Tailwind animate-pulse oscillates opacity 100% / 50%,
+  // which keeps the label readable.
+  const className = status === "processing" ? "animate-pulse" : undefined;
+  return <Badge variant={config.variant} className={cn(className)}>{config.label}</Badge>;
 }
 
 export function OutcomeBadge({ outcome }: { outcome?: RunOutcome }) {
