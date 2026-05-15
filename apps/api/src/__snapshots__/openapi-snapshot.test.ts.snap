@@ -7316,7 +7316,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "content": {
             "application/json": {
               "schema": {
-                "properties": {},
+                "properties": {
+                  "force": {
+                    "type": "boolean",
+                  },
+                },
                 "type": "object",
               },
             },

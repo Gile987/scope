@@ -99,8 +99,11 @@ export const api = {
   },
 
   /** Retry a request (start a new attempt) */
-  retryRun: (id: string): Promise<{ requestId: string; runId: string; attemptNumber: number }> => {
-    return request(`/requests/${id}/retry`, { method: "POST" });
+  retryRun: (id: string, options?: { force?: boolean }): Promise<{ requestId: string; runId: string; attemptNumber: number }> => {
+    return request(`/requests/${id}/retry`, {
+      method: "POST",
+      body: options?.force ? JSON.stringify({ force: true }) : undefined,
+    });
   },
 
   /** Pause a request */

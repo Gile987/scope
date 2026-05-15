@@ -1310,6 +1310,32 @@ describe("API Endpoints", () => {
       );
     });
 
+    it("returns 409 when retrying a successful run without force=true", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "succeeded" },
+      });
+
+      const res = await request(app).post("/api/v1/requests/req-1/retry");
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain("force=true");
+    });
+
+    it("retries a successful run when force=true", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        workerType: "coder-acp-copilot",
+        run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "succeeded" },
+      });
+      (mocks.runsCollection.insertOne as any).mockResolvedValue({ insertedId: "run-1" });
+      (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+
+      const res = await request(app).post("/api/v1/requests/req-1/retry").send({ force: true });
+      expect(res.status).toBe(201);
+      expect(res.body.attemptNumber).toBe(2);
+    });
+
     it("returns 409 when concurrent retry wins the race", async () => {
       (mocks.collection.findOne as any).mockResolvedValue({
         _id: "req-1",

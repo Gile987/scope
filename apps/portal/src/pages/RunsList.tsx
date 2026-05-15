@@ -102,6 +102,7 @@ export function RunsList() {
   const [cursorDirection, setCursorDirection] = useState<"after" | "before" | "last" | undefined>(undefined);
   const [isJumpingToLast, setIsJumpingToLast] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(loadHiddenColumns);
+  const [isForceRetryModifierActive, setIsForceRetryModifierActive] = useState(false);
   const queryClient = useQueryClient();
 
   const toggleColumn = useCallback((col: ColumnId) => {
@@ -312,7 +313,7 @@ export function RunsList() {
   });
 
   const retryMutation = useMutation({
-    mutationFn: api.retryRun,
+    mutationFn: ({ id, force }: { id: string; force?: boolean }) => api.retryRun(id, { force }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["runs"] });
       toast.success(`Retry started — attempt #${data.attemptNumber}`);
@@ -501,7 +502,7 @@ export function RunsList() {
         pausable: selected.filter((r) => status(r) === "pending" || status(r) === "queued").length,
         resumable: selected.filter((r) => status(r) === "paused").length,
         prioritizable: selected.filter((r) => status(r) === "pending" || status(r) === "paused").length,
-        retryable: selected.filter((r) => status(r) === "done").length,
+        retryable: selected.filter((r) => status(r) === "done" && r.run?.outcome !== "succeeded").length,
       };
     }
     // Grouped mode — derive caps from group-level statusCounts for groups
@@ -517,13 +518,13 @@ export function RunsList() {
         pausable += (sc.pending ?? 0) + (sc.queued ?? 0);
         resumable += sc.paused ?? 0;
         prioritizable += (sc.pending ?? 0) + (sc.paused ?? 0);
-        retryable += sc.done ?? 0;
+        retryable += Math.max(0, (sc.done ?? 0) - (group.aggregates.outcomeCounts.succeeded ?? 0));
       } else {
         // Partial selection — estimate proportionally (round up to be permissive)
         pausable += Math.ceil(((sc.pending ?? 0) + (sc.queued ?? 0)) * ratio);
         resumable += Math.ceil((sc.paused ?? 0) * ratio);
         prioritizable += Math.ceil(((sc.pending ?? 0) + (sc.paused ?? 0)) * ratio);
-        retryable += Math.ceil((sc.done ?? 0) * ratio);
+        retryable += Math.ceil(Math.max(0, (sc.done ?? 0) - (group.aggregates.outcomeCounts.succeeded ?? 0)) * ratio);
       }
     }
     return { pausable, resumable, prioritizable, retryable };
@@ -550,6 +551,26 @@ export function RunsList() {
       setIsJumpingToLast(false);
     }
   }, [isJumpingToLast, groupBy, isLoading, isRefetching, isGroupsLoading, isGroupsRefetching]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Shift") setIsForceRetryModifierActive(true);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === "Shift") setIsForceRetryModifierActive(false);
+    };
+    const onBlur = () => setIsForceRetryModifierActive(false);
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
 
   const toggleSelectAll = () => {
     if (allSelected) {
@@ -1564,6 +1585,7 @@ export function RunsList() {
                     outcomeFilter={effectiveOutcome}
                     criteriaState={criteriaState}
                     hiddenColumns={hiddenColumns}
+                    isForceRetryModifierActive={isForceRetryModifierActive}
                   />
                 );
               })
@@ -1582,6 +1604,7 @@ export function RunsList() {
                   setPriorityMutation={setPriorityMutation}
                   profileNameMap={profileNameMap}
                   hiddenColumns={hiddenColumns}
+                  isForceRetryModifierActive={isForceRetryModifierActive}
                 />
               ))
             )}
@@ -1646,20 +1669,24 @@ function RunRow({
   setPriorityMutation,
   profileNameMap,
   hiddenColumns,
+  isForceRetryModifierActive,
 }: {
   run: Run;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
-  retryMutation: { mutate: (id: string) => void; isPending: boolean };
+  retryMutation: { mutate: (args: { id: string; force?: boolean }) => void; isPending: boolean };
   pauseMutation: { mutate: (id: string) => void; isPending: boolean };
   resumeMutation: { mutate: (id: string) => void; isPending: boolean };
   setPriorityMutation: { mutate: (args: { id: string; priority: number }) => void; isPending: boolean };
   profileNameMap: Map<string, string>;
   hiddenColumns: Set<ColumnId>;
+  isForceRetryModifierActive: boolean;
 }) {
   const isCol = (col: ColumnId) => !hiddenColumns.has(col);
+  const isSuccessfulCompletedRun = run.run?.status === "done" && run.run?.outcome === "succeeded";
+  const canRetryRun = run.run?.status === "done" && (!isSuccessfulCompletedRun || isForceRetryModifierActive);
   return (
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
       <TableCell>
@@ -1887,13 +1914,13 @@ function RunRow({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          {run.run?.status === "done" && (
+          {canRetryRun && (
             <Button
               variant="ghost"
               size="icon"
               className="h-8 w-8"
               title="Retry"
-              onClick={() => retryMutation.mutate(run._id)}
+              onClick={() => retryMutation.mutate({ id: run._id, force: isSuccessfulCompletedRun })}
               disabled={retryMutation.isPending}
             >
               <RotateCcw className="h-4 w-4" />
@@ -1929,6 +1956,7 @@ function GroupRows({
   outcomeFilter,
   criteriaState,
   hiddenColumns,
+  isForceRetryModifierActive,
 }: {
   group: RunGroup;
   isExpanded: boolean;
@@ -1937,7 +1965,7 @@ function GroupRows({
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
-  retryMutation: { mutate: (id: string) => void; isPending: boolean };
+  retryMutation: { mutate: (args: { id: string; force?: boolean }) => void; isPending: boolean };
   pauseMutation: { mutate: (id: string) => void; isPending: boolean };
   resumeMutation: { mutate: (id: string) => void; isPending: boolean };
   setPriorityMutation: { mutate: (args: { id: string; priority: number }) => void; isPending: boolean };
@@ -1948,6 +1976,7 @@ function GroupRows({
   outcomeFilter?: string;
   criteriaState?: string;
   hiddenColumns: Set<ColumnId>;
+  isForceRetryModifierActive: boolean;
 }) {
   const { aggregates, uniform } = group;
   const fmtDur = (v: number) => formatDuration(Math.round(v));
@@ -2265,6 +2294,7 @@ function GroupRows({
               setPriorityMutation={setPriorityMutation}
               profileNameMap={profileNameMap}
               hiddenColumns={hiddenColumns}
+              isForceRetryModifierActive={isForceRetryModifierActive}
             />
           ))
         )

@@ -2628,7 +2628,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Requests"],
   summary: "Retry a request (start a new attempt)",
   params: z.object({ id: z.string() }),
-  body: z.object({}).optional(),
+  body: z.object({ force: z.boolean().optional() }).optional(),
   response: z.object({
     requestId: z.string(),
     runId: z.string(),
@@ -2641,6 +2641,7 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res) => {
     const { id } = req.params;
+    const force = req.body?.force === true;
 
     const request = await ctx.requestCollection.findOne({ _id: id });
     if (!request) {
@@ -2658,6 +2659,12 @@ apiRoute(ctx.app, ctx.registry, {
     if (!currentRun || currentRun.status !== "done") {
       res.status(422).json({
         error: `Cannot retry: current run status is '${currentRun?.status ?? "unknown"}', expected 'done'`,
+      });
+      return;
+    }
+    if (currentRun.outcome === "succeeded" && !force) {
+      res.status(409).json({
+        error: "Cannot retry a successful run unless force=true",
       });
       return;
     }
