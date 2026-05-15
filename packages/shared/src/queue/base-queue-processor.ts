@@ -13,6 +13,10 @@ import {
   startVisibilityHeartbeat,
   type VisibilityHeartbeat,
 } from "./visibility-heartbeat.js";
+import {
+  RedisHeartbeatStore,
+  type HeartbeatStore,
+} from "./heartbeat-store.js";
 
 /**
  * Generic queue processor that polls an Azure Storage Queue and processes messages.
@@ -28,6 +32,9 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
   protected queueClient: QueueClient;
   protected config: BaseQueueProcessorConfig;
   protected logPublisher!: LogPublisher;
+  /** Per-run liveness heartbeat store (Redis-backed in production).
+   *  Subclasses can override in tests via {@link setHeartbeatStore}. */
+  protected heartbeatStore!: HeartbeatStore;
   protected workerName: string;
   /** Per-process UUID generated at construction time. Stamped on
    *  `run.worker.instanceId` when this worker picks up a message and used
@@ -106,6 +113,13 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       console.warn(`[${this.workerName}] Error closing Redis:`, err);
     }
     try {
+      if (this.heartbeatStore) {
+        await this.heartbeatStore.close();
+      }
+    } catch (err) {
+      console.warn(`[${this.workerName}] Error closing heartbeat store:`, err);
+    }
+    try {
       await this.mongoClient.close();
       console.log(`[${this.workerName}] MongoDB connection closed`);
     } catch (err) {
@@ -144,6 +158,21 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       blobStorage,
       this.workerName
     );
+
+    // Per-run liveness heartbeat store. Reuses the same Redis instance as
+    // log publishing; sharing the host is fine because heartbeat ops are
+    // small and infrequent compared to log streaming.
+    if (!this.heartbeatStore) {
+      this.heartbeatStore = new RedisHeartbeatStore({
+        redisHost: this.config.redisHost,
+        redisPort: this.config.redisPort,
+        redisPassword: this.config.redisPassword,
+      }, {
+        ttlMs: process.env.SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS
+          ? Number(process.env.SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS)
+          : undefined,
+      });
+    }
 
     while (!this.stopping) {
       try {
@@ -234,30 +263,13 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         undefined,
         undefined,
         { documentId, runId: logRunId },
-        // Bump run.lastHeartbeatAt on every successful tick so the redelivery
-        // handler can distinguish a real worker crash from a spurious queue
-        // redelivery. Filter is gated on { _id, run._id, run.worker.instanceId }
-        // so a stale worker can't keep heart-beating for a run another worker
-        // has taken over.
+        // Bump the per-run liveness heartbeat in Redis on every successful
+        // tick so the redelivery handler can distinguish a real worker crash
+        // from a spurious queue redelivery. Stored in Redis (not Mongo) to
+        // avoid the recurring CosmosDB RU cost of writing every 15 s for
+        // every active run.
         async () => {
-          try {
-            await this.collection.updateOne(
-              {
-                _id: documentId,
-                "run._id": logRunId,
-                "run.worker.instanceId": this.instanceId,
-              } as any,
-              {
-                $set: {
-                  "run.lastHeartbeatAt": new Date(),
-                },
-              } as any,
-            );
-          } catch (err) {
-            // Already logged inside the heartbeat module; swallow so the
-            // visibility extension keeps ticking.
-            console.warn(`[${this.workerName}] Failed to update run.lastHeartbeatAt:`, err);
-          }
+          await this.heartbeatStore.set(logRunId, new Date());
         },
       );
 
@@ -314,6 +326,10 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
               } as any
             ));
             updated = (result.matchedCount ?? 0) > 0;
+            if (updated) {
+              // Run is terminal — drop the Redis liveness heartbeat.
+              await this.heartbeatStore.delete(runId);
+            }
           }
           if (!updated) {
             // Legacy fallback: top-level fields (pre-migration / no runId in message).

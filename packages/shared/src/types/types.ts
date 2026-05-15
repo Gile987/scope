@@ -235,10 +235,12 @@ export interface RunState {
   workerVersion?: string;
   os?: OsInfo;
   /** Wall-clock time of the last heartbeat written by the worker actively
-   *  processing this attempt. Used by the redelivery handler to distinguish
-   *  a real worker crash (stale heartbeat → mark failed) from a spurious
-   *  Azure Storage Queue redelivery while the original worker is still
-   *  alive (fresh heartbeat → drop the duplicate, leave run untouched). */
+   *  processing this attempt. **Stored in Redis, not Mongo** — the API
+   *  enriches this field on response from a Redis MGET so the portal can
+   *  show "Last heartbeat: Xs ago". The redelivery handler reads it
+   *  directly from Redis to distinguish a real worker crash (stale or
+   *  missing) from a spurious Azure Storage Queue redelivery while the
+   *  original worker is still alive (fresh). Never persisted to Mongo. */
   lastHeartbeatAt?: Date;
   /** Identity of the worker process currently (or last) handling this
    *  attempt. Stamped at message pickup. `instanceId` is a per-process UUID

@@ -6,6 +6,7 @@ import os from "node:os";
 import { CodingAgentQueueProcessor } from "./queue-processor.js";
 import type { QueueProcessorConfig, WorkerProcessor, WorkerResult } from "../types/types.js";
 import type { VisibilityHeartbeat } from "./visibility-heartbeat.js";
+import { InMemoryHeartbeatStore } from "./heartbeat-store.js";
 
 const testConfig: QueueProcessorConfig = {
   mongoUri: "mongodb://localhost:27017",
@@ -105,20 +106,26 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     };
     const message = { messageId: "msg-1", popReceipt: "pop-1", messageText: "" } as any;
 
+    const heartbeatStore = new InMemoryHeartbeatStore();
+
     const qp = new CodingAgentQueueProcessor(testConfig, stubProcessor);
     (qp as any).collection = collection;
     (qp as any).safeDeleteMessage = safeDeleteMessage;
+    (qp as any).heartbeatStore = heartbeatStore;
     // Guard: if the redelivery branch ever falls through, processMultiTurn
     // would be invoked. Stub it so any accidental call is observable.
     (qp as any).processMultiTurn = vi.fn().mockResolvedValue(undefined);
 
-    return { qp, requestDoc, message, heartbeat, log, findOneAndUpdate, safeDeleteMessage, runId, requestId };
+    return { qp, requestDoc, message, heartbeat, log, findOneAndUpdate, safeDeleteMessage, heartbeatStore, runId, requestId };
   }
 
-  it("marks run failed and deletes message when run.status is 'processing' with no heartbeat (back-compat)", async () => {
-    // No lastHeartbeatAt at all — simulates an in-flight run from before
-    // this feature shipped, or a worker that died before its first beat.
-    const h = makeHarness("processing");
+  it("marks run failed when no heartbeat AND startedAt is older than the staleness threshold", async () => {
+    // No Redis heartbeat AND startedAt is way back — this is the legitimate
+    // "worker died before its first beat" / "Redis lost the key after a long
+    // time" case. Should mark failed.
+    const h = makeHarness("processing", {
+      startedAt: new Date(Date.now() - 10 * 60 * 1000),
+    });
 
     await (h.qp as any).handleRequest(h.requestDoc, h.message, h.heartbeat, h.log, { runId: h.runId });
 
@@ -129,11 +136,9 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
       "run._id": h.runId,
       "run.status": "processing",
     });
-    // Atomic re-check of staleness inside the update filter.
-    expect(filter.$or).toEqual([
-      { "run.lastHeartbeatAt": { $exists: false } },
-      { "run.lastHeartbeatAt": { $lt: expect.any(Date) } },
-    ]);
+    // Atomic claim is now gated on the *current* worker identity (or its
+    // absence), not on heartbeat timestamps.
+    expect(filter["run.worker"]).toEqual({ $exists: false });
     expect(update.$set["run.status"]).toBe("done");
     expect(update.$set["run.outcome"]).toBe("failed");
     expect(update.$set["run.error"]).toMatch(/Worker presumed dead/);
@@ -149,20 +154,44 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
   });
 
-  it("marks run failed when heartbeat is older than the staleness threshold", async () => {
-    // 10 minutes ago — well past the 120 s default threshold.
-    const stale = new Date(Date.now() - 10 * 60 * 1000);
+  it("DROPS duplicate (does not fail run) when no heartbeat but startedAt is recent", async () => {
+    // No Redis heartbeat yet AND run was just picked up — this is a
+    // transient race (queue redelivered before the first beat fired, or a
+    // brief Redis blip). Must NOT fail healthy runs.
     const h = makeHarness("processing", {
-      lastHeartbeatAt: stale,
-      worker: { instanceId: "worker-A", podName: "pod-A" },
+      startedAt: new Date(Date.now() - 5_000),
+      worker: { instanceId: "worker-X" },
     });
 
     await (h.qp as any).handleRequest(h.requestDoc, h.message, h.heartbeat, h.log, { runId: h.runId });
 
+    expect(h.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(h.safeDeleteMessage).toHaveBeenCalledWith("msg-1", "pop-1");
+    expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
+    expect(h.log).toHaveBeenCalledWith(
+      "warn",
+      expect.stringMatching(/Duplicate queue message dropped/),
+      expect.objectContaining({ runId: h.runId }),
+    );
+  });
+
+  it("marks run failed when heartbeat is older than the staleness threshold", async () => {
+    const h = makeHarness("processing", {
+      startedAt: new Date(Date.now() - 15 * 60 * 1000),
+      worker: { instanceId: "worker-A", podName: "pod-A" },
+    });
+    // 10 minutes ago — well past the 120 s default threshold.
+    await h.heartbeatStore.set(h.runId, new Date(Date.now() - 10 * 60 * 1000));
+
+    await (h.qp as any).handleRequest(h.requestDoc, h.message, h.heartbeat, h.log, { runId: h.runId });
+
     expect(h.findOneAndUpdate).toHaveBeenCalledTimes(1);
-    const [, update] = h.findOneAndUpdate.mock.calls[0];
+    const [filter, update] = h.findOneAndUpdate.mock.calls[0];
+    // Claim filter targets the dead worker's identity — if a peer has
+    // already taken over (rewriting run.worker.instanceId), the claim
+    // no-ops and we drop the dupe instead of double-failing.
+    expect(filter["run.worker.instanceId"]).toBe("worker-A");
     expect(update.$set["run.error"]).toMatch(/Worker presumed dead/);
-    // Identity of the dead worker is included for troubleshooting.
     expect(update.$set["run.error"]).toMatch(/instance=worker-A/);
     expect(update.$set["run.error"]).toMatch(/pod=pod-A/);
     expect(h.safeDeleteMessage).toHaveBeenCalledWith("msg-1", "pop-1");
@@ -170,12 +199,12 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
   });
 
   it("drops duplicate message WITHOUT touching run state when heartbeat is fresh", async () => {
-    // 5 seconds ago — well within the 120 s threshold.
-    const fresh = new Date(Date.now() - 5_000);
     const h = makeHarness("processing", {
-      lastHeartbeatAt: fresh,
+      startedAt: new Date(Date.now() - 60_000),
       worker: { instanceId: "worker-B", podName: "pod-B" },
     });
+    // 5 seconds ago — well within the 120 s threshold.
+    await h.heartbeatStore.set(h.runId, new Date(Date.now() - 5_000));
 
     await (h.qp as any).handleRequest(h.requestDoc, h.message, h.heartbeat, h.log, { runId: h.runId });
 
@@ -183,13 +212,11 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     expect(h.findOneAndUpdate).not.toHaveBeenCalled();
     expect(h.safeDeleteMessage).toHaveBeenCalledWith("msg-1", "pop-1");
     expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
-    // Logged as a warn, not an error, and includes the live worker's identity.
     expect(h.log).toHaveBeenCalledWith(
       "warn",
       expect.stringMatching(/Duplicate queue message dropped.*worker-B/),
       expect.objectContaining({ runId: h.runId }),
     );
-    // Not "final" — the run is still in flight.
     const finalCalls = h.log.mock.calls.filter((c: any[]) => c[2]?.final);
     expect(finalCalls).toHaveLength(0);
   });
@@ -198,12 +225,12 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     const prev = process.env.SCOPE_RUN_HEARTBEAT_STALE_MS;
     process.env.SCOPE_RUN_HEARTBEAT_STALE_MS = "1000"; // 1 s
     try {
-      // 5 s ago — fresh under the default 120 s, but stale under 1 s.
-      const fiveSecondsAgo = new Date(Date.now() - 5_000);
       const h = makeHarness("processing", {
-        lastHeartbeatAt: fiveSecondsAgo,
+        startedAt: new Date(Date.now() - 60_000),
         worker: { instanceId: "worker-C" },
       });
+      // 5 s ago — fresh under the default 120 s, but stale under 1 s.
+      await h.heartbeatStore.set(h.runId, new Date(Date.now() - 5_000));
 
       await (h.qp as any).handleRequest(h.requestDoc, h.message, h.heartbeat, h.log, { runId: h.runId });
 
@@ -215,19 +242,17 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
   });
 
   it("still deletes message when atomic claim does not match (concurrent retry won)", async () => {
-    // Stale heartbeat triggers the claim path, but the claim returns null
-    // (something else \u2014 another redelivery, a retry, or the original worker
-    // resuming \u2014 changed state between our read and write).
-    const stale = new Date(Date.now() - 10 * 60 * 1000);
-    const h = makeHarness("processing", { lastHeartbeatAt: stale });
+    const h = makeHarness("processing", {
+      startedAt: new Date(Date.now() - 15 * 60 * 1000),
+      worker: { instanceId: "worker-D" },
+    });
+    await h.heartbeatStore.set(h.runId, new Date(Date.now() - 10 * 60 * 1000));
     h.findOneAndUpdate.mockResolvedValueOnce(null);
 
     await (h.qp as any).handleRequest(h.requestDoc, h.message, h.heartbeat, h.log, { runId: h.runId });
 
     expect(h.safeDeleteMessage).toHaveBeenCalledWith("msg-1", "pop-1");
     expect((h.qp as any).processMultiTurn).not.toHaveBeenCalled();
-    // No "final" error log when claim didn't match — the run was already
-    // taken over by something else.
     const finalCalls = h.log.mock.calls.filter((c: any[]) => c[2]?.final);
     expect(finalCalls).toHaveLength(0);
   });

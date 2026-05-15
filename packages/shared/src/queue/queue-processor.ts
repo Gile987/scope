@@ -98,33 +98,39 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // Redelivery handling: if the run is already in "processing" state, the
     // message was redelivered by Azure Storage Queue while the original
     // worker was busy. There are two cases we need to disambiguate using
-    // the per-run liveness heartbeat (run.lastHeartbeatAt + run.worker):
+    // the per-run liveness heartbeat in Redis (run.worker stays in Mongo as
+    // persistent identity):
     //
-    //   1. Original worker is alive (fresh heartbeat) \u2014 a spurious
+    //   1. Original worker is alive (fresh Redis heartbeat) — a spurious
     //      redelivery (transient queue-extension miss, throttling, etc.).
     //      Drop the duplicate message and leave the run untouched so the
     //      original worker keeps making progress.
     //
-    //   2. Original worker is dead (stale heartbeat, or no heartbeat field
-    //      at all on legacy in-flight runs) \u2014 mark the run failed atomically
-    //      so the user can retry. The user opts into a clean restart via
-    //      the explicit POST /requests/:id/retry endpoint, which properly
-    //      demotes the failed run to history.
+    //   2. Original worker is dead (stale or missing Redis heartbeat AND
+    //      run was picked up long enough ago) — mark the run failed
+    //      atomically so the user can retry.
     //
-    // The atomic findOneAndUpdate is gated on the staleness condition so we
-    // don't race a worker that has just resumed beating between our read
-    // and our write.
+    // Atomicity of the claim is gated on the existing run.worker.instanceId
+    // in the findOneAndUpdate filter: if a peer worker has already taken
+    // over (rewriting run.worker.instanceId), our update no-ops.
     if (requestDoc.run?.status === "processing") {
       const staleThresholdMs =
         Number(process.env.SCOPE_RUN_HEARTBEAT_STALE_MS) ||
         2 * HEARTBEAT_VISIBILITY_SECONDS * 1000;
-      const lastHeartbeatAt = requestDoc.run.lastHeartbeatAt instanceof Date
-        ? requestDoc.run.lastHeartbeatAt
-        : requestDoc.run.lastHeartbeatAt
-          ? new Date(requestDoc.run.lastHeartbeatAt as any)
+      const heartbeatAt = await this.heartbeatStore.get(requestDoc.run._id);
+      const startedAt = requestDoc.run.startedAt instanceof Date
+        ? requestDoc.run.startedAt
+        : requestDoc.run.startedAt
+          ? new Date(requestDoc.run.startedAt as any)
           : undefined;
-      const ageMs = lastHeartbeatAt ? Date.now() - lastHeartbeatAt.getTime() : Infinity;
-      const isStale = !lastHeartbeatAt || ageMs > staleThresholdMs;
+      const ageMs = heartbeatAt ? Date.now() - heartbeatAt.getTime() : Infinity;
+      // Missing-heartbeat guard: if Redis returns null we don't immediately
+      // declare the worker dead — a transient Redis blip would otherwise
+      // mass-fail healthy in-flight runs. Only treat "missing" as stale if
+      // the run was picked up longer ago than the staleness threshold.
+      const isStale = heartbeatAt
+        ? ageMs > staleThresholdMs
+        : (!startedAt || Date.now() - startedAt.getTime() > staleThresholdMs);
       const workerInfo = requestDoc.run.worker;
       const workerDesc = workerInfo
         ? `instance=${workerInfo.instanceId}${workerInfo.podName ? ` pod=${workerInfo.podName}` : ""}`
@@ -132,32 +138,34 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
       if (!isStale) {
         // Original worker is still beating — drop the duplicate, keep run state.
+        const beatDesc = heartbeatAt
+          ? `last beat ${Math.round(ageMs / 1000)}s ago`
+          : `no heartbeat yet, picked up ${startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : "?"}s ago`;
         console.warn(
-          `[${this.workerName}] Duplicate message for ${requestDoc._id} (runId=${requestDoc.run._id}) — original worker still alive (${workerDesc}, last beat ${Math.round(ageMs / 1000)}s ago); dropping`,
+          `[${this.workerName}] Duplicate message for ${requestDoc._id} (runId=${requestDoc.run._id}) — original worker still alive (${workerDesc}, ${beatDesc}); dropping`,
         );
         await log(
           "warn",
-          `Duplicate queue message dropped — original worker still heart-beating (${workerDesc}, last beat ${Math.round(ageMs / 1000)}s ago)`,
+          `Duplicate queue message dropped — original worker still heart-beating (${workerDesc}, ${beatDesc})`,
           { runId: requestDoc.run._id },
         );
         await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
         return;
       }
 
-      const staleCutoff = new Date(Date.now() - staleThresholdMs);
-      const errorMsg = `Worker presumed dead (${workerDesc}, last heartbeat ${lastHeartbeatAt ? `${Math.round(ageMs / 1000)}s ago` : "never"}, threshold ${Math.round(staleThresholdMs / 1000)}s); queue message redelivered while run was in 'processing' state`;
+      const errorMsg = `Worker presumed dead (${workerDesc}, last heartbeat ${heartbeatAt ? `${Math.round(ageMs / 1000)}s ago` : "never"}, threshold ${Math.round(staleThresholdMs / 1000)}s); queue message redelivered while run was in 'processing' state`;
+      // Atomic claim: gate on the *current* run.worker.instanceId. If a
+      // peer worker has already taken over (rewrote run.worker.instanceId)
+      // between our read and write, our filter no-ops and we drop the dupe.
+      const currentOwnerId = workerInfo?.instanceId;
       const claim = await withRetry(() => this.collection.findOneAndUpdate(
         {
           _id: requestDoc._id,
           "run._id": requestDoc.run!._id,
           "run.status": "processing",
-          // Re-check staleness atomically: either the field is missing, or
-          // it's older than the cutoff. Prevents racing a worker that just
-          // resumed beating between our read above and this write.
-          $or: [
-            { "run.lastHeartbeatAt": { $exists: false } },
-            { "run.lastHeartbeatAt": { $lt: staleCutoff } },
-          ],
+          ...(currentOwnerId
+            ? { "run.worker.instanceId": currentOwnerId }
+            : { "run.worker": { $exists: false } }),
         } as any,
         {
           $set: {
@@ -179,6 +187,9 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           `Run marked failed: ${errorMsg}. Use the retry endpoint to start a new attempt.`,
           { final: true, runId: requestDoc.run._id },
         );
+        // Run is terminal — drop the heartbeat key so the API stops
+        // surfacing it (TTL would expire it eventually anyway).
+        await this.heartbeatStore.delete(requestDoc.run!._id);
       } else {
         // Either the original worker resumed beating between our read and
         // write, or a concurrent retry already demoted this run, or the
@@ -348,9 +359,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution).
     // Write to run.* (run-retry-attempts) plus a top-level updatedAt for index freshness.
-    // Stamp run.worker (instance identity) and an initial run.lastHeartbeatAt
-    // atomically so the redelivery handler in another worker can immediately
-    // see this pickup and won't treat the run as orphaned.
+    // Stamp run.worker (instance identity) atomically with the status change
+    // so the redelivery handler in another worker can immediately see this
+    // pickup. The accompanying liveness heartbeat is written to Redis (not
+    // Mongo) immediately after to avoid recurring CosmosDB RU cost.
     const versionFields = this.getVersionFields();
     const now = new Date();
     await withRetry(() => this.collection.updateOne(
@@ -360,7 +372,6 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           "run.status": "processing",
           "run.startedAt": now,
           "run.updatedAt": now,
-          "run.lastHeartbeatAt": now,
           "run.worker": {
             instanceId: this.instanceId,
             ...(this.podName ? { podName: this.podName } : {}),
@@ -372,6 +383,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         },
       }
     ));
+    // Seed the Redis liveness heartbeat right after pickup so a redelivery
+    // arriving immediately afterwards sees a fresh beat instead of falling
+    // through to the missing-heartbeat guard.
+    await this.heartbeatStore.set(requestDoc.run!._id, now);
 
     await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
       criteria: requestDoc.scenario.criteria,
@@ -493,6 +508,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         },
       }
     ));
+    // Drop the Redis liveness heartbeat now that the run is terminal so it
+    // doesn't surface in the API's "still processing" enrichment. (TTL would
+    // eventually expire it anyway, but explicit cleanup is tidier.)
+    await this.heartbeatStore.delete(requestDoc.run!._id);
 
     console.log(
       `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
