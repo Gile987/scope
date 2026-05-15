@@ -3,7 +3,7 @@ FROM node:22.22.0-slim AS base
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 
-# Install system tools for coding agents: Python, uv, git, PowerShell, Go
+# Install system tools for coding agents: Python, uv, git, PowerShell, Go, .NET, Rust
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
     libicu72 \
     && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
     && ARCH=$(dpkg --print-architecture) \
-    && case "$ARCH" in amd64) PS_ARCH=x64;; arm64) PS_ARCH=arm64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
+    && case "$ARCH" in amd64) PS_ARCH=x64; DOTNET_ARCH=x64;; arm64) PS_ARCH=arm64; DOTNET_ARCH=arm64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
     && curl -fsSL -o /tmp/powershell.tar.gz \
       "https://github.com/PowerShell/PowerShell/releases/download/v7.4.14/powershell-7.4.14-linux-${PS_ARCH}.tar.gz" \
     && mkdir -p /opt/microsoft/powershell/7 \
@@ -20,6 +20,14 @@ RUN apt-get update && apt-get install -y \
     && rm /tmp/powershell.tar.gz \
     && chmod +x /opt/microsoft/powershell/7/pwsh \
     && ln -s /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh \
+    && curl -fsSL -o /tmp/dotnet-sdk.tar.gz \
+      "https://dotnetcli.blob.core.windows.net/dotnet/Sdk/8.0.111/dotnet-sdk-8.0.111-linux-${DOTNET_ARCH}.tar.gz" \
+    && mkdir -p /opt/dotnet \
+    && tar -xzf /tmp/dotnet-sdk.tar.gz -C /opt/dotnet \
+    && rm /tmp/dotnet-sdk.tar.gz \
+    && chmod +x /opt/dotnet/dotnet \
+    && ln -s /opt/dotnet/dotnet /usr/local/bin/dotnet \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
     && GO_ARCH=$(dpkg --print-architecture) \
     && curl -fsSL -o /tmp/go.tar.gz \
       "https://go.dev/dl/go1.26.3.linux-${GO_ARCH}.tar.gz" \
@@ -28,7 +36,7 @@ RUN apt-get update && apt-get install -y \
     && ln -s /usr/local/go/bin/go /usr/local/bin/go \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PATH="/root/.local/bin:$PATH"
+ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
 
 # --- Builder stage: compile TypeScript ---
 FROM base AS builder
