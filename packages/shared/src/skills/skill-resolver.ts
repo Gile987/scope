@@ -23,8 +23,19 @@ import type { SkillRevisionDocument } from '../types/skill.js';
 export interface SkillResolverOptions {
   /** GitHub API base URL (default: https://api.github.com) */
   githubApiUrl?: string;
-  /** GitHub token for authentication (optional, increases rate limits) */
+  /**
+   * Static GitHub token for authentication (optional, increases rate limits).
+   * Mutually compatible with `tokenProvider` — if both are provided,
+   * `tokenProvider` takes precedence per request.
+   */
   githubToken?: string;
+  /**
+   * Async token provider, called once per request batch. Lets the resolver
+   * acquire round-robin tokens from the token manager (with env-var fallback)
+   * instead of being pinned to a single token at construction time.
+   * If it resolves to `undefined`, the request is sent unauthenticated.
+   */
+  tokenProvider?: () => Promise<string | undefined>;
 }
 
 /** A file entry discovered in a skill directory */
@@ -78,17 +89,37 @@ export function encodeGitHubPath(path: string): string {
  */
 export class SkillResolver {
   private readonly githubApiUrl: string;
-  private readonly headers: Record<string, string>;
+  private readonly baseHeaders: Record<string, string>;
+  private readonly staticToken?: string;
+  private readonly tokenProvider?: () => Promise<string | undefined>;
 
   constructor(options?: SkillResolverOptions) {
     this.githubApiUrl = options?.githubApiUrl?.replace(/\/+$/, '') ?? 'https://api.github.com';
-    this.headers = {
+    this.baseHeaders = {
       'Accept': 'application/vnd.github.v3+json',
       'User-Agent': 'scope-mt-skill-resolver',
     };
-    if (options?.githubToken) {
-      this.headers['Authorization'] = `Bearer ${options.githubToken}`;
+    this.staticToken = options?.githubToken;
+    this.tokenProvider = options?.tokenProvider;
+  }
+
+  /**
+   * Build request headers, acquiring a fresh token via `tokenProvider` if
+   * configured (so each request can use a different round-robin token).
+   * Falls back to the static `githubToken` from construction.
+   */
+  private async getHeaders(): Promise<Record<string, string>> {
+    let token: string | undefined;
+    if (this.tokenProvider) {
+      try {
+        token = await this.tokenProvider();
+      } catch {
+        // Provider failure is non-fatal — fall through to static token / unauth
+      }
     }
+    if (!token) token = this.staticToken;
+    if (!token) return this.baseHeaders;
+    return { ...this.baseHeaders, Authorization: `Bearer ${token}` };
   }
 
   /**
@@ -173,6 +204,7 @@ export class SkillResolver {
    * Searches well-known locations for a directory named `skillName` containing SKILL.md.
    */
   async discoverSkillPath(source: string, skillName: string): Promise<string | null> {
+    const headers = await this.getHeaders();
     // Try each well-known directory
     for (const searchDir of SKILL_SEARCH_DIRS) {
       const candidatePath = searchDir ? `${searchDir}/${skillName}` : skillName;
@@ -180,7 +212,7 @@ export class SkillResolver {
 
       try {
         const url = `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(skillMdPath)}`;
-        const res = await fetch(url, { headers: this.headers });
+        const res = await fetch(url, { headers });
         if (res.ok) {
           return candidatePath;
         }
@@ -204,8 +236,9 @@ export class SkillResolver {
    * @throws if the repo itself cannot be accessed (404, rate limit, etc.).
    */
   async discoverSkills(source: string): Promise<SkillDiscoveryEntry[]> {
+    const headers = await this.getHeaders();
     // 1. Get the default branch (a single repo metadata call).
-    const repoRes = await fetch(`${this.githubApiUrl}/repos/${source}`, { headers: this.headers });
+    const repoRes = await fetch(`${this.githubApiUrl}/repos/${source}`, { headers });
     if (repoRes.status === 404) {
       throw new Error(`Repository "${source}" not found`);
     }
@@ -218,7 +251,7 @@ export class SkillResolver {
 
     // 2. Fetch the recursive tree (a single API call).
     const treeUrl = `${this.githubApiUrl}/repos/${source}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
-    const treeRes = await fetch(treeUrl, { headers: this.headers });
+    const treeRes = await fetch(treeUrl, { headers });
     if (!treeRes.ok) {
       const detail = await this.formatGitHubError(treeRes);
       throw new Error(`Failed to list ${source} tree: ${detail}`);
@@ -293,7 +326,7 @@ export class SkillResolver {
     skillPath: string
   ): Promise<{ sha: string; date: Date }> {
     const url = `${this.githubApiUrl}/repos/${source}/commits?path=${encodeURIComponent(skillPath)}&per_page=1`;
-    const res = await fetch(url, { headers: this.headers });
+    const res = await fetch(url, { headers: await this.getHeaders() });
 
     if (!res.ok) {
       throw new Error(`Failed to get commits for ${source}/${skillPath}: ${res.status} ${res.statusText}`);
@@ -323,9 +356,10 @@ export class SkillResolver {
     skillPath: string,
     commitSha: string
   ): Promise<SkillFileEntry[]> {
+    const headers = await this.getHeaders();
     // Get the directory listing at the specific commit
     const url = `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(skillPath)}?ref=${commitSha}`;
-    const res = await fetch(url, { headers: this.headers });
+    const res = await fetch(url, { headers });
 
     if (!res.ok) {
       throw new Error(`Failed to list ${source}/${skillPath} at ${commitSha}: ${res.status} ${res.statusText}`);
@@ -342,7 +376,7 @@ export class SkillResolver {
 
     for (const entry of entries) {
       if (entry.type === 'file' && entry.download_url) {
-        const fileRes = await fetch(entry.download_url, { headers: this.headers });
+        const fileRes = await fetch(entry.download_url, { headers });
         if (fileRes.ok) {
           const content = await fileRes.text();
           // Path relative to skill directory

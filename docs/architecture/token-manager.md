@@ -64,9 +64,12 @@ The Token Manager uses a **capability-based model** where tokens are associated 
 | Capability | Description |
 |------------|-------------|
 | `github-models` | Access to GitHub Models API (GPT-4o, etc.) |
+| `github-public-api` | Read-only access to the GitHub REST API for public repos (skill discovery / resolution) |
 | `copilot-sdk` | GitHub Copilot SDK integration |
 | `copilot-cli` | GitHub Copilot CLI authentication |
 | `claude-code-cli` | Anthropic Claude Code CLI |
+
+`github-public-api` is granted to **any** valid GitHub bearer token (PAT classic, PAT fine-grained, OAuth, scopeless OAuth) since public-repo reads require no scopes.
 
 ### Token Type + Permissions → Capabilities Matrix
 
