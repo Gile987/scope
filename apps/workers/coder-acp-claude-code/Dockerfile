@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
     libicu72 \
     && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
     && ARCH=$(dpkg --print-architecture) \
-    && case "$ARCH" in amd64) PS_ARCH=x64; DOTNET_ARCH=x64; JAVA_ARCH=x64;; arm64) PS_ARCH=arm64; DOTNET_ARCH=arm64; JAVA_ARCH=aarch64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
+    && case "$ARCH" in amd64) PS_ARCH=x64; DOTNET_ARCH=x64; JAVA_ARCH=x86_64;; arm64) PS_ARCH=arm64; DOTNET_ARCH=arm64; JAVA_ARCH=aarch64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
     && curl -fsSL -o /tmp/powershell.tar.gz \
       "https://github.com/PowerShell/PowerShell/releases/download/v7.4.14/powershell-7.4.14-linux-${PS_ARCH}.tar.gz" \
     && mkdir -p /opt/microsoft/powershell/7 \
