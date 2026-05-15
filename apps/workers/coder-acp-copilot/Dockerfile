@@ -5,7 +5,7 @@ FROM node:24-slim AS base
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 
-# Install system tools for coding agents: Python, uv, git, PowerShell
+# Install system tools for coding agents: Python, uv, git, PowerShell, Go
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -22,6 +22,12 @@ RUN apt-get update && apt-get install -y \
     && rm /tmp/powershell.tar.gz \
     && chmod +x /opt/microsoft/powershell/7/pwsh \
     && ln -s /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh \
+    && GO_ARCH=$(dpkg --print-architecture) \
+    && curl -fsSL -o /tmp/go.tar.gz \
+      "https://go.dev/dl/go1.26.3.linux-${GO_ARCH}.tar.gz" \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz \
+    && ln -s /usr/local/go/bin/go /usr/local/bin/go \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/root/.local/bin:$PATH"
