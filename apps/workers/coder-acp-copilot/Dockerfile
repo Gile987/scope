@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y \
     && chmod +x /opt/microsoft/powershell/7/pwsh \
     && ln -s /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh \
     && curl -fsSL -o /tmp/dotnet-sdk.tar.gz \
-      "https://dotnetcli.blob.core.windows.net/dotnet/Sdk/8.0.11/dotnet-sdk-8.0.11-linux-${DOTNET_ARCH}.tar.gz" \
+      "https://dotnetcli.blob.core.windows.net/dotnet/Sdk/8.0.111/dotnet-sdk-8.0.111-linux-${DOTNET_ARCH}.tar.gz" \
     && mkdir -p /opt/dotnet \
     && tar -xzf /tmp/dotnet-sdk.tar.gz -C /opt/dotnet \
     && rm /tmp/dotnet-sdk.tar.gz \
