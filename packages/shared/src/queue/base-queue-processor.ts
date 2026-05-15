@@ -4,6 +4,7 @@
 import { MongoClient, Collection, Db } from "mongodb";
 import { QueueClient, DequeuedMessageItem } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
+import { randomUUID } from "node:crypto";
 import { LogEvent, BaseQueueProcessorConfig } from "../types/types.js";
 import { LogPublisher } from "../logging/log-publisher.js";
 import { BlobStorage } from "../storage/blob-storage.js";
@@ -28,6 +29,14 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
   protected config: BaseQueueProcessorConfig;
   protected logPublisher!: LogPublisher;
   protected workerName: string;
+  /** Per-process UUID generated at construction time. Stamped on
+   *  `run.worker.instanceId` when this worker picks up a message and used
+   *  to gate heartbeat writes (so a stale worker can't keep heart-beating
+   *  for a run another worker has taken over). */
+  protected readonly instanceId: string = randomUUID();
+  /** Kubernetes pod name (or whatever `process.env.HOSTNAME` is set to).
+   *  Stamped on `run.worker.podName` for troubleshooting. Optional. */
+  protected readonly podName: string | undefined = process.env.HOSTNAME || undefined;
   private stopping = false;
   private processing = false;
 
@@ -106,6 +115,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
 
   async start(): Promise<void> {
     console.log(`[${this.workerName}] Starting worker...`);
+    console.log(`[${this.workerName}] Instance: ${this.instanceId}${this.podName ? ` (pod=${this.podName})` : ""}`);
     console.log(`[${this.workerName}] MongoDB: ${this.config.mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
     console.log(`[${this.workerName}] Queue: ${this.config.storageAccountName}/${this.config.queueName}`);
     console.log(`[${this.workerName}] Redis: ${this.config.redisHost}:${this.config.redisPort}`);
@@ -224,6 +234,31 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         undefined,
         undefined,
         { documentId, runId: logRunId },
+        // Bump run.lastHeartbeatAt on every successful tick so the redelivery
+        // handler can distinguish a real worker crash from a spurious queue
+        // redelivery. Filter is gated on { _id, run._id, run.worker.instanceId }
+        // so a stale worker can't keep heart-beating for a run another worker
+        // has taken over.
+        async () => {
+          try {
+            await this.collection.updateOne(
+              {
+                _id: documentId,
+                "run._id": logRunId,
+                "run.worker.instanceId": this.instanceId,
+              } as any,
+              {
+                $set: {
+                  "run.lastHeartbeatAt": new Date(),
+                },
+              } as any,
+            );
+          } catch (err) {
+            // Already logged inside the heartbeat module; swallow so the
+            // visibility extension keeps ticking.
+            console.warn(`[${this.workerName}] Failed to update run.lastHeartbeatAt:`, err);
+          }
+        },
       );
 
       try {
