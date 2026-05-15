@@ -3,7 +3,7 @@ FROM node:22.22.0-slim AS base
 
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 
-# Install system tools for coding agents: Python, uv, git, PowerShell, .NET, Rust
+# Install system tools for coding agents: Python, uv, git, PowerShell, Go, .NET, Rust
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -28,6 +28,12 @@ RUN apt-get update && apt-get install -y \
     && chmod +x /opt/dotnet/dotnet \
     && ln -s /opt/dotnet/dotnet /usr/local/bin/dotnet \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
+    && GO_ARCH=$(dpkg --print-architecture) \
+    && curl -fsSL -o /tmp/go.tar.gz \
+      "https://go.dev/dl/go1.26.3.linux-${GO_ARCH}.tar.gz" \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz \
+    && ln -s /usr/local/go/bin/go /usr/local/bin/go \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"

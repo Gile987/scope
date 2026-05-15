@@ -171,7 +171,7 @@ describe("coder-acp-claude-code integration", async () => {
   // Tool availability: each tool gets its own test for CI visibility
   // -----------------------------------------------------------------------
 
-  for (const tool of ["pwsh", "python3", "git", "uv"]) {
+  for (const tool of ["pwsh", "python3", "git", "uv", "go"]) {
     it.skipIf(!dockerAvailable)(
       `has ${tool} in PATH`,
       { timeout: 30_000 },

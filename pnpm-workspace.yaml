@@ -1,21 +1,19 @@
 packages:
-  - "apps/api"
-  - "apps/key-updaters/*"
-  - "apps/cli"
-  - "apps/judge"
-  - "apps/portal"
-  - "apps/scheduler"
-  - "apps/token-manager"
-  - "apps/workers/*"
-  - "apps/model-scanners/*"
-  - "apps/version-checkers/*"
-  - "packages/shared"
-  - "packages/version-checking"
-  - "packages/github-auth"
-  - "packages/model-scanning"
-  - "packages/db-migrations"
-  - "packages/copilot-driver-ext"
-
+  - apps/api
+  - apps/key-updaters/*
+  - apps/cli
+  - apps/judge
+  - apps/portal
+  - apps/scheduler
+  - apps/token-manager
+  - apps/workers/*
+  - apps/model-scanners/*
+  - apps/version-checkers/*
+  - packages/shared
+  - packages/version-checking
+  - packages/github-auth
+  - packages/model-scanning
+  - packages/db-migrations
 # Runtime language version pinning (for worker Docker images)
 # - python: 3.x (system package)
 # - node: 24 (coder-acp workers)
@@ -24,4 +22,14 @@ packages:
 # - dotnet: 8.0.111
 # - rustup: stable (installed via rustup, which provides the latest stable Rust toolchain)
 # - pnpm: 10.29.1
-# - note: version pins are documented for reproducible worker images
+
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
+
+onlyBuiltDependencies:
+  - '@vscode/vsce-sign'
+  - cpu-features
+  - esbuild
+  - keytar
+  - protobufjs
+  - ssh2
