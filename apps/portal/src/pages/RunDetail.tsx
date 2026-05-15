@@ -289,6 +289,7 @@ export function RunDetail() {
                 status={activeRun?.status ?? "pending"}
                 worker={activeRun?.worker}
                 lastHeartbeatAt={activeRun?.lastHeartbeatAt}
+                startedAt={activeRun?.startedAt}
               />
               {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
               <span className="font-mono">{run.workerType}</span>
@@ -414,6 +415,7 @@ export function RunDetail() {
                               status={attempt.status ?? "pending"}
                               worker={attempt.worker}
                               lastHeartbeatAt={attempt.lastHeartbeatAt}
+                              startedAt={attempt.startedAt}
                             />
                             {attempt.status === "done" && <OutcomeBadge outcome={attempt.outcome} />}
                             {duration ? (

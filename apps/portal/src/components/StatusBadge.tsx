@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { serverNow } from "@/lib/serverClock";
 import type { RunStatus, RunOutcome, RunState } from "@/types";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info" | "purple";
@@ -23,21 +24,29 @@ const outcomeConfig: Record<RunOutcome, { label: string; variant: BadgeVariant }
   finished: { label: "Finished", variant: "warning" },
 };
 
-function formatRelative(iso: string, nowMs: number): string {
-  const ms = nowMs - new Date(iso).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return "just now";
+/**
+ * Render a positive elapsed duration as a string composed of the two
+ * largest non-zero units. Picks "1m 5s" / "2h 14m" / "3d 4h" so the
+ * value reads naturally while staying precise enough to diagnose
+ * stalled runs.
+ */
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0s";
   const totalSec = Math.floor(ms / 1000);
   const d = Math.floor(totalSec / 86_400);
   const h = Math.floor((totalSec % 86_400) / 3_600);
   const m = Math.floor((totalSec % 3_600) / 60);
   const s = totalSec % 60;
-  // Pick the two largest non-zero units so the value reads naturally
-  // ("1m 5s ago", "2h 14m ago") while staying precise enough for
-  // diagnosis. Always show seconds when the total is under a minute.
-  if (d > 0) return `${d}d ${h}h ago`;
-  if (h > 0) return `${h}h ${m}m ago`;
-  if (m > 0) return `${m}m ${s}s ago`;
-  return `${s}s ago`;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function formatRelative(iso: string, nowMs: number): string {
+  const ms = nowMs - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "just now";
+  return `${formatDuration(ms)} ago`;
 }
 
 /**
@@ -46,10 +55,10 @@ function formatRelative(iso: string, nowMs: number): string {
  * displays (e.g. "5s ago") ticking without the parent re-rendering.
  */
 function useNow(enabled: boolean, intervalMs = 1000): number {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => serverNow());
   useEffect(() => {
     if (!enabled) return;
-    const id = window.setInterval(() => setNow(Date.now()), intervalMs);
+    const id = window.setInterval(() => setNow(serverNow()), intervalMs);
     return () => window.clearInterval(id);
   }, [enabled, intervalMs]);
   return now;
@@ -59,10 +68,12 @@ export function StatusBadge({
   status,
   worker,
   lastHeartbeatAt,
+  startedAt,
 }: {
   status: RunStatus;
   worker?: RunState["worker"];
   lastHeartbeatAt?: RunState["lastHeartbeatAt"];
+  startedAt?: RunState["startedAt"];
 }) {
   const config = statusConfig[status] ?? { label: status, variant: "outline" as const };
   // Pulse the badge while a run is actively processing so it's visually
@@ -72,7 +83,7 @@ export function StatusBadge({
   const className = status === "processing" ? "animate-pulse" : undefined;
   const badge = <Badge variant={config.variant} className={cn(className)}>{config.label}</Badge>;
 
-  const showTooltip = status === "processing" && (worker || lastHeartbeatAt);
+  const showTooltip = status === "processing" && (worker || lastHeartbeatAt || startedAt);
   // Tick once per second while a tooltip is renderable so the "Ns ago"
   // value advances live as the user keeps the tooltip open. Disabled
   // otherwise to avoid pointless re-renders for terminal-state badges.
@@ -108,6 +119,12 @@ export function StatusBadge({
               <div>
                 <span className="text-muted-foreground">Last heartbeat: </span>
                 <span>{formatRelative(lastHeartbeatAt, now)}</span>
+              </div>
+            )}
+            {startedAt && (
+              <div>
+                <span className="text-muted-foreground">Duration: </span>
+                <span>{formatDuration(now - new Date(startedAt).getTime())}</span>
               </div>
             )}
           </div>

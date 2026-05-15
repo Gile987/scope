@@ -1774,6 +1774,7 @@ function RunRow({
           status={run.run?.status ?? "pending"}
           worker={run.run?.worker}
           lastHeartbeatAt={run.run?.lastHeartbeatAt}
+          startedAt={run.run?.startedAt}
         />
       </TableCell>}
       {isCol("outcome") && <TableCell>

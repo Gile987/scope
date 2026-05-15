@@ -4,6 +4,7 @@
 import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp } from "@/types";
 
 import { qs } from "./url";
+import { recordServerDate } from "./serverClock";
 
 const BASE = "/api/v1";
 
@@ -12,6 +13,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
+  // Sample the server's wall-clock from the standard HTTP `Date` header so
+  // relative-time displays survive a misconfigured local clock.
+  recordServerDate(res.headers.get("Date"));
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     const message = body.error || `HTTP ${res.status}`;
@@ -202,6 +206,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
     });
+    recordServerDate(resp.headers.get("Date"));
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ error: resp.statusText }));
       throw new Error(err.error ?? "Failed to download batch archive");
