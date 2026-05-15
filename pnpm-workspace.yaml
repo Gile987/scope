@@ -15,3 +15,12 @@ packages:
   - "packages/model-scanning"
   - "packages/db-migrations"
   - "packages/copilot-driver-ext"
+
+# Runtime language version pinning (for worker Docker images)
+# - python: 3.x (system package)
+# - node: 24 (coder-acp workers)
+# - powershell: 7.4.14
+# - uv: 0.10.0
+# - dotnet: 8.0.11
+# - rustup: stable (installed via rustup, which provides the latest stable Rust toolchain)
+# - pnpm: 10.29.1
