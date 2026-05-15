@@ -28,14 +28,6 @@ RUN apt-get update && apt-get install -y \
     && chmod +x /opt/dotnet/dotnet \
     && ln -s /opt/dotnet/dotnet /usr/local/bin/dotnet \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
-    && curl -fsSL -o /tmp/dotnet-sdk.tar.gz \
-      "https://dotnetcli.blob.core.windows.net/dotnet/Sdk/8.0.11/dotnet-sdk-8.0.11-linux-${DOTNET_ARCH}.tar.gz" \
-    && mkdir -p /opt/dotnet \
-    && tar -xzf /tmp/dotnet-sdk.tar.gz -C /opt/dotnet \
-    && rm /tmp/dotnet-sdk.tar.gz \
-    && chmod +x /opt/dotnet/dotnet \
-    && ln -s /opt/dotnet/dotnet /usr/local/bin/dotnet \
-    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
