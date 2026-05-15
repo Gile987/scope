@@ -158,10 +158,11 @@ export class SkillResolver {
 
   /**
    * Discover where the skill directory lives in the repo.
-   * Searches well-known locations for a directory named `skillName` containing SKILL.md.
+   * First searches by directory name, then falls back to scanning SKILL.md
+   * frontmatter `name` fields in well-known parent directories.
    */
   async discoverSkillPath(source: string, skillName: string): Promise<string | null> {
-    // Try each well-known directory
+    // Primary: try each well-known directory by name
     for (const searchDir of SKILL_SEARCH_DIRS) {
       const candidatePath = searchDir ? `${searchDir}/${skillName}` : skillName;
       const skillMdPath = `${candidatePath}/SKILL.md`;
@@ -174,6 +175,51 @@ export class SkillResolver {
         }
       } catch {
         // Continue searching
+      }
+    }
+
+    // Fallback: scan well-known parent directories for a SKILL.md whose
+    // frontmatter `name` matches the requested skillName.
+    return this.discoverByFrontmatterName(source, skillName);
+  }
+
+  /**
+   * Fallback discovery: list subdirectories in well-known skill parent dirs
+   * and check each SKILL.md frontmatter for a matching `name` field.
+   */
+  private async discoverByFrontmatterName(source: string, skillName: string): Promise<string | null> {
+    for (const searchDir of SKILL_SEARCH_DIRS) {
+      if (!searchDir) continue; // Skip root-level — too broad to scan
+
+      try {
+        const url = `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(searchDir)}`;
+        const res = await fetch(url, { headers: this.headers });
+        if (!res.ok) continue;
+
+        const entries = (await res.json()) as Array<{ name: string; type: string }>;
+        const dirs = entries.filter((e) => e.type === 'dir');
+
+        for (const dir of dirs) {
+          const candidatePath = `${searchDir}/${dir.name}`;
+          const skillMdUrl = `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(`${candidatePath}/SKILL.md`)}`;
+          try {
+            const mdRes = await fetch(skillMdUrl, { headers: this.headers });
+            if (!mdRes.ok) continue;
+
+            const data = (await mdRes.json()) as { content?: string; encoding?: string };
+            if (!data.content || data.encoding !== 'base64') continue;
+
+            const raw = Buffer.from(data.content, 'base64').toString('utf-8');
+            const parsed = parseSkillMd(raw);
+            if (parsed.frontmatter.name === skillName) {
+              return candidatePath;
+            }
+          } catch {
+            // Skip this subdirectory
+          }
+        }
+      } catch {
+        // Skip this search dir
       }
     }
 
