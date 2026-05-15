@@ -2664,7 +2664,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
     if (currentRun.outcome === "succeeded" && !force) {
       res.status(409).json({
-        error: "Cannot retry a successful run unless force=true",
+        error: "Cannot retry a successful run unless force=true in the request body",
       });
       return;
     }

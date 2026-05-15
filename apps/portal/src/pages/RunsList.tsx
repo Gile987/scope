@@ -512,19 +512,20 @@ export function RunsList() {
       const selectedInGroup = group.runIds.filter((id) => selectedIds.has(id)).length;
       if (selectedInGroup === 0) continue;
       const sc = group.aggregates.statusCounts;
+      const nonSucceededDoneCount = Math.max(0, (sc.done ?? 0) - (group.aggregates.outcomeCounts.succeeded ?? 0));
       const ratio = selectedInGroup / group.runIds.length;
       if (selectedInGroup === group.runIds.length) {
         // All runs in group selected — use exact counts
         pausable += (sc.pending ?? 0) + (sc.queued ?? 0);
         resumable += sc.paused ?? 0;
         prioritizable += (sc.pending ?? 0) + (sc.paused ?? 0);
-        retryable += Math.max(0, (sc.done ?? 0) - (group.aggregates.outcomeCounts.succeeded ?? 0));
+        retryable += nonSucceededDoneCount;
       } else {
         // Partial selection — estimate proportionally (round up to be permissive)
         pausable += Math.ceil(((sc.pending ?? 0) + (sc.queued ?? 0)) * ratio);
         resumable += Math.ceil((sc.paused ?? 0) * ratio);
         prioritizable += Math.ceil(((sc.pending ?? 0) + (sc.paused ?? 0)) * ratio);
-        retryable += Math.ceil(Math.max(0, (sc.done ?? 0) - (group.aggregates.outcomeCounts.succeeded ?? 0)) * ratio);
+        retryable += Math.ceil(nonSucceededDoneCount * ratio);
       }
     }
     return { pausable, resumable, prioritizable, retryable };
@@ -1686,7 +1687,7 @@ function RunRow({
 }) {
   const isCol = (col: ColumnId) => !hiddenColumns.has(col);
   const isSuccessfulCompletedRun = run.run?.status === "done" && run.run?.outcome === "succeeded";
-  const canRetryRun = run.run?.status === "done" && (!isSuccessfulCompletedRun || isForceRetryModifierActive);
+  const canRetryRun = isSuccessfulCompletedRun ? isForceRetryModifierActive : run.run?.status === "done";
   return (
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
       <TableCell>

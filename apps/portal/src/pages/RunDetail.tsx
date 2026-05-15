@@ -258,9 +258,8 @@ export function RunDetail() {
     + (activeRun?.videoUrls?.length ?? 0)
     + (activeRun?.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
   const isSuccessfulCompletedRun = activeRun?.status === "done" && activeRun?.outcome === "succeeded";
-  const canShowRetry = activeRun?.status === "done"
-    && !isViewingHistorical
-    && (!isSuccessfulCompletedRun || isForceRetryModifierActive);
+  const canShowRetry = !isViewingHistorical
+    && (isSuccessfulCompletedRun ? isForceRetryModifierActive : activeRun?.status === "done");
 
   // Compute aggregate token usage: for one-shot runs use activeRun?.tokenUsage,
   // for multi-turn runs sum per-turn token usage
