@@ -24,3 +24,4 @@ packages:
 # - dotnet: 8.0.111
 # - rustup: stable (installed via rustup, which provides the latest stable Rust toolchain)
 # - pnpm: 10.29.1
+# - note: version pins are documented for reproducible worker images
