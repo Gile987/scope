@@ -31,6 +31,17 @@ export interface HeartbeatLogContext {
 }
 
 /**
+ * Optional callback invoked on every successful heartbeat tick. Used by the
+ * queue processor to also bump a per-run liveness timestamp in MongoDB so
+ * the redelivery handler can tell a real worker crash apart from a spurious
+ * Azure Storage Queue redelivery while the original worker is still alive.
+ *
+ * The callback is awaited but its errors are caught and logged — a Mongo
+ * write failure must never abort the visibility extension itself.
+ */
+export type HeartbeatTickCallback = (tickInfo: { tickCount: number }) => Promise<void> | void;
+
+/**
  * Start a background loop that periodically extends a queue message's
  * visibility timeout via `QueueClient.updateMessage`. This keeps the message
  * hidden from other workers as long as this process is alive. If the worker
@@ -48,6 +59,7 @@ export function startVisibilityHeartbeat(
   intervalMs: number = HEARTBEAT_INTERVAL_MS,
   visibilityTimeoutSeconds: number = HEARTBEAT_VISIBILITY_SECONDS,
   context: HeartbeatLogContext = {},
+  onTick?: HeartbeatTickCallback,
 ): VisibilityHeartbeat {
   let popReceipt = initialPopReceipt;
   let tickCount = 0;
@@ -83,6 +95,18 @@ export function startVisibilityHeartbeat(
         console.log(
           `[${workerName}] Visibility heartbeat tick #${tickCount} extended by ${visibilityTimeoutSeconds}s ${ctx}`,
         );
+        if (onTick) {
+          try {
+            await onTick({ tickCount });
+          } catch (cbError) {
+            // Never let a callback failure abort the heartbeat loop — the
+            // queue visibility extension already succeeded.
+            console.warn(
+              `[${workerName}] Visibility heartbeat onTick callback failed ${ctx}:`,
+              cbError,
+            );
+          }
+        }
       } catch (error) {
         if (abort.signal.aborted) break;
         failureCount++;
