@@ -26,6 +26,7 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
+import { getRunDetailActiveTab } from "@/lib/run-detail-tab";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState, useMemo } from "react";
@@ -515,7 +516,7 @@ export function RunDetail() {
 
       {/* Tabs */}
       <Tabs
-        value={tab || (activeRun?.turns && activeRun?.turns.length > 0 ? "turns" : "logs")}
+        value={getRunDetailActiveTab(tab, activeRun)}
         onValueChange={(value) => navigate(`/runs/${id}/${value}`)}
       >
         <TabsList>
