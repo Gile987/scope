@@ -680,6 +680,70 @@ describe("API Endpoints", () => {
     });
   });
 
+  describe("POST /api/v1/skills (auto-resolve)", () => {
+    it("creates a skill and triggers auto-resolve from GitHub", async () => {
+      (mocks.skillCollection.findOne as any).mockResolvedValue(null);
+      (mocks.skillCollection.insertOne as any).mockResolvedValue({ acknowledged: true });
+      (mocks.skillResolver.resolve as any).mockResolvedValue({ ref: "mock-ref" });
+
+      const res = await request(app)
+        .post("/api/v1/skills")
+        .send({ source: "org/repo", skillName: "my-skill", name: "My Skill", origin: "manual" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("id", "org/repo/my-skill");
+      expect(mocks.skillResolver.resolve).toHaveBeenCalledOnce();
+      expect(mocks.skillResolver.resolve).toHaveBeenCalledWith(
+        "org/repo",
+        "my-skill",
+        mocks.skillRevisionStore,
+        expect.any(Function),
+      );
+    });
+
+    it("still returns the created skill when auto-resolve fails", async () => {
+      (mocks.skillCollection.findOne as any).mockResolvedValue(null);
+      (mocks.skillCollection.insertOne as any).mockResolvedValue({ acknowledged: true });
+      (mocks.skillResolver.resolve as any).mockRejectedValue(new Error("GitHub 404"));
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const res = await request(app)
+        .post("/api/v1/skills")
+        .send({ source: "org/repo", skillName: "missing-skill", name: "Missing", origin: "manual" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("id", "org/repo/missing-skill");
+      expect(mocks.skillResolver.resolve).toHaveBeenCalledOnce();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Auto-resolve failed for skill org/repo/missing-skill"),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("auto-resolves on upsert of an existing skill", async () => {
+      const existing = {
+        _id: "org/repo/my-skill",
+        source: "org/repo",
+        skillName: "my-skill",
+        name: "Old Name",
+        origin: "manual",
+        createdAt: new Date(),
+      };
+      (mocks.skillCollection.findOne as any)
+        .mockResolvedValueOnce(existing)
+        .mockResolvedValueOnce({ ...existing, name: "New Name" });
+      (mocks.skillCollection.updateOne as any).mockResolvedValue({ acknowledged: true });
+      (mocks.skillResolver.resolve as any).mockResolvedValue({ ref: "mock-ref" });
+
+      const res = await request(app)
+        .post("/api/v1/skills")
+        .send({ source: "org/repo", skillName: "my-skill", name: "New Name", origin: "manual" });
+
+      expect(res.status).toBe(200);
+      expect(mocks.skillResolver.resolve).toHaveBeenCalledOnce();
+    });
+  });
+
   // ===================================================================
   // Prompt Features endpoints
   // ===================================================================
