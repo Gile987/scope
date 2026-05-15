@@ -787,6 +787,7 @@ export interface SkillRevisionDocument {
   metadata?: Record<string, string>;
   content: string;
   archiveUrl?: string;
+  validationWarnings?: string[];
   resolvedAt: string;
 }
 
