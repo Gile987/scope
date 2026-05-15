@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     git \
     libicu72 \
   unzip \
+  rustc \
+  cargo \
     && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
     && ARCH=$(dpkg --print-architecture) \
   && case "$ARCH" in amd64) PS_ARCH=x64; DOTNET_ARCH=x64; JAVA_ARCH=x64;; arm64) PS_ARCH=arm64; DOTNET_ARCH=arm64; JAVA_ARCH=aarch64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
@@ -28,7 +30,6 @@ RUN apt-get update && apt-get install -y \
     && rm /tmp/dotnet-sdk.tar.gz \
     && chmod +x /opt/dotnet/dotnet \
     && ln -s /opt/dotnet/dotnet /usr/local/bin/dotnet \
-    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
     && GO_ARCH=$(dpkg --print-architecture) \
     && curl -fsSL -o /tmp/go.tar.gz \
       "https://go.dev/dl/go1.26.3.linux-${GO_ARCH}.tar.gz" \
