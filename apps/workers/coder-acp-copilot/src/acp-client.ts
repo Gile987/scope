@@ -192,10 +192,14 @@ export async function runACPSession(
   onLog(`Starting ACP agent: ${command} ${args.join(" ")}`);
 
   // Spawn the agent process
+  // On Windows, .cmd files (produced by npm install -g) cannot be executed
+  // directly — they require cmd.exe to interpret them. Setting shell:true routes
+  // through cmd.exe so copilot.cmd is resolved and run correctly.
   const agentProcess: ChildProcess = spawn(command, args, {
     cwd,
     env: { ...process.env, ...env },
     stdio: ["pipe", "pipe", "pipe"],
+    shell: process.platform === "win32",
   });
 
   if (!agentProcess.stdin || !agentProcess.stdout) {

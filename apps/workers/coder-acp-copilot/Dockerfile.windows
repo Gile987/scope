@@ -1,0 +1,107 @@
+ARG COPILOT_CLI_VERSION
+
+# --- Base stage: runtime tools shared by dev and production ---
+# Windows Server Core LTSC 2022 with Node.js 24 installed via direct download.
+# PowerShell is available natively — no manual install needed.
+# uv and git are installed via Chocolatey (pre-installed on servercore).
+FROM mcr.microsoft.com/windows/servercore:ltsc2022 AS base
+
+SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+# Install Chocolatey
+RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+# Install Node.js 24 via direct MSI download (nodejs-lts 24.x not yet on Chocolatey)
+RUN Invoke-WebRequest -Uri 'https://nodejs.org/dist/v24.0.0/node-v24.0.0-x64.msi' \
+    -OutFile C:\node.msi; \
+    Start-Process msiexec.exe -ArgumentList '/i', 'C:\node.msi', '/quiet', '/norestart' -Wait; \
+    Remove-Item C:\node.msi
+
+# Install git and Python via Chocolatey
+RUN choco install -y git; \
+    choco install -y python3
+
+# Install pnpm as a standalone executable to a known location
+RUN New-Item -ItemType Directory -Force -Path C:\tools | Out-Null; \
+    Invoke-WebRequest -Uri 'https://github.com/pnpm/pnpm/releases/download/v10.29.1/pnpm-win-x64.exe' \
+    -OutFile 'C:\tools\pnpm.exe'
+
+# Install uv (Python package manager) for Windows
+RUN $env:UV_VERSION = '0.10.0'; \
+    Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/download/${env:UV_VERSION}/uv-x86_64-pc-windows-msvc.zip" \
+    -OutFile C:\uv.zip; \
+    Expand-Archive -Path C:\uv.zip -DestinationPath C:\uv; \
+    Remove-Item C:\uv.zip
+
+ENV PATH="C:\tools;C:\tools\bin;C:\uv;C:\Program Files\nodejs;C:\Program Files\Git\cmd;C:\Python312;C:\ProgramData\chocolatey\bin;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Windows\system32;C:\Windows"
+
+# --- Builder stage: compile TypeScript ---
+FROM base AS builder
+SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+WORKDIR C:/app
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY tsconfig.base.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY apps/workers/coder-acp-copilot/package.json ./apps/workers/coder-acp-copilot/
+
+RUN C:\tools\pnpm.exe install --frozen-lockfile
+
+COPY packages/shared/tsconfig.json ./packages/shared/
+COPY packages/shared/src ./packages/shared/src/
+COPY apps/workers/coder-acp-copilot/tsconfig.json ./apps/workers/coder-acp-copilot/
+COPY apps/workers/coder-acp-copilot/src ./apps/workers/coder-acp-copilot/src/
+
+RUN C:\tools\pnpm.exe --filter shared build; C:\tools\pnpm.exe --filter coder-acp-copilot build
+
+# --- Dev stage: hot reload with tsx watch ---
+FROM builder AS dev
+ARG COPILOT_CLI_VERSION
+# Install copilot to C:\tools so it lands on PATH (default AppData\Roaming\npm is not in PATH)
+RUN npm install -g --prefix C:\tools @github/copilot@${COPILOT_CLI_VERSION}
+
+RUN New-Item -ItemType Directory -Force -Path C:\workspace
+
+ENV NODE_ENV=development
+ENV SERVICE_DIR=workers/coder-acp-copilot
+ENV WORKER_NAME=coder-acp-copilot-windows
+
+WORKDIR C:/app/apps/workers/coder-acp-copilot
+COPY scripts/dev-entrypoint.ps1 C:/app/scripts/dev-entrypoint.ps1
+COPY config C:/app/config
+CMD ["powershell", "-File", "C:\\app\\scripts\\dev-entrypoint.ps1"]
+
+# --- Production stage ---
+FROM base AS production
+SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+ARG COPILOT_CLI_VERSION
+# Install copilot to C:\tools so it lands on PATH (default AppData\Roaming\npm is not in PATH)
+RUN npm install -g --prefix C:\tools @github/copilot@${COPILOT_CLI_VERSION}
+
+WORKDIR C:/app
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/shared/package.json ./packages/shared/
+COPY apps/workers/coder-acp-copilot/package.json ./apps/workers/coder-acp-copilot/
+
+RUN C:\tools\pnpm.exe install --frozen-lockfile --prod
+
+COPY --from=builder C:/app/packages/shared/dist ./packages/shared/dist/
+COPY --from=builder C:/app/apps/workers/coder-acp-copilot/dist ./apps/workers/coder-acp-copilot/dist/
+
+RUN New-Item -ItemType Directory -Force -Path C:\workspace
+
+WORKDIR C:/app/apps/workers/coder-acp-copilot
+
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+ENV COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION
+ENV GIT_COMMIT=$GIT_COMMIT
+ENV BUILD_TIME=$BUILD_TIME
+ENV WORKER_NAME=coder-acp-copilot-windows
+
+CMD ["node", "dist/index.js"]
