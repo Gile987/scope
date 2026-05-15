@@ -1770,7 +1770,11 @@ function RunRow({
         {run.priority ?? 0}
       </TableCell>}
       {isCol("status") && <TableCell>
-        <StatusBadge status={run.run?.status ?? "pending"} />
+        <StatusBadge
+          status={run.run?.status ?? "pending"}
+          worker={run.run?.worker}
+          lastHeartbeatAt={run.run?.lastHeartbeatAt}
+        />
       </TableCell>}
       {isCol("outcome") && <TableCell>
         <OutcomeBadge outcome={run.run?.outcome} />
