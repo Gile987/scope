@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
     libicu72 \
     && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
     && ARCH=$(dpkg --print-architecture) \
-    && case "$ARCH" in amd64) PS_ARCH=x64; DOTNET_ARCH=x64; JAVA_ARCH=x86_64;; arm64) PS_ARCH=arm64; DOTNET_ARCH=arm64; JAVA_ARCH=aarch64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
+    && case "$ARCH" in amd64) PS_ARCH=x64; DOTNET_ARCH=x64; JAVA_ARCH=x64;; arm64) PS_ARCH=arm64; DOTNET_ARCH=arm64; JAVA_ARCH=aarch64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
     && curl -fsSL -o /tmp/powershell.tar.gz \
       "https://github.com/PowerShell/PowerShell/releases/download/v7.4.14/powershell-7.4.14-linux-${PS_ARCH}.tar.gz" \
     && mkdir -p /opt/microsoft/powershell/7 \
@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y \
     && chmod +x /opt/dotnet/dotnet \
     && ln -s /opt/dotnet/dotnet /usr/local/bin/dotnet \
     && curl -fsSL -o /tmp/java.tar.gz \
-      "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.4%2B7/OpenJDK21U-jdk_${JAVA_ARCH}_linux_hotspot_21.0.4_7.tar.gz" \
+      "https://api.adoptium.net/v3/binary/version/jdk-21.0.4+7/linux/${JAVA_ARCH}/jdk/hotspot/normal/eclipse" \
     && mkdir -p /opt/java \
     && tar -xzf /tmp/java.tar.gz -C /opt/java --strip-components=1 \
     && rm /tmp/java.tar.gz \
