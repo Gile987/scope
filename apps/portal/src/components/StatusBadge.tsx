@@ -26,7 +26,18 @@ const outcomeConfig: Record<RunOutcome, { label: string; variant: BadgeVariant }
 function formatRelative(iso: string, nowMs: number): string {
   const ms = nowMs - new Date(iso).getTime();
   if (!Number.isFinite(ms) || ms < 0) return "just now";
-  return `${Math.round(ms / 1000)}s ago`;
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86_400);
+  const h = Math.floor((totalSec % 86_400) / 3_600);
+  const m = Math.floor((totalSec % 3_600) / 60);
+  const s = totalSec % 60;
+  // Pick the two largest non-zero units so the value reads naturally
+  // ("1m 5s ago", "2h 14m ago") while staying precise enough for
+  // diagnosis. Always show seconds when the total is under a minute.
+  if (d > 0) return `${d}d ${h}h ago`;
+  if (h > 0) return `${h}h ${m}m ago`;
+  if (m > 0) return `${m}m ${s}s ago`;
+  return `${s}s ago`;
 }
 
 /**
