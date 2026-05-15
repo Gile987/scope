@@ -49,6 +49,7 @@ export const SkillRevisionResponseSchema = z
     metadata: z.record(z.string(), z.string()).optional(),
     content: z.string(),
     archiveUrl: z.string(),
+    validationWarnings: z.array(z.string()).optional(),
     resolvedAt: z.coerce.date(),
     createdAt: z.coerce.date(),
   })

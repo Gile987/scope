@@ -102,9 +102,20 @@ async function main() {
     }
     process.exit(1);
   }
-  console.log('✅');
+  if (validation.warnings.length > 0) {
+    console.log('⚠️  WARNINGS');
+    for (const warn of validation.warnings) {
+      console.warn(`   [${warn.field}] ${warn.message}`);
+    }
+  } else {
+    console.log('✅');
+  }
 
-  console.log('\n✅ Skill is valid!\n');
+  if (validation.warnings.length > 0) {
+    console.log('\n⚠️  Skill is valid with warnings.\n');
+  } else {
+    console.log('\n✅ Skill is valid!\n');
+  }
 }
 
 main().catch((err) => {
