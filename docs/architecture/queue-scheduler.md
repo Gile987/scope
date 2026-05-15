@@ -136,6 +136,24 @@ If worker replicas scale up, increase `SCHEDULER_QUEUE_DEPTH_<TYPE>` to match. T
 
 Workers are unchanged except for one guard: after fetching a document from MongoDB, if `run.status === "paused"`, the worker deletes the queue message and moves on. This handles the race where a request was paused after being queued but before the worker picked it up.
 
+### Liveness Heartbeat & Redelivery
+
+Azure Storage Queues guarantee at-least-once delivery, so a worker may receive a duplicate of a message that another worker is already processing (e.g. transient visibility-extension miss, throttling). To distinguish a spurious redelivery from a genuine worker crash, every in-flight run carries two fields:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `run.lastHeartbeatAt` | `Date` | Wall-clock time the owning worker last extended visibility for this run's queue message. Refreshed every 15s by the visibility heartbeat. |
+| `run.worker` | `{ instanceId, podName? }` | Identity of the worker process currently processing the run. `instanceId` is a per-process UUID; `podName` is the K8s pod name (`HOSTNAME`) when running in a pod. |
+
+Both are stamped atomically when the worker transitions the run from `queued → processing`, and are kept fresh by the per-run heartbeat callback wired into [`startVisibilityHeartbeat`](../../packages/shared/src/queue/visibility-heartbeat.ts). Heartbeat writes are gated on `run.worker.instanceId` matching `this.instanceId`, so a stale worker can never overwrite the liveness of a run another worker has taken over.
+
+When a worker dequeues a message whose `run.status === "processing"`, it consults the heartbeat:
+
+- **Fresh** (last beat ≤ `staleThresholdMs` ago): the original worker is alive. Drop the duplicate message, leave the run untouched, log a `warn`.
+- **Stale or missing** (last beat older than threshold, or no heartbeat field at all on a legacy in-flight run): the worker is presumed dead. Mark the run failed via an atomic `findOneAndUpdate` whose filter re-checks the staleness condition (so a worker that resumed beating between read and write wins the race). The user retries explicitly via `POST /requests/:id/retry`.
+
+The default threshold is `2 × HEARTBEAT_VISIBILITY_SECONDS` (= 120s). Override with the `SCOPE_RUN_HEARTBEAT_STALE_MS` env var (milliseconds).
+
 ## API Endpoints
 
 ### Single Request

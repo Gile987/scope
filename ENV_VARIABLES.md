@@ -149,6 +149,19 @@ Timeout for the Copilot SDK session used by the report-generator worker. If the 
 
 Git commit hash embedded in reporter metadata. Automatically set during CI/CD builds. Used to track which version of the report-generator produced a given report.
 
+## Worker Configuration
+
+### SCOPE_RUN_HEARTBEAT_STALE_MS
+**Default:** `120000` (2 × `HEARTBEAT_VISIBILITY_SECONDS`)
+**Type:** integer (milliseconds)
+
+Threshold used by the queue-processor redelivery handler to decide whether an in-flight `processing` run is still alive. When a worker dequeues a duplicate message for a run already in `processing`, it compares `Date.now() - run.lastHeartbeatAt`:
+
+- **≤ threshold** → original worker is alive; drop the duplicate, leave the run untouched.
+- **> threshold** (or missing field) → worker presumed dead; mark the run failed atomically.
+
+Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+
 ## Token Manager Configuration
 
 ### TOKEN_MANAGER_URL
