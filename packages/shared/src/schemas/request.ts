@@ -163,6 +163,11 @@ export const RunStateSchema = z
       release: z.string(),
       arch: z.string(),
     }).optional(),
+    lastHeartbeatAt: z.coerce.date().optional(),
+    worker: z.object({
+      instanceId: z.string(),
+      podName: z.string().optional(),
+    }).optional(),
     harUrl: z.string().optional(),
     videoUrls: z.array(z.string()).optional(),
     setupVideoUrls: z.array(z.string()).optional(),
