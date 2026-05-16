@@ -41,27 +41,64 @@ export interface RedisHeartbeatStoreOptions {
   ttlMs?: number;
 }
 
+/**
+ * Detect whether to use Redis Cluster mode. Explicit env var takes precedence;
+ * otherwise infer from Azure Redis Enterprise's default port (10000).
+ */
+function shouldUseCluster(config: RedisConfig): boolean {
+  const explicit = process.env.REDIS_CLUSTER;
+  if (explicit === "true") return true;
+  if (explicit === "false") return false;
+  return config.redisPort === 10000;
+}
+
+function createRedisClient(config: RedisConfig): any {
+  const useTls =
+    process.env.REDIS_TLS === "true" ||
+    (config.redisPassword &&
+      config.redisHost !== "localhost" &&
+      config.redisHost !== "127.0.0.1" &&
+      config.redisHost !== "redis");
+  const tlsOpts = useTls ? { tls: { rejectUnauthorized: false } } : {};
+
+  if (shouldUseCluster(config)) {
+    return new Redis.Cluster(
+      [{ host: config.redisHost, port: config.redisPort }],
+      {
+        redisOptions: {
+          password: config.redisPassword || undefined,
+          ...tlsOpts,
+          maxRetriesPerRequest: 3,
+        },
+        // Azure Redis Enterprise exposes a single endpoint that handles slot
+        // routing internally — disable topology refresh to avoid DNS churn.
+        slotsRefreshTimeout: 10_000,
+        dnsLookup: undefined,
+        ...tlsOpts,
+      },
+    );
+  }
+
+  return new Redis({
+    host: config.redisHost,
+    port: config.redisPort,
+    password: config.redisPassword || undefined,
+    ...tlsOpts,
+    maxRetriesPerRequest: 3,
+    retryStrategy: (times: number) => (times > 3 ? null : Math.min(times * 1000, 3000)),
+  });
+}
+
 export class RedisHeartbeatStore implements HeartbeatStore {
   private readonly redis: any;
   private readonly ttlMs: number;
+  private readonly isCluster: boolean;
   private warnedOnError = false;
 
   constructor(config: RedisConfig, options: RedisHeartbeatStoreOptions = {}) {
     this.ttlMs = options.ttlMs ?? DEFAULT_HEARTBEAT_TTL_MS;
-    const useTls =
-      process.env.REDIS_TLS === "true" ||
-      (config.redisPassword &&
-        config.redisHost !== "localhost" &&
-        config.redisHost !== "127.0.0.1" &&
-        config.redisHost !== "redis");
-    this.redis = new Redis({
-      host: config.redisHost,
-      port: config.redisPort,
-      password: config.redisPassword || undefined,
-      ...(useTls ? { tls: { rejectUnauthorized: false } } : {}),
-      maxRetriesPerRequest: 3,
-      retryStrategy: (times: number) => (times > 3 ? null : Math.min(times * 1000, 3000)),
-    });
+    this.isCluster = shouldUseCluster(config);
+    this.redis = createRedisClient(config);
     this.redis.on("error", (err: Error) => {
       // Throttle the warning so a sustained outage doesn't spam logs.
       if (!this.warnedOnError) {
@@ -98,12 +135,26 @@ export class RedisHeartbeatStore implements HeartbeatStore {
     const out = new Map<string, Date>();
     if (runIds.length === 0) return out;
     try {
-      const vals: (string | null)[] = await this.redis.mget(runIds.map(keyFor));
-      vals.forEach((v, i) => {
-        if (!v) return;
-        const ms = Date.parse(v);
-        if (Number.isFinite(ms)) out.set(runIds[i], new Date(ms));
-      });
+      // In cluster mode, keys may reside in different hash slots so a single
+      // MGET would fail with CROSSSLOT. Issue individual GETs in parallel
+      // which ioredis Cluster routes to the correct nodes automatically.
+      if (this.isCluster) {
+        const results = await Promise.allSettled(
+          runIds.map((id) => this.redis.get(keyFor(id))),
+        );
+        results.forEach((r, i) => {
+          if (r.status !== "fulfilled" || !r.value) return;
+          const ms = Date.parse(r.value);
+          if (Number.isFinite(ms)) out.set(runIds[i], new Date(ms));
+        });
+      } else {
+        const vals: (string | null)[] = await this.redis.mget(runIds.map(keyFor));
+        vals.forEach((v, i) => {
+          if (!v) return;
+          const ms = Date.parse(v);
+          if (Number.isFinite(ms)) out.set(runIds[i], new Date(ms));
+        });
+      }
     } catch (err) {
       console.warn(`[heartbeat-store] mget failed:`, (err as Error).message);
     }
