@@ -2538,7 +2538,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/requests/bulk-retry",
   tags: ["Requests"],
   summary: "Bulk retry requests (start new attempts)",
-  body: z.object({ ids: z.array(z.string()).min(1) }),
+  body: z.object({ ids: z.array(z.string()).min(1), force: z.boolean().optional() }),
   response: z.object({
     retried: z.number().int(),
     skipped: z.number().int(),
@@ -2550,7 +2550,7 @@ apiRoute(ctx.app, ctx.registry, {
     })),
   }),
   handler: async (req, res) => {
-    const { ids } = req.body;
+    const { ids, force } = req.body;
 
     // Fetch all requested documents
     const requests = await ctx.requestCollection.find(
@@ -2573,6 +2573,12 @@ apiRoute(ctx.app, ctx.registry, {
       const currentRun: RunState | undefined = request.run;
       if (currentRun?.status !== "done") {
         results.push({ requestId: id, error: `Status is '${currentRun?.status ?? "unknown"}', expected 'done'` });
+        skipped++;
+        continue;
+      }
+
+      if (currentRun.outcome === "succeeded" && !force) {
+        results.push({ requestId: id, error: "Cannot retry a successful run unless force=true" });
         skipped++;
         continue;
       }

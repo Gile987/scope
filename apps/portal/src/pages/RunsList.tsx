@@ -101,6 +101,7 @@ export function RunsList() {
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [priorityDialogOpen, setPriorityDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [bulkRetryConfirmOpen, setBulkRetryConfirmOpen] = useState(false);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [cursorDirection, setCursorDirection] = useState<"after" | "before" | "last" | undefined>(undefined);
   const [isJumpingToLast, setIsJumpingToLast] = useState(false);
@@ -368,7 +369,7 @@ export function RunsList() {
   });
 
   const bulkRetryMutation = useMutation({
-    mutationFn: (ids: string[]) => api.bulkRetryRuns(ids),
+    mutationFn: ({ ids, force }: { ids: string[]; force?: boolean }) => api.bulkRetryRuns(ids, { force }),
     onSuccess: ({ retried, skipped }) => {
       queryClient.invalidateQueries({ queryKey: ["runs"] });
       const parts: string[] = [];
@@ -501,16 +502,18 @@ export function RunsList() {
       // Flat list mode — we have full run objects
       const selected = runs.filter((r) => selectedIds.has(r._id));
       const status = (r: Run) => r.run?.status ?? "pending";
+      const doneRuns = selected.filter((r) => status(r) === "done");
       return {
         pausable: selected.filter((r) => status(r) === "pending" || status(r) === "queued").length,
         resumable: selected.filter((r) => status(r) === "paused").length,
         prioritizable: selected.filter((r) => status(r) === "pending" || status(r) === "paused").length,
-        retryable: selected.filter((r) => status(r) === "done" && r.run?.outcome !== "succeeded").length,
+        retryable: doneRuns.filter((r) => r.run?.outcome !== "succeeded").length,
+        retryableWithForce: doneRuns.length,
       };
     }
     // Grouped mode — derive caps from group-level statusCounts for groups
     // whose runs are (partially or fully) selected
-    let pausable = 0, resumable = 0, prioritizable = 0, retryable = 0;
+    let pausable = 0, resumable = 0, prioritizable = 0, retryable = 0, retryableWithForce = 0;
     for (const group of serverGroups) {
       const selectedInGroup = group.runIds.filter((id) => selectedIds.has(id)).length;
       if (selectedInGroup === 0) continue;
@@ -523,15 +526,17 @@ export function RunsList() {
         resumable += sc.paused ?? 0;
         prioritizable += (sc.pending ?? 0) + (sc.paused ?? 0);
         retryable += nonSucceededDoneCount;
+        retryableWithForce += sc.done ?? 0;
       } else {
         // Partial selection — estimate proportionally (round up to be permissive)
         pausable += Math.ceil(((sc.pending ?? 0) + (sc.queued ?? 0)) * ratio);
         resumable += Math.ceil((sc.paused ?? 0) * ratio);
         prioritizable += Math.ceil(((sc.pending ?? 0) + (sc.paused ?? 0)) * ratio);
         retryable += Math.ceil(nonSucceededDoneCount * ratio);
+        retryableWithForce += Math.ceil((sc.done ?? 0) * ratio);
       }
     }
-    return { pausable, resumable, prioritizable, retryable };
+    return { pausable, resumable, prioritizable, retryable, retryableWithForce };
   }, [runs, selectedIds, groupBy, serverGroups]);
 
   const toggleGroup = (key: string) => {
@@ -910,14 +915,26 @@ export function RunsList() {
                 variant="outline"
                 size="sm"
                 className="gap-1.5"
-                disabled={bulkRetryMutation.isPending || selectionCaps.retryable === 0}
-                onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
+                disabled={bulkRetryMutation.isPending || (isForceRetryModifierActive ? selectionCaps.retryableWithForce === 0 : selectionCaps.retryable === 0)}
+                onClick={() => {
+                  if (isForceRetryModifierActive && selectionCaps.retryableWithForce > selectionCaps.retryable) {
+                    setBulkRetryConfirmOpen(true);
+                  } else {
+                    bulkRetryMutation.mutate({ ids: Array.from(selectedIds) });
+                  }
+                }}
               >
                 <RotateCcw className="h-4 w-4" />
-                <span className="hidden md:inline">{bulkRetryMutation.isPending ? "…" : `Retry${selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}`}</span>
+                <span className="hidden md:inline">{bulkRetryMutation.isPending ? "…" : (() => {
+                  const count = isForceRetryModifierActive ? selectionCaps.retryableWithForce : selectionCaps.retryable;
+                  return `Retry${count > 0 ? ` (${count})` : ""}`;
+                })()}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Retry completed runs{selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}</TooltipContent>
+            <TooltipContent>{isForceRetryModifierActive ? "Force retry all completed runs" : "Retry completed runs"}{(() => {
+              const count = isForceRetryModifierActive ? selectionCaps.retryableWithForce : selectionCaps.retryable;
+              return count > 0 ? ` (${count})` : "";
+            })()}</TooltipContent>
           </Tooltip>
           {/* Export */}
           <span className="hidden 2xl:inline text-xs font-semibold text-muted-foreground uppercase tracking-wide ml-2">Export</span>
@@ -1492,6 +1509,26 @@ export function RunsList() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {bulkDeleteMutation.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bulkRetryConfirmOpen} onOpenChange={setBulkRetryConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Force retry {selectionCaps.retryableWithForce} run{selectionCaps.retryableWithForce !== 1 ? "s" : ""} including successful ones?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Some of the selected runs completed successfully. Are you sure you want to retry all of them?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => bulkRetryMutation.mutate({ ids: Array.from(selectedIds), force: true })}
+              disabled={bulkRetryMutation.isPending}
+            >
+              {bulkRetryMutation.isPending ? "Retrying…" : "Force Retry"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
