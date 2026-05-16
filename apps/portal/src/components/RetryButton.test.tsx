@@ -4,7 +4,8 @@
 // @vitest-environment happy-dom
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { useShiftModifier, getRetryButtonState } from "./RetryButton";
+import { useShiftModifier } from "../hooks/useShiftModifier";
+import { getRetryButtonState } from "./RetryButton";
 
 afterEach(cleanup);
 

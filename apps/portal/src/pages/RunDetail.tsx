@@ -31,7 +31,8 @@ import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import type { RunState } from "@/types";
-import { useShiftModifier, getRetryButtonState } from "@/components/RetryButton";
+import { useShiftModifier } from "@/hooks/useShiftModifier";
+import { getRetryButtonState } from "@/components/RetryButton";
 
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
