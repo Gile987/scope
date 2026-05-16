@@ -93,6 +93,10 @@ export interface RunState {
   turns?: ConversationTurn[];
   workerVersion?: string;
   os?: OsInfo;
+  /** Wall-clock time the owning worker last extended visibility for this run's queue message. */
+  lastHeartbeatAt?: string;
+  /** Identity of the worker process currently processing the run. */
+  worker?: { instanceId: string; podName?: string };
   harUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];

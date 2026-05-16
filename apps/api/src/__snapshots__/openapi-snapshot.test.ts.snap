@@ -2161,6 +2161,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "harUrl": {
             "type": "string",
           },
+          "lastHeartbeatAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
           "logsUrl": {
             "type": "string",
           },
@@ -2258,6 +2265,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
             "type": "array",
+          },
+          "worker": {
+            "properties": {
+              "instanceId": {
+                "type": "string",
+              },
+              "podName": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "instanceId",
+            ],
+            "type": "object",
           },
           "workerVersion": {
             "type": "string",

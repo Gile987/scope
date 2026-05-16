@@ -474,6 +474,14 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    // Enrich `processing` runs with the latest liveness heartbeat from
+    // Redis. (Heartbeats are stored in Redis — not Mongo — to avoid the
+    // CosmosDB RU cost of a sub-document write every 15s per active run.)
+    if (resource.run?.status === "processing" && resource.run._id) {
+      const hb = await ctx.heartbeatStore.get(resource.run._id);
+      if (hb) resource.run.lastHeartbeatAt = hb;
+    }
+
     // Map _id back to id for API response
     res.json({ ...resource, id: resource._id });
   },
@@ -894,6 +902,21 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     const data = resources.map((r) => ({ ...r, id: r._id }));
+
+    // Enrich `processing` runs with the latest liveness heartbeat from
+    // Redis (single MGET; heartbeats live there, not Mongo).
+    const processingRunIds = data
+      .filter((r) => r.run?.status === "processing" && r.run._id)
+      .map((r) => r.run!._id!);
+    if (processingRunIds.length > 0) {
+      const hbMap = await ctx.heartbeatStore.mget(processingRunIds);
+      for (const r of data) {
+        const runId = r.run?._id;
+        if (runId && hbMap.has(runId)) {
+          r.run!.lastHeartbeatAt = hbMap.get(runId);
+        }
+      }
+    }
 
     if (data.length === 0) {
       res.json({ data: [], limit, estimatedTotal, cursors: { next: null, prev: null } });

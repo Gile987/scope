@@ -4,6 +4,7 @@
 import { MongoClient, Collection, Db } from "mongodb";
 import { QueueClient, DequeuedMessageItem } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
+import { randomUUID } from "node:crypto";
 import { LogEvent, BaseQueueProcessorConfig } from "../types/types.js";
 import { LogPublisher } from "../logging/log-publisher.js";
 import { BlobStorage } from "../storage/blob-storage.js";
@@ -12,6 +13,10 @@ import {
   startVisibilityHeartbeat,
   type VisibilityHeartbeat,
 } from "./visibility-heartbeat.js";
+import {
+  RedisHeartbeatStore,
+  type HeartbeatStore,
+} from "./heartbeat-store.js";
 
 /**
  * Generic queue processor that polls an Azure Storage Queue and processes messages.
@@ -27,7 +32,18 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
   protected queueClient: QueueClient;
   protected config: BaseQueueProcessorConfig;
   protected logPublisher!: LogPublisher;
+  /** Per-run liveness heartbeat store (Redis-backed in production).
+   *  Subclasses can override in tests via {@link setHeartbeatStore}. */
+  protected heartbeatStore!: HeartbeatStore;
   protected workerName: string;
+  /** Per-process UUID generated at construction time. Stamped on
+   *  `run.worker.instanceId` when this worker picks up a message and used
+   *  to gate heartbeat writes (so a stale worker can't keep heart-beating
+   *  for a run another worker has taken over). */
+  protected readonly instanceId: string = randomUUID();
+  /** Kubernetes pod name (or whatever `process.env.HOSTNAME` is set to).
+   *  Stamped on `run.worker.podName` for troubleshooting. Optional. */
+  protected readonly podName: string | undefined = process.env.HOSTNAME || undefined;
   private stopping = false;
   private processing = false;
 
@@ -97,6 +113,13 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       console.warn(`[${this.workerName}] Error closing Redis:`, err);
     }
     try {
+      if (this.heartbeatStore) {
+        await this.heartbeatStore.close();
+      }
+    } catch (err) {
+      console.warn(`[${this.workerName}] Error closing heartbeat store:`, err);
+    }
+    try {
       await this.mongoClient.close();
       console.log(`[${this.workerName}] MongoDB connection closed`);
     } catch (err) {
@@ -106,6 +129,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
 
   async start(): Promise<void> {
     console.log(`[${this.workerName}] Starting worker...`);
+    console.log(`[${this.workerName}] Instance: ${this.instanceId}${this.podName ? ` (pod=${this.podName})` : ""}`);
     console.log(`[${this.workerName}] MongoDB: ${this.config.mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
     console.log(`[${this.workerName}] Queue: ${this.config.storageAccountName}/${this.config.queueName}`);
     console.log(`[${this.workerName}] Redis: ${this.config.redisHost}:${this.config.redisPort}`);
@@ -134,6 +158,21 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       blobStorage,
       this.workerName
     );
+
+    // Per-run liveness heartbeat store. Reuses the same Redis instance as
+    // log publishing; sharing the host is fine because heartbeat ops are
+    // small and infrequent compared to log streaming.
+    if (!this.heartbeatStore) {
+      this.heartbeatStore = new RedisHeartbeatStore({
+        redisHost: this.config.redisHost,
+        redisPort: this.config.redisPort,
+        redisPassword: this.config.redisPassword,
+      }, {
+        ttlMs: process.env.SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS
+          ? Number(process.env.SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS)
+          : undefined,
+      });
+    }
 
     while (!this.stopping) {
       try {
@@ -224,6 +263,14 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         undefined,
         undefined,
         { documentId, runId: logRunId },
+        // Bump the per-run liveness heartbeat in Redis on every successful
+        // tick so the redelivery handler can distinguish a real worker crash
+        // from a spurious queue redelivery. Stored in Redis (not Mongo) to
+        // avoid the recurring CosmosDB RU cost of writing every 15 s for
+        // every active run.
+        async () => {
+          await this.heartbeatStore.set(logRunId, new Date());
+        },
       );
 
       try {
@@ -279,6 +326,10 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
               } as any
             ));
             updated = (result.matchedCount ?? 0) > 0;
+            if (updated) {
+              // Run is terminal — drop the Redis liveness heartbeat.
+              await this.heartbeatStore.delete(runId);
+            }
           }
           if (!updated) {
             // Legacy fallback: top-level fields (pre-migration / no runId in message).

@@ -293,7 +293,12 @@ export function RunDetail() {
               </button>
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <StatusBadge status={activeRun?.status ?? "pending"} />
+              <StatusBadge
+                status={activeRun?.status ?? "pending"}
+                worker={activeRun?.worker}
+                lastHeartbeatAt={activeRun?.lastHeartbeatAt}
+                startedAt={activeRun?.startedAt}
+              />
               {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
               <span className="font-mono">{run.workerType}</span>
               {run.model && (
@@ -414,7 +419,12 @@ export function RunDetail() {
                             }}
                           >
                             <span className="font-mono font-medium w-5 text-right">#{attempt.attemptNumber}</span>
-                            <StatusBadge status={attempt.status ?? "pending"} />
+                            <StatusBadge
+                              status={attempt.status ?? "pending"}
+                              worker={attempt.worker}
+                              lastHeartbeatAt={attempt.lastHeartbeatAt}
+                              startedAt={attempt.startedAt}
+                            />
                             {attempt.status === "done" && <OutcomeBadge outcome={attempt.outcome} />}
                             {duration ? (
                               <span className="font-mono text-muted-foreground">{formatDuration(duration)}</span>
