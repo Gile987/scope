@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { serverNow } from "@/lib/serverClock";
+import { shouldPulse } from "@/lib/status-badge";
 import type { RunStatus, RunOutcome, RunState } from "@/types";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info" | "purple";
@@ -84,10 +85,7 @@ export function StatusBadge({
   // 100% / 50%, which keeps the label readable. Stop pulsing once the last
   // heartbeat is older than 30s — beyond that the worker is suspect and a
   // steady badge avoids implying false liveness.
-  const heartbeatMs = lastHeartbeatAt ? new Date(lastHeartbeatAt).getTime() : undefined;
-  const heartbeatFresh =
-    heartbeatMs === undefined ? true : now - heartbeatMs <= 30_000;
-  const className = status === "processing" && heartbeatFresh ? "animate-pulse" : undefined;
+  const className = shouldPulse(status, lastHeartbeatAt, now) ? "animate-pulse" : undefined;
   const badge = <Badge variant={config.variant} className={cn(className)}>{config.label}</Badge>;
 
   const showTooltip = status === "processing" && (worker || lastHeartbeatAt || startedAt);
