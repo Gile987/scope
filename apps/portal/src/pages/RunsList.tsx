@@ -1687,7 +1687,8 @@ function RunRow({
 }) {
   const isCol = (col: ColumnId) => !hiddenColumns.has(col);
   const isSuccessfulCompletedRun = run.run?.status === "done" && run.run?.outcome === "succeeded";
-  const canRetryRun = isSuccessfulCompletedRun ? isForceRetryModifierActive : run.run?.status === "done";
+  const canRetryRun = run.run?.status === "done";
+  const isRetryDisabled = retryMutation.isPending || (isSuccessfulCompletedRun && !isForceRetryModifierActive);
   return (
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
       <TableCell>
@@ -1920,9 +1921,9 @@ function RunRow({
               variant="ghost"
               size="icon"
               className="h-8 w-8"
-              title="Retry"
+              title={isSuccessfulCompletedRun && !isForceRetryModifierActive ? "Hold Shift to force retry" : "Retry"}
               onClick={() => retryMutation.mutate({ id: run._id, force: isSuccessfulCompletedRun })}
-              disabled={retryMutation.isPending}
+              disabled={isRetryDisabled}
             >
               <RotateCcw className="h-4 w-4" />
             </Button>

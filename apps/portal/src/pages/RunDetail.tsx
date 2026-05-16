@@ -258,8 +258,8 @@ export function RunDetail() {
     + (activeRun?.videoUrls?.length ?? 0)
     + (activeRun?.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
   const isSuccessfulCompletedRun = activeRun?.status === "done" && activeRun?.outcome === "succeeded";
-  const canShowRetry = !isViewingHistorical
-    && (isSuccessfulCompletedRun ? isForceRetryModifierActive : activeRun?.status === "done");
+  const canShowRetry = !isViewingHistorical && activeRun?.status === "done";
+  const isRetryDisabled = retryMutation.isPending || (isSuccessfulCompletedRun && !isForceRetryModifierActive);
 
   // Compute aggregate token usage: for one-shot runs use activeRun?.tokenUsage,
   // for multi-turn runs sum per-turn token usage
@@ -464,7 +464,8 @@ export function RunDetail() {
               size="sm"
               className="gap-1.5"
               onClick={() => retryMutation.mutate({ force: isSuccessfulCompletedRun })}
-              disabled={retryMutation.isPending}
+              disabled={isRetryDisabled}
+              title={isSuccessfulCompletedRun && !isForceRetryModifierActive ? "Hold Shift to force retry a successful run" : undefined}
             >
               <RotateCcw className="h-4 w-4" />
               {retryMutation.isPending ? "Retrying…" : "Retry"}
