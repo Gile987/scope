@@ -1,12 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   ssr: {
     resolve: {
       conditions: ["source"],
+    },
+  },
+  resolve: {
+    alias: {
+      // Portal uses `@/...` as a shortcut for apps/portal/src/...
+      "@/": fileURLToPath(new URL("./apps/portal/src/", import.meta.url)),
     },
   },
   test: {
