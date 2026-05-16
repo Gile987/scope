@@ -1671,7 +1671,9 @@ function RunRow({
   const isSuccessfulCompletedRun = run.run?.status === "done" && run.run?.outcome === "succeeded";
   const canRetryRun = run.run?.status === "done";
   const retryButtonState = getRetryButtonState(!!isSuccessfulCompletedRun, retryMutation.isPending, isForceRetryModifierActive);
+  const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
   return (
+    <>
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
       <TableCell>
         <Checkbox
@@ -1904,7 +1906,13 @@ function RunRow({
               size="icon"
               className="h-8 w-8"
               title={retryButtonState.title ?? "Retry"}
-              onClick={() => retryMutation.mutate({ id: run._id, force: isSuccessfulCompletedRun })}
+              onClick={() => {
+                if (isSuccessfulCompletedRun) {
+                  setRetryConfirmOpen(true);
+                } else {
+                  retryMutation.mutate({ id: run._id, force: false });
+                }
+              }}
               disabled={retryButtonState.disabled}
             >
               <RotateCcw className="h-4 w-4" />
@@ -1918,6 +1926,26 @@ function RunRow({
         </div>
       </TableCell>
     </TableRow>
+    <AlertDialog open={retryConfirmOpen} onOpenChange={setRetryConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Retry successful run?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This run completed successfully. Are you sure you want to retry it?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => retryMutation.mutate({ id: run._id, force: true })}
+            disabled={retryMutation.isPending}
+          >
+            {retryMutation.isPending ? "Retrying…" : "Retry"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 

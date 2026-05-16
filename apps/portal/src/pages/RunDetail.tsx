@@ -4,6 +4,10 @@
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -44,6 +48,7 @@ export function RunDetail() {
   const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
   const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
   const [showAttempts, setShowAttempts] = useState(false);
+  const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
   const isForceRetryModifierActive = useShiftModifier();
 
   const { data: run, isLoading, error } = useQuery({
@@ -445,7 +450,13 @@ export function RunDetail() {
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => retryMutation.mutate({ force: isSuccessfulCompletedRun })}
+              onClick={() => {
+                if (isSuccessfulCompletedRun) {
+                  setRetryConfirmOpen(true);
+                } else {
+                  retryMutation.mutate({ force: false });
+                }
+              }}
               disabled={retryButtonState.disabled}
               title={retryButtonState.title}
             >
@@ -1030,6 +1041,26 @@ export function RunDetail() {
           </TabsContent>
         )}
       </Tabs>
+
+      <AlertDialog open={retryConfirmOpen} onOpenChange={setRetryConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Retry successful run?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This run completed successfully. Are you sure you want to retry it?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => retryMutation.mutate({ force: true })}
+              disabled={retryMutation.isPending}
+            >
+              {retryMutation.isPending ? "Retrying…" : "Retry"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
