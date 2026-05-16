@@ -112,6 +112,7 @@ export interface CodingAgentDocument {
   modelProvider?: string;     // Model provider (e.g. "github-copilot", "anthropic") — used by scanners to discover agents
   supportedModels: string[];  // Empty array = model selection disabled
   defaultModel?: string;
+  available?: boolean;        // Whether this agent is available for new submissions (default: true)
   versions?: AgentVersion[];  // Registered agent versions (embedded array)
   createdAt: Date;
   updatedAt?: Date;

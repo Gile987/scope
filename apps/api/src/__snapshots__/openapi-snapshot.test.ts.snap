@@ -20,6 +20,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "_id": {
             "type": "string",
           },
+          "available": {
+            "type": "boolean",
+          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -409,6 +412,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "properties": {
           "_id": {
             "type": "string",
+          },
+          "available": {
+            "type": "boolean",
           },
           "defaultModel": {
             "type": "string",
@@ -2560,6 +2566,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "UpdateAgentInput": {
         "properties": {
+          "available": {
+            "type": "boolean",
+          },
           "defaultModel": {
             "type": "string",
           },
