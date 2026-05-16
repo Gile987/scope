@@ -147,6 +147,7 @@ export function SubmitRun() {
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
 
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
+  const availableAgents = activeAgents.filter((a: CodingAgent) => a.available !== false);
   const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
   const isVscodeWorker = worker.includes("vscode");
 
@@ -523,8 +524,8 @@ export function SubmitRun() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {activeAgents.length > 0
-                      ? activeAgents.map((a: CodingAgent) => (
+                    {availableAgents.length > 0
+                      ? availableAgents.map((a: CodingAgent) => (
                           <SelectItem key={a._id} value={a._id}>
                             {a.name}
                           </SelectItem>

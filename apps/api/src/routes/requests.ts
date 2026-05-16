@@ -169,6 +169,15 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    // Check if the worker (agent) is available for new submissions
+    const workerAgent = await ctx.agentCollection.findOne({ _id: worker, deletedAt: { $exists: false } });
+    if (workerAgent && workerAgent.available === false) {
+      res.status(400).json({
+        error: `Worker "${worker}" is not available for new submissions`,
+      });
+      return;
+    }
+
     // Validate scenario.criteria if provided
     if (scenarioObj.criteria !== undefined) {
       if (!Array.isArray(scenarioObj.criteria) || !scenarioObj.criteria.every((c: unknown) => typeof c === "string")) {
@@ -1010,6 +1019,15 @@ apiRoute(ctx.app, ctx.registry, {
     if (overrides?.workerType && !VALID_WORKERS.includes(overrides.workerType as WorkerType)) {
       res.status(400).json({ error: `Invalid workerType override: ${overrides.workerType}` });
       return;
+    }
+
+    // Check if the overridden worker is available for new submissions
+    if (overrides?.workerType) {
+      const overrideAgent = await ctx.agentCollection.findOne({ _id: overrides.workerType, deletedAt: { $exists: false } });
+      if (overrideAgent && overrideAgent.available === false) {
+        res.status(400).json({ error: `Worker "${overrides.workerType}" is not available for new submissions` });
+        return;
+      }
     }
 
     // Resolve profile override (once for the entire batch)
