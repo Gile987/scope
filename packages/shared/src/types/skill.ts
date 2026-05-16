@@ -96,4 +96,10 @@ export interface SkillDiscoveryResult {
   skillPath: string;              // Full path within the repo
   name?: string;                  // Display name from SKILL.md frontmatter (best-effort)
   description?: string;           // Description from SKILL.md frontmatter (best-effort)
+  // Library-status enrichment (set by the API route, not the resolver):
+  existsInLibrary?: boolean;      // True if a SkillDocument with this source+skillName exists
+  currentRevisionCommitSha?: string; // commitHash of the most recently stored SkillRevisionDocument
+  latestUpstreamCommitSha?: string;  // commitSha of the latest commit touching skillPath upstream
+  updateAvailable?: boolean;      // existsInLibrary && currentRevisionCommitSha !== latestUpstreamCommitSha
+  lastImportedAt?: string;        // ISO timestamp of the most recent revision (if existsInLibrary)
 }

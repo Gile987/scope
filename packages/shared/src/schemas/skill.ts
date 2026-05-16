@@ -72,5 +72,10 @@ export const SkillDiscoveryResultSchema = z
     skillPath: z.string(),
     name: z.string().optional(),
     description: z.string().optional(),
+    existsInLibrary: z.boolean().optional(),
+    currentRevisionCommitSha: z.string().optional(),
+    latestUpstreamCommitSha: z.string().optional(),
+    updateAvailable: z.boolean().optional(),
+    lastImportedAt: z.string().optional(),
   })
   .openapi("SkillDiscoveryResult");

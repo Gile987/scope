@@ -60,8 +60,16 @@ export function SkillImportWizard({ onClose }: SkillImportWizardProps) {
     mutationFn: (repoSource: string) => api.discoverSkills(repoSource),
     onSuccess: (results) => {
       setDiscovered(results);
-      // Pre-select all by default to mirror common case ("import everything")
-      setSelected(new Set(results.map((r) => r.skillName)));
+      // Default-select skills that are new OR have an update available.
+      // Up-to-date skills start unchecked so the user doesn't accidentally
+      // re-import everything on every visit.
+      setSelected(
+        new Set(
+          results
+            .filter((r) => !r.existsInLibrary || r.updateAvailable)
+            .map((r) => r.skillName)
+        )
+      );
       setProgress(new Map());
       setStep(2);
     },
@@ -84,7 +92,14 @@ export function SkillImportWizard({ onClose }: SkillImportWizardProps) {
     });
   };
 
-  const selectAll = () => setSelected(new Set(discovered.map((r) => r.skillName)));
+  const selectAll = () =>
+    setSelected(
+      new Set(
+        discovered
+          .filter((r) => !r.existsInLibrary || r.updateAvailable)
+          .map((r) => r.skillName)
+      )
+    );
   const selectNone = () => setSelected(new Set());
 
   // ─── Step 2: Import the selected skills in parallel ───────────────
@@ -259,8 +274,12 @@ export function SkillImportWizard({ onClose }: SkillImportWizardProps) {
                 {discovered.map((skill) => {
                   const prog = progress.get(skill.skillName);
                   const isSelected = selected.has(skill.skillName);
+                  const upToDate = skill.existsInLibrary && !skill.updateAvailable;
                   return (
-                    <li key={skill.skillPath} className="flex items-start gap-2 p-2">
+                    <li
+                      key={skill.skillPath}
+                      className={`flex items-start gap-2 p-2 ${upToDate ? "opacity-60" : ""}`}
+                    >
                       <Checkbox
                         id={`wizard-skill-${skill.skillName}`}
                         checked={isSelected}
@@ -272,9 +291,10 @@ export function SkillImportWizard({ onClose }: SkillImportWizardProps) {
                         htmlFor={`wizard-skill-${skill.skillName}`}
                         className="flex-1 min-w-0 cursor-pointer"
                       >
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-mono text-xs font-medium">{skill.skillName}</span>
                           <span className="text-[10px] text-muted-foreground font-mono">{skill.skillPath}</span>
+                          <LibraryStatusBadge skill={skill} />
                         </div>
                         {(skill.name || skill.description) && (
                           <p className="text-xs text-muted-foreground truncate">
@@ -376,4 +396,36 @@ function ImportStatusBadge({ status }: { status?: ImportStatus }) {
     return <Check className="h-3.5 w-3.5 text-green-600 shrink-0" />;
   }
   return <X className="h-3.5 w-3.5 text-destructive shrink-0" />;
+}
+
+function LibraryStatusBadge({ skill }: { skill: SkillDiscoveryResult }) {
+  if (!skill.existsInLibrary) {
+    return (
+      <span className="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 font-semibold">
+        New
+      </span>
+    );
+  }
+  if (skill.updateAvailable) {
+    return (
+      <span
+        className="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-300 font-semibold"
+        title={
+          skill.currentRevisionCommitSha && skill.latestUpstreamCommitSha
+            ? `Current ${skill.currentRevisionCommitSha.slice(0, 7)} \u2192 ${skill.latestUpstreamCommitSha.slice(0, 7)}`
+            : undefined
+        }
+      >
+        Update available
+      </span>
+    );
+  }
+  return (
+    <span
+      className="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-muted text-muted-foreground font-semibold"
+      title={skill.lastImportedAt ? `Imported ${new Date(skill.lastImportedAt).toLocaleString()}` : undefined}
+    >
+      Up to date
+    </span>
+  );
 }

@@ -809,6 +809,11 @@ export interface SkillDiscoveryResult {
   skillPath: string;
   name?: string;
   description?: string;
+  existsInLibrary?: boolean;
+  currentRevisionCommitSha?: string;
+  latestUpstreamCommitSha?: string;
+  updateAvailable?: boolean;
+  lastImportedAt?: string;
 }
 
 // =============================================================================

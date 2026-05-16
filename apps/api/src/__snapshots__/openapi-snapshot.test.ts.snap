@@ -2291,7 +2291,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "SkillDiscoveryResult": {
         "properties": {
+          "currentRevisionCommitSha": {
+            "type": "string",
+          },
           "description": {
+            "type": "string",
+          },
+          "existsInLibrary": {
+            "type": "boolean",
+          },
+          "lastImportedAt": {
+            "type": "string",
+          },
+          "latestUpstreamCommitSha": {
             "type": "string",
           },
           "name": {
@@ -2302,6 +2314,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "skillPath": {
             "type": "string",
+          },
+          "updateAvailable": {
+            "type": "boolean",
           },
         },
         "required": [

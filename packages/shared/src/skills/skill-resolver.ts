@@ -319,6 +319,15 @@ export class SkillResolver {
   }
 
   /**
+   * Get the SHA of the latest commit touching the skill directory.
+   * Public wrapper around the resolver's internal commit lookup so route
+   * handlers can compare upstream state against stored revisions.
+   */
+  async getLatestCommitSha(source: string, skillPath: string): Promise<string> {
+    return (await this.getLatestCommit(source, skillPath)).sha;
+  }
+
+  /**
    * Get the latest commit touching the skill directory.
    */
   private async getLatestCommit(
