@@ -28,6 +28,7 @@ export const CreateAgentInputSchema = z
     modelProvider: z.string().optional(),
     supportedModels: z.array(z.string()).optional(),
     defaultModel: z.string().optional(),
+    available: z.boolean().optional(),
   })
   .openapi("CreateAgentInput");
 
@@ -38,6 +39,7 @@ export const UpdateAgentInputSchema = z
     modelProvider: z.string().optional(),
     supportedModels: z.array(z.string()).optional(),
     defaultModel: z.string().optional(),
+    available: z.boolean().optional(),
   })
   .openapi("UpdateAgentInput");
 
@@ -49,6 +51,7 @@ export const AgentResponseSchema = z
     modelProvider: z.string().optional(),
     supportedModels: z.array(z.string()),
     defaultModel: z.string().optional(),
+    available: z.boolean().optional(),
     versions: z.array(AgentVersionSchema).optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),

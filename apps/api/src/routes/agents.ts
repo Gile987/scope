@@ -81,7 +81,7 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res, next) => {
     try {
-      const { _id, name, description, modelProvider, supportedModels, defaultModel } = req.body;
+      const { _id, name, description, modelProvider, supportedModels, defaultModel, available } = req.body;
 
       if (!_id || typeof _id !== "string") {
         res.status(400).json({ error: "_id is required and must be a string" });
@@ -122,6 +122,7 @@ apiRoute(ctx.app, ctx.registry, {
               ...(modelProvider !== undefined ? { modelProvider } : {}),
               ...(supportedModels !== undefined ? { supportedModels } : {}),
               ...(defaultModel !== undefined ? { defaultModel } : {}),
+              ...(available !== undefined ? { available } : {}),
               updatedAt: now,
             },
             $unset: { deletedAt: "" },
@@ -138,6 +139,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(modelProvider ? { modelProvider } : {}),
           supportedModels: supportedModels ?? [],
           ...(defaultModel ? { defaultModel } : {}),
+          ...(available !== undefined ? { available } : {}),
           createdAt: now,
         };
         await ctx.agentCollection.insertOne(agentDoc);
@@ -165,7 +167,7 @@ apiRoute(ctx.app, ctx.registry, {
   handler: async (req, res, next) => {
     try {
       const { id } = req.params;
-      const { name, description, supportedModels, defaultModel } = req.body;
+      const { name, description, supportedModels, defaultModel, available } = req.body;
 
       const existing = await ctx.agentCollection.findOne({ _id: id, deletedAt: { $exists: false } });
       if (!existing) {
@@ -191,6 +193,7 @@ apiRoute(ctx.app, ctx.registry, {
         }
         updateFields.defaultModel = defaultModel;
       }
+      if (available !== undefined) updateFields.available = available;
 
       await ctx.agentCollection.updateOne({ _id: id }, { $set: updateFields });
 

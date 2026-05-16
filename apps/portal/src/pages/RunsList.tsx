@@ -205,6 +205,7 @@ export function RunsList() {
     queryFn: api.listAgents,
   });
   const activeAgents = useMemo(() => agents.filter((a) => !a.deletedAt), [agents]);
+  const availableAgents = useMemo(() => activeAgents.filter((a) => a.available !== false), [activeAgents]);
 
   // Fetch profiles for name lookup
   const { data: profiles = [] } = useQuery<ProfileWithVersion[]>({
@@ -1112,7 +1113,12 @@ export function RunsList() {
                         ? selectedRunsSummary.worker
                         : selectedRunsSummary.isMultiWorker ? "Mixed (keep each)" : "—"}
                     </SelectItem>
-                    {WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
+                    {availableAgents
+                      .filter((a) => a._id !== selectedRunsSummary.worker)
+                      .map((a) => (
+                        <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
+                      ))}
+                    {availableAgents.length === 0 && WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
                       <SelectItem key={w} value={w}>{w}</SelectItem>
                     ))}
                   </SelectContent>
