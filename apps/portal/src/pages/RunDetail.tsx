@@ -4,10 +4,7 @@
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { RetryConfirmDialog } from "@/components/RetryConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -1042,25 +1039,12 @@ export function RunDetail() {
         )}
       </Tabs>
 
-      <AlertDialog open={retryConfirmOpen} onOpenChange={setRetryConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Retry successful run?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This run completed successfully. Are you sure you want to retry it?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => retryMutation.mutate({ force: true })}
-              disabled={retryMutation.isPending}
-            >
-              {retryMutation.isPending ? "Retrying…" : "Retry"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RetryConfirmDialog
+        open={retryConfirmOpen}
+        onOpenChange={setRetryConfirmOpen}
+        onConfirm={() => retryMutation.mutate({ force: true })}
+        isPending={retryMutation.isPending}
+      />
     </div>
   );
 }

@@ -19,6 +19,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { RetryConfirmDialog } from "@/components/RetryConfirmDialog";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
@@ -1926,25 +1927,12 @@ function RunRow({
         </div>
       </TableCell>
     </TableRow>
-    <AlertDialog open={retryConfirmOpen} onOpenChange={setRetryConfirmOpen}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Retry successful run?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This run completed successfully. Are you sure you want to retry it?
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => retryMutation.mutate({ id: run._id, force: true })}
-            disabled={retryMutation.isPending}
-          >
-            {retryMutation.isPending ? "Retrying…" : "Retry"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <RetryConfirmDialog
+      open={retryConfirmOpen}
+      onOpenChange={setRetryConfirmOpen}
+      onConfirm={() => retryMutation.mutate({ id: run._id, force: true })}
+      isPending={retryMutation.isPending}
+    />
     </>
   );
 }
