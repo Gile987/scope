@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { McpGatewayClient } from "./mcp-gateway-client.js";
+import { McpGatewayClient, isTransientNetworkError } from "./mcp-gateway-client.js";
 import type { McpServerConfig } from "../types/mcp.js";
 
 const mockFetch = vi.fn();
@@ -280,6 +280,132 @@ describe("McpGatewayClient", () => {
       mockFetch.mockResolvedValueOnce(okResponse([]));
       await client.purgeAll();
       expect(mockFetch).toHaveBeenCalledTimes(1); // only the listServers call
+    });
+  });
+
+  describe("isTransientNetworkError()", () => {
+    it("returns true for 'fetch failed' TypeError", () => {
+      expect(isTransientNetworkError(new TypeError("fetch failed"))).toBe(true);
+    });
+
+    it("returns true for ECONNREFUSED in message", () => {
+      expect(isTransientNetworkError(new Error("connect ECONNREFUSED 127.0.0.1:8080"))).toBe(true);
+    });
+
+    it("returns true for ECONNREFUSED in cause.code", () => {
+      const err = new TypeError("fetch failed");
+      (err as any).cause = { code: "ECONNREFUSED" };
+      expect(isTransientNetworkError(err)).toBe(true);
+    });
+
+    it("returns true for ETIMEDOUT", () => {
+      expect(isTransientNetworkError(new Error("ETIMEDOUT"))).toBe(true);
+    });
+
+    it("returns true for ECONNRESET", () => {
+      expect(isTransientNetworkError(new Error("ECONNRESET"))).toBe(true);
+    });
+
+    it("returns false for HTTP-level errors", () => {
+      expect(isTransientNetworkError(new Error("[McpGatewayClient] GET /api/v0/servers failed: 500"))).toBe(false);
+    });
+
+    it("returns false for null/undefined", () => {
+      expect(isTransientNetworkError(null)).toBe(false);
+      expect(isTransientNetworkError(undefined)).toBe(false);
+    });
+  });
+
+  describe("waitForHealthy()", () => {
+    it("resolves immediately when gateway is already healthy", async () => {
+      mockFetch.mockResolvedValueOnce(okResponse("OK"));
+
+      await client.waitForHealthy({ pollMs: 10, timeoutMs: 1000 });
+
+      expect(mockFetch).toHaveBeenCalledWith("http://localhost:8080/health");
+    });
+
+    it("polls until gateway becomes healthy", async () => {
+      mockFetch
+        .mockRejectedValueOnce(new TypeError("fetch failed"))
+        .mockRejectedValueOnce(new TypeError("fetch failed"))
+        .mockResolvedValueOnce(okResponse("OK"));
+
+      await client.waitForHealthy({ pollMs: 10, timeoutMs: 5000 });
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("throws after timeout if gateway never becomes healthy", async () => {
+      mockFetch.mockRejectedValue(new TypeError("fetch failed"));
+
+      await expect(
+        client.waitForHealthy({ pollMs: 10, timeoutMs: 50 })
+      ).rejects.toThrow("Gateway did not become healthy within 50ms");
+    });
+
+    it("treats non-ok responses as unhealthy and keeps polling", async () => {
+      mockFetch
+        .mockResolvedValueOnce(errorResponse(503))
+        .mockResolvedValueOnce(okResponse("OK"));
+
+      await client.waitForHealthy({ pollMs: 10, timeoutMs: 5000 });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("calls log callback with progress messages", async () => {
+      mockFetch.mockResolvedValueOnce(okResponse("OK"));
+      const log = vi.fn();
+
+      await client.waitForHealthy({ pollMs: 10, timeoutMs: 1000, log });
+
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("Waiting for gateway"));
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("Gateway is healthy"));
+    });
+  });
+
+  describe("retry behavior", () => {
+    it("retries listServers on transient network error", async () => {
+      mockFetch
+        .mockRejectedValueOnce(new TypeError("fetch failed"))
+        .mockResolvedValueOnce(okResponse([{ name: "srv" }]));
+
+      const result = await client.listServers();
+
+      expect(result).toEqual(["srv"]);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries registerServer on ECONNREFUSED", async () => {
+      const connErr = new TypeError("fetch failed");
+      (connErr as any).cause = { code: "ECONNREFUSED" };
+      mockFetch
+        .mockRejectedValueOnce(connErr)
+        .mockResolvedValueOnce(okResponse());
+
+      await client.registerServer({ slug: "srv", name: "srv", type: "http", url: "https://example.com/mcp" });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries deregisterServer on transient error", async () => {
+      mockFetch
+        .mockRejectedValueOnce(new TypeError("fetch failed"))
+        .mockResolvedValueOnce(okResponse());
+
+      await client.deregisterServer("srv");
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not retry on HTTP 500 (non-transient)", async () => {
+      mockFetch.mockResolvedValueOnce(errorResponse(500));
+
+      await expect(client.listServers()).rejects.toThrow(
+        "[McpGatewayClient] GET /api/v0/servers failed: 500"
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -9,6 +9,7 @@ import { LogEvent, BaseQueueProcessorConfig } from "../types/types.js";
 import { LogPublisher } from "../logging/log-publisher.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { withRetry } from "../utils/retry.js";
+import { McpGatewayClient } from "../mcp/mcp-gateway-client.js";
 import {
   startVisibilityHeartbeat,
   type VisibilityHeartbeat,
@@ -171,6 +172,16 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         ttlMs: process.env.SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS
           ? Number(process.env.SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS)
           : undefined,
+      });
+    }
+
+    // Wait for the MCP gateway sidecar to become healthy before accepting
+    // work. On cold starts (KEDA scale-from-zero), the gateway image may
+    // still be pulling while the worker container starts instantly.
+    if (McpGatewayClient.isEnabled()) {
+      const gateway = new McpGatewayClient();
+      await gateway.waitForHealthy({
+        log: (msg) => console.log(`[${this.workerName}] ${msg}`),
       });
     }
 
