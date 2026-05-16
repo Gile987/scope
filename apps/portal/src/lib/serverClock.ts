@@ -34,3 +34,8 @@ export function serverNow(): number {
 export function getServerSkewMs(): number {
   return skewMs;
 }
+
+/** Reset skew to zero. Only intended for use in tests. */
+export function _resetSkewForTesting(): void {
+  skewMs = 0;
+}

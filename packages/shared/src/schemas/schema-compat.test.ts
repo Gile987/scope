@@ -46,6 +46,7 @@ import {
   SkillResponseSchema,
   SkillRevisionResponseSchema,
   SkillSearchResultSchema,
+  SkillDiscoveryResultSchema,
   ReportTriggerSchema,
 } from "./index.js";
 
@@ -87,6 +88,7 @@ import type {
   SkillDocument,
   SkillRevisionDocument,
   SkillSearchResult,
+  SkillDiscoveryResult,
 } from "../types/skill.js";
 
 // ==========================================================================
@@ -140,6 +142,7 @@ type InferredMcpServerResponse = z.infer<typeof McpServerResponseSchema>;
 type InferredSkillResponse = z.infer<typeof SkillResponseSchema>;
 type InferredSkillRevisionResponse = z.infer<typeof SkillRevisionResponseSchema>;
 type InferredSkillSearchResult = z.infer<typeof SkillSearchResultSchema>;
+type InferredSkillDiscoveryResult = z.infer<typeof SkillDiscoveryResultSchema>;
 type InferredReportTrigger = z.infer<typeof ReportTriggerSchema>;
 
 // ==========================================================================
@@ -182,6 +185,7 @@ assertAssignable<InferredMcpServerResponse, McpServerDocument>();
 assertAssignable<InferredSkillResponse, SkillDocument>();
 assertAssignable<InferredSkillRevisionResponse, SkillRevisionDocument>();
 assertAssignable<InferredSkillSearchResult, SkillSearchResult>();
+assertAssignable<InferredSkillDiscoveryResult, SkillDiscoveryResult>();
 
 // Discriminated unions
 assertAssignable<InferredReportTrigger, ReportTrigger>();
@@ -211,6 +215,7 @@ assertAssignable<InsightReference, InferredInsightReference>();
 assertAssignable<Reporter, InferredReporter>();
 assertAssignable<McpTransportType, InferredMcpTransportType>();
 assertAssignable<SkillSearchResult, InferredSkillSearchResult>();
+assertAssignable<SkillDiscoveryResult, InferredSkillDiscoveryResult>();
 assertAssignable<ReportTrigger, InferredReportTrigger>();
 
 // ---------------------------------------------------------------------------

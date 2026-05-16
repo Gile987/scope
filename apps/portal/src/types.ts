@@ -486,7 +486,7 @@ export type KeyType =
   "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth";
 
 export type KeyCapability =
-  "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
+  "github-models" | "github-public-api" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
 
 export type KeyValidationStatus =
   | "valid"
@@ -551,6 +551,7 @@ export const KEY_TYPE_LABELS: Record<KeyType, string> = {
 
 export const KEY_CAPABILITY_LABELS: Record<KeyCapability, string> = {
   "github-models": "GitHub Models",
+  "github-public-api": "GitHub Public API",
   "copilot-models": "Copilot Models",
   "copilot-sdk": "Copilot SDK",
   "copilot-cli": "Copilot CLI",
@@ -560,6 +561,7 @@ export const KEY_CAPABILITY_LABELS: Record<KeyCapability, string> = {
 
 export const KEY_CAPABILITY_DESCRIPTIONS: Record<KeyCapability, string> = {
   "github-models": "Access AI models hosted on GitHub (GPT-4o, Claude, etc.)",
+  "github-public-api": "Read public repository contents (used for skill discovery and resolution)",
   "copilot-models": "List models available via the Copilot API (OAuth only, PATs rejected)",
   "copilot-sdk": "Use the Copilot SDK to make LLM requests programmatically",
   "copilot-cli": "Run GitHub Copilot in the CLI for code suggestions",
@@ -574,16 +576,16 @@ export const KEY_CAPABILITY_DESCRIPTIONS: Record<KeyCapability, string> = {
  * detection happens during validation.
  */
 export const KEY_TYPE_EXPECTED_CAPABILITIES: Record<KeyType, KeyCapability[]> = {
-  "github-pat-classic": ["copilot-sdk", "copilot-cli"],
-  "github-pat-fine-grained": ["github-models"],
-  "github-oauth": ["github-models", "copilot-models", "copilot-sdk", "copilot-cli"],
+  "github-pat-classic": ["github-public-api", "copilot-sdk", "copilot-cli"],
+  "github-pat-fine-grained": ["github-public-api", "github-models"],
+  "github-oauth": ["github-public-api", "github-models", "copilot-models", "copilot-sdk", "copilot-cli"],
   "github-oauth-cookie-state": [],
   "anthropic-api-key": ["claude-code-cli", "anthropic-api"],
   "anthropic-oauth": ["claude-code-cli"],
 };
 
 export const ALL_CAPABILITIES: KeyCapability[] = [
-  "github-models", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli", "anthropic-api"
+  "github-models", "github-public-api", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli", "anthropic-api"
 ];
 
 // Account types
@@ -804,6 +806,19 @@ export interface SkillSearchResult {
   description?: string;
   internal: boolean;
   installs?: number;
+}
+
+/** A skill discovered by enumerating a GitHub repo's well-known directories */
+export interface SkillDiscoveryResult {
+  skillName: string;
+  skillPath: string;
+  name?: string;
+  description?: string;
+  existsInLibrary?: boolean;
+  currentRevisionCommitSha?: string;
+  latestUpstreamCommitSha?: string;
+  updateAvailable?: boolean;
+  lastImportedAt?: string;
 }
 
 // =============================================================================

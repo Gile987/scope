@@ -23,14 +23,37 @@ import type { SkillRevisionDocument } from '../types/skill.js';
 export interface SkillResolverOptions {
   /** GitHub API base URL (default: https://api.github.com) */
   githubApiUrl?: string;
-  /** GitHub token for authentication (optional, increases rate limits) */
+  /**
+   * Static GitHub token for authentication (optional, increases rate limits).
+   * Mutually compatible with `tokenProvider` — if both are provided,
+   * `tokenProvider` takes precedence per request.
+   */
   githubToken?: string;
+  /**
+   * Async token provider, called once per request batch. Lets the resolver
+   * acquire round-robin tokens from the token manager (with env-var fallback)
+   * instead of being pinned to a single token at construction time.
+   * If it resolves to `undefined`, the request is sent unauthenticated.
+   */
+  tokenProvider?: () => Promise<string | undefined>;
 }
 
 /** A file entry discovered in a skill directory */
 interface SkillFileEntry {
   path: string;       // Path relative to skill directory (e.g. "SKILL.md", "scripts/extract.py")
   content: string;    // File content (text)
+}
+
+/** A skill discovered by scanning a repo's well-known directories */
+export interface SkillDiscoveryEntry {
+  /** Directory name of the skill (last path segment) */
+  skillName: string;
+  /** Full path within the repo where the skill directory lives */
+  skillPath: string;
+  /** Display name from SKILL.md frontmatter (best-effort) */
+  name?: string;
+  /** Description from SKILL.md frontmatter (best-effort) */
+  description?: string;
 }
 
 /**
@@ -66,17 +89,37 @@ export function encodeGitHubPath(path: string): string {
  */
 export class SkillResolver {
   private readonly githubApiUrl: string;
-  private readonly headers: Record<string, string>;
+  private readonly baseHeaders: Record<string, string>;
+  private readonly staticToken?: string;
+  private readonly tokenProvider?: () => Promise<string | undefined>;
 
   constructor(options?: SkillResolverOptions) {
     this.githubApiUrl = options?.githubApiUrl?.replace(/\/+$/, '') ?? 'https://api.github.com';
-    this.headers = {
+    this.baseHeaders = {
       'Accept': 'application/vnd.github.v3+json',
       'User-Agent': 'scope-mt-skill-resolver',
     };
-    if (options?.githubToken) {
-      this.headers['Authorization'] = `Bearer ${options.githubToken}`;
+    this.staticToken = options?.githubToken;
+    this.tokenProvider = options?.tokenProvider;
+  }
+
+  /**
+   * Build request headers, acquiring a fresh token via `tokenProvider` if
+   * configured (so each request can use a different round-robin token).
+   * Falls back to the static `githubToken` from construction.
+   */
+  private async getHeaders(): Promise<Record<string, string>> {
+    let token: string | undefined;
+    if (this.tokenProvider) {
+      try {
+        token = await this.tokenProvider();
+      } catch {
+        // Provider failure is non-fatal — fall through to static token / unauth
+      }
     }
+    if (!token) token = this.staticToken;
+    if (!token) return this.baseHeaders;
+    return { ...this.baseHeaders, Authorization: `Bearer ${token}` };
   }
 
   /**
@@ -161,6 +204,7 @@ export class SkillResolver {
    * Searches well-known locations for a directory named `skillName` containing SKILL.md.
    */
   async discoverSkillPath(source: string, skillName: string): Promise<string | null> {
+    const headers = await this.getHeaders();
     // Try each well-known directory
     for (const searchDir of SKILL_SEARCH_DIRS) {
       const candidatePath = searchDir ? `${searchDir}/${skillName}` : skillName;
@@ -168,7 +212,7 @@ export class SkillResolver {
 
       try {
         const url = `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(skillMdPath)}`;
-        const res = await fetch(url, { headers: this.headers });
+        const res = await fetch(url, { headers });
         if (res.ok) {
           return candidatePath;
         }
@@ -181,6 +225,109 @@ export class SkillResolver {
   }
 
   /**
+   * List all skills available in a repo by scanning well-known directories.
+   *
+   * Uses the GitHub Trees API recursively (a single API call) to enumerate the
+   * entire repo, then filters for `SKILL.md` files inside well-known parent
+   * directories. Frontmatter (name, description) is parsed best-effort in
+   * parallel — if a fetch fails (rate limit, etc.) the entry is still returned
+   * with `skillName` only.
+   *
+   * @throws if the repo itself cannot be accessed (404, rate limit, etc.).
+   */
+  async discoverSkills(source: string): Promise<SkillDiscoveryEntry[]> {
+    const headers = await this.getHeaders();
+    // 1. Get the default branch (a single repo metadata call).
+    const repoRes = await fetch(`${this.githubApiUrl}/repos/${source}`, { headers });
+    if (repoRes.status === 404) {
+      throw new Error(`Repository "${source}" not found`);
+    }
+    if (!repoRes.ok) {
+      const detail = await this.formatGitHubError(repoRes);
+      throw new Error(`Failed to access repository "${source}": ${detail}`);
+    }
+    const repoJson = await repoRes.json() as { default_branch?: string };
+    const branch = repoJson.default_branch ?? 'main';
+
+    // 2. Fetch the recursive tree (a single API call).
+    const treeUrl = `${this.githubApiUrl}/repos/${source}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
+    const treeRes = await fetch(treeUrl, { headers });
+    if (!treeRes.ok) {
+      const detail = await this.formatGitHubError(treeRes);
+      throw new Error(`Failed to list ${source} tree: ${detail}`);
+    }
+    const treeJson = await treeRes.json() as {
+      tree?: Array<{ path: string; type: 'blob' | 'tree' }>;
+      truncated?: boolean;
+    };
+    if (!treeJson.tree) return [];
+
+    // 3. Filter for SKILL.md files inside well-known parent dirs.
+    const seen = new Set<string>();
+    const candidates: SkillDiscoveryEntry[] = [];
+    for (const entry of treeJson.tree) {
+      if (entry.type !== 'blob') continue;
+      if (!entry.path.endsWith('/SKILL.md') && entry.path !== 'SKILL.md') continue;
+
+      const skillPath = entry.path === 'SKILL.md' ? '' : entry.path.slice(0, -'/SKILL.md'.length);
+      const parentDir = skillPath.includes('/') ? skillPath.slice(0, skillPath.lastIndexOf('/')) : '';
+      const skillName = skillPath.includes('/') ? skillPath.slice(skillPath.lastIndexOf('/') + 1) : skillPath;
+
+      // Match against well-known parent directories.
+      if (!SKILL_SEARCH_DIRS.includes(parentDir)) continue;
+      // Skip dot-prefixed dirs at the repo root (e.g. .github/workflows/SKILL.md if any).
+      if (!parentDir && skillName.startsWith('.')) continue;
+      if (!skillName) continue;
+
+      if (seen.has(skillPath)) continue;
+      seen.add(skillPath);
+
+      candidates.push({ skillName, skillPath });
+    }
+
+    // 4. Best-effort parallel frontmatter fetch (raw.githubusercontent.com avoids
+    //    counting against the API rate limit).
+    await Promise.all(
+      candidates.map(async (c) => {
+        try {
+          const rawUrl = `https://raw.githubusercontent.com/${source}/${encodeURIComponent(branch)}/${encodeGitHubPath(`${c.skillPath}/SKILL.md`)}`;
+          const res = await fetch(rawUrl);
+          if (!res.ok) return;
+          const content = await res.text();
+          const parsed = parseSkillMd(content);
+          if (parsed.frontmatter.name) c.name = parsed.frontmatter.name;
+          if (parsed.frontmatter.description) c.description = parsed.frontmatter.description;
+        } catch {
+          // Non-fatal: return entry without metadata.
+        }
+      })
+    );
+
+    candidates.sort((a, b) => a.skillName.localeCompare(b.skillName));
+    return candidates;
+  }
+
+  /** Format a non-OK GitHub response, surfacing rate-limit info when possible. */
+  private async formatGitHubError(res: Response): Promise<string> {
+    const remaining = res.headers.get('x-ratelimit-remaining');
+    if (res.status === 403 && remaining === '0') {
+      return `403 rate limit exceeded — set GITHUB_TOKEN to raise the limit`;
+    }
+    let body = '';
+    try { body = (await res.text()).slice(0, 200); } catch { /* ignore */ }
+    return `${res.status} ${res.statusText}${body ? ` — ${body}` : ''}`;
+  }
+
+  /**
+   * Get the SHA of the latest commit touching the skill directory.
+   * Public wrapper around the resolver's internal commit lookup so route
+   * handlers can compare upstream state against stored revisions.
+   */
+  async getLatestCommitSha(source: string, skillPath: string): Promise<string> {
+    return (await this.getLatestCommit(source, skillPath)).sha;
+  }
+
+  /**
    * Get the latest commit touching the skill directory.
    */
   private async getLatestCommit(
@@ -188,7 +335,7 @@ export class SkillResolver {
     skillPath: string
   ): Promise<{ sha: string; date: Date }> {
     const url = `${this.githubApiUrl}/repos/${source}/commits?path=${encodeURIComponent(skillPath)}&per_page=1`;
-    const res = await fetch(url, { headers: this.headers });
+    const res = await fetch(url, { headers: await this.getHeaders() });
 
     if (!res.ok) {
       throw new Error(`Failed to get commits for ${source}/${skillPath}: ${res.status} ${res.statusText}`);
@@ -218,9 +365,10 @@ export class SkillResolver {
     skillPath: string,
     commitSha: string
   ): Promise<SkillFileEntry[]> {
+    const headers = await this.getHeaders();
     // Get the directory listing at the specific commit
     const url = `${this.githubApiUrl}/repos/${source}/contents/${encodeGitHubPath(skillPath)}?ref=${commitSha}`;
-    const res = await fetch(url, { headers: this.headers });
+    const res = await fetch(url, { headers });
 
     if (!res.ok) {
       throw new Error(`Failed to list ${source}/${skillPath} at ${commitSha}: ${res.status} ${res.statusText}`);
@@ -237,7 +385,7 @@ export class SkillResolver {
 
     for (const entry of entries) {
       if (entry.type === 'file' && entry.download_url) {
-        const fileRes = await fetch(entry.download_url, { headers: this.headers });
+        const fileRes = await fetch(entry.download_url, { headers });
         if (fileRes.ok) {
           const content = await fileRes.text();
           // Path relative to skill directory

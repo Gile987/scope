@@ -2316,6 +2316,42 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "SkillDiscoveryResult": {
+        "properties": {
+          "currentRevisionCommitSha": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "existsInLibrary": {
+            "type": "boolean",
+          },
+          "lastImportedAt": {
+            "type": "string",
+          },
+          "latestUpstreamCommitSha": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "skillName": {
+            "type": "string",
+          },
+          "skillPath": {
+            "type": "string",
+          },
+          "updateAvailable": {
+            "type": "boolean",
+          },
+        },
+        "required": [
+          "skillName",
+          "skillPath",
+        ],
+        "type": "object",
+      },
       "SkillResponse": {
         "properties": {
           "_id": {
@@ -7704,6 +7740,48 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Create or import a skill",
+        "tags": [
+          "Skills",
+        ],
+      },
+    },
+    "/api/v1/skills/discover": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillDiscoveryResult",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Missing or malformed source parameter",
+          },
+          "404": {
+            "description": "Repository not found",
+          },
+          "502": {
+            "description": "GitHub API error",
+          },
+        },
+        "summary": "Discover skills in a GitHub repository",
         "tags": [
           "Skills",
         ],

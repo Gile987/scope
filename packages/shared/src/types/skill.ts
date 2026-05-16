@@ -86,3 +86,20 @@ export interface SkillSearchResult {
   internal: boolean;              // true if already in our DB
   installs?: number;              // Install count from skills.sh (external only)
 }
+
+/**
+ * A skill discovered by enumerating the well-known directories of a GitHub repo.
+ * Returned by the skill discovery endpoint to power the multi-skill import wizard.
+ */
+export interface SkillDiscoveryResult {
+  skillName: string;              // Directory name (last path segment)
+  skillPath: string;              // Full path within the repo
+  name?: string;                  // Display name from SKILL.md frontmatter (best-effort)
+  description?: string;           // Description from SKILL.md frontmatter (best-effort)
+  // Library-status enrichment (set by the API route, not the resolver):
+  existsInLibrary?: boolean;      // True if a SkillDocument with this source+skillName exists
+  currentRevisionCommitSha?: string; // commitHash of the most recently stored SkillRevisionDocument
+  latestUpstreamCommitSha?: string;  // commitSha of the latest commit touching skillPath upstream
+  updateAvailable?: boolean;      // existsInLibrary && currentRevisionCommitSha !== latestUpstreamCommitSha
+  lastImportedAt?: string;        // ISO timestamp of the most recent revision (if existsInLibrary)
+}

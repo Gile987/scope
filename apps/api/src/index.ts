@@ -10,6 +10,7 @@ import { createQueueClientFactory } from "./utils/queue-client-factory.js";
 import dotenv from "dotenv";
 import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore } from "shared";
 import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, ProfileDocument, ProfileVersionDocument, HeartbeatStore } from "shared";
+import { acquireGitHubPublicApiToken } from "./github-api-token.js";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
 import { registerFeatureFlagRoutes } from "./routes/feature-flags.js";
@@ -123,7 +124,7 @@ async function initializeClients(): Promise<void> {
   skillRevisionCollection = db.collection<SkillRevisionDocument>("skill-revisions");
   skillRevisionStore = new SkillRevisionStore(skillRevisionCollection);
   skillResolver = new SkillResolver({
-    githubToken: process.env.GITHUB_TOKEN,
+    tokenProvider: acquireGitHubPublicApiToken,
   });
   profileCollection = db.collection<ProfileDocument>("profiles");
   profileVersionCollection = db.collection<ProfileVersionDocument>("profile-versions");
