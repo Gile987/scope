@@ -854,13 +854,15 @@ run
   .command("retry")
   .description("Retry a request — starts a new attempt while preserving previous attempts in history")
   .requiredOption("-i, --id <id>", "Request ID")
+  .option("-f, --force", "Allow retrying a successful run")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
-    const { id } = options;
+    const { id, force } = options;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}/retry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: force ? JSON.stringify({ force: true }) : undefined,
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: response.statusText }));

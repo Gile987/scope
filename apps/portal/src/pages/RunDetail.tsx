@@ -4,6 +4,7 @@
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { RetryConfirmDialog } from "@/components/RetryConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -31,6 +32,8 @@ import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import type { RunState } from "@/types";
+import { useShiftModifier } from "@/hooks/useShiftModifier";
+import { getRetryButtonState } from "@/components/RetryButton";
 
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
@@ -42,6 +45,8 @@ export function RunDetail() {
   const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
   const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
   const [showAttempts, setShowAttempts] = useState(false);
+  const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
+  const isForceRetryModifierActive = useShiftModifier();
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ["run", id],
@@ -157,7 +162,7 @@ export function RunDetail() {
   });
 
   const retryMutation = useMutation({
-    mutationFn: () => api.retryRun(id!),
+    mutationFn: (options?: { force?: boolean }) => api.retryRun(id!, options),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["run", id] });
       toast.success(`Retry started — attempt #${data.attemptNumber}`);
@@ -236,6 +241,9 @@ export function RunDetail() {
   const videoCount = (activeRun?.setupVideoUrls?.length ?? 0)
     + (activeRun?.videoUrls?.length ?? 0)
     + (activeRun?.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
+  const isSuccessfulCompletedRun = activeRun?.status === "done" && activeRun?.outcome === "succeeded";
+  const canShowRetry = !isViewingHistorical && activeRun?.status === "done";
+  const retryButtonState = getRetryButtonState(!!isSuccessfulCompletedRun, retryMutation.isPending, isForceRetryModifierActive);
 
   // Compute aggregate token usage: for one-shot runs use activeRun?.tokenUsage,
   // for multi-turn runs sum per-turn token usage
@@ -434,13 +442,20 @@ export function RunDetail() {
               Download Archive
             </Button>
           )}
-          {activeRun?.status === "done" && !isViewingHistorical && (
+          {canShowRetry && (
             <Button
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => retryMutation.mutate()}
-              disabled={retryMutation.isPending}
+              onClick={() => {
+                if (isSuccessfulCompletedRun) {
+                  setRetryConfirmOpen(true);
+                } else {
+                  retryMutation.mutate({ force: false });
+                }
+              }}
+              disabled={retryButtonState.disabled}
+              title={retryButtonState.title}
             >
               <RotateCcw className="h-4 w-4" />
               {retryMutation.isPending ? "Retrying…" : "Retry"}
@@ -1023,6 +1038,13 @@ export function RunDetail() {
           </TabsContent>
         )}
       </Tabs>
+
+      <RetryConfirmDialog
+        open={retryConfirmOpen}
+        onOpenChange={setRetryConfirmOpen}
+        onConfirm={() => retryMutation.mutate({ force: true })}
+        isPending={retryMutation.isPending}
+      />
     </div>
   );
 }
