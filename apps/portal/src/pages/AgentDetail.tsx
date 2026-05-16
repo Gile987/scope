@@ -289,6 +289,16 @@ export function AgentDetail() {
                 <span className="text-muted-foreground">Name</span>
                 <p>{agent.name}</p>
               </div>
+              <div>
+                <span className="text-muted-foreground">Availability</span>
+                <div className="mt-1">
+                  {agent.available === false ? (
+                    <Badge variant="secondary">Unavailable</Badge>
+                  ) : (
+                    <Badge variant="default">Available</Badge>
+                  )}
+                </div>
+              </div>
               {agent.description && (
                 <div className="col-span-2">
                   <span className="text-muted-foreground">Description</span>

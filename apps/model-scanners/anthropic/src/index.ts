@@ -16,7 +16,7 @@ import { scanAnthropicModels } from "./scan.js";
 const AGENT_ID = "coder-acp-claude-code";
 const AGENT_DEFINITION = {
   _id: AGENT_ID,
-  name: "Claude Code (ACP)",
+  name: "Claude Code CLI",
   description: "Anthropic Claude Code coding agent via ACP protocol",
   supportedModels: [] as string[],  // Will be populated by scan
 };

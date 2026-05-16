@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -9,8 +10,14 @@ export default defineConfig({
       conditions: ["source"],
     },
   },
+  resolve: {
+    alias: {
+      // Portal uses `@/...` as a shortcut for apps/portal/src/...
+      "@/": fileURLToPath(new URL("./apps/portal/src/", import.meta.url)),
+    },
+  },
   test: {
-    include: ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.ts", "apps/workers/*/src/**/*.test.ts", "apps/workers/*/scripts/**/*.test.ts", "apps/model-scanners/*/src/**/*.test.ts", "apps/version-checkers/*/src/**/*.test.ts", "apps/key-updaters/*/src/**/*.test.ts", "scripts/**/*.test.ts"],
+    include: ["packages/*/src/**/*.test.{ts,tsx}", "apps/*/src/**/*.test.{ts,tsx}", "apps/workers/*/src/**/*.test.{ts,tsx}", "apps/workers/*/scripts/**/*.test.{ts,tsx}", "apps/model-scanners/*/src/**/*.test.{ts,tsx}", "apps/version-checkers/*/src/**/*.test.{ts,tsx}", "apps/key-updaters/*/src/**/*.test.{ts,tsx}", "scripts/**/*.test.{ts,tsx}"],
     exclude: ["**/node_modules/**", "**/.git/**", "**/*.integration.test.ts"],
     environment: "node",
     globals: false,

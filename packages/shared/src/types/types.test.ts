@@ -65,14 +65,14 @@ describe("CodingAgentDocument", () => {
   it("supports all required fields", () => {
     const agent: CodingAgentDocument = {
       _id: "coder-acp-copilot",
-      name: "Copilot (ACP)",
+      name: "GitHub Copilot CLI",
       supportedModels: ["gpt-4.1", "claude-sonnet-4"],
       defaultModel: "gpt-4.1",
       createdAt: new Date(),
     };
 
     expect(agent._id).toBe("coder-acp-copilot");
-    expect(agent.name).toBe("Copilot (ACP)");
+    expect(agent.name).toBe("GitHub Copilot CLI");
     expect(agent.supportedModels).toEqual(["gpt-4.1", "claude-sonnet-4"]);
     expect(agent.defaultModel).toBe("gpt-4.1");
     expect(agent.deletedAt).toBeUndefined();
@@ -81,7 +81,7 @@ describe("CodingAgentDocument", () => {
   it("supports empty supportedModels (model selection disabled)", () => {
     const agent: CodingAgentDocument = {
       _id: "coder-acp-copilot",
-      name: "VS Code Web",
+      name: "VS Code Copilot (Web)",
       supportedModels: [],
       createdAt: new Date(),
     };
@@ -93,7 +93,7 @@ describe("CodingAgentDocument", () => {
   it("supports soft-delete with deletedAt", () => {
     const agent: CodingAgentDocument = {
       _id: "coder-acp-claude-code",
-      name: "Claude Code (ACP)",
+      name: "Claude Code CLI",
       supportedModels: ["claude-sonnet-4"],
       defaultModel: "claude-sonnet-4",
       createdAt: new Date("2025-01-01"),
@@ -120,7 +120,7 @@ describe("CodingAgentDocument", () => {
   it("supports optional modelProvider field", () => {
     const agent: CodingAgentDocument = {
       _id: "coder-acp-copilot",
-      name: "Copilot (ACP)",
+      name: "GitHub Copilot CLI",
       modelProvider: "github-copilot",
       supportedModels: ["gpt-4.1"],
       createdAt: new Date(),

@@ -149,6 +149,26 @@ Timeout for the Copilot SDK session used by the report-generator worker. If the 
 
 Git commit hash embedded in reporter metadata. Automatically set during CI/CD builds. Used to track which version of the report-generator produced a given report.
 
+## Worker Configuration
+
+### SCOPE_RUN_HEARTBEAT_STALE_MS
+**Default:** `120000` (2 × `HEARTBEAT_VISIBILITY_SECONDS`)
+**Type:** integer (milliseconds)
+
+Threshold used by the queue-processor redelivery handler to decide whether an in-flight `processing` run is still alive. When a worker dequeues a duplicate message for a run already in `processing`, it reads the per-run liveness heartbeat from Redis (`run-heartbeat:<runId>`) and compares `Date.now() - lastBeat`:
+
+- **≤ threshold** → original worker is alive; drop the duplicate, leave the run untouched.
+- **> threshold** → worker presumed dead; mark the run failed atomically.
+- **missing key** → fall back to `run.startedAt`. If picked up ≤ threshold ago, drop (transient race / Redis blip); otherwise mark failed.
+
+Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+
+### SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS
+**Default:** `300000` (5 × `HEARTBEAT_VISIBILITY_SECONDS`)
+**Type:** integer (milliseconds)
+
+TTL applied to per-run liveness heartbeat keys in Redis (`run-heartbeat:<runId>`). The TTL is refreshed on every beat (every 15s), so the key only expires when the worker stops beating. Set comfortably above `SCOPE_RUN_HEARTBEAT_STALE_MS` so a brief beat delay never causes premature TTL expiry; the default gives 2.5× the staleness threshold.
+
 ## Token Manager Configuration
 
 ### TOKEN_MANAGER_URL

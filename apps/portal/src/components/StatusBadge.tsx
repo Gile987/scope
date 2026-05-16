@@ -1,8 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import type { RunStatus, RunOutcome } from "@/types";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { serverNow } from "@/lib/serverClock";
+import { shouldPulse } from "@/lib/status-badge";
+import type { RunStatus, RunOutcome, RunState } from "@/types";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info" | "purple";
 
@@ -20,9 +25,114 @@ const outcomeConfig: Record<RunOutcome, { label: string; variant: BadgeVariant }
   finished: { label: "Finished", variant: "warning" },
 };
 
-export function StatusBadge({ status }: { status: RunStatus }) {
+/**
+ * Render a positive elapsed duration as a string composed of the two
+ * largest non-zero units. Picks "1m 5s" / "2h 14m" / "3d 4h" so the
+ * value reads naturally while staying precise enough to diagnose
+ * stalled runs.
+ */
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0s";
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86_400);
+  const h = Math.floor((totalSec % 86_400) / 3_600);
+  const m = Math.floor((totalSec % 3_600) / 60);
+  const s = totalSec % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function formatRelative(iso: string, nowMs: number): string {
+  const ms = nowMs - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "just now";
+  return `${formatDuration(ms)} ago`;
+}
+
+/**
+ * Re-renders every `intervalMs` while `enabled` is true, returning the
+ * current wall-clock millisecond timestamp. Used to keep relative-time
+ * displays (e.g. "5s ago") ticking without the parent re-rendering.
+ */
+function useNow(enabled: boolean, intervalMs = 1000): number {
+  const [now, setNow] = useState(() => serverNow());
+  useEffect(() => {
+    if (!enabled) return;
+    const id = window.setInterval(() => setNow(serverNow()), intervalMs);
+    return () => window.clearInterval(id);
+  }, [enabled, intervalMs]);
+  return now;
+}
+
+export function StatusBadge({
+  status,
+  worker,
+  lastHeartbeatAt,
+  startedAt,
+}: {
+  status: RunStatus;
+  worker?: RunState["worker"];
+  lastHeartbeatAt?: RunState["lastHeartbeatAt"];
+  startedAt?: RunState["startedAt"];
+}) {
   const config = statusConfig[status] ?? { label: status, variant: "outline" as const };
-  return <Badge variant={config.variant}>{config.label}</Badge>;
+  // Tick once per second while processing so both the live "Ns ago" tooltip
+  // value and the heartbeat-freshness check below advance over time.
+  const now = useNow(status === "processing");
+  // Pulse the badge while a run is actively processing AND the worker has
+  // recently checked in. Default Tailwind animate-pulse oscillates opacity
+  // 100% / 50%, which keeps the label readable. Stop pulsing once the last
+  // heartbeat is older than 30s — beyond that the worker is suspect and a
+  // steady badge avoids implying false liveness.
+  const className = shouldPulse(status, lastHeartbeatAt, now) ? "animate-pulse" : undefined;
+  const badge = <Badge variant={config.variant} className={cn(className)}>{config.label}</Badge>;
+
+  const showTooltip = status === "processing" && (worker || lastHeartbeatAt || startedAt);
+
+  if (!showTooltip) return badge;
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* span wrapper so the tooltip works even when the badge has no
+              focusable behavior of its own */}
+          <span className="inline-flex">{badge}</span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs">
+          <div className="space-y-0.5 text-xs">
+            {worker && (
+              <>
+                <div>
+                  <span className="text-muted-foreground">Worker: </span>
+                  <span className="font-mono">{worker.instanceId}</span>
+                </div>
+                {worker.podName && (
+                  <div>
+                    <span className="text-muted-foreground">Pod: </span>
+                    <span className="font-mono">{worker.podName}</span>
+                  </div>
+                )}
+              </>
+            )}
+            {lastHeartbeatAt && (
+              <div>
+                <span className="text-muted-foreground">Last heartbeat: </span>
+                <span>{formatRelative(lastHeartbeatAt, now)}</span>
+              </div>
+            )}
+            {startedAt && (
+              <div>
+                <span className="text-muted-foreground">Duration: </span>
+                <span>{formatDuration(now - new Date(startedAt).getTime())}</span>
+              </div>
+            )}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 export function OutcomeBadge({ outcome }: { outcome?: RunOutcome }) {

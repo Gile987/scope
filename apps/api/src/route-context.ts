@@ -7,6 +7,7 @@ import type { QueueClient } from "@azure/storage-queue";
 import type { Express } from "express";
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import type { BlobStorage } from "shared";
+import type { HeartbeatStore } from "shared";
 import type {
   TaskPromptStore,
   TaskPromptDocument,
@@ -112,6 +113,10 @@ export interface RouteContext {
 
   // Blob storage (log persistence + snapshots)
   blobStorage: BlobStorage;
+
+  // Per-run liveness heartbeat store (Redis-backed). Used by the runs
+  // routes to enrich `processing` responses with `run.lastHeartbeatAt`.
+  heartbeatStore: HeartbeatStore;
 
   // Config
   validWorkers: readonly string[];
