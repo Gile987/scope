@@ -147,6 +147,7 @@ export function SubmitRun() {
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
 
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
+  // available defaults to true when undefined (backward compat with agents registered before this field existed)
   const availableAgents = activeAgents.filter((a: CodingAgent) => a.available !== false);
   const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
   const isVscodeWorker = worker.includes("vscode");
