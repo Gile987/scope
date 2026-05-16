@@ -28,9 +28,10 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import type { RunState } from "@/types";
+import { useShiftModifier, getRetryButtonState } from "@/components/RetryButton";
 
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
@@ -42,7 +43,7 @@ export function RunDetail() {
   const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
   const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
   const [showAttempts, setShowAttempts] = useState(false);
-  const [isForceRetryModifierActive, setIsForceRetryModifierActive] = useState(false);
+  const isForceRetryModifierActive = useShiftModifier();
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ["run", id],
@@ -168,26 +169,6 @@ export function RunDetail() {
     },
   });
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Shift") setIsForceRetryModifierActive(true);
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (event.key === "Shift") setIsForceRetryModifierActive(false);
-    };
-    const onBlur = () => setIsForceRetryModifierActive(false);
-
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", onBlur);
-
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", onBlur);
-    };
-  }, []);
-
   const pauseMutation = useMutation({
     mutationFn: () => api.pauseRun(id!),
     onSuccess: () => {
@@ -259,7 +240,7 @@ export function RunDetail() {
     + (activeRun?.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
   const isSuccessfulCompletedRun = activeRun?.status === "done" && activeRun?.outcome === "succeeded";
   const canShowRetry = !isViewingHistorical && activeRun?.status === "done";
-  const isRetryDisabled = retryMutation.isPending || (isSuccessfulCompletedRun && !isForceRetryModifierActive);
+  const retryButtonState = getRetryButtonState(!!isSuccessfulCompletedRun, retryMutation.isPending, isForceRetryModifierActive);
 
   // Compute aggregate token usage: for one-shot runs use activeRun?.tokenUsage,
   // for multi-turn runs sum per-turn token usage
@@ -464,8 +445,8 @@ export function RunDetail() {
               size="sm"
               className="gap-1.5"
               onClick={() => retryMutation.mutate({ force: isSuccessfulCompletedRun })}
-              disabled={isRetryDisabled}
-              title={isSuccessfulCompletedRun && !isForceRetryModifierActive ? "Hold Shift to force retry a successful run" : undefined}
+              disabled={retryButtonState.disabled}
+              title={retryButtonState.title}
             >
               <RotateCcw className="h-4 w-4" />
               {retryMutation.isPending ? "Retrying…" : "Retry"}

@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useShiftModifier, getRetryButtonState } from "@/components/RetryButton";
 import { PlatformIcon } from "@/components/PlatformIcon";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -102,7 +103,7 @@ export function RunsList() {
   const [cursorDirection, setCursorDirection] = useState<"after" | "before" | "last" | undefined>(undefined);
   const [isJumpingToLast, setIsJumpingToLast] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(loadHiddenColumns);
-  const [isForceRetryModifierActive, setIsForceRetryModifierActive] = useState(false);
+  const isForceRetryModifierActive = useShiftModifier();
   const queryClient = useQueryClient();
 
   const toggleColumn = useCallback((col: ColumnId) => {
@@ -552,26 +553,6 @@ export function RunsList() {
       setIsJumpingToLast(false);
     }
   }, [isJumpingToLast, groupBy, isLoading, isRefetching, isGroupsLoading, isGroupsRefetching]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Shift") setIsForceRetryModifierActive(true);
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (event.key === "Shift") setIsForceRetryModifierActive(false);
-    };
-    const onBlur = () => setIsForceRetryModifierActive(false);
-
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", onBlur);
-
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", onBlur);
-    };
-  }, []);
 
   const toggleSelectAll = () => {
     if (allSelected) {
@@ -1688,7 +1669,7 @@ function RunRow({
   const isCol = (col: ColumnId) => !hiddenColumns.has(col);
   const isSuccessfulCompletedRun = run.run?.status === "done" && run.run?.outcome === "succeeded";
   const canRetryRun = run.run?.status === "done";
-  const isRetryDisabled = retryMutation.isPending || (isSuccessfulCompletedRun && !isForceRetryModifierActive);
+  const retryButtonState = getRetryButtonState(!!isSuccessfulCompletedRun, retryMutation.isPending, isForceRetryModifierActive);
   return (
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
       <TableCell>
@@ -1921,9 +1902,9 @@ function RunRow({
               variant="ghost"
               size="icon"
               className="h-8 w-8"
-              title={isSuccessfulCompletedRun && !isForceRetryModifierActive ? "Hold Shift to force retry" : "Retry"}
+              title={retryButtonState.title ?? "Retry"}
               onClick={() => retryMutation.mutate({ id: run._id, force: isSuccessfulCompletedRun })}
-              disabled={isRetryDisabled}
+              disabled={retryButtonState.disabled}
             >
               <RotateCcw className="h-4 w-4" />
             </Button>
