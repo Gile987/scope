@@ -103,8 +103,11 @@ export const api = {
   },
 
   /** Retry a request (start a new attempt) */
-  retryRun: (id: string): Promise<{ requestId: string; runId: string; attemptNumber: number }> => {
-    return request(`/requests/${id}/retry`, { method: "POST" });
+  retryRun: (id: string, options?: { force?: boolean }): Promise<{ requestId: string; runId: string; attemptNumber: number }> => {
+    return request(`/requests/${id}/retry`, {
+      method: "POST",
+      body: options?.force ? JSON.stringify({ force: true }) : undefined,
+    });
   },
 
   /** Pause a request */
@@ -131,10 +134,10 @@ export const api = {
   },
 
   /** Bulk retry multiple requests */
-  bulkRetryRuns: (ids: string[]): Promise<{ retried: number; skipped: number; results: Array<{ requestId: string; runId?: string; attemptNumber?: number; error?: string }> }> => {
+  bulkRetryRuns: (ids: string[], options?: { force?: boolean }): Promise<{ retried: number; skipped: number; results: Array<{ requestId: string; runId?: string; attemptNumber?: number; error?: string }> }> => {
     return request(`/requests/bulk-retry`, {
       method: "POST",
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({ ids, force: options?.force }),
     });
   },
 

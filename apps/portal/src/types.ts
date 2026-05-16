@@ -642,6 +642,7 @@ export interface CodingAgent {
   modelProvider?: string;
   supportedModels: string[];
   defaultModel?: string;
+  available?: boolean;
   versions?: AgentVersion[];
   createdAt: string;
   updatedAt?: string;
@@ -791,6 +792,7 @@ export interface SkillRevisionDocument {
   metadata?: Record<string, string>;
   content: string;
   archiveUrl?: string;
+  validationWarnings?: string[];
   resolvedAt: string;
 }
 

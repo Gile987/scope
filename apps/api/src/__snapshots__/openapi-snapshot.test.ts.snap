@@ -20,6 +20,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "_id": {
             "type": "string",
           },
+          "available": {
+            "type": "boolean",
+          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -409,6 +412,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "properties": {
           "_id": {
             "type": "string",
+          },
+          "available": {
+            "type": "boolean",
           },
           "defaultModel": {
             "type": "string",
@@ -2434,6 +2440,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "source": {
             "type": "string",
           },
+          "validationWarnings": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
         },
         "required": [
           "_id",
@@ -2575,6 +2587,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "UpdateAgentInput": {
         "properties": {
+          "available": {
+            "type": "boolean",
+          },
           "defaultModel": {
             "type": "string",
           },
@@ -6946,6 +6961,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "application/json": {
               "schema": {
                 "properties": {
+                  "force": {
+                    "type": "boolean",
+                  },
                   "ids": {
                     "items": {
                       "type": "string",
@@ -7331,7 +7349,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "content": {
             "application/json": {
               "schema": {
-                "properties": {},
+                "properties": {
+                  "force": {
+                    "type": "boolean",
+                  },
+                },
                 "type": "object",
               },
             },

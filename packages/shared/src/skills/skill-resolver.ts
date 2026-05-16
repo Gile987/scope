@@ -121,12 +121,14 @@ export class SkillResolver {
 
     const parsed = parseSkillMd(skillMdFile.content);
 
-    // 6. Validate per spec
-    const validation = validateSkillFrontmatter(parsed.frontmatter, skillName);
+    // 6. Validate per spec (use actual directory name from discovered path)
+    const dirName = skillPath.split('/').pop()!;
+    const validation = validateSkillFrontmatter(parsed.frontmatter, dirName);
     if (!validation.valid) {
       const errorMessages = validation.errors.map(e => `${e.field}: ${e.message}`).join('; ');
       throw new Error(`Invalid SKILL.md in ${source}/${skillPath}: ${errorMessages}`);
     }
+    const validationWarnings = validation.warnings.map(w => `${w.field}: ${w.message}`);
 
     // 7. Create tar.gz archive and upload
     const archiveData = await this.createArchive(skillName, files);
@@ -149,6 +151,7 @@ export class SkillResolver {
       metadata: parsed.frontmatter.metadata,
       content: skillMdFile.content,
       archiveUrl,
+      ...(validationWarnings.length > 0 ? { validationWarnings } : {}),
       resolvedAt: now,
     });
   }

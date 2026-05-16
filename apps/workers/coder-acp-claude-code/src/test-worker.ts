@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   emit("test-worker starting");
 
   // Check required CLI tools are available in PATH
-  const toolChecks = checkTools(["pwsh", "python3", "git", "uv"]);
+  const toolChecks = checkTools(["pwsh", "python3", "git", "uv", "go", "dotnet", "rustc", "cargo", "java", "mvn", "gradle"]);
   for (const tc of toolChecks) {
     emit(`tool ${tc.tool}: ${tc.available ? `found ${tc.path}` : "NOT FOUND"}${tc.version ? ` (${tc.version})` : ""}`);
   }

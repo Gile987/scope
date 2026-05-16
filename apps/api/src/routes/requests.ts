@@ -169,6 +169,15 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    // Check if the worker (agent) is available for new submissions
+    const workerAgent = await ctx.agentCollection.findOne({ _id: worker, deletedAt: { $exists: false } });
+    if (workerAgent && workerAgent.available === false) {
+      res.status(400).json({
+        error: `Worker "${worker}" is not available for new submissions`,
+      });
+      return;
+    }
+
     // Validate scenario.criteria if provided
     if (scenarioObj.criteria !== undefined) {
       if (!Array.isArray(scenarioObj.criteria) || !scenarioObj.criteria.every((c: unknown) => typeof c === "string")) {
@@ -1033,6 +1042,15 @@ apiRoute(ctx.app, ctx.registry, {
     if (overrides?.workerType && !VALID_WORKERS.includes(overrides.workerType as WorkerType)) {
       res.status(400).json({ error: `Invalid workerType override: ${overrides.workerType}` });
       return;
+    }
+
+    // Check if the overridden worker is available for new submissions
+    if (overrides?.workerType) {
+      const overrideAgent = await ctx.agentCollection.findOne({ _id: overrides.workerType, deletedAt: { $exists: false } });
+      if (overrideAgent && overrideAgent.available === false) {
+        res.status(400).json({ error: `Worker "${overrides.workerType}" is not available for new submissions` });
+        return;
+      }
     }
 
     // Resolve profile override (once for the entire batch)
@@ -2561,7 +2579,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/requests/bulk-retry",
   tags: ["Requests"],
   summary: "Bulk retry requests (start new attempts)",
-  body: z.object({ ids: z.array(z.string()).min(1) }),
+  body: z.object({ ids: z.array(z.string()).min(1), force: z.boolean().optional() }),
   response: z.object({
     retried: z.number().int(),
     skipped: z.number().int(),
@@ -2573,7 +2591,7 @@ apiRoute(ctx.app, ctx.registry, {
     })),
   }),
   handler: async (req, res) => {
-    const { ids } = req.body;
+    const { ids, force } = req.body;
 
     // Fetch all requested documents
     const requests = await ctx.requestCollection.find(
@@ -2596,6 +2614,12 @@ apiRoute(ctx.app, ctx.registry, {
       const currentRun: RunState | undefined = request.run;
       if (currentRun?.status !== "done") {
         results.push({ requestId: id, error: `Status is '${currentRun?.status ?? "unknown"}', expected 'done'` });
+        skipped++;
+        continue;
+      }
+
+      if (currentRun.outcome === "succeeded" && !force) {
+        results.push({ requestId: id, error: "Cannot retry a successful run unless force=true" });
         skipped++;
         continue;
       }
@@ -2651,7 +2675,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Requests"],
   summary: "Retry a request (start a new attempt)",
   params: z.object({ id: z.string() }),
-  body: z.object({}).optional(),
+  body: z.object({ force: z.boolean().optional() }).optional(),
   response: z.object({
     requestId: z.string(),
     runId: z.string(),
@@ -2664,6 +2688,7 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res) => {
     const { id } = req.params;
+    const force = req.body?.force === true;
 
     const request = await ctx.requestCollection.findOne({ _id: id });
     if (!request) {
@@ -2681,6 +2706,12 @@ apiRoute(ctx.app, ctx.registry, {
     if (!currentRun || currentRun.status !== "done") {
       res.status(422).json({
         error: `Cannot retry: current run status is '${currentRun?.status ?? "unknown"}', expected 'done'`,
+      });
+      return;
+    }
+    if (currentRun.outcome === "succeeded" && !force) {
+      res.status(409).json({
+        error: "Cannot retry a successful run unless force=true in the request body",
       });
       return;
     }
