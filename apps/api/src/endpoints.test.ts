@@ -764,7 +764,9 @@ describe("API Endpoints", () => {
 
       const res = await request(app).get("/api/v1/skills/discover?source=Azure/documentdb-agent-kit");
       expect(res.status).toBe(200);
-      expect(res.body).toEqual(discovered);
+      // Route enriches each result with library state. With an empty skill
+      // collection, every discovered skill is reported as new.
+      expect(res.body).toEqual(discovered.map((d) => ({ ...d, existsInLibrary: false })));
       expect(mocks.skillResolver.discoverSkills).toHaveBeenCalledWith("Azure/documentdb-agent-kit");
     });
 
