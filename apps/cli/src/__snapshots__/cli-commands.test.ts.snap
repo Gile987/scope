@@ -582,6 +582,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
       "retry": {
         "options": [
+          "--force",
           "--id",
           "--url",
         ],
