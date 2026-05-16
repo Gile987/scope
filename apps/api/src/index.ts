@@ -149,8 +149,8 @@ async function initializeClients(): Promise<void> {
 
   // Seed default agents (upsert — always updates name and modelProvider, preserves existing models)
   const defaultAgents: Array<{ _id: string; name: string; modelProvider?: string }> = [
-    { _id: "coder-acp-claude-code", name: "Claude Code (ACP)", modelProvider: "anthropic" },
-    { _id: "coder-acp-copilot", name: "Copilot (ACP)", modelProvider: "github-copilot" },
+    { _id: "coder-acp-claude-code", name: "Claude Code CLI", modelProvider: "anthropic" },
+    { _id: "coder-acp-copilot", name: "GitHub Copilot CLI", modelProvider: "github-copilot" },
   ];
   for (const agent of defaultAgents) {
     await agentCollection.updateOne(
