@@ -76,18 +76,21 @@ export function StatusBadge({
   startedAt?: RunState["startedAt"];
 }) {
   const config = statusConfig[status] ?? { label: status, variant: "outline" as const };
-  // Pulse the badge while a run is actively processing so it's visually
-  // obvious the worker is still alive (vs. stuck "Processing" forever after
-  // a crash). Default Tailwind animate-pulse oscillates opacity 100% / 50%,
-  // which keeps the label readable.
-  const className = status === "processing" ? "animate-pulse" : undefined;
+  // Tick once per second while processing so both the live "Ns ago" tooltip
+  // value and the heartbeat-freshness check below advance over time.
+  const now = useNow(status === "processing");
+  // Pulse the badge while a run is actively processing AND the worker has
+  // recently checked in. Default Tailwind animate-pulse oscillates opacity
+  // 100% / 50%, which keeps the label readable. Stop pulsing once the last
+  // heartbeat is older than 30s — beyond that the worker is suspect and a
+  // steady badge avoids implying false liveness.
+  const heartbeatMs = lastHeartbeatAt ? new Date(lastHeartbeatAt).getTime() : undefined;
+  const heartbeatFresh =
+    heartbeatMs === undefined ? true : now - heartbeatMs <= 30_000;
+  const className = status === "processing" && heartbeatFresh ? "animate-pulse" : undefined;
   const badge = <Badge variant={config.variant} className={cn(className)}>{config.label}</Badge>;
 
   const showTooltip = status === "processing" && (worker || lastHeartbeatAt || startedAt);
-  // Tick once per second while a tooltip is renderable so the "Ns ago"
-  // value advances live as the user keeps the tooltip open. Disabled
-  // otherwise to avoid pointless re-renders for terminal-state badges.
-  const now = useNow(Boolean(showTooltip));
 
   if (!showTooltip) return badge;
 
