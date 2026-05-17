@@ -322,7 +322,14 @@ criteria
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria`);
+      // Build query params for server-side filtering
+      const params = new URLSearchParams();
+      if (options.ids && options.ids.length > 0) {
+        params.set("ids", options.ids.join(","));
+        params.set("ancestors", "true");
+      }
+      const qs = params.toString();
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria${qs ? `?${qs}` : ""}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -330,37 +337,11 @@ criteria
         process.exit(1);
       }
 
-      let items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
+      const items = await response.json() as Array<{ id: string; prompt: string; dependsOn?: string[] }>;
 
       if (items.length === 0) {
         console.error(errorText("No criteria found to export."));
         process.exit(1);
-      }
-
-      // If --ids specified, resolve selected criteria + dependency ancestors
-      if (options.ids && options.ids.length > 0) {
-        const byId = new Map(items.map(c => [c.id, c]));
-        const included = new Set<string>();
-
-        const resolveAncestors = (id: string) => {
-          if (included.has(id)) return;
-          const criterion = byId.get(id);
-          if (!criterion) return;
-          included.add(id);
-          for (const dep of criterion.dependsOn ?? []) {
-            resolveAncestors(dep);
-          }
-        };
-
-        for (const id of options.ids) {
-          if (!byId.has(id)) {
-            console.error(errorText(`Criterion not found: ${id}`));
-            process.exit(1);
-          }
-          resolveAncestors(id);
-        }
-
-        items = items.filter(c => included.has(c.id));
       }
 
       // Topological sort: parents before children

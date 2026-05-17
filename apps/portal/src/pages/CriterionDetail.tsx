@@ -22,7 +22,7 @@ import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { formatDate } from "@/lib/utils";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
-import { criteriaToExportYaml, resolveWithAncestors, downloadAsFile } from "@/lib/criteria-export";
+import { criteriaToExportYaml, downloadAsFile } from "@/lib/criteria-export";
 
 export function CriterionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -36,11 +36,6 @@ export function CriterionDetail() {
     queryKey: ["criterion", id],
     queryFn: () => api.getCriterion(id!),
     enabled: !!id,
-  });
-
-  const { data: allCriteria = [] } = useQuery({
-    queryKey: ["criteria"],
-    queryFn: () => api.listCriteria(),
   });
 
   const [editing, setEditing] = useState(false);
@@ -195,8 +190,8 @@ export function CriterionDetail() {
               <Button
                 variant="outline"
                 className="gap-1.5"
-                onClick={() => {
-                  const subset = resolveWithAncestors([criterion.id], allCriteria);
+                onClick={async () => {
+                  const subset = await api.listCriteria(undefined, { ids: [criterion.id], ancestors: true });
                   const yaml = criteriaToExportYaml(subset);
                   downloadAsFile(yaml, `${criterion.id}.yaml`);
                 }}

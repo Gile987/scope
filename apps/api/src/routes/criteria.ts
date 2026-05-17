@@ -120,13 +120,17 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
-// GET /api/v1/criteria — list all criteria (with optional ?q= search)
+// GET /api/v1/criteria — list all criteria (with optional ?q= search, ?ids= filter with ancestor resolution)
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/criteria",
   tags: ["Criteria"],
   summary: "List criteria",
-  query: z.object({ q: z.string().optional() }),
+  query: z.object({
+    q: z.string().optional(),
+    ids: z.string().optional().describe("Comma-separated criterion IDs to include"),
+    ancestors: z.enum(["true", "false"]).optional().describe("When true and ids is set, also include dependency ancestors"),
+  }),
   response: z.array(CriteriaResponseSchema),
   handler: async (req, res) => {
     const q = req.query.q;
@@ -137,8 +141,39 @@ apiRoute(ctx.app, ctx.registry, {
         { prompt: { $regex: q, $options: "i" } },
       ];
     }
-    const criteria = await ctx.criteriaCollection.find(filter).toArray();
+    let criteria = await ctx.criteriaCollection.find(filter).toArray();
     criteria.sort((a, b) => a.id.localeCompare(b.id));
+
+    // Filter by IDs with optional ancestor resolution
+    const idsParam = req.query.ids;
+    if (idsParam) {
+      const requestedIds = idsParam.split(",").map(s => s.trim()).filter(Boolean);
+      const includeAncestors = req.query.ancestors === "true";
+
+      if (includeAncestors) {
+        const byId = new Map(criteria.map(c => [c.id, c]));
+        const included = new Set<string>();
+
+        const resolve = (id: string) => {
+          if (included.has(id)) return;
+          const criterion = byId.get(id);
+          if (!criterion) return;
+          included.add(id);
+          for (const dep of criterion.dependsOn ?? []) {
+            resolve(dep);
+          }
+        };
+
+        for (const id of requestedIds) {
+          resolve(id);
+        }
+        criteria = criteria.filter(c => included.has(c.id));
+      } else {
+        const idSet = new Set(requestedIds);
+        criteria = criteria.filter(c => idSet.has(c.id));
+      }
+    }
+
     res.json(criteria);
   },
 });
