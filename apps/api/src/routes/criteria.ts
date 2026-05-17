@@ -106,6 +106,7 @@ apiRoute(ctx.app, ctx.registry, {
                 : [],
               createdAt: new Date(),
             },
+            $unset: { deletedAt: "" },
           },
           { upsert: true },
         );
