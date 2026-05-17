@@ -16,6 +16,8 @@ interface ConversationViewProps {
   task?: string;
   /** Run ID — needed to fetch HAR data for each turn */
   runId: string;
+  /** If provided, uses per-run URL for a specific historical attempt */
+  attemptRunId?: string;
 }
 
 /**
@@ -29,7 +31,7 @@ interface ConversationViewProps {
  *   - Tool calls (inline, collapsible)
  *   - Judge feedback (left-aligned, amber tint)
  */
-export function ConversationView({ turns, task, runId }: ConversationViewProps) {
+export function ConversationView({ turns, task, runId, attemptRunId }: ConversationViewProps) {
   if (turns.length === 0 && !task) {
     return (
       <div className="text-sm text-muted-foreground italic py-4 text-center">
@@ -60,7 +62,7 @@ export function ConversationView({ turns, task, runId }: ConversationViewProps) 
 
       {/* Turn messages */}
       {turns.map((turn) => (
-        <TurnMessages key={turn.iteration} turn={turn} runId={runId} />
+        <TurnMessages key={turn.iteration} turn={turn} runId={runId} attemptRunId={attemptRunId} />
       ))}
     </div>
   );
@@ -172,9 +174,9 @@ function ToolCallInline({ tc }: { tc: ToolCall }) {
   );
 }
 
-function TurnMessages({ turn, runId }: { turn: ConversationTurn; runId: string }) {
+function TurnMessages({ turn, runId, attemptRunId }: { turn: ConversationTurn; runId: string; attemptRunId?: string }) {
   const hasHar = !!turn.harUrl;
-  const { data: harData, isLoading: harLoading } = useHarExtraction(runId, turn.iteration, hasHar);
+  const { data: harData, isLoading: harLoading } = useHarExtraction(runId, turn.iteration, hasHar, attemptRunId);
 
   const segments = harData?.segments ?? [];
   const hasContentSegment = segments.some((s) => s.type === "content");

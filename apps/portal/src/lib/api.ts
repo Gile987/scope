@@ -241,6 +241,44 @@ export const api = {
     return `${BASE}/requests/${id}/logs?fromStart=${fromStart}`;
   },
 
+  // ─── Per-run artifact URLs (for historical attempts) ─────────────────────
+
+  /** SSE endpoint URL for log streaming of a specific attempt */
+  runLogsUrl: (requestId: string, runId: string, fromStart = true): string => {
+    return `${BASE}/requests/${requestId}/runs/${runId}/logs?fromStart=${fromStart}`;
+  },
+
+  /** HAR file download URL for a specific attempt */
+  runHarUrl: (requestId: string, runId: string, iteration?: number): string => {
+    const qs = iteration ? `?iteration=${iteration}` : "";
+    return `${BASE}/requests/${requestId}/runs/${runId}/har${qs}`;
+  },
+
+  /** Video stream URL for a specific attempt */
+  runVideoUrl: (requestId: string, runId: string, iteration?: number, index = 0, phase?: string): string => {
+    const params = new URLSearchParams();
+    if (phase) params.set("phase", phase);
+    if (iteration) params.set("iteration", String(iteration));
+    if (index > 0) params.set("index", String(index));
+    const qs = params.toString();
+    return `${BASE}/requests/${requestId}/runs/${runId}/video${qs ? `?${qs}` : ""}`;
+  },
+
+  /** Tool-calls JSONL URL for a specific attempt */
+  runToolCallsUrl: (requestId: string, runId: string, iteration: number): string => {
+    return `${BASE}/requests/${requestId}/runs/${runId}/tool-calls?iteration=${iteration}`;
+  },
+
+  /** Full run archive download URL for a specific attempt */
+  runArchiveUrl: (requestId: string, runId: string): string => {
+    return `${BASE}/requests/${requestId}/runs/${runId}/archive`;
+  },
+
+  /** Snapshot download URL for a specific attempt */
+  runSnapshotUrl: (requestId: string, runId: string, iteration: number): string => {
+    return `${BASE}/requests/${requestId}/runs/${runId}/snapshots/${iteration}`;
+  },
+
   // ─── Criteria ──────────────────────────────────────────────────────────────
 
   /** List all criteria, optionally filtered by search query */

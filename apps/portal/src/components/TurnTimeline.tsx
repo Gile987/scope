@@ -16,9 +16,11 @@ import { useState } from "react";
 interface TurnTimelineProps {
   turns: ConversationTurn[];
   runId: string;
+  /** If provided, uses per-run URLs for a specific historical attempt */
+  attemptRunId?: string;
 }
 
-export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
+export function TurnTimeline({ turns, runId, attemptRunId }: TurnTimelineProps) {
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(
     // Expand last turn by default
     new Set(turns.length > 0 ? [turns[turns.length - 1].iteration] : [])
@@ -93,7 +95,7 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                       className="h-7 gap-1"
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(api.snapshotUrl(runId, turn.iteration), "_blank");
+                        window.open(attemptRunId ? api.runSnapshotUrl(runId, attemptRunId, turn.iteration) : api.snapshotUrl(runId, turn.iteration), "_blank");
                       }}
                     >
                       <Download className="h-3 w-3" />
@@ -107,7 +109,7 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                       className="h-7 gap-1"
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(api.harUrl(runId, turn.iteration), "_blank");
+                        window.open(attemptRunId ? api.runHarUrl(runId, attemptRunId, turn.iteration) : api.harUrl(runId, turn.iteration), "_blank");
                       }}
                     >
                       <FileText className="h-3 w-3" />
@@ -121,7 +123,7 @@ export function TurnTimeline({ turns, runId }: TurnTimelineProps) {
                       className="h-7 gap-1"
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(api.videoUrl(runId, turn.iteration), "_blank");
+                        window.open(attemptRunId ? api.runVideoUrl(runId, attemptRunId, turn.iteration) : api.videoUrl(runId, turn.iteration), "_blank");
                       }}
                     >
                       <Video className="h-3 w-3" />

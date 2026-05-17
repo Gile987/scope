@@ -98,12 +98,23 @@ export function RunDetail() {
   // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
   // Must be called unconditionally (before any early returns) per Rules of Hooks
   // The SSE endpoint handles completed runs by replaying blob logs then closing.
-  // Pass run?.run?.attemptNumber so the hook reconnects only when a new latest attempt is created (e.g., on retry).
+  // When viewing a historical run, use the per-run logs endpoint; otherwise use the
+  // default endpoint with attemptNumber for reconnection on retry.
+  const logStreamUrlBuilder = useMemo(() => {
+    if (isViewingHistorical && activeRun?._id && run?._id) {
+      const requestId = run._id;
+      const runId = activeRun._id;
+      return (_id: string, fromStart: boolean) => api.runLogsUrl(requestId, runId, fromStart);
+    }
+    return api.logsUrl;
+  }, [isViewingHistorical, activeRun?._id, run?._id]);
+
   const logStream = useLogStream({
     id: run?._id ?? "",
     enabled: !!run,
     fromStart: true,
-    attemptNumber: run?.run?.attemptNumber,
+    attemptNumber: activeRun?.attemptNumber,
+    urlBuilder: logStreamUrlBuilder,
   });
 
   const effectiveLogs = logStream.logs;
@@ -446,7 +457,7 @@ export function RunDetail() {
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => window.open(api.archiveUrl(run._id), "_blank")}
+              onClick={() => window.open(isViewingHistorical && activeRun?._id ? api.runArchiveUrl(run._id, activeRun._id) : api.archiveUrl(run._id), "_blank")}
             >
               <Archive className="h-4 w-4" />
               Download Archive
@@ -562,13 +573,13 @@ export function RunDetail() {
 
         {/* Turns tab */}
         <TabsContent value="turns" className="mt-4">
-          <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} />
+          <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
         </TabsContent>
 
         {/* Conversation tab — chat-style view of agent/judge exchanges */}
         {activeRun?.turns && activeRun?.turns.length > 0 && (
           <TabsContent value="conversation" className="mt-4">
-            <ConversationView turns={activeRun?.turns} task={run.scenario?.task} runId={run._id} />
+            <ConversationView turns={activeRun?.turns} task={run.scenario?.task} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
           </TabsContent>
         )}
 
@@ -577,9 +588,9 @@ export function RunDetail() {
           <TabsContent value="network" className="mt-4">
             {/* If multi-turn, show per-iteration selector; otherwise one viewer */}
             {activeRun?.turns && activeRun?.turns.some(t => t.harUrl) ? (
-              <HarIterationTabs runId={run._id} turns={activeRun?.turns} />
+              <HarIterationTabs runId={run._id} turns={activeRun?.turns} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
             ) : (
-              <HarNetworkViewer runId={run._id} />
+              <HarNetworkViewer runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
             )}
           </TabsContent>
         )}
@@ -588,17 +599,17 @@ export function RunDetail() {
         {hasVideoData && (
           <TabsContent value="video" className="mt-4">
             {activeRun?.turns && activeRun?.turns.some(t => t.videoUrls?.length) ? (
-              <VideoIterationTabs runId={run._id} turns={activeRun?.turns} setupVideoUrls={activeRun?.setupVideoUrls} />
+              <VideoIterationTabs runId={run._id} turns={activeRun?.turns} setupVideoUrls={activeRun?.setupVideoUrls} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
             ) : (
               <div className="space-y-4">
                 {activeRun?.setupVideoUrls && activeRun?.setupVideoUrls.length > 0 && (
                   activeRun?.setupVideoUrls.map((_, i) => (
-                    <VideoPlayer key={`setup-${i}`} src={api.videoUrl(run._id, undefined, i, "setup")} label="Setup" />
+                    <VideoPlayer key={`setup-${i}`} src={isViewingHistorical && activeRun?._id ? api.runVideoUrl(run._id, activeRun._id, undefined, i, "setup") : api.videoUrl(run._id, undefined, i, "setup")} label="Setup" />
                   ))
                 )}
                 {activeRun?.videoUrls && activeRun?.videoUrls.length > 0 && (
                   activeRun?.videoUrls.map((_, i) => (
-                    <VideoPlayer key={i} src={api.videoUrl(run._id, undefined, i)} label={(activeRun?.videoUrls?.length ?? 0) > 1 ? `Video ${i + 1}` : undefined} />
+                    <VideoPlayer key={i} src={isViewingHistorical && activeRun?._id ? api.runVideoUrl(run._id, activeRun._id, undefined, i) : api.videoUrl(run._id, undefined, i)} label={(activeRun?.videoUrls?.length ?? 0) > 1 ? `Video ${i + 1}` : undefined} />
                   ))
                 )}
               </div>
@@ -1044,7 +1055,7 @@ export function RunDetail() {
         {/* Tool Calls tab — HAR captures & tool calls summary */}
         {hasHarData && (
           <TabsContent value="tool-calls" className="mt-4 space-y-4">
-            <ToolCallsTab runId={run._id} turns={activeRun?.turns} harUrl={activeRun?.harUrl} />
+            <ToolCallsTab runId={run._id} turns={activeRun?.turns} harUrl={activeRun?.harUrl} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
           </TabsContent>
         )}
       </Tabs>
@@ -1063,7 +1074,7 @@ export function RunDetail() {
 // Helper: per-iteration HAR viewer tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration: number; harUrl?: string }[] }) {
+function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns: { iteration: number; harUrl?: string }[]; attemptRunId?: string }) {
   const turnsWithHar = turns.filter(t => t.harUrl);
   const [activeIteration, setActiveIteration] = useState(turnsWithHar[0]?.iteration);
 
@@ -1071,7 +1082,7 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
 
   // Single iteration — no sub-tabs needed
   if (turnsWithHar.length === 1) {
-    return <HarNetworkViewer runId={runId} iteration={turnsWithHar[0].iteration} />;
+    return <HarNetworkViewer runId={runId} iteration={turnsWithHar[0].iteration} attemptRunId={attemptRunId} />;
   }
 
   return (
@@ -1090,7 +1101,7 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
         ))}
       </div>
       {activeIteration !== undefined && (
-        <HarNetworkViewer runId={runId} iteration={activeIteration} />
+        <HarNetworkViewer runId={runId} iteration={activeIteration} attemptRunId={attemptRunId} />
       )}
     </div>
   );
@@ -1100,7 +1111,7 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
 // Helper: per-iteration video player tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[]; setupVideoUrls?: string[] }) {
+function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[]; setupVideoUrls?: string[]; attemptRunId?: string }) {
   const turnsWithVideo = turns.filter(t => t.videoUrls && t.videoUrls.length > 0);
   const hasSetupVideo = setupVideoUrls && setupVideoUrls.length > 0;
   const [activeTab, setActiveTab] = useState<string>(hasSetupVideo ? "setup" : String(turnsWithVideo[0]?.iteration));
@@ -1108,6 +1119,9 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
   if (turnsWithVideo.length === 0 && !hasSetupVideo) return null;
 
   const activeTurn = turnsWithVideo.find(t => String(t.iteration) === activeTab);
+  const videoUrlFn = attemptRunId
+    ? (iteration?: number, index?: number, phase?: string) => api.runVideoUrl(runId, attemptRunId, iteration, index, phase)
+    : (iteration?: number, index?: number, phase?: string) => api.videoUrl(runId, iteration, index, phase);
 
   return (
     <div className="space-y-3">
@@ -1141,7 +1155,7 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
           {setupVideoUrls.map((_, i) => (
             <VideoPlayer
               key={`setup-${i}`}
-              src={api.videoUrl(runId, undefined, i, "setup")}
+              src={videoUrlFn(undefined, i, "setup")}
               label={setupVideoUrls.length > 1 ? `Setup Video ${i + 1}` : "Setup"}
             />
           ))}
@@ -1152,7 +1166,7 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
           {activeTurn.videoUrls!.map((_, i) => (
             <VideoPlayer
               key={`${activeTab}-${i}`}
-              src={api.videoUrl(runId, Number(activeTab), i)}
+              src={videoUrlFn(Number(activeTab), i)}
               label={activeTurn.videoUrls!.length > 1 ? `Video ${i + 1}` : undefined}
             />
           ))}
@@ -1182,14 +1196,17 @@ function ExpandableCell({ children, className = "" }: { children: React.ReactNod
   );
 }
 
-function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: ConversationTurn[]; harUrl?: string }) {
-  const { allToolCalls, isLoading } = useAllTurnsToolCalls(runId, turns, harUrl);
+function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; turns?: ConversationTurn[]; harUrl?: string; attemptRunId?: string }) {
+  const { allToolCalls, isLoading } = useAllTurnsToolCalls(runId, turns, harUrl, attemptRunId);
 
   // Group by tool name for summary
   const byName = new Map<string, number>();
   for (const tc of allToolCalls) {
     byName.set(tc.name, (byName.get(tc.name) ?? 0) + 1);
   }
+
+  const harDownloadUrl = attemptRunId ? api.runHarUrl(runId, attemptRunId) : api.harUrl(runId);
+  const harIterationUrl = (iteration: number) => attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration);
 
   return (
     <>
@@ -1200,7 +1217,7 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
             variant="outline"
             size="sm"
             className="gap-1.5"
-            onClick={() => window.open(api.harUrl(runId), "_blank")}
+            onClick={() => window.open(harDownloadUrl, "_blank")}
           >
             <Download className="h-4 w-4" />
             Download HAR
@@ -1309,7 +1326,7 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
                     variant="outline"
                     size="sm"
                     className="gap-1 font-mono text-xs"
-                    onClick={() => window.open(api.harUrl(runId, t.iteration), "_blank")}
+                    onClick={() => window.open(harIterationUrl(t.iteration), "_blank")}
                   >
                     <Download className="h-3 w-3" />
                     Iteration {t.iteration}
@@ -1319,7 +1336,7 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
             </div>
           )}
         </div>
-      )}
+      )}}
     </>
   );
 }

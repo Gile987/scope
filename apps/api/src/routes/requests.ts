@@ -55,6 +55,29 @@ import type { RunState } from "shared";
 
 
 
+/**
+ * Resolve a specific RunState by runId — checks the current request.run
+ * first, then falls back to the historical runs collection.
+ */
+async function resolveRunForRequest(
+  ctx: RouteContext,
+  requestId: string,
+  runId: string,
+): Promise<{ run: RunState; request: RequestDocument } | { error: string; status: number }> {
+  const request = await ctx.requestCollection.findOne({ _id: requestId });
+  if (!request) {
+    return { error: "Request not found", status: 404 };
+  }
+  if (request.run?._id === runId) {
+    return { run: request.run, request };
+  }
+  const historical = await getHistoricalRun({ runsCollection: ctx.runsCollection }, runId);
+  if (!historical || historical.requestId !== requestId) {
+    return { error: "Run not found for this request", status: 404 };
+  }
+  return { run: historical, request };
+}
+
 export function registerRequestsRoutes(ctx: RouteContext): void {
 
 const upload = multer({ dest: tmpdir() });
@@ -2569,6 +2592,625 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
     res.json(historical);
+  },
+});
+
+// ─── Per-run artifact endpoints (/requests/:id/runs/:runId/*) ─────────────
+// These mirror the existing /requests/:id/* artifact endpoints but resolve
+// a specific RunState by runId, enabling the portal to display data for
+// historical attempts.
+
+// Per-run logs SSE stream
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/runs/:runId/logs",
+  tags: ["Requests"],
+  summary: "Stream logs for a specific attempt (SSE)",
+  params: z.object({ id: z.string(), runId: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Server-sent event stream of log entries",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    const { id, runId } = req.params;
+    const fromStart = req.query.fromStart === "true";
+
+    const resolved = await resolveRunForRequest(ctx, id, runId);
+    if ("error" in resolved) {
+      res.status(resolved.status).json({ error: resolved.error });
+      return;
+    }
+    const { run: targetRun } = resolved;
+
+    // Set SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    // Replay logs from blob storage
+    if (fromStart) {
+      try {
+        const logsUrl = targetRun.logsUrl;
+        const pastLogs = logsUrl
+          ? await ctx.blobStorage.getLogEvents(logsUrl)
+          : await ctx.blobStorage.getLogEvents(id, targetRun._id);
+        for (const log of pastLogs) {
+          res.write(`data: ${JSON.stringify(log)}\n\n`);
+        }
+      } catch (err) {
+        console.error(`Failed to replay logs for request ${id} run ${runId}:`, err);
+        res.write(`event: error\ndata: ${JSON.stringify({ message: "Cannot connect to log storage" })}\n\n`);
+        res.end();
+        return;
+      }
+    }
+
+    // If the run is done (historical runs always are), close immediately
+    if (targetRun.status === "done") {
+      const currentTurns = targetRun.turns;
+      if (currentTurns && currentTurns.length > 0) {
+        res.write(`data: ${JSON.stringify({ type: "turns_summary", turns: currentTurns.length, passed: targetRun.outcome === "succeeded" })}\n\n`);
+      }
+      res.write(`event: done\ndata: ${JSON.stringify({ status: targetRun.status, outcome: targetRun.outcome })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // For active runs, subscribe to live updates (same as the main logs endpoint)
+    let cleaned = false;
+    let changeStream: ReturnType<typeof ctx.requestCollection.watch> | null = null;
+    let redisSubscribed = false;
+
+    const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+    let inactivityTimer: ReturnType<typeof setTimeout>;
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      clearTimeout(inactivityTimer);
+      if (changeStream) {
+        changeStream.close().catch(() => {});
+        changeStream = null;
+      }
+      if (redisSubscribed) {
+        unsubscribeClient(id, sseClient);
+        redisSubscribed = false;
+      }
+    };
+
+    const resetInactivityTimer = () => {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => {
+        res.write(`event: timeout\ndata: ${JSON.stringify({ message: "Inactivity timeout" })}\n\n`);
+        res.end();
+        cleanup();
+      }, INACTIVITY_TIMEOUT_MS);
+    };
+    resetInactivityTimer();
+
+    const sseClient: SSEClient = {
+      res,
+      onActivity: resetInactivityTimer,
+      cleanup,
+    };
+
+    // SSE heartbeat every 30s to prevent proxy/LB disconnects
+    const heartbeat = setInterval(() => {
+      if (!cleaned) {
+        res.write(`:\n\n`);
+      }
+    }, 30_000);
+
+    const originalCleanup = cleanup;
+    const cleanupWithHeartbeat = () => {
+      clearInterval(heartbeat);
+      originalCleanup();
+    };
+
+    // Try Redis subscription if configured
+    if (process.env.REDIS_HOST) {
+      try {
+        await subscribeClient(id, sseClient);
+        redisSubscribed = true;
+      } catch (err) {
+        console.error(`Redis subscription failed for ${id} run ${runId}:`, err);
+      }
+    }
+
+    // Use MongoDB Change Streams as fallback
+    try {
+      changeStream = ctx.requestCollection.watch(
+        [{ $match: { "documentKey._id": id, operationType: "update" } }],
+        { fullDocument: "updateLookup" }
+      );
+
+      changeStream.on("change", (change: any) => {
+        if (change.operationType === "update" && change.fullDocument) {
+          const doc = change.fullDocument;
+          const docStatus = doc.run?.status;
+          const docOutcome = doc.run?.outcome;
+          if (docStatus === "done") {
+            res.write(`event: done\ndata: ${JSON.stringify({ status: docStatus, outcome: docOutcome })}\n\n`);
+            cleanupWithHeartbeat();
+            res.end();
+          }
+        }
+      });
+
+      changeStream.on("error", () => {
+        cleanupWithHeartbeat();
+        res.end();
+      });
+    } catch (err) {
+      console.error(`Change stream failed for ${id} run ${runId}:`, err);
+    }
+
+    req.on("close", cleanupWithHeartbeat);
+  },
+});
+
+// Per-run HAR download
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/runs/:runId/har",
+  tags: ["Requests"],
+  summary: "Download HAR file for a specific attempt",
+  params: z.object({ id: z.string(), runId: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "HAR-format JSON file",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
+      const { id, runId } = req.params;
+      const iterationParam = req.query.iteration as string | undefined;
+
+      const resolved = await resolveRunForRequest(ctx, id, runId);
+      if ("error" in resolved) {
+        res.status(resolved.status).json({ error: resolved.error });
+        return;
+      }
+      const { run: targetRun } = resolved;
+
+      let harUrl: string | undefined;
+      let label: string;
+
+      if (iterationParam) {
+        const iterNum = parseInt(iterationParam, 10);
+        if (isNaN(iterNum) || iterNum < 1) {
+          res.status(400).json({ error: "Invalid iteration number" });
+          return;
+        }
+        const turns = targetRun.turns;
+        const turn = turns?.find((t: { iteration: number }) => t.iteration === iterNum);
+        harUrl = turn?.harUrl;
+        label = `${id}-iteration-${iterNum}`;
+      } else {
+        const turns = targetRun.turns;
+        harUrl = targetRun.harUrl || turns?.[turns.length - 1]?.harUrl;
+        label = id;
+      }
+
+      if (!harUrl) {
+        res.status(404).json({ error: "No HAR capture available" });
+        return;
+      }
+
+      let blobServiceClient: BlobServiceClient;
+      if (ctx.storageConnectionString) {
+        blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
+      } else {
+        blobServiceClient = new BlobServiceClient(
+          `https://${ctx.storageAccountName}.blob.core.windows.net`,
+          new DefaultAzureCredential()
+        );
+      }
+
+      const parsedUrl = new URL(harUrl);
+      const containerPrefix = "/snapshots/";
+      const containerIndex = parsedUrl.pathname.indexOf(containerPrefix);
+      if (containerIndex === -1) {
+        res.status(500).json({ error: "Invalid HAR URL format" });
+        return;
+      }
+      const blobName = parsedUrl.pathname.substring(containerIndex + containerPrefix.length);
+      const containerClient = blobServiceClient.getContainerClient("snapshots");
+      const blobClient = containerClient.getBlockBlobClient(blobName);
+
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody) {
+        res.status(500).json({ error: "Failed to download HAR file" });
+        return;
+      }
+
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="${label}.har"`);
+      if (downloadResponse.contentLength) {
+        res.setHeader("Content-Length", downloadResponse.contentLength);
+      }
+
+      downloadResponse.readableStreamBody.pipe(res);
+    } catch (error) {
+      if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+        res.status(404).json({ error: "HAR file not found — the blob may have been deleted or is no longer available" });
+        return;
+      }
+      throw error;
+    }
+  },
+});
+
+// Per-run video download
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/runs/:runId/video",
+  tags: ["Requests"],
+  summary: "Download session recording for a specific attempt",
+  params: z.object({ id: z.string(), runId: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "WebM video recording (supports Range requests)",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
+      const { id, runId } = req.params;
+      const iterationParam = req.query.iteration as string | undefined;
+      const phaseParam = req.query.phase as string | undefined;
+      const indexParam = req.query.index as string | undefined;
+      const videoIndex = indexParam ? parseInt(indexParam, 10) : 0;
+
+      if (isNaN(videoIndex) || videoIndex < 0) {
+        res.status(400).json({ error: "Invalid video index" });
+        return;
+      }
+
+      const resolved = await resolveRunForRequest(ctx, id, runId);
+      if ("error" in resolved) {
+        res.status(resolved.status).json({ error: resolved.error });
+        return;
+      }
+      const { run: targetRun } = resolved;
+
+      let videoUrls: string[] | undefined;
+      let label: string;
+
+      if (phaseParam === "setup") {
+        videoUrls = targetRun.setupVideoUrls;
+        label = `${id}-setup-video-${videoIndex}`;
+      } else if (iterationParam) {
+        const iterNum = parseInt(iterationParam, 10);
+        if (isNaN(iterNum) || iterNum < 1) {
+          res.status(400).json({ error: "Invalid iteration number" });
+          return;
+        }
+        const turns = targetRun.turns;
+        const turn = turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
+        videoUrls = turn?.videoUrls;
+        label = `${id}-iteration-${iterNum}-video-${videoIndex}`;
+      } else {
+        const turns = targetRun.turns;
+        videoUrls = targetRun.videoUrls ?? turns?.[turns.length - 1]?.videoUrls;
+        label = `${id}-video-${videoIndex}`;
+      }
+
+      if (!videoUrls || videoUrls.length === 0) {
+        res.status(404).json({ error: "No video recordings available" });
+        return;
+      }
+
+      if (videoIndex >= videoUrls.length) {
+        res.status(404).json({ error: `Video index ${videoIndex} not found (${videoUrls.length} available)` });
+        return;
+      }
+
+      const videoUrl = videoUrls[videoIndex];
+
+      let blobServiceClient: BlobServiceClient;
+      if (ctx.storageConnectionString) {
+        blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
+      } else {
+        blobServiceClient = new BlobServiceClient(
+          `https://${ctx.storageAccountName}.blob.core.windows.net`,
+          new DefaultAzureCredential()
+        );
+      }
+
+      const parsedUrl = new URL(videoUrl);
+      const containerPrefix = "/snapshots/";
+      const containerIndex = parsedUrl.pathname.indexOf(containerPrefix);
+      if (containerIndex === -1) {
+        res.status(500).json({ error: "Invalid video URL format" });
+        return;
+      }
+      const blobName = parsedUrl.pathname.substring(containerIndex + containerPrefix.length);
+      const containerClient = blobServiceClient.getContainerClient("snapshots");
+      const blobClient = containerClient.getBlockBlobClient(blobName);
+
+      const properties = await blobClient.getProperties();
+      const totalSize = properties.contentLength ?? 0;
+
+      const rangeHeader = req.headers.range;
+      if (rangeHeader && totalSize > 0) {
+        const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+        if (match) {
+          const start = parseInt(match[1], 10);
+          const end = match[2] ? parseInt(match[2], 10) : totalSize - 1;
+          const chunkSize = end - start + 1;
+
+          const downloadResponse = await blobClient.download(start, chunkSize);
+          if (!downloadResponse.readableStreamBody) {
+            res.status(500).json({ error: "Failed to download video file" });
+            return;
+          }
+
+          res.status(206);
+          res.setHeader("Content-Type", "video/webm");
+          res.setHeader("Content-Range", `bytes ${start}-${end}/${totalSize}`);
+          res.setHeader("Accept-Ranges", "bytes");
+          res.setHeader("Content-Length", chunkSize);
+          downloadResponse.readableStreamBody.pipe(res);
+          return;
+        }
+      }
+
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody) {
+        res.status(500).json({ error: "Failed to download video file" });
+        return;
+      }
+
+      res.setHeader("Content-Type", "video/webm");
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Disposition", `inline; filename="${label}.webm"`);
+      if (totalSize > 0) {
+        res.setHeader("Content-Length", totalSize);
+      }
+
+      downloadResponse.readableStreamBody.pipe(res);
+    } catch (error) {
+      if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+        res.status(404).json({ error: "Video file not found — the blob may have been deleted or is no longer available" });
+        return;
+      }
+      throw error;
+    }
+  },
+});
+
+// Per-run tool-calls JSONL download
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/runs/:runId/tool-calls",
+  tags: ["Requests"],
+  summary: "Download per-iteration tool-calls JSONL for a specific attempt",
+  params: z.object({ id: z.string(), runId: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "JSONL stream — one ToolCall per line",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
+      const { id, runId } = req.params;
+      const iterationParam = req.query.iteration as string | undefined;
+
+      const resolved = await resolveRunForRequest(ctx, id, runId);
+      if ("error" in resolved) {
+        res.status(resolved.status).json({ error: resolved.error });
+        return;
+      }
+      const { run: targetRun } = resolved;
+
+      if (!iterationParam) {
+        res.status(400).json({ error: "iteration query parameter is required" });
+        return;
+      }
+      const iterNum = parseInt(iterationParam, 10);
+      if (isNaN(iterNum) || iterNum < 1) {
+        res.status(400).json({ error: "Invalid iteration number" });
+        return;
+      }
+      const turns = targetRun.turns;
+      const turn = turns?.find((t: any) => t.iteration === iterNum);
+      const toolCallsUrl = turn?.toolCallsUrl;
+      const label = `${id}-iteration-${iterNum}-tool-calls`;
+
+      if (!toolCallsUrl) {
+        res.status(404).json({ error: "No tool-calls JSONL available for this iteration" });
+        return;
+      }
+
+      let blobServiceClient: BlobServiceClient;
+      if (ctx.storageConnectionString) {
+        blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
+      } else {
+        blobServiceClient = new BlobServiceClient(
+          `https://${ctx.storageAccountName}.blob.core.windows.net`,
+          new DefaultAzureCredential()
+        );
+      }
+
+      const parsedUrl = new URL(toolCallsUrl);
+      const containerPrefix = "/snapshots/";
+      const containerIndex = parsedUrl.pathname.indexOf(containerPrefix);
+      if (containerIndex === -1) {
+        res.status(500).json({ error: "Invalid tool-calls URL format" });
+        return;
+      }
+      const blobName = decodeURIComponent(
+        parsedUrl.pathname.substring(containerIndex + containerPrefix.length)
+      );
+      const containerClient = blobServiceClient.getContainerClient("snapshots");
+      const blobClient = containerClient.getBlobClient(blobName);
+
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody) {
+        res.status(500).json({ error: "Failed to download tool-calls JSONL" });
+        return;
+      }
+
+      res.setHeader("Content-Type", "application/x-ndjson");
+      res.setHeader("Content-Disposition", `attachment; filename="${label}.jsonl"`);
+      if (downloadResponse.contentLength) {
+        res.setHeader("Content-Length", downloadResponse.contentLength);
+      }
+
+      downloadResponse.readableStreamBody.pipe(res);
+    } catch (error) {
+      if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+        res.status(404).json({ error: "Tool-calls JSONL not found — the blob may have been deleted or is no longer available" });
+        return;
+      }
+      throw error;
+    }
+  },
+});
+
+// Per-run snapshot download
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/runs/:runId/snapshots/:iteration",
+  tags: ["Requests"],
+  summary: "Download iteration snapshot for a specific attempt",
+  params: z.object({ id: z.string(), runId: z.string(), iteration: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Gzipped snapshot archive",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
+      const { id, runId, iteration } = req.params;
+      const iterNum = parseInt(iteration, 10);
+      if (isNaN(iterNum) || iterNum < 1) {
+        res.status(400).json({ error: "Invalid iteration number" });
+        return;
+      }
+
+      const resolved = await resolveRunForRequest(ctx, id, runId);
+      if ("error" in resolved) {
+        res.status(resolved.status).json({ error: resolved.error });
+        return;
+      }
+      const { run: targetRun } = resolved;
+
+      const turns = targetRun.turns;
+      const turn = turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
+      if (!turn?.snapshotUrl) {
+        res.status(404).json({ error: `No snapshot for iteration ${iterNum}` });
+        return;
+      }
+
+      let blobServiceClient: BlobServiceClient;
+      if (ctx.storageConnectionString) {
+        blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
+      } else {
+        blobServiceClient = new BlobServiceClient(
+          `https://${ctx.storageAccountName}.blob.core.windows.net`,
+          new DefaultAzureCredential()
+        );
+      }
+
+      const snapshotUrl = new URL(turn.snapshotUrl);
+      const containerPrefix = "/snapshots/";
+      const containerIndex = snapshotUrl.pathname.indexOf(containerPrefix);
+      if (containerIndex === -1) {
+        res.status(500).json({ error: "Invalid snapshot URL format" });
+        return;
+      }
+      const blobName = snapshotUrl.pathname.substring(containerIndex + containerPrefix.length);
+      const containerClient = blobServiceClient.getContainerClient("snapshots");
+      const blobClient = containerClient.getBlockBlobClient(blobName);
+
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody) {
+        res.status(500).json({ error: "Failed to download snapshot" });
+        return;
+      }
+
+      res.setHeader("Content-Type", "application/gzip");
+      res.setHeader("Content-Disposition", `attachment; filename="${id}-iteration-${iterNum}.tar.gz"`);
+      if (downloadResponse.contentLength) {
+        res.setHeader("Content-Length", downloadResponse.contentLength);
+      }
+
+      downloadResponse.readableStreamBody.pipe(res);
+    } catch (error) {
+      if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+        res.status(404).json({ error: "Snapshot not found — the blob may have been deleted or is no longer available" });
+        return;
+      }
+      throw error;
+    }
+  },
+});
+
+// Per-run archive download
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/:id/runs/:runId/archive",
+  tags: ["Requests"],
+  summary: "Download full run archive for a specific attempt",
+  params: z.object({ id: z.string(), runId: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  responseDescription: "Gzipped run archive",
+  errorResponses: { 404: { description: "Not found" } },
+  handler: async (req, res) => {
+    try {
+      const { id, runId } = req.params;
+
+      const resolved = await resolveRunForRequest(ctx, id, runId);
+      if ("error" in resolved) {
+        res.status(resolved.status).json({ error: resolved.error });
+        return;
+      }
+      const { run: targetRun, request: resource } = resolved;
+
+      const allTurns = targetRun.turns;
+      if (!allTurns || allTurns.length === 0) {
+        res.status(404).json({ error: "No iterations found for this run" });
+        return;
+      }
+
+      let blobServiceClient: BlobServiceClient;
+      if (ctx.storageConnectionString) {
+        blobServiceClient = BlobServiceClient.fromConnectionString(ctx.storageConnectionString);
+      } else {
+        blobServiceClient = new BlobServiceClient(
+          `https://${ctx.storageAccountName}.blob.core.windows.net`,
+          new DefaultAzureCredential()
+        );
+      }
+      const containerClient = blobServiceClient.getContainerClient("snapshots");
+      const logsContainerClient = blobServiceClient.getContainerClient("logs");
+
+      res.setHeader("Content-Type", "application/gzip");
+      res.setHeader("Content-Disposition", `attachment; filename="${id}.tar.gz"`);
+
+      const pack = tarPack();
+      const gzip = createGzip();
+      pack.pipe(gzip).pipe(res);
+
+      const isBlobNotFound = (err: unknown) =>
+        err instanceof RestError && (err.statusCode === 404 || err.code === "ContainerNotFound" || err.code === "BlobNotFound");
+
+      // Construct a resource view with the target run for packRunIntoTar
+      const archiveResource = { ...resource, run: targetRun };
+      await packRunIntoTar(pack, archiveResource, containerClient, id, isBlobNotFound, logsContainerClient);
+
+      pack.finalize();
+    } catch (error) {
+      if (!res.headersSent) {
+        if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
+          res.status(404).json({ error: "Archive not found — the blob may have been deleted or is no longer available" });
+          return;
+        }
+        throw error;
+      }
+      console.error(`Error streaming archive for request ${req.params.id}:`, error);
+      res.end();
+    }
   },
 });
 
