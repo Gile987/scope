@@ -2886,7 +2886,7 @@ apiRoute(ctx.app, ctx.registry, {
           return;
         }
         const turns = targetRun.turns;
-        const turn = turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
+        const turn = turns?.find((t) => t.iteration === iterNum);
         videoUrls = turn?.videoUrls;
         label = `${id}-iteration-${iterNum}-video-${videoIndex}`;
       } else {
@@ -3095,7 +3095,7 @@ apiRoute(ctx.app, ctx.registry, {
       const { run: targetRun } = resolved;
 
       const turns = targetRun.turns;
-      const turn = turns?.find((t: Record<string, unknown>) => t.iteration === iterNum);
+      const turn = turns?.find((t) => t.iteration === iterNum);
       if (!turn?.snapshotUrl) {
         res.status(404).json({ error: `No snapshot for iteration ${iterNum}` });
         return;
@@ -3196,7 +3196,7 @@ apiRoute(ctx.app, ctx.registry, {
         err instanceof RestError && (err.statusCode === 404 || err.code === "ContainerNotFound" || err.code === "BlobNotFound");
 
       // Construct a resource view with the target run for packRunIntoTar
-      const archiveResource = { ...resource, run: targetRun };
+      const archiveResource = { ...resource, run: targetRun } as unknown as import("../archive-har.js").ArchivableRun;
       await packRunIntoTar(pack, archiveResource, containerClient, id, isBlobNotFound, logsContainerClient);
 
       pack.finalize();
