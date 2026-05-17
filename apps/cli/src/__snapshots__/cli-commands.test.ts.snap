@@ -93,6 +93,13 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
+      "export": {
+        "options": [
+          "--ids",
+          "--output-file",
+          "--url",
+        ],
+      },
       "get": {
         "options": [
           "--id",
