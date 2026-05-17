@@ -26,6 +26,7 @@
     "docker:down": "worktree-env && docker compose --env-file .env --env-file apps/workers/coder-acp-copilot/versions.env --env-file apps/workers/coder-acp-claude-code/versions.env --profile claude-code --profile copilot --profile report --profile portal down --volumes",
     "docker:build": "worktree-env && docker compose --env-file .env --env-file apps/workers/coder-acp-copilot/versions.env --env-file apps/workers/coder-acp-claude-code/versions.env --profile claude-code --profile copilot --profile report build",
     "open:portal": "tsx scripts/open-portal.ts",
+    "portal:url": "tsx scripts/portal-url.ts",
     "get-copilot-token": "tsx scripts/get-copilot-token.ts",
     "validate-skill": "tsx scripts/validate-skill.ts",
     "lint": "pnpm -r lint",
