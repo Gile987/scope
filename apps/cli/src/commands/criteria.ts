@@ -400,7 +400,8 @@ criteria
         .join('\n---\n');
 
       if (options.outputFile) {
-        writeFileSync(resolve(options.outputFile), yamlOutput + '\n', 'utf-8');
+        const outputPath = resolve(process.env.INIT_CWD || process.cwd(), options.outputFile);
+        writeFileSync(outputPath, yamlOutput + '\n', 'utf-8');
         console.error(`${successText('Exported')} ${value(String(sorted.length))} criteria to ${value(options.outputFile)}`);
       } else {
         process.stdout.write(yamlOutput + '\n');
@@ -419,7 +420,7 @@ criteria
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .action(async (inputPath: string, options) => {
     try {
-      const absPath = resolve(inputPath);
+      const absPath = resolve(process.env.INIT_CWD || process.cwd(), inputPath);
       if (!existsSync(absPath)) {
         console.error(errorText(`Path not found: ${absPath}`));
         process.exit(1);
