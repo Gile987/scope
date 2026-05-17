@@ -17,11 +17,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X, Plus } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Loader2, Sparkles, Check, X, Plus, Download } from "lucide-react";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { formatDate } from "@/lib/utils";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
+import { criteriaToExportYaml, resolveWithAncestors, downloadAsFile } from "@/lib/criteria-export";
 
 export function CriterionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -35,6 +36,11 @@ export function CriterionDetail() {
     queryKey: ["criterion", id],
     queryFn: () => api.getCriterion(id!),
     enabled: !!id,
+  });
+
+  const { data: allCriteria = [] } = useQuery({
+    queryKey: ["criteria"],
+    queryFn: () => api.listCriteria(),
   });
 
   const [editing, setEditing] = useState(false);
@@ -185,6 +191,17 @@ export function CriterionDetail() {
                   New Criterion
                   <KbdBadge />
                 </Link>
+              </Button>
+              <Button
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => {
+                  const subset = resolveWithAncestors([criterion.id], allCriteria);
+                  const yaml = criteriaToExportYaml(subset);
+                  downloadAsFile(yaml, `${criterion.id}.yaml`);
+                }}
+              >
+                <Download className="h-4 w-4" /> Export YAML
               </Button>
               <Button variant="outline" onClick={startEditing}>
                 Edit

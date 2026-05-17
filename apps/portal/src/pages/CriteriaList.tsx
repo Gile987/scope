@@ -16,8 +16,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, Eye, Search, GitBranch, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Eye, Search, GitBranch, RefreshCw, Download } from "lucide-react";
 import { truncate } from "@/lib/utils";
+import { criteriaToExportYaml, downloadAsFile } from "@/lib/criteria-export";
 
 export function CriteriaList() {
   const [search, setSearch] = useState("");
@@ -42,6 +43,17 @@ export function CriteriaList() {
           <p className="text-muted-foreground">Manage evaluation criteria and their dependencies</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            disabled={criteria.length === 0}
+            onClick={() => {
+              const yaml = criteriaToExportYaml(criteria);
+              downloadAsFile(yaml, "criteria.yaml");
+            }}
+          >
+            <Download className="h-4 w-4" /> Export YAML
+          </Button>
           <Link to="/criteria/graph">
             <Button variant="outline" className="gap-1.5">
               <GitBranch className="h-4 w-4" /> Graph
