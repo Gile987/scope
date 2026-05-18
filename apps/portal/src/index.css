@@ -150,3 +150,25 @@
   background-color: rgb(69 10 10 / 0.4);
   color: rgb(254 202 202);
 }
+
+/* Shimmer animation for active processing badge */
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.animate-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.animate-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.7) 50%,
+    transparent 80%
+  );
+  animation: shimmer 1.5s infinite linear;
+}
