@@ -8,7 +8,7 @@
     "cli": "pnpm --filter cli exec tsx src/index.ts",
     "dev:api": "pnpm --filter api dev",
     "dev:portal": "pnpm --filter portal dev",
-    "storybook": "pnpm --filter portal storybook",
+    "storybook": "worktree-env && pnpm --filter portal storybook",
     "dev:coder-acp-claude-code": "pnpm --filter coder-acp-claude-code dev",
     "dev:coder-acp-copilot": "pnpm --filter coder-acp-copilot dev",
     "dev:report-generator": "pnpm --filter report-generator dev",
