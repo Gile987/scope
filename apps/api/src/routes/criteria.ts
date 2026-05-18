@@ -125,12 +125,14 @@ apiRoute(ctx.app, ctx.registry, {
   }),
   response: z.object({
     seeded: z.number(),
+    skipped: z.array(z.string()),
     errors: z.array(z.string()),
   }),
   handler: async (req, res) => {
     const { criteria } = req.body;
     let seeded = 0;
     const errors: string[] = [];
+    const skipped: string[] = [];
     const activeCriteria = await loadActiveCriteria(ctx);
     const existingIds = new Set(activeCriteria.map((criterion) => criterion.id));
     const pendingSeeds = new Map<string, { id: string; prompt: string; dependsOn: string[] }>();
@@ -142,7 +144,13 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       const id = config.id.trim();
-      if (existingIds.has(id) || pendingSeeds.has(id)) {
+      if (pendingSeeds.has(id)) {
+        skipped.push(id);
+        continue;
+      }
+      if (existingIds.has(id)) {
+        // Already in DB — upsert below will be a no-op but we still count it as seeded
+        // for backwards compatibility with the pre-validation behavior.
         continue;
       }
 
@@ -185,12 +193,16 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
+    const seededIds = new Set<string>();
     for (const config of criteria) {
       if (!config.id || !config.prompt) {
         continue;
       }
 
       const id = config.id.trim();
+      if (seededIds.has(id)) {
+        continue;
+      }
       const dependsOn = normalizeDependsOn(config.dependsOn);
       const shouldSeedExisting = existingIds.has(id);
       const shouldSeedNew = pendingSeeds.has(id);
@@ -213,12 +225,13 @@ apiRoute(ctx.app, ctx.registry, {
           { upsert: true },
         );
         seeded++;
+        seededIds.add(id);
       } catch (err) {
         errors.push(`Failed to seed ${id}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
-    res.json({ seeded, errors });
+    res.json({ seeded, skipped, errors });
   },
 });
 

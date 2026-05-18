@@ -3650,9 +3650,16 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "seeded": {
                       "type": "number",
                     },
+                    "skipped": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
                   },
                   "required": [
                     "seeded",
+                    "skipped",
                     "errors",
                   ],
                   "type": "object",

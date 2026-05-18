@@ -415,10 +415,16 @@ criteria
         process.exit(1);
       }
 
-      const result = await response.json() as { seeded: number; errors: string[] };
+      const result = await response.json() as { seeded: number; skipped?: string[]; errors: string[] };
       console.log(`${successText('Seeded:')} ${value(String(result.seeded))} criteria`);
       if (result.seeded < allCriteria.length) {
         console.log(`${dimTimestamp(`(${allCriteria.length - result.seeded} already existed — skipped)`)}`);
+      }
+      if (result.skipped && result.skipped.length > 0) {
+        console.log(`\n${warnBanner('Duplicate ids skipped:')}`);
+        for (const id of result.skipped) {
+          console.log(`  ${dimTimestamp('•')} ${id}`);
+        }
       }
       if (result.errors.length > 0) {
         console.log(`\n${warnBanner('Seed errors:')}`);

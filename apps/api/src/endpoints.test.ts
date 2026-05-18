@@ -283,6 +283,29 @@ describe("API Endpoints", () => {
       expect(res.body.errors).toContain("Failed to seed criteria batch: Cycle detected in dependencies");
       expect(mocks.criteriaCollection.updateOne).not.toHaveBeenCalled();
     });
+
+    it("surfaces duplicate ids within the request payload via the skipped field", async () => {
+      (mocks.criteriaCollection.find as any).mockReturnValue({
+        project: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/criteria/seed")
+        .send({
+          criteria: [
+            { id: "dup", prompt: "first", dependsOn: [] },
+            { id: "dup", prompt: "second", dependsOn: [] },
+            { id: "other", prompt: "other", dependsOn: [] },
+          ],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.seeded).toBe(2);
+      expect(res.body.skipped).toEqual(["dup"]);
+      expect(res.body.errors).toEqual([]);
+      expect(mocks.criteriaCollection.updateOne).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("DELETE /api/v1/criteria/:id", () => {
