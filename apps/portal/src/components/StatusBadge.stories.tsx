@@ -36,19 +36,23 @@ export const Done: Story = {
   args: { status: "done" },
 };
 
-// OutcomeBadge stories
+// OutcomeBadge stories — use args with render to satisfy type constraint
 export const Succeeded: Story = {
+  args: { status: "done" },
   render: () => <OutcomeBadge outcome="succeeded" />,
 };
 
 export const Failed: Story = {
+  args: { status: "done" },
   render: () => <OutcomeBadge outcome="failed" />,
 };
 
 export const Finished: Story = {
+  args: { status: "done" },
   render: () => <OutcomeBadge outcome="finished" />,
 };
 
 export const NoOutcome: Story = {
+  args: { status: "done" },
   render: () => <OutcomeBadge />,
 };
