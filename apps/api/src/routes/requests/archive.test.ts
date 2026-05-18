@@ -139,7 +139,7 @@ vi.mock("@azure/identity", () => ({
 }));
 
 // Imports that depend on the mocked modules must come after `vi.mock`.
-const { registerRequestsRoutes } = await import("./requests.js");
+const { registerRequestsRoutes } = await import("./index.js");
 
 // ─── In-memory Mongo collection ─────────────────────────────────────────────
 

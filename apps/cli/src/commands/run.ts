@@ -484,6 +484,51 @@ run
   });
 
 run
+  .command("cancel")
+  .description("Cancel one or more runs (marks as failed and signals active workers to exit)")
+  .requiredOption("-i, --id <ids...>", "Request ID(s) to cancel")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .action(async (options) => {
+    const { id: ids, url } = options;
+    const baseUrl = normalizeUrl(url);
+    try {
+      if (ids.length === 1) {
+        const response = await fetch(`${baseUrl}/api/v1/requests/${ids[0]}/cancel`, { method: "POST" });
+        if (!response.ok) {
+          const error = await response.json();
+          console.error(errorText("Error:"), error.error || JSON.stringify(error));
+          process.exit(1);
+        }
+        const result = await response.json() as { id: string; previousStatus: string; status: string; outcome: string };
+        console.log(`${successText('Cancelled run')} ${value(result.id)} (was ${result.previousStatus})`);
+      } else {
+        const response = await fetch(`${baseUrl}/api/v1/requests/bulk-cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          console.error(errorText("Error:"), error.error || JSON.stringify(error));
+          process.exit(1);
+        }
+        const result = await response.json() as { cancelled: number; skipped: number; results: { id: string; cancelled: boolean; previousStatus?: string; error?: string }[] };
+        for (const r of result.results) {
+          if (r.cancelled) {
+            console.log(`${successText('Cancelled')} ${value(r.id)} (was ${r.previousStatus})`);
+          } else {
+            console.log(`${errorText('Skipped')} ${value(r.id)}: ${r.error}`);
+          }
+        }
+        console.log(`\n${label('Total:')} ${result.cancelled} cancelled, ${result.skipped} skipped`);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+run
   .command("download")
   .description("Download all artifacts of a run (workspaces + run document)")
   .requiredOption("-i, --id <id>", "Request ID")

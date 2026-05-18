@@ -15,7 +15,8 @@ import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
 import { registerFeatureFlagRoutes } from "./routes/feature-flags.js";
 import { registerSystemRoutes } from "./routes/system.js";
-import { registerRequestsRoutes } from "./routes/requests.js";
+import { registerRequestsRoutes } from "./routes/requests/index.js";
+import { registerRequestsCancelRoutes } from "./routes/requests/cancel.js";
 import { registerCriteriaRoutes } from "./routes/criteria.js";
 import { registerPromptFeaturesRoutes } from "./routes/prompt-features.js";
 import { registerTaskPromptsRoutes } from "./routes/task-prompts.js";
@@ -252,6 +253,7 @@ const routeCtx: RouteContext = {
 registerSecretsRoutes(routeCtx);
 registerSystemRoutes(routeCtx);
 registerRequestsRoutes(routeCtx);
+registerRequestsCancelRoutes(routeCtx);
 registerCriteriaRoutes(routeCtx);
 registerPromptFeaturesRoutes(routeCtx);
 registerTaskPromptsRoutes(routeCtx);

@@ -27,7 +27,7 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown } from "lucide-react";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
@@ -180,6 +180,17 @@ export function RunDetail() {
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to pause");
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () => api.cancelRun(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success("Run cancelled");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to cancel");
     },
   });
 
@@ -481,6 +492,22 @@ export function RunDetail() {
             >
               <Pause className="h-4 w-4" />
               {pauseMutation.isPending ? "Pausing…" : "Pause"}
+            </Button>
+          )}
+          {(activeRun?.status === "pending" || activeRun?.status === "queued" || activeRun?.status === "processing") && !isViewingHistorical && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-destructive border-destructive/50 hover:bg-destructive/10"
+              onClick={() => {
+                if (window.confirm("Are you sure you want to cancel this run? This will mark it as failed and kill any active worker.")) {
+                  cancelMutation.mutate();
+                }
+              }}
+              disabled={cancelMutation.isPending}
+            >
+              <X className="h-4 w-4" />
+              {cancelMutation.isPending ? "Cancelling…" : "Cancel"}
             </Button>
           )}
           {activeRun?.status === "paused" && !isViewingHistorical && (

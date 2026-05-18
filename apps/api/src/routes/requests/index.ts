@@ -31,26 +31,26 @@ import {
   resolveAgentVersion,
 } from "shared";
 import type { ProfileDocument, ProfileVersionDocument } from "shared";
-import { apiRoute } from "../openapi/api-route.js";
-import { VALID_WORKERS } from "../route-context.js";
+import { apiRoute } from "../../openapi/api-route.js";
+import { VALID_WORKERS } from "../../route-context.js";
 import type {
   ExtensionDocument,
   McpServerDocument,
   RequestDocument,
   RouteContext,
   WorkerType,
-} from "../route-context.js";
-import { computeAnalysis } from "../analysis.js";
-import type { AnalysisResponse, AnalyzableRun } from "../analysis.js";
-import { parseStateKey } from "../criteria-mdp.js";
-import { buildGroupingPipeline } from "../grouping.js";
-import { resolveSkillSpecs } from "../utils/skill-helpers.js";
+} from "../../route-context.js";
+import { computeAnalysis } from "../../analysis.js";
+import type { AnalysisResponse, AnalyzableRun } from "../../analysis.js";
+import { parseStateKey } from "../../criteria-mdp.js";
+import { buildGroupingPipeline } from "../../grouping.js";
+import { resolveSkillSpecs } from "../../utils/skill-helpers.js";
 import {
   packRunIntoTar,
-} from "../archive-har.js";
-import { subscribeClient, unsubscribeClient } from "../utils/sse.js";
-import type { SSEClient } from "../utils/sse.js";
-import { insertHistoricalRun, listHistoricalRuns, getHistoricalRun } from "../runs-repo.js";
+} from "../../archive-har.js";
+import { subscribeClient, unsubscribeClient } from "../../utils/sse.js";
+import type { SSEClient } from "../../utils/sse.js";
+import { insertHistoricalRun, listHistoricalRuns, getHistoricalRun } from "../../runs-repo.js";
 import type { RunState } from "shared";
 
 
