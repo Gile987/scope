@@ -28,6 +28,32 @@ export const Processing: Story = {
   args: { status: "processing" },
 };
 
+export const ProcessingFresh: Story = {
+  args: {
+    status: "processing",
+    lastHeartbeatAt: new Date(Date.now() - 5_000).toISOString(),
+    startedAt: new Date(Date.now() - 120_000).toISOString(),
+  },
+  play: async ({ canvas }) => {
+    const badge = canvas.getByText("Processing");
+    await expect(badge).toBeVisible();
+    await expect(badge).toHaveClass(/animate-shimmer/);
+  },
+};
+
+export const Stale: Story = {
+  args: {
+    status: "processing",
+    lastHeartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    startedAt: new Date(Date.now() - 120_000).toISOString(),
+  },
+  play: async ({ canvas }) => {
+    const badge = canvas.getByText("Processing");
+    await expect(badge).toBeVisible();
+    await expect(badge).toHaveClass(/opacity-50/);
+  },
+};
+
 export const Paused: Story = {
   args: { status: "paused" },
 };
