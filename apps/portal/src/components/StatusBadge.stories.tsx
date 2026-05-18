@@ -24,10 +24,6 @@ export const Queued: Story = {
   args: { status: "queued" },
 };
 
-export const Processing: Story = {
-  args: { status: "processing" },
-};
-
 export const ProcessingFresh: Story = {
   args: {
     status: "processing",
