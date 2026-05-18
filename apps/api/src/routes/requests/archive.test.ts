@@ -140,6 +140,7 @@ vi.mock("@azure/identity", () => ({
 
 // Imports that depend on the mocked modules must come after `vi.mock`.
 const { registerRequestsRoutes } = await import("./index.js");
+const { registerRequestsArchiveRoutes } = await import("./archive.js");
 
 // ─── In-memory Mongo collection ─────────────────────────────────────────────
 
@@ -282,6 +283,7 @@ function buildApp(
   };
 
   registerRequestsRoutes(ctx);
+  registerRequestsArchiveRoutes(ctx);
 
   // Generic error handler so unhandled throws surface as 500.
   app.use((err: Error, _req: any, res: any, _next: any) => {
