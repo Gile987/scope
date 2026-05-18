@@ -33,6 +33,34 @@ export function generateOutputFormatsHelp(
   return output;
 }
 
+/** Environment variable definition for help text generation */
+export interface EnvVarDef {
+  description: string;
+  default?: string;
+}
+
+/**
+ * Generate a help text block documenting environment variables read by the CLI.
+ * Appended to the main program --help via addHelpText('after', ...).
+ */
+export function generateEnvVarsHelp(
+  envVars: Record<string, EnvVarDef>,
+): string {
+  const entries = Object.entries(envVars);
+  const nameWidth = Math.max(...entries.map(([name]) => name.length));
+
+  let output = '\n' + styleText('bold', 'Environment Variables:') + '\n';
+  for (const [name, def] of entries) {
+    output += `  ${styleText('cyan', name.padEnd(nameWidth))}  ${def.description}`;
+    if (def.default !== undefined) {
+      output += ` ${styleText('italic', `(default: ${def.default})`)}`;
+    }
+    output += '\n';
+  }
+  output += '\n  ' + styleText('italic', 'Variables are also loaded from a .env file in the current directory.') + '\n';
+  return output;
+}
+
 /**
  * Recursively collect all commands and subcommands from a Commander program
  */

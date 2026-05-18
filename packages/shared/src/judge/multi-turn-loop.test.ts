@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WorkerResult } from "../types/types.js";
 // Mock BlobStorage
 const mockUploadFile = vi.fn();
@@ -256,6 +256,8 @@ describe("runMultiTurnLoop — tool call extraction", () => {
       blobStorage: {
         uploadFile: vi.fn().mockResolvedValue("https://blob/har"),
         uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
+        writeToolCalls: vi.fn().mockResolvedValue(undefined),
+        getToolCallsBlobUrl: vi.fn().mockReturnValue("https://blob/tool-calls.jsonl"),
       } as any,
       requestId: "req1",
       runId: "attempt-1",
@@ -265,7 +267,7 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     };
   }
 
-  it("extracts tool calls from HAR and stores them on the turn", async () => {
+  it("extracts tool calls from HAR and writes them to a JSONL blob, recording url + count on the turn", async () => {
     const harFile = { log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } };
     mockSanitizeHarFile.mockResolvedValue(harFile);
 
@@ -284,11 +286,16 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     const result = await runMultiTurnLoop(config as any);
 
     expect(result.passed).toBe(true);
-    expect(result.turns[0].toolCalls).toEqual(expectedToolCalls);
+    expect(result.turns[0].toolCalls).toBeUndefined();
+    expect(result.turns[0].toolCallsUrl).toBe("https://blob/tool-calls.jsonl");
+    expect(result.turns[0].toolCallCount).toBe(2);
     expect(mockExtractToolCalls).toHaveBeenCalledWith(harFile);
+    const writeToolCalls = (config.blobStorage as any).writeToolCalls;
+    expect(writeToolCalls).toHaveBeenCalledTimes(1);
+    expect(writeToolCalls).toHaveBeenCalledWith("req1", "attempt-1", 1, expectedToolCalls);
   });
 
-  it("does not include toolCalls when no HAR file is available", async () => {
+  it("does not record toolCallsUrl when no HAR file is available", async () => {
     const config = makeConfig();
     (config.processor as any).processMessage.mockResolvedValue({
       response: "done",
@@ -297,10 +304,13 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     const result = await runMultiTurnLoop(config as any);
 
     expect(result.turns[0].toolCalls).toBeUndefined();
+    expect(result.turns[0].toolCallsUrl).toBeUndefined();
+    expect(result.turns[0].toolCallCount).toBeUndefined();
     expect(mockExtractToolCalls).not.toHaveBeenCalled();
+    expect((config.blobStorage as any).writeToolCalls).not.toHaveBeenCalled();
   });
 
-  it("does not include toolCalls when extraction returns empty array", async () => {
+  it("does not record toolCallsUrl when extraction returns empty array", async () => {
     mockSanitizeHarFile.mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
     mockExtractToolCalls.mockReturnValue([]);
 
@@ -313,6 +323,9 @@ describe("runMultiTurnLoop — tool call extraction", () => {
     const result = await runMultiTurnLoop(config as any);
 
     expect(result.turns[0].toolCalls).toBeUndefined();
+    expect(result.turns[0].toolCallsUrl).toBeUndefined();
+    expect(result.turns[0].toolCallCount).toBeUndefined();
+    expect((config.blobStorage as any).writeToolCalls).not.toHaveBeenCalled();
   });
 
   it("logs warning but continues when tool call extraction fails", async () => {
@@ -329,7 +342,8 @@ describe("runMultiTurnLoop — tool call extraction", () => {
 
     expect(result.passed).toBe(true);
     expect(result.turns[0].toolCalls).toBeUndefined();
-    expect(mockLog).toHaveBeenCalledWith("warn", expect.stringContaining("Failed to extract tool calls"), expect.anything());
+    expect(result.turns[0].toolCallsUrl).toBeUndefined();
+    expect(mockLog).toHaveBeenCalledWith("warn", expect.stringContaining("Failed to extract or persist tool calls"), expect.anything());
   });
 });
 
@@ -596,5 +610,109 @@ describe("runMultiTurnLoop — optional criteria (issue #605)", () => {
         snapshotUrl: "https://blob/snapshot",
       }),
     );
+  });
+});
+
+describe("runMultiTurnLoop — per-iteration timeout", () => {
+  const mockLog = vi.fn().mockResolvedValue(undefined);
+  const mockOnTurnComplete = vi.fn().mockResolvedValue(undefined);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let MULTI_TURN_DEFAULTS_REF: any;
+  let originalTimeout: number;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockSanitizeHarFile
+      .mockReset()
+      .mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
+    mockExtractToolCalls.mockReset().mockReturnValue([]);
+    const mod = await import("../types/types.js");
+    MULTI_TURN_DEFAULTS_REF = mod.MULTI_TURN_DEFAULTS;
+    originalTimeout = MULTI_TURN_DEFAULTS_REF.ITERATION_TIMEOUT_MS;
+  });
+
+  afterEach(() => {
+    MULTI_TURN_DEFAULTS_REF.ITERATION_TIMEOUT_MS = originalTimeout;
+  });
+
+  function makeConfig(overrides: Record<string, unknown> = {}) {
+    return {
+      processor: {
+        workerName: "test-worker",
+        processMessage: vi.fn().mockResolvedValue({ response: "done" } satisfies WorkerResult),
+      },
+      task: "Do something",
+      criteria: ["check"],
+      maxIterations: 3,
+      workspacePath: "/workspace",
+      // Judge always fails so the loop continues to the next iteration unless aborted.
+      judgeClient: { evaluate: vi.fn().mockResolvedValue({ passed: false, feedback: "try again" }) } as any,
+      blobStorage: {
+        uploadFile: vi.fn().mockResolvedValue("https://blob/x"),
+        uploadWorkspaceSnapshot: vi.fn().mockResolvedValue("https://blob/snapshot"),
+      } as any,
+      requestId: "req1",
+      runId: "attempt-1",
+      log: mockLog,
+      onTurnComplete: mockOnTurnComplete,
+      ...overrides,
+    };
+  }
+
+  it("aborts after the iteration that exceeds the per-iteration budget", async () => {
+    // Tiny budget — any iteration with a small delay will exceed it.
+    MULTI_TURN_DEFAULTS_REF.ITERATION_TIMEOUT_MS = 5;
+
+    const processMessage = vi.fn().mockImplementation(
+      async () => {
+        await new Promise((r) => setTimeout(r, 30));
+        return { response: "done" } satisfies WorkerResult;
+      },
+    );
+    const config = makeConfig({
+      processor: { workerName: "test-worker", processMessage },
+    });
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.passed).toBe(false);
+    expect(result.hadError).toBe(true);
+    expect(result.finalResult).toMatch(/Iteration 1 exceeded timeout/);
+    // Iteration 1 completed (turn recorded), iteration 2 never started.
+    expect(result.turns).toHaveLength(1);
+    expect(processMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT abort when individual iterations stay under budget even if cumulative time exceeds it (regression for cumulative-budget bug)", async () => {
+    // Budget per iteration: 50ms. Each iteration sleeps 10ms (well under budget).
+    // With the old cumulative-budget bug, three iterations sleeping 10ms each plus
+    // overhead could trip a small budget. This test ensures only per-iteration
+    // duration matters.
+    MULTI_TURN_DEFAULTS_REF.ITERATION_TIMEOUT_MS = 50;
+
+    const processMessage = vi.fn().mockImplementation(
+      async () => {
+        await new Promise((r) => setTimeout(r, 10));
+        return { response: "done" } satisfies WorkerResult;
+      },
+    );
+    // Judge passes on the 3rd iteration so we know the loop ran to completion.
+    const evaluate = vi
+      .fn()
+      .mockResolvedValueOnce({ passed: false, feedback: "again" })
+      .mockResolvedValueOnce({ passed: false, feedback: "again" })
+      .mockResolvedValueOnce({ passed: true, feedback: "ok" });
+    const config = makeConfig({
+      processor: { workerName: "test-worker", processMessage },
+      judgeClient: { evaluate } as any,
+      maxIterations: 3,
+    });
+
+    const result = await runMultiTurnLoop(config as any);
+
+    expect(result.hadError).toBe(false);
+    expect(result.passed).toBe(true);
+    expect(result.turns).toHaveLength(3);
+    expect(processMessage).toHaveBeenCalledTimes(3);
   });
 });

@@ -64,9 +64,21 @@ The Token Manager uses a **capability-based model** where tokens are associated 
 | Capability | Description |
 |------------|-------------|
 | `github-models` | Access to GitHub Models API (GPT-4o, etc.) |
+| `github-public-api` | Read-only access to the GitHub REST API for public repos (skill discovery / resolution) |
 | `copilot-sdk` | GitHub Copilot SDK integration |
 | `copilot-cli` | GitHub Copilot CLI authentication |
 | `claude-code-cli` | Anthropic Claude Code CLI |
+
+`github-public-api` is granted to **any** valid GitHub bearer token (PAT classic, PAT fine-grained, OAuth, scopeless OAuth) since public-repo reads require no scopes.
+
+### Acquisition Fallback Chain
+
+`TokenManagerClient.acquireToken(capability)` resolves a token in three tiers, returning the first one that succeeds:
+
+1. **Capability-specific env var** — e.g. `GITHUB_MODELS_TOKEN` for `github-models`, `ANTHROPIC_API_KEY` for `claude-code-cli`. Mapping lives in `KEY_CAPABILITY_ENV_VARS`.
+3. **Token Manager HTTP service** — `GET /tokens/acquire?capability=...` against `TOKEN_MANAGER_URL`. This is the only tier used in production K8s deployments, where no static token env vars are mounted.
+
+The API's discovery endpoint uses this chain via the `github-api-token` helper to acquire a `github-public-api` token per call, so each request can be served by a different token in round-robin.
 
 ### Token Type + Permissions → Capabilities Matrix
 

@@ -48,10 +48,13 @@ impl TestGateway {
         let har_plugin: Arc<dyn gateway::plugin::ProxyPlugin> =
             Arc::new(HarPlugin::new(har_dir.clone()));
         let registry = Arc::new(PluginRegistry::new(vec![har_plugin]));
+        let iteration_store: Arc<dyn gateway::iteration_store::IterationStore> =
+            Arc::new(gateway::iteration_store::LocalIterationStore::new());
         let session_manager = Arc::new(SessionManager::new(
             registry.clone(),
             Duration::from_secs(300),
             100,
+            iteration_store,
         ));
 
         let http_client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new())

@@ -87,7 +87,16 @@ pub async fn post_create_session(
         return (StatusCode::BAD_REQUEST, "id must be a valid UUID").into_response();
     }
 
-    let plugin_settings = body.plugins.unwrap_or_default();
+    let mut plugin_settings = body.plugins.unwrap_or_default();
+
+    // Propagate the top-level maxSessionDurationSecs into plugin_settings
+    // so session_ttl() and PluginRegistry can access it uniformly.
+    if let Some(secs) = body.max_session_duration_secs {
+        plugin_settings.insert(
+            "_maxSessionDurationSecs".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(secs)),
+        );
+    }
 
     info!("Creating session {}", session_id);
 
@@ -115,6 +124,10 @@ pub async fn post_create_session(
 pub struct SessionCreateRequest {
     pub id: String,
     pub plugins: Option<HashMap<String, serde_json::Value>>,
+    /// Maximum session duration in seconds. Used as the TTL for Redis keys.
+    /// Falls back to `plugins.plugin.max_session_duration_secs` then 3600s.
+    #[serde(rename = "maxSessionDurationSecs")]
+    pub max_session_duration_secs: Option<u64>,
 }
 
 /// Response body after session creation.
@@ -185,6 +198,59 @@ pub async fn get_cacert(State(state): State<Arc<ApiState>>) -> impl IntoResponse
     )
 }
 
+/// Query parameters for `POST /api/v1/sessions/:id/rotate`.
+#[derive(Deserialize)]
+pub struct RotateQuery {
+    /// Expected current iteration (CAS guard).
+    pub expected: u32,
+}
+
+/// JSON response for rotate.
+#[derive(Serialize)]
+pub struct RotateResponse {
+    pub iteration: u32,
+}
+
+/// POST /api/v1/sessions/:id/rotate?expected=N — rotate to a new iteration.
+///
+/// CAS semantics: if the session's current iteration == expected, bump to
+/// expected+1 and return 200 with the new iteration number. If there's a
+/// mismatch, return 409 with the actual value.
+pub async fn post_rotate(
+    Path(session_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<RotateQuery>,
+    State(state): State<Arc<ApiState>>,
+) -> impl IntoResponse {
+    use crate::iteration_store::CasResult;
+
+    match state
+        .session_manager
+        .rotate(&session_id, query.expected)
+        .await
+    {
+        Ok(CasResult::Ok(new_iteration)) => {
+            info!(
+                "Session {} rotated from iter {} to {}",
+                session_id, query.expected, new_iteration
+            );
+            (
+                StatusCode::OK,
+                Json(RotateResponse {
+                    iteration: new_iteration,
+                }),
+            )
+                .into_response()
+        }
+        Ok(CasResult::Conflict(actual)) => (
+            StatusCode::CONFLICT,
+            Json(RotateResponse { iteration: actual }),
+        )
+            .into_response(),
+        Err(crate::session::SessionError::NotFound) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,6 +262,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::ca::CertificateAuthority;
+    use crate::iteration_store::LocalIterationStore;
     use crate::plugin::PluginRegistry;
     use crate::session::SessionManager;
 
@@ -204,6 +271,7 @@ mod tests {
         let session_routes = Router::new()
             .route("/", get(get_session))
             .route("/stop", post(post_stop_session))
+            .route("/rotate", post(post_rotate))
             .route("/", delete(delete_session))
             .with_state(state.clone());
 
@@ -224,10 +292,13 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let ca = Arc::new(CertificateAuthority::new(tmp.path(), 10).unwrap());
         let registry = Arc::new(PluginRegistry::new(vec![]));
+        let iteration_store =
+            Arc::new(LocalIterationStore::new()) as Arc<dyn crate::iteration_store::IterationStore>;
         let mgr = Arc::new(SessionManager::new(
             registry,
             std::time::Duration::from_secs(300),
             100,
+            iteration_store,
         ));
         // Leak the TempDir so the CA directory lives for the test duration.
         // This is fine for tests — the OS cleans up on process exit.
@@ -350,10 +421,13 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let ca = Arc::new(CertificateAuthority::new(tmp.path(), 10).unwrap());
         let registry = Arc::new(PluginRegistry::new(vec![]));
+        let iteration_store =
+            Arc::new(LocalIterationStore::new()) as Arc<dyn crate::iteration_store::IterationStore>;
         let mgr = Arc::new(SessionManager::new(
             registry,
             std::time::Duration::from_secs(300),
             1, // max 1 session
+            iteration_store,
         ));
         std::mem::forget(tmp);
         let state = Arc::new(ApiState {
@@ -523,6 +597,61 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), 409);
+    }
+
+    // --- Rotate iteration ---
+
+    #[tokio::test]
+    async fn rotate_session_returns_200_with_next_iteration() {
+        let state = test_state();
+        let id = uuid::Uuid::new_v4().to_string();
+        state
+            .session_manager
+            .create_session(id.clone(), HashMap::new())
+            .await
+            .unwrap();
+
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/api/v1/sessions/{}/rotate?expected=1", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), 200);
+        let body = body_string(resp).await;
+        assert!(body.contains("\"iteration\":2"));
+    }
+
+    #[tokio::test]
+    async fn rotate_session_conflict_returns_409_with_actual_iteration() {
+        let state = test_state();
+        let id = uuid::Uuid::new_v4().to_string();
+        state
+            .session_manager
+            .create_session(id.clone(), HashMap::new())
+            .await
+            .unwrap();
+
+        // First rotate succeeds to iteration 2.
+        state.session_manager.rotate(&id, 1).await.unwrap();
+
+        let app = test_router(state);
+        let resp = app
+            .oneshot(
+                Request::post(format!("/api/v1/sessions/{}/rotate?expected=1", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), 409);
+        let body = body_string(resp).await;
+        assert!(body.contains("\"iteration\":2"));
     }
 
     // --- Delete session ---

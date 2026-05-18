@@ -19,7 +19,7 @@ export type KeyType =
  * Workers acquire keys by capability, not by type.
  */
 export type KeyCapability =
-  "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
+  "github-models" | "github-public-api" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
 
 /**
  * Validation status of a key.
@@ -126,6 +126,7 @@ export const KEY_CAPABILITY_ENV_VARS: Record<KeyCapability, string> = {
   "copilot-cli": "GITHUB_TOKEN",
   "copilot-models": "GITHUB_TOKEN",
   "github-models": "GITHUB_TOKEN",
+  "github-public-api": "GITHUB_TOKEN",
   "claude-code-cli": "ANTHROPIC_API_KEY",
   "anthropic-api": "ANTHROPIC_API_KEY",
 };

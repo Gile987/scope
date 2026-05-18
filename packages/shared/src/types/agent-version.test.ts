@@ -78,7 +78,7 @@ describe("CodingAgentDocument with versions", () => {
   it("supports versions array", () => {
     const agent: CodingAgentDocument = {
       _id: "coder-acp-copilot",
-      name: "GitHub Copilot (ACP)",
+      name: "GitHub Copilot CLI",
       supportedModels: ["gpt-4.1"],
       createdAt: new Date(),
       versions: [
@@ -103,7 +103,7 @@ describe("CodingAgentDocument with versions", () => {
   it("allows empty versions array", () => {
     const agent: CodingAgentDocument = {
       _id: "coder-acp-copilot",
-      name: "GitHub Copilot (ACP)",
+      name: "GitHub Copilot CLI",
       supportedModels: [],
       createdAt: new Date(),
       versions: [],
@@ -115,7 +115,7 @@ describe("CodingAgentDocument with versions", () => {
   it("allows undefined versions (backward compatible)", () => {
     const agent: CodingAgentDocument = {
       _id: "coder-acp-copilot",
-      name: "GitHub Copilot (ACP)",
+      name: "GitHub Copilot CLI",
       supportedModels: [],
       createdAt: new Date(),
     };

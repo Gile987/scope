@@ -3,8 +3,8 @@
 
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import request from "supertest";
-import { app, _injectTestDependencies } from "./index.js";
-import { createAllMockDependencies } from "./test-helpers.js";
+import { app, _injectTestDependencies } from "../../index.js";
+import { createAllMockDependencies } from "../../test-helpers.js";
 import type { LogEvent } from "shared";
 
 // ─── Module stubs (required before app import resolves) ────────────────────

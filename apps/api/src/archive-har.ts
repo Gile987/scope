@@ -40,18 +40,21 @@ export function blobNameFromLogsUrl(url: string): string | null {
 }
 
 /**
- * Deep-clone a run resource and rewrite `harUrl` and `rawChatUrl` fields to relative archive paths.
+ * Deep-clone a run resource and rewrite `harUrl`, `rawChatUrl`,
+ * `chatResultUrl`, and `toolCallsUrl` fields to relative archive paths.
  *
- * - `run.harUrl`            → `"run.har"`
- * - Per-turn `harUrl`        → `"iteration-{N}.har"`
- * - `run.rawChatUrl`         → `"run.chat-export.json"`
- * - Per-turn `rawChatUrl`    → `"iteration-{N}.chat-export.json"`
+ * - `run.harUrl`              → `"run.har"`
+ * - Per-turn `harUrl`          → `"iteration-{N}.har"`
+ * - `run.rawChatUrl`           → `"run.chat-export.json"`
+ * - Per-turn `rawChatUrl`      → `"iteration-{N}.chat-export.json"`
+ * - Per-turn `chatResultUrl`   → `"iteration-{N}.chat-result.json"`
+ * - Per-turn `toolCallsUrl`    → `"iteration-{N}.tool-calls.jsonl"`
  */
 export function rewriteHarUrlsForArchive<T extends {
   run?: {
     harUrl?: string;
     rawChatUrl?: string;
-    turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; [key: string]: unknown }>;
+    turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; chatResultUrl?: string; toolCallsUrl?: string; [key: string]: unknown }>;
     [key: string]: unknown;
   };
 }>(resource: T): T {
@@ -70,6 +73,12 @@ export function rewriteHarUrlsForArchive<T extends {
         }
         if (turn.rawChatUrl) {
           turn.rawChatUrl = `iteration-${turn.iteration}.chat-export.json`;
+        }
+        if (turn.chatResultUrl) {
+          turn.chatResultUrl = `iteration-${turn.iteration}.chat-result.json`;
+        }
+        if (turn.toolCallsUrl) {
+          turn.toolCallsUrl = `iteration-${turn.iteration}.tool-calls.jsonl`;
         }
       }
     }
@@ -227,6 +236,112 @@ export async function uploadBundledChatFiles(opts: {
   return topLevelChatUrl;
 }
 
+/** Describes a per-iteration tool-calls JSONL file found in an extracted archive directory. */
+export interface DetectedToolCallsFile {
+  fileName: string;
+  /** Iteration number — tool-calls JSONL is always per-iteration. */
+  iteration: number;
+}
+
+/**
+ * Scan a list of filenames and return tool-calls JSONL files that follow the
+ * bundled naming convention: `iteration-{N}.tool-calls.jsonl`.
+ */
+export function detectBundledToolCallsFiles(fileNames: string[]): DetectedToolCallsFile[] {
+  const results: DetectedToolCallsFile[] = [];
+  for (const name of fileNames) {
+    const m = name.match(/^iteration-(\d+)\.tool-calls\.jsonl$/);
+    if (m) {
+      results.push({ fileName: name, iteration: parseInt(m[1], 10) });
+    }
+  }
+  return results;
+}
+
+/**
+ * Upload detected tool-calls JSONL files from an extracted archive directory
+ * to blob storage. Mutates each matching turn's `toolCallsUrl` to the new blob URL.
+ *
+ * Note: the archived files are uploaded as block blobs (snapshot of the JSONL)
+ * rather than append blobs — re-imported runs are already complete, so the
+ * append semantics aren't needed.
+ */
+export async function uploadBundledToolCallsFiles(opts: {
+  toolCallsFiles: DetectedToolCallsFile[];
+  runDir: string;
+  runId: string;
+  turns: Array<{ iteration: number; toolCallsUrl?: string; [key: string]: unknown }>;
+  containerClient: BlobUploader;
+}): Promise<void> {
+  const { toolCallsFiles, runDir, runId, turns, containerClient } = opts;
+  const { join } = await import("node:path");
+
+  for (const tc of toolCallsFiles) {
+    const filePath = join(runDir, tc.fileName);
+    const blobName = `${runId}/iteration-${tc.iteration}/tool-calls.jsonl`;
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    await blockBlobClient.uploadFile(filePath, {
+      blobHTTPHeaders: { blobContentType: "application/x-ndjson" },
+      tags: { requestId: runId, iteration: String(tc.iteration) },
+    });
+    const turn = turns.find(t => t.iteration === tc.iteration);
+    if (turn) {
+      turn.toolCallsUrl = blockBlobClient.url;
+    }
+  }
+}
+
+/** Describes a per-iteration chat-result JSON file found in an extracted archive directory. */
+export interface DetectedChatResultFile {
+  fileName: string;
+  /** Iteration number — chat-result is always per-iteration. */
+  iteration: number;
+}
+
+/**
+ * Scan a list of filenames and return chat-result JSON files that follow the
+ * bundled naming convention: `iteration-{N}.chat-result.json`.
+ */
+export function detectBundledChatResultFiles(fileNames: string[]): DetectedChatResultFile[] {
+  const results: DetectedChatResultFile[] = [];
+  for (const name of fileNames) {
+    const m = name.match(/^iteration-(\d+)\.chat-result\.json$/);
+    if (m) {
+      results.push({ fileName: name, iteration: parseInt(m[1], 10) });
+    }
+  }
+  return results;
+}
+
+/**
+ * Upload detected chat-result JSON files from an extracted archive directory
+ * to blob storage. Mutates each matching turn's `chatResultUrl` to the new blob URL.
+ */
+export async function uploadBundledChatResultFiles(opts: {
+  chatResultFiles: DetectedChatResultFile[];
+  runDir: string;
+  runId: string;
+  turns: Array<{ iteration: number; chatResultUrl?: string; [key: string]: unknown }>;
+  containerClient: BlobUploader;
+}): Promise<void> {
+  const { chatResultFiles, runDir, runId, turns, containerClient } = opts;
+  const { join } = await import("node:path");
+
+  for (const cr of chatResultFiles) {
+    const filePath = join(runDir, cr.fileName);
+    const blobName = `${runId}/iteration-${cr.iteration}/chat-result.json`;
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    await blockBlobClient.uploadFile(filePath, {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+      tags: { requestId: runId, iteration: String(cr.iteration) },
+    });
+    const turn = turns.find(t => t.iteration === cr.iteration);
+    if (turn) {
+      turn.chatResultUrl = blockBlobClient.url;
+    }
+  }
+}
+
 /** Minimal interface for blob download needed by packRunIntoTar. */
 export interface BlobDownloader {
   getBlockBlobClient(blobName: string): {
@@ -255,6 +370,8 @@ export interface ArchivableRun {
       snapshotUrl?: string;
       harUrl?: string;
       rawChatUrl?: string;
+      chatResultUrl?: string;
+      toolCallsUrl?: string;
       [key: string]: unknown;
     }>;
     [key: string]: unknown;
@@ -356,6 +473,51 @@ export async function packRunIntoTar(
       if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
       const entry = pack.entry({ name: entryName, size: downloadResponse.contentLength });
       await pipeline(downloadResponse.readableStreamBody, entry);
+    } catch (blobError) {
+      if (isBlobNotFound(blobError)) continue;
+      throw blobError;
+    }
+  }
+
+  // Bundle IChatAgentResult2 envelope files into the archive (#811)
+  const chatResultEntries: Array<{ url: string; entryName: string }> = [];
+  for (const turn of turns) {
+    if (turn.chatResultUrl) chatResultEntries.push({ url: turn.chatResultUrl, entryName: `${id}/iteration-${turn.iteration}.chat-result.json` });
+  }
+
+  for (const { url, entryName } of chatResultEntries) {
+    try {
+      const blobName = blobNameFromSnapshotsUrl(url);
+      if (!blobName) continue;
+      const blobClient = container.getBlockBlobClient(blobName);
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
+      const entry = pack.entry({ name: entryName, size: downloadResponse.contentLength });
+      await pipeline(downloadResponse.readableStreamBody, entry);
+    } catch (blobError) {
+      if (isBlobNotFound(blobError)) continue;
+      throw blobError;
+    }
+  }
+
+  // Bundle per-iteration tool-calls JSONL files into the archive.
+  // Stored as append blobs in the snapshots container, so use getBlobClient
+  // (type-agnostic) — getBlockBlobClient.download() returns contentLength:
+  // undefined for append blobs and the entry would be silently skipped.
+  for (const turn of turns) {
+    if (!turn.toolCallsUrl) continue;
+    try {
+      const blobName = blobNameFromSnapshotsUrl(turn.toolCallsUrl);
+      if (!blobName) continue;
+      const blobClient = container.getBlobClient(blobName);
+      const downloadResponse = await blobClient.download();
+      const { readableStreamBody, contentLength } = downloadResponse;
+      if (!readableStreamBody || contentLength == null || contentLength === 0) continue;
+      const entry = pack.entry({
+        name: `${id}/iteration-${turn.iteration}.tool-calls.jsonl`,
+        size: contentLength,
+      });
+      await pipeline(readableStreamBody, entry);
     } catch (blobError) {
       if (isBlobNotFound(blobError)) continue;
       throw blobError;

@@ -184,6 +184,7 @@ services:
       AZURE_STORAGE_QUEUE_WORKER_1: queue-coder-acp-claude-code
       AZURE_STORAGE_QUEUE_WORKER_2: queue-coder-acp-copilot
       AZURE_STORAGE_QUEUE_REPORT: report-queue
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_MODELS_API_KEY: ${GITHUB_MODELS_API_KEY:-${GITHUB_TOKEN}}
       LLM_MODEL: ${LLM_MODEL:-gpt-4.1}
       GIT_COMMIT: ${GIT_COMMIT:-development}
@@ -235,13 +236,13 @@ services:
 
 
         # Upsert agent: coder-acp-copilot
-        post "/api/v1/agents" '{"_id":"coder-acp-copilot","name":"Copilot (ACP)","description":"GitHub Copilot coding agent via ACP protocol","modelProvider":"github-copilot"}'
+        post "/api/v1/agents" '{"_id":"coder-acp-copilot","name":"GitHub Copilot CLI","description":"GitHub Copilot coding agent via ACP protocol","modelProvider":"github-copilot"}'
 
         # Register dev version: coder-acp-copilot
         post "/api/v1/agents/coder-acp-copilot/versions" '{"agentVersion":"copilot-dev","workerVersion":"copilot-dev-local-dev","components":{"COPILOT_CLI_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-copilot"}'
 
         # Upsert agent: coder-acp-claude-code
-        post "/api/v1/agents" '{"_id":"coder-acp-claude-code","name":"Claude Code (ACP)","description":"Anthropic Claude Code coding agent via ACP protocol","modelProvider":"anthropic"}'
+        post "/api/v1/agents" '{"_id":"coder-acp-claude-code","name":"Claude Code CLI","description":"Anthropic Claude Code coding agent via ACP protocol","modelProvider":"anthropic"}'
 
         # Register dev version: coder-acp-claude-code
         post "/api/v1/agents/coder-acp-claude-code/versions" '{"agentVersion":"claude-agent-acp-dev-sdk-dev","workerVersion":"claude-agent-acp-dev-sdk-dev-local-dev","components":{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-claude-code"}'
@@ -424,7 +425,7 @@ services:
       context: .
       dockerfile: apps/workers/coder-acp-claude-code/Dockerfile
       args:
-        CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION}
+        CLAUDE_CODE_ACP_VERSION: ${CLAUDE_CODE_ACP_VERSION:-}
     profiles: [claude-code]
     environment:
       <<: *worker-env
@@ -434,10 +435,8 @@ services:
       # DevProxy integration (enabled by default when using claude-code profile)
       DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
       DEV_PROXY_API_URL: http://devproxy-claude-code:18897
+      DEV_PROXY_URL: http://devproxy-claude-code:18000
       DEV_PROXY_HAR_DIR: /har-output
-      HTTP_PROXY: http://devproxy-claude-code:18000
-      HTTPS_PROXY: http://devproxy-claude-code:18000
-      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-claude-code,mcp-gateway-claude-code"
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
       MCP_GATEWAY_URL: http://mcp-gateway-claude-code:8080
     volumes:
@@ -513,6 +512,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/coder-acp-copilot/Dockerfile
+      args:
+        COPILOT_CLI_VERSION: ${COPILOT_CLI_VERSION:-}
     profiles: [copilot]
     environment:
       <<: *worker-env
@@ -522,10 +523,8 @@ services:
       # DevProxy integration (enabled by default when using copilot profile)
       DEV_PROXY_ENABLED: "${DEV_PROXY_ENABLED:-true}"
       DEV_PROXY_API_URL: http://devproxy-copilot:18897
+      DEV_PROXY_URL: http://devproxy-copilot:18000
       DEV_PROXY_HAR_DIR: /har-output
-      HTTP_PROXY: http://devproxy-copilot:18000
-      HTTPS_PROXY: http://devproxy-copilot:18000
-      NO_PROXY: "localhost,127.0.0.1,mongodb,redis,azurite,judge,api,token-manager,devproxy-copilot,mcp-gateway-copilot"
       NODE_EXTRA_CA_CERTS: /tmp/dev-proxy-ca.crt
       MCP_GATEWAY_URL: http://mcp-gateway-copilot:8080
     volumes:
@@ -542,13 +541,14 @@ services:
 
   # DevProxy sidecar for Copilot worker (HAR capture)
   devproxy-copilot:
-    image: ghcr.io/dotnet/dev-proxy:2.1.0
+    build:
+      context: ./apps/workers/coder-acp-copilot
+      dockerfile: devproxy.Dockerfile
     profiles: [copilot]
     user: "1000:1000"
     working_dir: /har-output
-    command: ["--config-file", "/config/devproxyrc.json", "--record"]
+    command: ["--config-file", "/etc/devproxy/devproxyrc.json", "--record"]
     volumes:
-      - ./apps/workers/coder-acp-copilot/devproxy-config.json:/config/devproxyrc.json:ro
       - copilot_har_output:/har-output
       - copilot_devproxy_cert:/home/devproxy/.config/dev-proxy/rootCert
     ports:
@@ -558,7 +558,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 10s
+      # First run generates the root CA into the cert volume, which can
+      # take 1-2 minutes before the API listener accepts requests.
+      start_period: 180s
     depends_on:
       devproxy-copilot-init:
         condition: service_completed_successfully

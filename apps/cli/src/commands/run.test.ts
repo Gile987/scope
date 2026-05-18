@@ -156,3 +156,81 @@ describe("run list", () => {
     expect(output).not.toContain("Found 1 request(s):");
   });
 });
+
+describe("run retry", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders attempt number when API returns it as a number (regression: styleText rejects non-strings)", async () => {
+    mockFetchWith({
+      requestId: "req-retry-1",
+      runId: "run-retry-1",
+      attemptNumber: 8,
+    });
+
+    const lines: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((...parts: unknown[]) => {
+      lines.push(parts.map(String).join(" "));
+    });
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code}) called`);
+    }) as never);
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        ["run", "retry", "-i", "req-retry-1", "-u", "http://localhost:3100"],
+        { from: "user" },
+      );
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    const output = lines.join("\n");
+    expect(output).toContain("Retry started");
+    expect(output).toContain("Attempt:");
+    expect(output).toContain("8");
+  });
+
+  it("sends force=true when --force is provided", async () => {
+    mockFetchWith({
+      requestId: "req-retry-force",
+      runId: "run-retry-force",
+      attemptNumber: 2,
+    });
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code}) called`);
+    }) as never);
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        ["run", "retry", "-i", "req-retry-force", "--force", "-u", "http://localhost:3100"],
+        { from: "user" },
+      );
+    } finally {
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:3100/api/v1/requests/req-retry-force/retry",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ force: true }),
+      }),
+    );
+  });
+});

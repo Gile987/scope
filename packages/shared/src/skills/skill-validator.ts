@@ -16,10 +16,17 @@ export interface SkillValidationError {
   message: string;
 }
 
+/** A single validation warning (non-blocking) */
+export interface SkillValidationWarning {
+  field: string;
+  message: string;
+}
+
 /** Result of validating SKILL.md frontmatter */
 export interface SkillValidationResult {
   valid: boolean;
   errors: SkillValidationError[];
+  warnings: SkillValidationWarning[];
 }
 
 /**
@@ -43,6 +50,7 @@ export function validateSkillFrontmatter(
   dirName?: string
 ): SkillValidationResult {
   const errors: SkillValidationError[] = [];
+  const warnings: SkillValidationWarning[] = [];
 
   // name: required, 1-64 chars, lowercase + hyphens, no leading/trailing/consecutive hyphens
   if (!frontmatter.name) {
@@ -58,7 +66,7 @@ export function validateSkillFrontmatter(
       errors.push({ field: 'name', message: 'name must not contain consecutive hyphens (--)' });
     }
     if (dirName && frontmatter.name !== dirName) {
-      errors.push({ field: 'name', message: `name "${frontmatter.name}" must match parent directory name "${dirName}"` });
+      warnings.push({ field: 'name', message: `name "${frontmatter.name}" does not match parent directory name "${dirName}" (spec recommends they match)` });
     }
   }
 
@@ -77,5 +85,6 @@ export function validateSkillFrontmatter(
   return {
     valid: errors.length === 0,
     errors,
+    warnings,
   };
 }

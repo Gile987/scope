@@ -20,6 +20,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "_id": {
             "type": "string",
           },
+          "available": {
+            "type": "boolean",
+          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -298,6 +301,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "aiCallCount": {
             "type": "number",
           },
+          "chatResultFormat": {
+            "type": "string",
+          },
+          "chatResultUrl": {
+            "type": "string",
+          },
           "codingAgentResponse": {
             "type": "string",
           },
@@ -348,6 +357,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "tokenUsage": {
             "$ref": "#/components/schemas/TokenUsage",
           },
+          "toolCallCount": {
+            "type": "number",
+          },
           "toolCalls": {
             "items": {
               "properties": {
@@ -377,6 +389,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "toolCallsUrl": {
+            "type": "string",
+          },
           "videoUrls": {
             "items": {
               "type": "string",
@@ -386,7 +401,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "iteration",
-          "codingAgentResponse",
           "judgeFeedback",
           "snapshotUrl",
           "passed",
@@ -398,6 +412,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "properties": {
           "_id": {
             "type": "string",
+          },
+          "available": {
+            "type": "boolean",
           },
           "defaultModel": {
             "type": "string",
@@ -2144,6 +2161,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "harUrl": {
             "type": "string",
           },
+          "lastHeartbeatAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
           "logsUrl": {
             "type": "string",
           },
@@ -2242,6 +2266,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "worker": {
+            "properties": {
+              "instanceId": {
+                "type": "string",
+              },
+              "podName": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "instanceId",
+            ],
+            "type": "object",
+          },
           "workerVersion": {
             "type": "string",
           },
@@ -2275,6 +2313,42 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "required": [
           "task",
           "criteria",
+        ],
+        "type": "object",
+      },
+      "SkillDiscoveryResult": {
+        "properties": {
+          "currentRevisionCommitSha": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "existsInLibrary": {
+            "type": "boolean",
+          },
+          "lastImportedAt": {
+            "type": "string",
+          },
+          "latestUpstreamCommitSha": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "skillName": {
+            "type": "string",
+          },
+          "skillPath": {
+            "type": "string",
+          },
+          "updateAvailable": {
+            "type": "boolean",
+          },
+        },
+        "required": [
+          "skillName",
+          "skillPath",
         ],
         "type": "object",
       },
@@ -2401,6 +2475,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "source": {
             "type": "string",
+          },
+          "validationWarnings": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
           },
         },
         "required": [
@@ -2543,6 +2623,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "UpdateAgentInput": {
         "properties": {
+          "available": {
+            "type": "boolean",
+          },
           "defaultModel": {
             "type": "string",
           },
@@ -6479,6 +6562,56 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "turns",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "turnsOp",
+            "required": false,
+            "schema": {
+              "enum": [
+                "eq",
+                "gte",
+                "lte",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "maxIterations",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "maxIterationsOp",
+            "required": false,
+            "schema": {
+              "enum": [
+                "eq",
+                "gte",
+                "lte",
+              ],
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -6654,6 +6787,85 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Bulk soft-delete requests",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/bulk-cancel": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "ids",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cancelled": {
+                      "type": "number",
+                    },
+                    "results": {
+                      "items": {
+                        "properties": {
+                          "cancelled": {
+                            "type": "boolean",
+                          },
+                          "error": {
+                            "type": "string",
+                          },
+                          "id": {
+                            "type": "string",
+                          },
+                          "previousStatus": {
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "id",
+                          "cancelled",
+                        ],
+                        "type": "object",
+                      },
+                      "type": "array",
+                    },
+                    "skipped": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "cancelled",
+                    "skipped",
+                    "results",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Cancel multiple requests",
         "tags": [
           "Requests",
         ],
@@ -6864,6 +7076,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "application/json": {
               "schema": {
                 "properties": {
+                  "force": {
+                    "type": "boolean",
+                  },
                   "ids": {
                     "items": {
                       "type": "string",
@@ -7027,6 +7242,46 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Download full run archive",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/cancel": {
+      "post": {
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                    },
+                    "outcome": {
+                      "type": "string",
+                    },
+                    "previousStatus": {
+                      "type": "string",
+                    },
+                    "status": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "previousStatus",
+                    "status",
+                    "outcome",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Cancel a request (marks as done/failed and signals worker to exit)",
         "tags": [
           "Requests",
         ],
@@ -7249,7 +7504,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "content": {
             "application/json": {
               "schema": {
-                "properties": {},
+                "properties": {
+                  "force": {
+                    "type": "boolean",
+                  },
+                },
                 "type": "object",
               },
             },
@@ -7375,6 +7634,218 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/{id}/runs/{runId}/archive": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Gzipped run archive",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download full run archive for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/har": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "HAR-format JSON file",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download HAR file for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/logs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent event stream of log entries",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Stream logs for a specific attempt (SSE)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/snapshots/{iteration}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "iteration",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Gzipped snapshot archive",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download iteration snapshot for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/tool-calls": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "JSONL stream — one ToolCall per line",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download per-iteration tool-calls JSONL for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/video": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "WebM video recording (supports Range requests)",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download session recording for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/{id}/snapshots/{iteration}": {
       "get": {
         "parameters": [
@@ -7404,6 +7875,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Download iteration snapshot",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/tool-calls": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "JSONL stream — one ToolCall per line",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download per-iteration tool-calls JSONL",
         "tags": [
           "Requests",
         ],
@@ -7443,6 +7940,22 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Import run archive",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/runs/upload-batch": {
+      "post": {
+        "responses": {
+          "207": {
+            "description": "Multi-status: 201 if all runs imported, 400 if none imported, 207 if partial",
+          },
+          "400": {
+            "description": "No archive uploaded, empty archive, or all runs failed",
+          },
+        },
+        "summary": "Import batch run archive",
         "tags": [
           "Requests",
         ],
@@ -7558,6 +8071,48 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Create or import a skill",
+        "tags": [
+          "Skills",
+        ],
+      },
+    },
+    "/api/v1/skills/discover": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SkillDiscoveryResult",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Missing or malformed source parameter",
+          },
+          "404": {
+            "description": "Repository not found",
+          },
+          "502": {
+            "description": "GitHub API error",
+          },
+        },
+        "summary": "Discover skills in a GitHub repository",
         "tags": [
           "Skills",
         ],

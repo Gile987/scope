@@ -28,6 +28,7 @@ const VALID_TYPES: KeyType[] = [
 ];
 const VALID_CAPABILITIES: KeyCapability[] = [
   "github-models",
+  "github-public-api",
   "copilot-models",
   "copilot-sdk",
   "copilot-cli",

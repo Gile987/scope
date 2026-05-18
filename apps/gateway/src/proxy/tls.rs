@@ -118,6 +118,21 @@ async fn relay_request_inner(
 ) -> anyhow::Result<hyper::Response<StreamingBody>> {
     let started_at = chrono::Utc::now();
 
+    // Mark this request as in flight on the session. The guard's drop
+    // decrements the counter and touches the session — this prevents the
+    // background reaper from deleting the session while a long-running
+    // streaming response (e.g. a multi-minute Claude completion) is in
+    // flight. See #818.
+    //
+    // The guard is moved into the response-completion callback below so the
+    // counter stays elevated until the entire response body has streamed to
+    // the client, not just until the upstream headers arrive.
+    let in_flight_guard =
+        crate::session::InFlightGuard::begin(state.session_manager.clone(), session_id.clone());
+    if in_flight_guard.is_none() {
+        anyhow::bail!("session {} no longer exists", session_id);
+    }
+
     // Capture request details
     let (parts, body) = req.into_parts();
     let req_body = body.collect().await?.to_bytes();
@@ -223,6 +238,10 @@ async fn relay_request_inner(
             // timeout fires — leaking fds under load.
             drop(sender);
             state_owned.session_manager.touch(&session_id_owned);
+            // Drop the in-flight guard last: this decrements the counter
+            // and touches the session, allowing the reaper to consider it
+            // again on its next tick.
+            drop(in_flight_guard);
         },
     );
 

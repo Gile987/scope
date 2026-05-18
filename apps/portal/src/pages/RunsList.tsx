@@ -6,6 +6,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useShiftModifier } from "@/hooks/useShiftModifier";
+import { getRetryButtonState } from "@/components/RetryButton";
 import { PlatformIcon } from "@/components/PlatformIcon";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,6 +19,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { RetryConfirmDialog } from "@/components/RetryConfirmDialog";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
@@ -28,7 +31,7 @@ import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, ChevronsLeft, ChevronsRight, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
-import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion } from "@/types";
+import type { Run, BulkResubmitOverrides, McpServerDocument, CodingAgent, BulkReportSummary, RunGroup, GroupByKey, ProfileWithVersion, IterationOp } from "@/types";
 import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
@@ -87,6 +90,10 @@ export function RunsList() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [outcomeFilter, setOutcomeFilter] = useState("all");
   const [taskFilter, setTaskFilter] = useState("all");
+  const [turnsOp, setTurnsOp] = useState<IterationOp>("gte");
+  const [turnsValue, setTurnsValue] = useState("");
+  const [maxIterOp, setMaxIterOp] = useState<IterationOp>("gte");
+  const [maxIterValue, setMaxIterValue] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [groupBy, setGroupBy] = useState<GroupByKey>("none");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -96,10 +103,12 @@ export function RunsList() {
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [priorityDialogOpen, setPriorityDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [bulkRetryConfirmOpen, setBulkRetryConfirmOpen] = useState(false);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [cursorDirection, setCursorDirection] = useState<"after" | "before" | "last" | undefined>(undefined);
   const [isJumpingToLast, setIsJumpingToLast] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(loadHiddenColumns);
+  const isForceRetryModifierActive = useShiftModifier();
   const queryClient = useQueryClient();
 
   const toggleColumn = useCallback((col: ColumnId) => {
@@ -123,6 +132,10 @@ export function RunsList() {
   const effectiveTaskPromptId = taskFilter !== "all" ? taskFilter : taskPromptId;
   const effectiveStatus = statusFilter !== "all" ? statusFilter : undefined;
   const effectiveOutcome = outcomeFilter !== "all" ? outcomeFilter : undefined;
+  const parsedTurns = turnsValue.trim() === "" ? undefined : Number(turnsValue);
+  const effectiveTurns = parsedTurns !== undefined && Number.isFinite(parsedTurns) && parsedTurns >= 0 ? parsedTurns : undefined;
+  const parsedMaxIter = maxIterValue.trim() === "" ? undefined : Number(maxIterValue);
+  const effectiveMaxIter = parsedMaxIter !== undefined && Number.isFinite(parsedMaxIter) && parsedMaxIter >= 0 ? parsedMaxIter : undefined;
 
   const goToLastPage = useCallback(() => {
     if (isJumpingToLast) return;
@@ -132,7 +145,7 @@ export function RunsList() {
   }, [isJumpingToLast]);
 
   const { data: runsResponse, isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
+    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, effectiveTurns, turnsOp, effectiveMaxIter, maxIterOp, cursor, cursorDirection, limit],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId: effectiveTaskPromptId,
@@ -140,6 +153,10 @@ export function RunsList() {
       outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      turns: effectiveTurns,
+      turnsOp: effectiveTurns !== undefined ? turnsOp : undefined,
+      maxIterations: effectiveMaxIter,
+      maxIterationsOp: effectiveMaxIter !== undefined ? maxIterOp : undefined,
       limit: limit,
       last: cursorDirection === "last",
       after: cursorDirection === "after" ? cursor : undefined,
@@ -153,7 +170,7 @@ export function RunsList() {
 
   // Fetch server-side groups when groupBy is active
   const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
-    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, cursor, cursorDirection, limit],
+    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, effectiveTurns, turnsOp, effectiveMaxIter, maxIterOp, cursor, cursorDirection, limit],
     queryFn: () => api.listRunGroups({
       groupBy: groupBy as "task" | "submissionId" | "profile",
       worker: workerFilter === "all" ? undefined : workerFilter,
@@ -162,6 +179,10 @@ export function RunsList() {
       outcome: effectiveOutcome,
       criteria: criteriaState,
       submissionId,
+      turns: effectiveTurns,
+      turnsOp: effectiveTurns !== undefined ? turnsOp : undefined,
+      maxIterations: effectiveMaxIter,
+      maxIterationsOp: effectiveMaxIter !== undefined ? maxIterOp : undefined,
       limit: limit,
       last: cursorDirection === "last",
       after: cursorDirection === "after" ? cursor : undefined,
@@ -186,6 +207,7 @@ export function RunsList() {
     queryFn: api.listAgents,
   });
   const activeAgents = useMemo(() => agents.filter((a) => !a.deletedAt), [agents]);
+  const availableAgents = useMemo(() => activeAgents.filter((a) => a.available !== false), [activeAgents]);
 
   // Fetch profiles for name lookup
   const { data: profiles = [] } = useQuery<ProfileWithVersion[]>({
@@ -298,7 +320,7 @@ export function RunsList() {
   });
 
   const retryMutation = useMutation({
-    mutationFn: api.retryRun,
+    mutationFn: ({ id, force }: { id: string; force?: boolean }) => api.retryRun(id, { force }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["runs"] });
       toast.success(`Retry started — attempt #${data.attemptNumber}`);
@@ -318,6 +340,19 @@ export function RunsList() {
     },
     onError: (error) => {
       toast.error("Failed to pause", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: api.cancelRun,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success("Run cancelled");
+    },
+    onError: (error) => {
+      toast.error("Failed to cancel", {
         description: error instanceof Error ? error.message : "Unknown error",
       });
     },
@@ -350,7 +385,7 @@ export function RunsList() {
   });
 
   const bulkRetryMutation = useMutation({
-    mutationFn: (ids: string[]) => api.bulkRetryRuns(ids),
+    mutationFn: ({ ids, force }: { ids: string[]; force?: boolean }) => api.bulkRetryRuns(ids, { force }),
     onSuccess: ({ retried, skipped }) => {
       queryClient.invalidateQueries({ queryKey: ["runs"] });
       const parts: string[] = [];
@@ -483,36 +518,41 @@ export function RunsList() {
       // Flat list mode — we have full run objects
       const selected = runs.filter((r) => selectedIds.has(r._id));
       const status = (r: Run) => r.run?.status ?? "pending";
+      const doneRuns = selected.filter((r) => status(r) === "done");
       return {
         pausable: selected.filter((r) => status(r) === "pending" || status(r) === "queued").length,
         resumable: selected.filter((r) => status(r) === "paused").length,
         prioritizable: selected.filter((r) => status(r) === "pending" || status(r) === "paused").length,
-        retryable: selected.filter((r) => status(r) === "done").length,
+        retryable: doneRuns.filter((r) => r.run?.outcome !== "succeeded").length,
+        retryableWithForce: doneRuns.length,
       };
     }
     // Grouped mode — derive caps from group-level statusCounts for groups
     // whose runs are (partially or fully) selected
-    let pausable = 0, resumable = 0, prioritizable = 0, retryable = 0;
+    let pausable = 0, resumable = 0, prioritizable = 0, retryable = 0, retryableWithForce = 0;
     for (const group of serverGroups) {
       const selectedInGroup = group.runIds.filter((id) => selectedIds.has(id)).length;
       if (selectedInGroup === 0) continue;
       const sc = group.aggregates.statusCounts;
+      const nonSucceededDoneCount = Math.max(0, (sc.done ?? 0) - (group.aggregates.outcomeCounts.succeeded ?? 0));
       const ratio = selectedInGroup / group.runIds.length;
       if (selectedInGroup === group.runIds.length) {
         // All runs in group selected — use exact counts
         pausable += (sc.pending ?? 0) + (sc.queued ?? 0);
         resumable += sc.paused ?? 0;
         prioritizable += (sc.pending ?? 0) + (sc.paused ?? 0);
-        retryable += sc.done ?? 0;
+        retryable += nonSucceededDoneCount;
+        retryableWithForce += sc.done ?? 0;
       } else {
         // Partial selection — estimate proportionally (round up to be permissive)
         pausable += Math.ceil(((sc.pending ?? 0) + (sc.queued ?? 0)) * ratio);
         resumable += Math.ceil((sc.paused ?? 0) * ratio);
         prioritizable += Math.ceil(((sc.pending ?? 0) + (sc.paused ?? 0)) * ratio);
-        retryable += Math.ceil((sc.done ?? 0) * ratio);
+        retryable += Math.ceil(nonSucceededDoneCount * ratio);
+        retryableWithForce += Math.ceil((sc.done ?? 0) * ratio);
       }
     }
-    return { pausable, resumable, prioritizable, retryable };
+    return { pausable, resumable, prioritizable, retryable, retryableWithForce };
   }, [runs, selectedIds, groupBy, serverGroups]);
 
   const toggleGroup = (key: string) => {
@@ -631,6 +671,50 @@ export function RunsList() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Turns:</span>
+          <Select value={turnsOp} onValueChange={(v) => { setTurnsOp(v as IterationOp); resetCursor(); }}>
+            <SelectTrigger className="w-[70px]" disabled={isJumpingToLast}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="eq">=</SelectItem>
+              <SelectItem value="gte">≥</SelectItem>
+              <SelectItem value="lte">≤</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            type="number"
+            min={0}
+            placeholder="any"
+            className="w-[80px]"
+            value={turnsValue}
+            disabled={isJumpingToLast}
+            onChange={(e) => { setTurnsValue(e.target.value); resetCursor(); }}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Max iter:</span>
+          <Select value={maxIterOp} onValueChange={(v) => { setMaxIterOp(v as IterationOp); resetCursor(); }}>
+            <SelectTrigger className="w-[70px]" disabled={isJumpingToLast}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="eq">=</SelectItem>
+              <SelectItem value="gte">≥</SelectItem>
+              <SelectItem value="lte">≤</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            type="number"
+            min={0}
+            placeholder="any"
+            className="w-[80px]"
+            value={maxIterValue}
+            disabled={isJumpingToLast}
+            onChange={(e) => { setMaxIterValue(e.target.value); resetCursor(); }}
+          />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Group by:</span>
@@ -847,14 +931,26 @@ export function RunsList() {
                 variant="outline"
                 size="sm"
                 className="gap-1.5"
-                disabled={bulkRetryMutation.isPending || selectionCaps.retryable === 0}
-                onClick={() => bulkRetryMutation.mutate(Array.from(selectedIds))}
+                disabled={bulkRetryMutation.isPending || (isForceRetryModifierActive ? selectionCaps.retryableWithForce === 0 : selectionCaps.retryable === 0)}
+                onClick={() => {
+                  if (isForceRetryModifierActive && selectionCaps.retryableWithForce > selectionCaps.retryable) {
+                    setBulkRetryConfirmOpen(true);
+                  } else {
+                    bulkRetryMutation.mutate({ ids: Array.from(selectedIds) });
+                  }
+                }}
               >
                 <RotateCcw className="h-4 w-4" />
-                <span className="hidden md:inline">{bulkRetryMutation.isPending ? "…" : `Retry${selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}`}</span>
+                <span className="hidden md:inline">{bulkRetryMutation.isPending ? "…" : (() => {
+                  const count = isForceRetryModifierActive ? selectionCaps.retryableWithForce : selectionCaps.retryable;
+                  return `Retry${count > 0 ? ` (${count})` : ""}`;
+                })()}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Retry completed runs{selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}</TooltipContent>
+            <TooltipContent>{isForceRetryModifierActive ? "Force retry all completed runs" : "Retry completed runs"}{(() => {
+              const count = isForceRetryModifierActive ? selectionCaps.retryableWithForce : selectionCaps.retryable;
+              return count > 0 ? ` (${count})` : "";
+            })()}</TooltipContent>
           </Tooltip>
           {/* Export */}
           <span className="hidden 2xl:inline text-xs font-semibold text-muted-foreground uppercase tracking-wide ml-2">Export</span>
@@ -1032,7 +1128,12 @@ export function RunsList() {
                         ? selectedRunsSummary.worker
                         : selectedRunsSummary.isMultiWorker ? "Mixed (keep each)" : "—"}
                     </SelectItem>
-                    {WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
+                    {availableAgents
+                      .filter((a) => a._id !== selectedRunsSummary.worker)
+                      .map((a) => (
+                        <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
+                      ))}
+                    {availableAgents.length === 0 && WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
                       <SelectItem key={w} value={w}>{w}</SelectItem>
                     ))}
                   </SelectContent>
@@ -1434,6 +1535,26 @@ export function RunsList() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog open={bulkRetryConfirmOpen} onOpenChange={setBulkRetryConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Force retry {selectionCaps.retryableWithForce} run{selectionCaps.retryableWithForce !== 1 ? "s" : ""} including successful ones?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Some of the selected runs completed successfully. Are you sure you want to retry all of them?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => bulkRetryMutation.mutate({ ids: Array.from(selectedIds), force: true })}
+              disabled={bulkRetryMutation.isPending}
+            >
+              {bulkRetryMutation.isPending ? "Retrying…" : "Force Retry"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Table */}
       {(groupBy === "none" ? isLoading : isGroupsLoading) ? (
         <div className="space-y-2">
@@ -1498,6 +1619,7 @@ export function RunsList() {
                     deleteMutation={deleteMutation}
                     retryMutation={retryMutation}
                     pauseMutation={pauseMutation}
+                    cancelMutation={cancelMutation}
                     resumeMutation={resumeMutation}
                     setPriorityMutation={setPriorityMutation}
                     groupBy={groupBy}
@@ -1507,6 +1629,7 @@ export function RunsList() {
                     outcomeFilter={effectiveOutcome}
                     criteriaState={criteriaState}
                     hiddenColumns={hiddenColumns}
+                    isForceRetryModifierActive={isForceRetryModifierActive}
                   />
                 );
               })
@@ -1521,10 +1644,12 @@ export function RunsList() {
                   deleteMutation={deleteMutation}
                   retryMutation={retryMutation}
                   pauseMutation={pauseMutation}
+                  cancelMutation={cancelMutation}
                   resumeMutation={resumeMutation}
                   setPriorityMutation={setPriorityMutation}
                   profileNameMap={profileNameMap}
                   hiddenColumns={hiddenColumns}
+                  isForceRetryModifierActive={isForceRetryModifierActive}
                 />
               ))
             )}
@@ -1585,22 +1710,26 @@ function RunRow({
   deleteMutation,
   retryMutation,
   pauseMutation,
+  cancelMutation,
   resumeMutation,
   setPriorityMutation,
   profileNameMap,
   hiddenColumns,
+  isForceRetryModifierActive,
 }: {
   run: Run;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
-  retryMutation: { mutate: (id: string) => void; isPending: boolean };
+  retryMutation: { mutate: (args: { id: string; force?: boolean }) => void; isPending: boolean };
   pauseMutation: { mutate: (id: string) => void; isPending: boolean };
+  cancelMutation: { mutate: (id: string) => void; isPending: boolean };
   resumeMutation: { mutate: (id: string) => void; isPending: boolean };
   setPriorityMutation: { mutate: (args: { id: string; priority: number }) => void; isPending: boolean };
   profileNameMap: Map<string, string>;
   hiddenColumns: Set<ColumnId>;
+  isForceRetryModifierActive: boolean;
 }) {
   const isCol = (col: ColumnId) => !hiddenColumns.has(col);
 
@@ -1619,7 +1748,13 @@ function RunRow({
       )
     : undefined;
 
+  const isSuccessfulCompletedRun = run.run?.status === "done" && run.run?.outcome === "succeeded";
+  const canRetryRun = run.run?.status === "done";
+  const retryButtonState = getRetryButtonState(!!isSuccessfulCompletedRun, retryMutation.isPending, isForceRetryModifierActive);
+  const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
+
   return (
+    <>
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
       <TableCell>
         <Checkbox
@@ -1746,7 +1881,12 @@ function RunRow({
         {run.priority ?? 0}
       </TableCell>}
       {isCol("status") && <TableCell>
-        <StatusBadge status={run.run?.status ?? "pending"} />
+        <StatusBadge
+          status={run.run?.status ?? "pending"}
+          worker={run.run?.worker}
+          lastHeartbeatAt={run.run?.lastHeartbeatAt}
+          startedAt={run.run?.startedAt}
+        />
       </TableCell>}
       {isCol("outcome") && <TableCell>
         <OutcomeBadge outcome={run.run?.outcome} />
@@ -1829,6 +1969,22 @@ function RunRow({
               <Pause className="h-4 w-4" />
             </Button>
           )}
+          {((run.run?.status ?? "pending") === "pending" || run.run?.status === "queued" || run.run?.status === "processing") && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive hover:text-destructive"
+              title="Cancel"
+              onClick={() => {
+                if (window.confirm("Cancel this run? It will be marked as failed.")) {
+                  cancelMutation.mutate(run._id);
+                }
+              }}
+              disabled={cancelMutation.isPending}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
           {run.run?.status === "paused" && (
             <Button
               variant="ghost"
@@ -1863,14 +2019,20 @@ function RunRow({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          {run.run?.status === "done" && (
+          {canRetryRun && (
             <Button
               variant="ghost"
               size="icon"
               className="h-8 w-8"
-              title="Retry"
-              onClick={() => retryMutation.mutate(run._id)}
-              disabled={retryMutation.isPending}
+              title={retryButtonState.title ?? "Retry"}
+              onClick={() => {
+                if (isSuccessfulCompletedRun) {
+                  setRetryConfirmOpen(true);
+                } else {
+                  retryMutation.mutate({ id: run._id, force: false });
+                }
+              }}
+              disabled={retryButtonState.disabled}
             >
               <RotateCcw className="h-4 w-4" />
             </Button>
@@ -1883,6 +2045,13 @@ function RunRow({
         </div>
       </TableCell>
     </TableRow>
+    <RetryConfirmDialog
+      open={retryConfirmOpen}
+      onOpenChange={setRetryConfirmOpen}
+      onConfirm={() => retryMutation.mutate({ id: run._id, force: true })}
+      isPending={retryMutation.isPending}
+    />
+    </>
   );
 }
 
@@ -1896,6 +2065,7 @@ function GroupRows({
   deleteMutation,
   retryMutation,
   pauseMutation,
+  cancelMutation,
   resumeMutation,
   setPriorityMutation,
   groupBy,
@@ -1905,6 +2075,7 @@ function GroupRows({
   outcomeFilter,
   criteriaState,
   hiddenColumns,
+  isForceRetryModifierActive,
 }: {
   group: RunGroup;
   isExpanded: boolean;
@@ -1913,8 +2084,9 @@ function GroupRows({
   onToggleSelect: (id: string) => void;
   reportSummaries: BulkReportSummary | undefined;
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
-  retryMutation: { mutate: (id: string) => void; isPending: boolean };
+  retryMutation: { mutate: (args: { id: string; force?: boolean }) => void; isPending: boolean };
   pauseMutation: { mutate: (id: string) => void; isPending: boolean };
+  cancelMutation: { mutate: (id: string) => void; isPending: boolean };
   resumeMutation: { mutate: (id: string) => void; isPending: boolean };
   setPriorityMutation: { mutate: (args: { id: string; priority: number }) => void; isPending: boolean };
   groupBy: GroupByKey;
@@ -1924,6 +2096,7 @@ function GroupRows({
   outcomeFilter?: string;
   criteriaState?: string;
   hiddenColumns: Set<ColumnId>;
+  isForceRetryModifierActive: boolean;
 }) {
   const { aggregates, uniform } = group;
   const fmtDur = (v: number) => formatDuration(Math.round(v));
@@ -2239,10 +2412,12 @@ function GroupRows({
               deleteMutation={deleteMutation}
               retryMutation={retryMutation}
               pauseMutation={pauseMutation}
+              cancelMutation={cancelMutation}
               resumeMutation={resumeMutation}
               setPriorityMutation={setPriorityMutation}
               profileNameMap={profileNameMap}
               hiddenColumns={hiddenColumns}
+              isForceRetryModifierActive={isForceRetryModifierActive}
             />
           ))
         )
