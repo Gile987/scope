@@ -1336,7 +1336,7 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
             </div>
           )}
         </div>
-      )}}
+      )}
     </>
   );
 }
