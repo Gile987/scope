@@ -6792,6 +6792,85 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/bulk-cancel": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "ids",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cancelled": {
+                      "type": "number",
+                    },
+                    "results": {
+                      "items": {
+                        "properties": {
+                          "cancelled": {
+                            "type": "boolean",
+                          },
+                          "error": {
+                            "type": "string",
+                          },
+                          "id": {
+                            "type": "string",
+                          },
+                          "previousStatus": {
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "id",
+                          "cancelled",
+                        ],
+                        "type": "object",
+                      },
+                      "type": "array",
+                    },
+                    "skipped": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "cancelled",
+                    "skipped",
+                    "results",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Cancel multiple requests",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/bulk-pause": {
       "post": {
         "requestBody": {
@@ -7163,6 +7242,46 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Download full run archive",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/cancel": {
+      "post": {
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                    },
+                    "outcome": {
+                      "type": "string",
+                    },
+                    "previousStatus": {
+                      "type": "string",
+                    },
+                    "status": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "previousStatus",
+                    "status",
+                    "outcome",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Cancel a request (marks as done/failed and signals worker to exit)",
         "tags": [
           "Requests",
         ],

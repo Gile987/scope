@@ -343,6 +343,19 @@ export function RunsList() {
     },
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: api.cancelRun,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast.success("Run cancelled");
+    },
+    onError: (error) => {
+      toast.error("Failed to cancel", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    },
+  });
+
   const resumeMutation = useMutation({
     mutationFn: api.resumeRun,
     onSuccess: () => {
@@ -1603,6 +1616,7 @@ export function RunsList() {
                     deleteMutation={deleteMutation}
                     retryMutation={retryMutation}
                     pauseMutation={pauseMutation}
+                    cancelMutation={cancelMutation}
                     resumeMutation={resumeMutation}
                     setPriorityMutation={setPriorityMutation}
                     groupBy={groupBy}
@@ -1627,6 +1641,7 @@ export function RunsList() {
                   deleteMutation={deleteMutation}
                   retryMutation={retryMutation}
                   pauseMutation={pauseMutation}
+                  cancelMutation={cancelMutation}
                   resumeMutation={resumeMutation}
                   setPriorityMutation={setPriorityMutation}
                   profileNameMap={profileNameMap}
@@ -1692,6 +1707,7 @@ function RunRow({
   deleteMutation,
   retryMutation,
   pauseMutation,
+  cancelMutation,
   resumeMutation,
   setPriorityMutation,
   profileNameMap,
@@ -1705,6 +1721,7 @@ function RunRow({
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   retryMutation: { mutate: (args: { id: string; force?: boolean }) => void; isPending: boolean };
   pauseMutation: { mutate: (id: string) => void; isPending: boolean };
+  cancelMutation: { mutate: (id: string) => void; isPending: boolean };
   resumeMutation: { mutate: (id: string) => void; isPending: boolean };
   setPriorityMutation: { mutate: (args: { id: string; priority: number }) => void; isPending: boolean };
   profileNameMap: Map<string, string>;
@@ -1915,6 +1932,22 @@ function RunRow({
               <Pause className="h-4 w-4" />
             </Button>
           )}
+          {((run.run?.status ?? "pending") === "pending" || run.run?.status === "queued" || run.run?.status === "processing") && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive hover:text-destructive"
+              title="Cancel"
+              onClick={() => {
+                if (window.confirm("Cancel this run? It will be marked as failed.")) {
+                  cancelMutation.mutate(run._id);
+                }
+              }}
+              disabled={cancelMutation.isPending}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
           {run.run?.status === "paused" && (
             <Button
               variant="ghost"
@@ -1995,6 +2028,7 @@ function GroupRows({
   deleteMutation,
   retryMutation,
   pauseMutation,
+  cancelMutation,
   resumeMutation,
   setPriorityMutation,
   groupBy,
@@ -2015,6 +2049,7 @@ function GroupRows({
   deleteMutation: { mutate: (id: string) => void; isPending: boolean };
   retryMutation: { mutate: (args: { id: string; force?: boolean }) => void; isPending: boolean };
   pauseMutation: { mutate: (id: string) => void; isPending: boolean };
+  cancelMutation: { mutate: (id: string) => void; isPending: boolean };
   resumeMutation: { mutate: (id: string) => void; isPending: boolean };
   setPriorityMutation: { mutate: (args: { id: string; priority: number }) => void; isPending: boolean };
   groupBy: GroupByKey;
@@ -2338,6 +2373,7 @@ function GroupRows({
               deleteMutation={deleteMutation}
               retryMutation={retryMutation}
               pauseMutation={pauseMutation}
+              cancelMutation={cancelMutation}
               resumeMutation={resumeMutation}
               setPriorityMutation={setPriorityMutation}
               profileNameMap={profileNameMap}

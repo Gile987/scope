@@ -522,6 +522,12 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
+      "cancel": {
+        "options": [
+          "--id",
+          "--url",
+        ],
+      },
       "delete": {
         "options": [
           "--id",

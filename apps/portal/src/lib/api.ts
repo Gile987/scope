@@ -115,6 +115,11 @@ export const api = {
     return request(`/requests/${id}/pause`, { method: "POST" });
   },
 
+  /** Cancel a request (marks as failed and signals worker to exit) */
+  cancelRun: (id: string): Promise<{ id: string; previousStatus: string; status: string; outcome: string }> => {
+    return request(`/requests/${id}/cancel`, { method: "POST" });
+  },
+
   /** Resume a paused request */
   resumeRun: (id: string): Promise<{ id: string; status: string }> => {
     return request(`/requests/${id}/resume`, { method: "POST" });

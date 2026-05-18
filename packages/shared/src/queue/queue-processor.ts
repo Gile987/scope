@@ -16,6 +16,7 @@ import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
 import type { ExtensionConfig } from "../types/extension.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
+import { cancelExit } from "./cancel-exit.js";
 import type { VisibilityHeartbeat } from "./visibility-heartbeat.js";
 import { HEARTBEAT_VISIBILITY_SECONDS } from "./visibility-heartbeat.js";
 import { BlobStorage } from "../storage/blob-storage.js";
@@ -92,6 +93,16 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         `[${this.workerName}] Request ${requestDoc._id} is paused — discarding queue message`,
       );
       await log("info", `Request paused — discarding queue message`);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    // Terminal status guard: if the run is already done (e.g. cancelled while
+    // this message was in the queue or redelivered after process.exit), discard.
+    if (requestDoc.run?.status === "done") {
+      console.log(
+        `[${this.workerName}] Request ${requestDoc._id} is already terminal (done) — discarding queue message`,
+      );
+      await log("info", `Run already terminal — discarding queue message`);
       await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
       return;
     }
@@ -388,6 +399,20 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     // through to the missing-heartbeat guard.
     await this.heartbeatStore.set(requestDoc.run!._id, now);
 
+    // Subscribe to instant cancel notifications via Redis Pub/Sub.
+    // If a cancel signal arrives, exit immediately — the run is already
+    // marked done/failed in DB by the cancel API. K8s (or docker compose
+    // restart) will bring up a fresh worker.
+    const unsubCancel = this.heartbeatStore.subscribeCancellation(
+      requestDoc.run!._id,
+      () => {
+        console.log(
+          `[${this.workerName}] Run ${requestDoc.run!._id} cancelled via pub/sub — exiting process`,
+        );
+        cancelExit();
+      },
+    );
+
     await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
       criteria: requestDoc.scenario.criteria,
       maxIterations: requestDoc.maxIterations,
@@ -475,6 +500,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       if (this.processor.teardown) {
         await this.processor.teardown(log);
       }
+      // Unsubscribe from cancel notifications — normal completion path
+      unsubCancel();
     }
 
     const finalStatus = "done";
@@ -493,8 +520,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
 
     const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
 
-    await withRetry(() => this.collection.updateOne(
-      { _id: requestId },
+    // Guard final write: only update if the run is still "processing" for this
+    // specific run._id. If a cancel already set status="done", this no-ops.
+    const finalWrite = await withRetry(() => this.collection.updateOne(
+      { _id: requestId, "run._id": runId, "run.status": "processing" },
       {
         $set: {
           "run.status": finalStatus,
@@ -508,17 +537,24 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         },
       }
     ));
+
+    if (finalWrite.matchedCount === 0) {
+      console.warn(
+        `[${this.workerName}] Final write for ${requestId} (runId=${runId}) did not match — run was cancelled or retried concurrently`,
+      );
+      await log("warn", "Run was cancelled or retried concurrently — skipping final update");
+    } else {
+      // Fire-and-forget report generation (only if we actually wrote the final status)
+      await this.triggerReportGeneration(requestId);
+      console.log(
+        `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
+      );
+    }
+
     // Drop the Redis liveness heartbeat now that the run is terminal so it
     // doesn't surface in the API's "still processing" enrichment. (TTL would
     // eventually expire it anyway, but explicit cleanup is tidier.)
     await this.heartbeatStore.delete(requestDoc.run!._id);
-
-    console.log(
-      `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
-    );
-
-    // Fire-and-forget report generation
-    await this.triggerReportGeneration(requestId);
 
     // Stop the heartbeat before deleting so the pop receipt is stable —
     // a tick landing between read and delete would invalidate it. The
