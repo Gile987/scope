@@ -41,7 +41,7 @@ export const ProcessingFresh: Story = {
   },
 };
 
-export const Stale: Story = {
+export const ProcessingStale: Story = {
   args: {
     status: "processing",
     lastHeartbeatAt: new Date(Date.now() - 60_000).toISOString(),
