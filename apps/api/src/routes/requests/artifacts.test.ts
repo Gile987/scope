@@ -95,6 +95,37 @@ function blobUrl(path: string): string {
   return `https://mockaccount.blob.core.windows.net/snapshots/${path}`;
 }
 
+// ─── Test path variants ────────────────────────────────────────────────────
+// Each artifact endpoint is mounted at both request-level and per-run level.
+// We parameterize tests to cover both without duplicating handler assertions.
+
+type PathVariant = {
+  label: string;
+  /** Build the URL for a given request id + suffix (query string / sub-path) */
+  url: (id: string, suffix?: string) => string;
+  /** Mock findOne to return a request with the given run */
+  mockRequest: (mocks: any, id: string, run: Record<string, unknown>) => void;
+};
+
+const REQUEST_LEVEL: PathVariant = {
+  label: "request-level",
+  url: (id, suffix = "") => `/api/v1/requests/${id}/`,
+  mockRequest: (mocks, id, run) => {
+    (mocks.collection.findOne as any).mockResolvedValue({ _id: id, run });
+  },
+};
+
+const RUN_LEVEL: PathVariant = {
+  label: "per-run",
+  url: (id, suffix = "") => `/api/v1/requests/${id}/runs/run-1/`,
+  mockRequest: (mocks, id, run) => {
+    // resolveRunForRequest finds request then matches run._id
+    (mocks.collection.findOne as any).mockResolvedValue({ _id: id, run: { ...run, _id: "run-1" } });
+  },
+};
+
+const VARIANTS: PathVariant[] = [REQUEST_LEVEL, RUN_LEVEL];
+
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe("Blob-proxied artifact endpoints", () => {
@@ -133,41 +164,56 @@ describe("Blob-proxied artifact endpoints", () => {
   });
 
   // =========================================================================
-  // GET /api/v1/requests/:id/har
+  // Per-run resolution — run not found
   // =========================================================================
 
-  describe("GET /api/v1/requests/:id/har", () => {
+  describe("per-run resolution", () => {
+    it("returns 404 when run is not found for the request", async () => {
+      // Request exists but run._id doesn't match and no historical run
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "req-1",
+        run: { _id: "different-run", status: "done" },
+      });
+      (mocks.runsCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await supertest(app).get("/api/v1/requests/req-1/runs/nonexistent/har");
+      expect(res.status).toBe(404);
+      expect(res.body).toMatchObject({ error: "Run not found for this request" });
+    });
+  });
+
+  // =========================================================================
+  // HAR endpoints
+  // =========================================================================
+
+  describe.each(VARIANTS)("HAR ($label)", (variant) => {
+    const harUrl = (id: string, query = "") => variant.url(id) + `har${query}`;
+
     it("returns 404 when request not found", async () => {
       (mocks.collection.findOne as any).mockResolvedValue(null);
 
-      const res = await supertest(app).get("/api/v1/requests/missing/har");
+      const res = await supertest(app).get(harUrl("missing"));
       expect(res.status).toBe(404);
       expect(res.body).toMatchObject({ error: "Request not found" });
     });
 
     it("returns 404 when no HAR capture available", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: { _id: "run-1", status: "done" },
-      });
+      variant.mockRequest(mocks, "req-1", { _id: "run-1", status: "done" });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/har");
+      const res = await supertest(app).get(harUrl("req-1"));
       expect(res.status).toBe(404);
       expect(res.body).toMatchObject({ error: "No HAR capture available" });
     });
 
     it("proxies HAR download from run-level harUrl", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: { _id: "run-1", status: "done", harUrl: blobUrl("req-1/run.har") },
-      });
+      variant.mockRequest(mocks, "req-1", { _id: "run-1", status: "done", harUrl: blobUrl("req-1/run.har") });
 
       mockDownload.mockResolvedValue({
         readableStreamBody: readableFrom('{"log":{}}'),
         contentLength: 10,
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/har").buffer(true).parse(rawParser);
+      const res = await supertest(app).get(harUrl("req-1")).buffer(true).parse(rawParser);
       expect(res.status).toBe(200);
       expect(res.headers["content-type"]).toMatch("application/json");
       expect(res.headers["content-disposition"]).toContain("req-1.har");
@@ -175,16 +221,13 @@ describe("Blob-proxied artifact endpoints", () => {
     });
 
     it("proxies HAR download from per-iteration turn harUrl", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          turns: [
-            { iteration: 1, harUrl: blobUrl("req-1/iter-1.har") },
-            { iteration: 2, harUrl: blobUrl("req-1/iter-2.har") },
-          ],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        turns: [
+          { iteration: 1, harUrl: blobUrl("req-1/iter-1.har") },
+          { iteration: 2, harUrl: blobUrl("req-1/iter-2.har") },
+        ],
       });
 
       mockDownload.mockResolvedValue({
@@ -192,34 +235,28 @@ describe("Blob-proxied artifact endpoints", () => {
         contentLength: 10,
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/har?iteration=2").buffer(true).parse(rawParser);
+      const res = await supertest(app).get(harUrl("req-1", "?iteration=2")).buffer(true).parse(rawParser);
       expect(res.status).toBe(200);
       expect(res.headers["content-disposition"]).toContain("req-1-iteration-2.har");
       expect(mockGetBlockBlobClient).toHaveBeenCalledWith("req-1/iter-2.har");
     });
 
     it("returns 400 for invalid iteration number", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: { _id: "run-1", status: "done" },
-      });
+      variant.mockRequest(mocks, "req-1", { _id: "run-1", status: "done" });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/har?iteration=abc");
+      const res = await supertest(app).get(harUrl("req-1", "?iteration=abc"));
       expect(res.status).toBe(400);
       expect(res.body).toMatchObject({ error: "Invalid iteration number" });
     });
 
     it("falls back to last turn harUrl when no run-level harUrl", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          turns: [
-            { iteration: 1, harUrl: blobUrl("req-1/iter-1.har") },
-            { iteration: 2, harUrl: blobUrl("req-1/iter-2.har") },
-          ],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        turns: [
+          { iteration: 1, harUrl: blobUrl("req-1/iter-1.har") },
+          { iteration: 2, harUrl: blobUrl("req-1/iter-2.har") },
+        ],
       });
 
       mockDownload.mockResolvedValue({
@@ -227,76 +264,65 @@ describe("Blob-proxied artifact endpoints", () => {
         contentLength: 10,
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/har").buffer(true).parse(rawParser);
+      const res = await supertest(app).get(harUrl("req-1")).buffer(true).parse(rawParser);
       expect(res.status).toBe(200);
-      // Falls back to last turn
       expect(mockGetBlockBlobClient).toHaveBeenCalledWith("req-1/iter-2.har");
     });
   });
 
   // =========================================================================
-  // GET /api/v1/requests/:id/tool-calls
+  // Tool-calls endpoints
   // =========================================================================
 
-  describe("GET /api/v1/requests/:id/tool-calls", () => {
+  describe.each(VARIANTS)("Tool-calls ($label)", (variant) => {
+    const tcUrl = (id: string, query = "") => variant.url(id) + `tool-calls${query}`;
+
     it("returns 404 when request not found", async () => {
       (mocks.collection.findOne as any).mockResolvedValue(null);
 
-      const res = await supertest(app).get("/api/v1/requests/missing/tool-calls?iteration=1");
+      const res = await supertest(app).get(tcUrl("missing", "?iteration=1"));
       expect(res.status).toBe(404);
       expect(res.body).toMatchObject({ error: "Request not found" });
     });
 
     it("returns 400 when iteration query parameter is missing", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: { _id: "run-1", status: "done" },
-      });
+      variant.mockRequest(mocks, "req-1", { _id: "run-1", status: "done" });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/tool-calls");
+      const res = await supertest(app).get(tcUrl("req-1"));
       expect(res.status).toBe(400);
       expect(res.body).toMatchObject({ error: "iteration query parameter is required" });
     });
 
     it("returns 400 for invalid iteration number", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: { _id: "run-1", status: "done" },
-      });
+      variant.mockRequest(mocks, "req-1", { _id: "run-1", status: "done" });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/tool-calls?iteration=0");
+      const res = await supertest(app).get(tcUrl("req-1", "?iteration=0"));
       expect(res.status).toBe(400);
       expect(res.body).toMatchObject({ error: "Invalid iteration number" });
     });
 
     it("returns 404 when no tool-calls available for iteration", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          turns: [{ iteration: 1 }],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        turns: [{ iteration: 1 }],
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/tool-calls?iteration=1");
+      const res = await supertest(app).get(tcUrl("req-1", "?iteration=1"));
       expect(res.status).toBe(404);
       expect(res.body).toMatchObject({ error: "No tool-calls JSONL available for this iteration" });
     });
 
     it("proxies tool-calls JSONL download", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          turns: [
-            { iteration: 1, toolCallsUrl: blobUrl("req-1/iter-1-tool-calls.jsonl") },
-          ],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        turns: [
+          { iteration: 1, toolCallsUrl: blobUrl("req-1/iter-1-tool-calls.jsonl") },
+        ],
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/tool-calls?iteration=1");
+      const res = await supertest(app).get(tcUrl("req-1", "?iteration=1"));
       expect(res.status).toBe(200);
       expect(res.headers["content-type"]).toMatch("application/x-ndjson");
       expect(res.headers["content-disposition"]).toContain("tool-calls.jsonl");
@@ -305,52 +331,48 @@ describe("Blob-proxied artifact endpoints", () => {
   });
 
   // =========================================================================
-  // GET /api/v1/requests/:id/snapshots/:iteration
+  // Snapshots endpoints
   // =========================================================================
 
-  describe("GET /api/v1/requests/:id/snapshots/:iteration", () => {
+  describe.each(VARIANTS)("Snapshots ($label)", (variant) => {
+    const snapUrl = (id: string, iteration: string | number) => variant.url(id) + `snapshots/${iteration}`;
+
     it("returns 404 when request not found", async () => {
       (mocks.collection.findOne as any).mockResolvedValue(null);
 
-      const res = await supertest(app).get("/api/v1/requests/missing/snapshots/1");
+      const res = await supertest(app).get(snapUrl("missing", 1));
       expect(res.status).toBe(404);
       expect(res.body).toMatchObject({ error: "Request not found" });
     });
 
     it("returns 400 for invalid iteration number", async () => {
-      const res = await supertest(app).get("/api/v1/requests/req-1/snapshots/abc");
+      const res = await supertest(app).get(snapUrl("req-1", "abc"));
       expect(res.status).toBe(400);
       expect(res.body).toMatchObject({ error: "Invalid iteration number" });
     });
 
     it("returns 404 when no snapshot for the iteration", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          turns: [{ iteration: 1 }],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        turns: [{ iteration: 1 }],
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/snapshots/1");
+      const res = await supertest(app).get(snapUrl("req-1", 1));
       expect(res.status).toBe(404);
       expect(res.body).toMatchObject({ error: "No snapshot for iteration 1" });
     });
 
     it("proxies snapshot download", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          turns: [
-            { iteration: 1, snapshotUrl: blobUrl("req-1/iter-1-snapshot.tar.gz") },
-          ],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        turns: [
+          { iteration: 1, snapshotUrl: blobUrl("req-1/iter-1-snapshot.tar.gz") },
+        ],
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/snapshots/1");
+      const res = await supertest(app).get(snapUrl("req-1", 1));
       expect(res.status).toBe(200);
       expect(res.headers["content-type"]).toMatch("application/gzip");
       expect(res.headers["content-disposition"]).toContain("req-1-iteration-1.tar.gz");
@@ -359,40 +381,36 @@ describe("Blob-proxied artifact endpoints", () => {
   });
 
   // =========================================================================
-  // GET /api/v1/requests/:id/video
+  // Video endpoints
   // =========================================================================
 
-  describe("GET /api/v1/requests/:id/video", () => {
+  describe.each(VARIANTS)("Video ($label)", (variant) => {
+    const vidUrl = (id: string, query = "") => variant.url(id) + `video${query}`;
+
     it("returns 404 when request not found", async () => {
       (mocks.collection.findOne as any).mockResolvedValue(null);
 
-      const res = await supertest(app).get("/api/v1/requests/missing/video");
+      const res = await supertest(app).get(vidUrl("missing"));
       expect(res.status).toBe(404);
       expect(res.body).toMatchObject({ error: "Request not found" });
     });
 
     it("returns 404 when no video recordings available", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: { _id: "run-1", status: "done" },
-      });
+      variant.mockRequest(mocks, "req-1", { _id: "run-1", status: "done" });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/video");
+      const res = await supertest(app).get(vidUrl("req-1"));
       expect(res.status).toBe(404);
       expect(res.body).toMatchObject({ error: "No video recordings available" });
     });
 
     it("proxies video download from run-level videoUrls", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          videoUrls: [blobUrl("req-1/video-0.webm")],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        videoUrls: [blobUrl("req-1/video-0.webm")],
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/video");
+      const res = await supertest(app).get(vidUrl("req-1"));
       expect(res.status).toBe(200);
       expect(res.headers["content-type"]).toMatch("video/webm");
       expect(res.headers["accept-ranges"]).toBe("bytes");
@@ -400,71 +418,56 @@ describe("Blob-proxied artifact endpoints", () => {
     });
 
     it("proxies video from per-iteration turn", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          turns: [
-            { iteration: 1, videoUrls: [blobUrl("req-1/iter-1-video-0.webm")] },
-          ],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        turns: [
+          { iteration: 1, videoUrls: [blobUrl("req-1/iter-1-video-0.webm")] },
+        ],
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/video?iteration=1");
+      const res = await supertest(app).get(vidUrl("req-1", "?iteration=1"));
       expect(res.status).toBe(200);
       expect(mockGetBlockBlobClient).toHaveBeenCalledWith("req-1/iter-1-video-0.webm");
     });
 
     it("proxies setup video", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          setupVideoUrls: [blobUrl("req-1/setup-video-0.webm")],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        setupVideoUrls: [blobUrl("req-1/setup-video-0.webm")],
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/video?phase=setup");
+      const res = await supertest(app).get(vidUrl("req-1", "?phase=setup"));
       expect(res.status).toBe(200);
       expect(mockGetBlockBlobClient).toHaveBeenCalledWith("req-1/setup-video-0.webm");
     });
 
     it("returns 404 when video index is out of range", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          videoUrls: [blobUrl("req-1/video-0.webm")],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        videoUrls: [blobUrl("req-1/video-0.webm")],
       });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/video?index=5");
+      const res = await supertest(app).get(vidUrl("req-1", "?index=5"));
       expect(res.status).toBe(404);
       expect(res.body.error).toContain("Video index 5 not found");
     });
 
     it("returns 400 for invalid video index", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: { _id: "run-1", status: "done" },
-      });
+      variant.mockRequest(mocks, "req-1", { _id: "run-1", status: "done" });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/video?index=-1");
+      const res = await supertest(app).get(vidUrl("req-1", "?index=-1"));
       expect(res.status).toBe(400);
       expect(res.body).toMatchObject({ error: "Invalid video index" });
     });
 
     it("supports Range requests for video seeking", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: {
-          _id: "run-1",
-          status: "done",
-          videoUrls: [blobUrl("req-1/video-0.webm")],
-        },
+      variant.mockRequest(mocks, "req-1", {
+        _id: "run-1",
+        status: "done",
+        videoUrls: [blobUrl("req-1/video-0.webm")],
       });
 
       mockGetProperties.mockResolvedValue({ contentLength: 1000 });
@@ -476,7 +479,7 @@ describe("Blob-proxied artifact endpoints", () => {
       });
 
       const res = await supertest(app)
-        .get("/api/v1/requests/req-1/video")
+        .get(vidUrl("req-1"))
         .set("Range", "bytes=0-499")
         .buffer(true)
         .parse(rawParser);
@@ -488,12 +491,9 @@ describe("Blob-proxied artifact endpoints", () => {
     });
 
     it("returns 400 for invalid iteration number", async () => {
-      (mocks.collection.findOne as any).mockResolvedValue({
-        _id: "req-1",
-        run: { _id: "run-1", status: "done" },
-      });
+      variant.mockRequest(mocks, "req-1", { _id: "run-1", status: "done" });
 
-      const res = await supertest(app).get("/api/v1/requests/req-1/video?iteration=abc");
+      const res = await supertest(app).get(vidUrl("req-1", "?iteration=abc"));
       expect(res.status).toBe(400);
       expect(res.body).toMatchObject({ error: "Invalid iteration number" });
     });
