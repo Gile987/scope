@@ -579,7 +579,7 @@ export function RunDetail() {
       {/* Tabs */}
       <Tabs
         value={tab || (activeRun?.turns && activeRun?.turns.length > 0 ? "turns" : "logs")}
-        onValueChange={(value) => navigate(`/runs/${id}/${value}`)}
+        onValueChange={(value) => navigate(`/runs/${id}/${value}${selectedRunId ? `?runId=${selectedRunId}` : ""}`)}
       >
         <TabsList>
           <TabsTrigger value="turns">
