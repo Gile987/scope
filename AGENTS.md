@@ -72,7 +72,7 @@ React 19 web UI with Vite, Tailwind CSS, Radix UI (shadcn/ui), TanStack Query, a
 
 - Real-time data flow: [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md)
 
-> **Storybook**: When adding or modifying portal components, update the corresponding Storybook stories. Use the `storybook` skill (`.agents/skills/storybook/SKILL.md`) for guidance. To regenerate stories with AI assistance, run `npx storybook ai setup` from `apps/portal/` and follow its instructions precisely.
+> **Storybook**: When adding or modifying portal components, update the corresponding Storybook stories. Use the `storybook` skill (`.agents/skills/storybook/SKILL.md`) for guidance.
 
 ### CLI (`apps/cli/`)
 
