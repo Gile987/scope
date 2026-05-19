@@ -160,7 +160,7 @@ taskPrompt
         console.log(`\n${label('Features:')} ${dimTimestamp('(not extracted)')}`);
       }
 
-      console.log(`\n${label('View runs:')} ${dimTimestamp(`pnpm cli run list --task-prompt-id ${tp._id}`)}`);
+      console.log(`\n${label('View runs:')} ${dimTimestamp(`scope run list --task-prompt-id ${tp._id}`)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

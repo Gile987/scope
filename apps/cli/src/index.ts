@@ -11,6 +11,9 @@ import { OUTPUT_FORMATS, ENV_VARS, applyApiPortFallback } from "./utils/shared.j
 import { registerRunCommands } from "./commands/run.js";
 import { registerCriteriaCommands } from "./commands/criteria.js";
 import { registerPromptFeatureCommands } from "./commands/prompt-feature.js";
+
+// Version is injected at build time by esbuild; falls back for dev mode
+const CLI_VERSION = process.env.SCOPE_CLI_VERSION ?? "0.1.0-dev";
 import { registerReportCommands } from "./commands/report.js";
 import { registerReportTemplateCommands } from "./commands/report-template.js";
 import { registerAgentCommands } from "./commands/agent.js";
@@ -20,6 +23,7 @@ import { registerExtensionCommands } from "./commands/extension.js";
 import { registerInsightCommands } from "./commands/insight.js";
 import { registerTaskPromptCommands } from "./commands/task-prompt.js";
 import { registerProfileCommands } from "./commands/profile.js";
+import { checkForUpdates } from "./utils/update-check.js";
 
 /**
  * Walk up from `start` looking for a `.env` file, stopping at the first hit
@@ -51,9 +55,9 @@ applyApiPortFallback();
 export const program = new Command();
 
 program
-  .name("scope-mt")
+  .name("scope")
   .description("Scope — AI coding agent benchmarking CLI")
-  .version("1.0.0")
+  .version(CLI_VERSION)
   .action(() => {
     program.help();
   })
@@ -79,8 +83,11 @@ registerProfileCommands(program);
 // Only parse when run directly (not when imported by tests)
 const isDirectRun = process.argv[1] && (
   process.argv[1].endsWith('/cli/src/index.ts') ||
-  process.argv[1].endsWith('/cli/dist/index.js')
+  process.argv[1].endsWith('/cli/dist/index.js') ||
+  process.argv[1].endsWith('/scope.mjs') ||
+  process.argv[1].endsWith('/dist/scope.mjs')
 );
 if (isDirectRun) {
+  checkForUpdates(CLI_VERSION);
   program.parse();
 }

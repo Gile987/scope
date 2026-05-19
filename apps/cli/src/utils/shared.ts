@@ -11,11 +11,11 @@ export const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
 export function printFollowUpCommands(id: string): void {
   console.log(`\n${label('Run ID:')} ${value(id)}`);
   console.log(`\n${label('Next steps:')}`);
-  console.log(`  ${dimTimestamp('Get details:')}   pnpm cli run get -i ${id}`);
-  console.log(`  ${dimTimestamp('Check status:')}  pnpm cli run status -i ${id}`);
-  console.log(`  ${dimTimestamp('Stream logs:')}   pnpm cli run logs -i ${id}`);
-  console.log(`  ${dimTimestamp('Download:')}      pnpm cli run download -i ${id}`);
-  console.log(`  ${dimTimestamp('List all runs:')} pnpm cli run list`);
+  console.log(`  ${dimTimestamp('Get details:')}   scope run get -i ${id}`);
+  console.log(`  ${dimTimestamp('Check status:')}  scope run status -i ${id}`);
+  console.log(`  ${dimTimestamp('Stream logs:')}   scope run logs -i ${id}`);
+  console.log(`  ${dimTimestamp('Download:')}      scope run download -i ${id}`);
+  console.log(`  ${dimTimestamp('List all runs:')} scope run list`);
 }
 
 export const DEFAULT_WORKERS = [
