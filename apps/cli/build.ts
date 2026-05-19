@@ -1,9 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { build } from "esbuild";
+import { build, type Plugin } from "esbuild";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 
 const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
 
@@ -16,6 +15,33 @@ const require = __createRequire(import.meta.url);
 const __filename = __fileURLToPath(import.meta.url);
 const __dirname = __dirname_(__filename);
 `;
+
+const stripShebang: Plugin = {
+  name: "strip-shebang",
+  setup(b) {
+    b.onLoad({ filter: /index\.ts$/ }, async (args) => {
+      let contents = readFileSync(args.path, "utf-8");
+      if (contents.startsWith("#!")) {
+        contents = contents.replace(/^#![^\n]*\n/, "");
+      }
+      return { contents, loader: "ts" };
+    });
+  },
+};
+
+const shimReactDevtools: Plugin = {
+  name: "shim-react-devtools",
+  setup(b) {
+    b.onResolve({ filter: /^react-devtools-core$/ }, () => ({
+      path: "react-devtools-core",
+      namespace: "shim",
+    }));
+    b.onLoad({ filter: /.*/, namespace: "shim" }, () => ({
+      contents: "export default undefined;",
+      loader: "js",
+    }));
+  },
+};
 
 await build({
   entryPoints: ["src/index.ts"],
@@ -35,30 +61,7 @@ await build({
   },
   external: [],
   logLevel: "warning",
-  plugins: [{
-    name: "strip-shebang",
-    setup(build) {
-      build.onLoad({ filter: /index\.ts$/ }, async (args) => {
-        let contents = readFileSync(args.path, "utf-8");
-        if (contents.startsWith("#!")) {
-          contents = contents.replace(/^#![^\n]*\n/, "");
-        }
-        return { contents, loader: "ts" };
-      });
-    },
-  }, {
-    name: "shim-react-devtools",
-    setup(build) {
-      build.onResolve({ filter: /^react-devtools-core$/ }, () => ({
-        path: "react-devtools-core",
-        namespace: "shim",
-      }));
-      build.onLoad({ filter: /.*/, namespace: "shim" }, () => ({
-        contents: "export default undefined;",
-        loader: "js",
-      }));
-    },
-  }],
+  plugins: [stripShebang, shimReactDevtools],
 });
 
 console.log(`✓ Built dist/scope.mjs (v${pkg.version})`);

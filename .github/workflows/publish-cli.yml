@@ -42,27 +42,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Bump version in package.json
+      - name: Bump version
         id: version
         working-directory: apps/cli
         run: |
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            const [major, minor, patch] = pkg.version.split('.').map(Number);
-            const bump = '${{ inputs.bump }}';
-            if (bump === 'major') pkg.version = \`\${major + 1}.0.0\`;
-            else if (bump === 'minor') pkg.version = \`\${major}.\${minor + 1}.0\`;
-            else pkg.version = \`\${major}.\${minor}.\${patch + 1}\`;
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-            console.log(\`version=\${pkg.version}\`);
-          " >> "$GITHUB_OUTPUT"
+          NEW_VERSION=$(pnpm version ${{ inputs.bump }} --no-git-tag-version | tr -d 'v')
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build CLI bundle
         working-directory: apps/cli
         env:
           SCOPE_DEFAULT_API_URL: ${{ vars.SCOPE_API_URL }}
-        run: node build.mjs
+        run: pnpm build
 
       - name: Verify bundle
         working-directory: apps/cli
