@@ -20,8 +20,8 @@ env:
   SCOPE_DOC_REPO: growth-ecosystems/scope-doc
 
 jobs:
-  publish:
-    name: Build & Release CLI
+  test:
+    name: Build & Test CLI
     runs-on: ubuntu-latest
 
     steps:
@@ -55,15 +55,38 @@ jobs:
           SCOPE_DEFAULT_API_URL: ${{ vars.SCOPE_API_URL }}
         run: pnpm build
 
-      - name: Verify bundle
-        working-directory: apps/cli
-        run: |
-          node dist/scope.mjs --version
-          node dist/scope.mjs --help
+      - name: Run integration tests
+        run: pnpm vitest run --config vitest.integration.config.ts apps/cli/src/bundle.integration.test.ts
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-bundle
+          path: |
+            apps/cli/dist/scope.mjs
+            apps/cli/install.sh
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  publish:
+    name: Publish Release
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-bundle
+          path: apps/cli
 
       - name: Create tag
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.test.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -73,7 +96,7 @@ jobs:
       - name: Create release on scope-doc
         env:
           GH_TOKEN: ${{ secrets.SCOPE_DOC_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.test.outputs.version }}
         run: |
           gh release create "v${VERSION}" \
             --repo "$SCOPE_DOC_REPO" \
