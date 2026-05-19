@@ -27,6 +27,7 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
+import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
 import { formatDate, formatId, formatDuration } from "@/lib/utils";
 import { useState, useMemo } from "react";
@@ -232,6 +233,37 @@ export function RunDetail() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // For completed runs, use the FINAL turn's criteriaResults to build a
+  // criterionId -> pass/fail/undefined lookup map.
+  // Using the final turn (not the latest turn with any results) avoids
+  // presenting stale pass/fail state from an earlier iteration when the
+  // last turn ended without evaluation (e.g. judge failure).
+  // "not evaluated" is preserved as undefined so skipped criteria are not
+  // collapsed into a failing `false` state.
+  const latestCriteriaResultsMap = useMemo(() => {
+    if (activeRun?.status !== "done") return undefined;
+    const turns = activeRun?.turns ?? [];
+    const lastTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
+    if (!lastTurn?.criteriaResults?.length) return new Map<string, boolean | undefined>();
+
+    return new Map<string, boolean | undefined>(
+      lastTurn.criteriaResults.map((r) => [
+        r.criterionId,
+        r.evaluated ? r.passed : undefined,
+      ])
+    );
+  }, [activeRun?.status, activeRun?.turns]);
+
+  // Prefer scenario criteria as the canonical list.
+  // If unavailable on a completed run, fall back to whatever the judge evaluated.
+  const displayedCriteria = useMemo(() => {
+    if ((run?.scenario?.criteria?.length ?? 0) > 0) return run?.scenario?.criteria ?? [];
+    if (activeRun?.status === "done" && latestCriteriaResultsMap) {
+      return Array.from(latestCriteriaResultsMap.keys());
+    }
+    return [] as string[];
+  }, [run?.scenario?.criteria, activeRun?.status, latestCriteriaResultsMap]);
 
   if (isLoading) {
     return (
@@ -806,15 +838,22 @@ export function RunDetail() {
                     <Badge variant="outline">{run.scenario!.version}</Badge>
                   </div>
                 )}
-                {(run.scenario?.criteria?.length ?? 0) > 0 && (
+                {displayedCriteria.length > 0 && (
                   <div>
-                    <h4 className="text-sm font-medium mb-1">Criteria ({run.scenario?.criteria?.length})</h4>
+                    <h4 className="text-sm font-medium mb-1">Criteria ({displayedCriteria.length})</h4>
                     <div className="flex flex-wrap gap-1.5">
-                      {run.scenario?.criteria?.map((c, i) => (
-                        <Badge key={i} variant="secondary" className="font-mono text-xs">
-                          {c}
-                        </Badge>
-                      ))}
+                      {displayedCriteria.map((c) => {
+                        return (
+                          <CriteriaBadge
+                            key={c}
+                            criterionId={c}
+                            result={latestCriteriaResultsMap?.get(c)}
+                            evaluated={activeRun?.status === "done"}
+                            showStateLabel={activeRun?.status === "done"}
+                            link={false}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 )}

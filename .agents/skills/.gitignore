@@ -5,3 +5,5 @@
 !scope-cli/**
 !rust-best-practices/
 !rust-best-practices/**
+!storybook/
+!storybook/**
