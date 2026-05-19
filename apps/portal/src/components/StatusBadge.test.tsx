@@ -33,32 +33,52 @@ describe("StatusBadge", () => {
     }
   });
 
-  it("does not pulse for non-processing statuses", () => {
+  it("does not shimmer for non-processing statuses", () => {
     render(<StatusBadge status="paused" />);
-    expect(getBadge("Paused").className).not.toContain("animate-pulse");
+    expect(getBadge("Paused").className).not.toContain("animate-shimmer");
   });
 
-  it("pulses while processing with no heartbeat yet", () => {
+  it("shimmers while processing with no heartbeat yet", () => {
     render(<StatusBadge status="processing" />);
-    expect(getBadge("Processing").className).toContain("animate-pulse");
+    expect(getBadge("Processing").className).toContain("animate-shimmer");
   });
 
-  it("pulses while processing with a fresh heartbeat", () => {
+  it("shimmers while processing with a fresh heartbeat", () => {
     vi.useFakeTimers();
     const now = new Date("2026-05-15T12:00:00.000Z");
     vi.setSystemTime(now);
     const heartbeat = new Date(now.getTime() - 5_000).toISOString();
     render(<StatusBadge status="processing" lastHeartbeatAt={heartbeat} />);
-    expect(getBadge("Processing").className).toContain("animate-pulse");
+    expect(getBadge("Processing").className).toContain("animate-shimmer");
   });
 
-  it("stops pulsing when the heartbeat is older than 30s", () => {
+  it("stops shimmering and dims when heartbeat is older than 30s", () => {
     vi.useFakeTimers();
     const now = new Date("2026-05-15T12:00:00.000Z");
     vi.setSystemTime(now);
     const stale = new Date(now.getTime() - 60_000).toISOString();
     render(<StatusBadge status="processing" lastHeartbeatAt={stale} />);
-    expect(getBadge("Processing").className).not.toContain("animate-pulse");
+    const badge = getBadge("Processing");
+    expect(badge.className).not.toContain("animate-shimmer");
+    expect(badge.className).toContain("opacity-50");
+  });
+
+  it("stops shimmering and dims when no heartbeat and startedAt exceeds grace period", () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-05-15T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const staleStart = new Date(now.getTime() - 120_000).toISOString();
+    render(<StatusBadge status="processing" startedAt={staleStart} />);
+    const badge = getBadge("Processing");
+    expect(badge.className).not.toContain("animate-shimmer");
+    expect(badge.className).toContain("opacity-50");
+  });
+
+  it("does not dim when processing and shimmering", () => {
+    render(<StatusBadge status="processing" />);
+    const badge = getBadge("Processing");
+    expect(badge.className).toContain("animate-shimmer");
+    expect(badge.className).not.toContain("opacity-50");
   });
 
   it("falls back to outline variant for an unknown status", () => {

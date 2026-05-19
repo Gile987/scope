@@ -80,13 +80,10 @@ export function StatusBadge({
   // Tick once per second while processing so both the live "Ns ago" tooltip
   // value and the heartbeat-freshness check below advance over time.
   const now = useNow(status === "processing");
-  // Pulse the badge while a run is actively processing AND the worker has
-  // recently checked in. Default Tailwind animate-pulse oscillates opacity
-  // 100% / 50%, which keeps the label readable. Stop pulsing once the last
-  // heartbeat is older than 30s — beyond that the worker is suspect and a
-  // steady badge avoids implying false liveness.
-  const className = shouldPulse(status, lastHeartbeatAt, now) ? "animate-pulse" : undefined;
-  const badge = <Badge variant={config.variant} className={cn(className)}>{config.label}</Badge>;
+  const pulsing = shouldPulse(status, lastHeartbeatAt, now, startedAt);
+  const className = pulsing ? "animate-shimmer" : undefined;
+  const staleClassName = status === "processing" && !pulsing ? "opacity-50" : undefined;
+  const badge = <Badge variant={config.variant} className={cn(className, staleClassName)}>{config.label}</Badge>;
 
   const showTooltip = status === "processing" && (worker || lastHeartbeatAt || startedAt);
 
