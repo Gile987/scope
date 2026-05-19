@@ -5,8 +5,8 @@
   "description": "Scoped - coding agent workers (Claude Code, Copilot ACP, VS Code Web) + API + CLI",
   "scripts": {
     "build": "pnpm -r build",
-    "cli": "pnpm --filter scope-cli exec tsx src/index.ts",
-    "build:cli": "pnpm --filter scope-cli build",
+    "cli": "pnpm --filter cli exec tsx src/index.ts",
+    "build:cli": "pnpm --filter cli build",
     "dev:api": "pnpm --filter api dev",
     "dev:portal": "pnpm --filter portal dev",
     "dev:coder-acp-claude-code": "pnpm --filter coder-acp-claude-code dev",
