@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
+import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, ChevronsLeft, ChevronsRight, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
@@ -35,12 +36,13 @@ import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
   { id: "submission", label: "Submission" },
   { id: "task", label: "Task" },
+  { id: "criteria", label: "Criteria" },
   { id: "worker", label: "Worker" },
   { id: "version", label: "Version" },
   { id: "os", label: "OS" },
@@ -1580,6 +1582,7 @@ export function RunsList() {
               {isCol("id") && <TableHead className="w-[100px]">ID</TableHead>}
               {isCol("submission") && <TableHead className="w-[100px]">Submission</TableHead>}
               {isCol("task") && <TableHead>Task</TableHead>}
+              {isCol("criteria") && <TableHead>Criteria</TableHead>}
               {isCol("worker") && <TableHead className="w-[180px]">Worker</TableHead>}
               {isCol("version") && <TableHead>Version</TableHead>}
               {isCol("os") && <TableHead className="w-[80px]">OS</TableHead>}
@@ -1729,10 +1732,27 @@ function RunRow({
   isForceRetryModifierActive: boolean;
 }) {
   const isCol = (col: ColumnId) => !hiddenColumns.has(col);
+
+  // For completed runs, build a criterionId → result map from the final
+  // turn's criteriaResults. Using the final turn avoids showing stale results
+  // from an earlier iteration when the last turn lacked evaluation (e.g. judge failure).
+  const isDone = run.run?.status === "done";
+  const runTurns = run.run?.turns ?? [];
+  const lastTurn = runTurns.length > 0 ? runTurns[runTurns.length - 1] : undefined;
+  const criteriaResultsMap: Map<string, boolean | undefined> | undefined = isDone
+    ? new Map(
+        (lastTurn?.criteriaResults ?? []).map((r) => [
+          r.criterionId,
+          r.evaluated ? r.passed : undefined,
+        ])
+      )
+    : undefined;
+
   const isSuccessfulCompletedRun = run.run?.status === "done" && run.run?.outcome === "succeeded";
   const canRetryRun = run.run?.status === "done";
   const retryButtonState = getRetryButtonState(!!isSuccessfulCompletedRun, retryMutation.isPending, isForceRetryModifierActive);
   const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
+
   return (
     <>
     <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
@@ -1763,6 +1783,23 @@ function RunRow({
       </TableCell>}
       {isCol("task") && <TableCell className="max-w-[300px]">
         <span title={run.scenario?.task ?? "–"}>{truncate(run.scenario?.task ?? "–", 60)}</span>
+      </TableCell>}
+      {isCol("criteria") && <TableCell>
+        {run.scenario?.criteria && run.scenario.criteria.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {run.scenario.criteria.map((criterionId) => (
+              <CriteriaBadge
+                key={criterionId}
+                criterionId={criterionId}
+                result={criteriaResultsMap?.get(criterionId)}
+                evaluated={isDone && criteriaResultsMap !== undefined}
+                link={true}
+              />
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
       </TableCell>}
       {isCol("worker") && <TableCell>
         <span className="font-mono text-xs">{run.workerType}</span>
@@ -2166,6 +2203,8 @@ function GroupRows({
             <span title={uniform.task}>{truncate(uniform.task, 60)}</span>
           ) : <span className="text-muted-foreground">–</span>}
         </TableCell>}
+        {/* Criteria — group rows never have individual criterion results */}
+        {isCol("criteria") && <TableCell><span className="text-xs text-muted-foreground">–</span></TableCell>}
         {/* Worker */}
         {isCol("worker") && <TableCell>
           {uniform.workerType ? (
