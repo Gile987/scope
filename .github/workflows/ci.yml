@@ -382,6 +382,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: CLI bundle integration tests
+        run: pnpm vitest run --config vitest.integration.config.ts apps/cli/src/bundle.integration.test.ts
+
   gateway:
     name: "Gateway: lint, test & build"
     needs: [detect-changes]
