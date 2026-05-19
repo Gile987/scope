@@ -5,9 +5,41 @@
  * Non-blocking check for newer CLI versions on GitHub Releases.
  * Prints a warning to stderr if a newer version is available.
  * Suppressed by SCOPE_NO_UPDATE_CHECK=1 environment variable.
+ * Checks at most once per hour (cooldown stored in ~/.config/scope/update-check.json).
  */
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const CONFIG_DIR = join(homedir(), ".config", "scope");
+const STATE_FILE = join(CONFIG_DIR, "update-check.json");
+
+function shouldCheck(): boolean {
+  try {
+    if (!existsSync(STATE_FILE)) return true;
+    const state = JSON.parse(readFileSync(STATE_FILE, "utf-8"));
+    const lastCheck = state.lastCheck ?? 0;
+    return Date.now() - lastCheck >= UPDATE_CHECK_INTERVAL_MS;
+  } catch {
+    return true;
+  }
+}
+
+function recordCheck(): void {
+  try {
+    if (!existsSync(CONFIG_DIR)) {
+      mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+    writeFileSync(STATE_FILE, JSON.stringify({ lastCheck: Date.now() }) + "\n");
+  } catch {
+    // Best-effort — don't fail if we can't write state
+  }
+}
+
 export function checkForUpdates(currentVersion: string): void {
   if (process.env.SCOPE_NO_UPDATE_CHECK === "1") return;
+  if (!shouldCheck()) return;
 
   // Fire-and-forget — never blocks CLI startup
   checkLatestVersion(currentVersion).catch(() => {
@@ -39,6 +71,8 @@ async function checkLatestVersion(currentVersion: string): Promise<void> {
     });
 
     if (!res.ok) return;
+
+    recordCheck();
 
     const data = (await res.json()) as { tag_name?: string };
     if (!data.tag_name) return;
