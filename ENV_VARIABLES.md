@@ -10,21 +10,66 @@ The sophisticated criteria system can be configured via environment variables in
 
 Base URL of the Scope API used by all CLI commands. Override this to point the CLI at a remote or Docker-hosted API instance.
 
-## LLM Configuration (Criteria Prompt Generation)
+## LLM Configuration (Portal AI Features)
 
-### GITHUB_MODELS_API_KEY
-**Required for AI prompt generation**
+The portal's AI features — criteria prompt generation, prompt-feature
+extraction/generation, and task-prompt generation/variation — all call an
+OpenAI-style chat-completions endpoint through the
+[`@azure-rest/ai-inference`](https://www.npmjs.com/package/@azure-rest/ai-inference)
+SDK. Two backends are supported, resolved in this priority order:
+
+1. **Azure AI Foundry** (preferred, dedicated capacity, fast) —
+   `AZURE_AI_INFERENCE_ENDPOINT` + `AZURE_AI_INFERENCE_API_KEY`.
+2. **GitHub Models** (public endpoint, slow under load; fine for local dev) —
+   `GITHUB_MODELS_API_KEY` / `GITHUB_TOKEN` / `TOKEN_MANAGER_URL`.
+
+If neither backend is configured, the portal's AI buttons return HTTP `503`
+and the rest of the API works unchanged.
+
+### AZURE_AI_INFERENCE_ENDPOINT
+**Required (with `AZURE_AI_INFERENCE_API_KEY`) to use Azure AI Foundry**
+**Type:** URL string
+
+Base URL of the Azure AI Foundry inference endpoint (e.g.
+`https://<foundry-resource>.services.ai.azure.com/models`). When set together
+with `AZURE_AI_INFERENCE_API_KEY` the API issues all portal-LLM calls to this
+endpoint and ignores GitHub Models. This is the recommended production
+configuration: GitHub Models' public endpoint regularly takes >1 minute under
+load (see [#847](https://github.com/growth-ecosystems/scope-core/issues/847)),
+while a Foundry deployment of the same model returns in well under a second.
+
+In Kubernetes the value comes from the `azure-ai-inference-secrets`
+ExternalSecret (Key Vault key `azure-ai-inference-endpoint`).
+
+### AZURE_AI_INFERENCE_API_KEY
+**Required (with `AZURE_AI_INFERENCE_ENDPOINT`) to use Azure AI Foundry**
 **Type:** string
 
-GitHub personal access token (with the `models` read permission) used to authenticate with GitHub Models (`https://models.inference.ai.azure.com`) via the Azure AI Inference SDK. When set, the API can auto-generate evaluation prompts from natural-language behavior descriptions during criteria creation.
+API key for the Foundry endpoint. In Kubernetes the value comes from the
+`azure-ai-inference-secrets` ExternalSecret (Key Vault key
+`azure-ai-inference-api-key`).
 
-> **Note:** This is separate from `GITHUB_TOKEN`, which is used by the Judge and worker services for Copilot SDK / ACP access and does **not** need the `models` permission.
+### GITHUB_MODELS_API_KEY
+**Optional (used as fallback when Foundry is not configured)**
+**Type:** string
+
+GitHub personal access token (with the `models` read permission) used to
+authenticate with GitHub Models (`https://models.inference.ai.azure.com`).
+Useful for local dev where no Foundry endpoint is available.
+
+> **Note:** This is separate from `GITHUB_TOKEN`, which is used by the Judge
+> and worker services for Copilot SDK / ACP access and does **not** need the
+> `models` permission. If `GITHUB_MODELS_API_KEY` is unset the API also
+> accepts `GITHUB_TOKEN` (or `TOKEN_MANAGER_URL` with a registered
+> `github-models` token) as a fallback.
 
 ### LLM_MODEL
 **Default:** `gpt-4.1`
 **Type:** string
 
-The model name to use for criteria prompt generation via GitHub Models. Examples: `gpt-4.1`, `gpt-4o`, `gpt-4.1-mini`.
+Model name / deployment name used by both backends. For Foundry, this must
+match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
+`gpt-4o`, `gpt-4.1-mini`.
 
 ## Judge Strategy Configuration
 
