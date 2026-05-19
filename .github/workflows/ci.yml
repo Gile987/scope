@@ -382,7 +382,33 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: CLI bundle integration tests
+  cli-bundle-test:
+    name: CLI Bundle Integration Tests
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.1 --activate
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI bundle
+        run: pnpm build:cli
+
+      - name: Run integration tests
         run: pnpm vitest run --config vitest.integration.config.ts apps/cli/src/bundle.integration.test.ts
 
   gateway:
@@ -782,7 +808,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [test, integration-test, lint, build, gateway]
+    needs: [test, integration-test, lint, build, cli-bundle-test, gateway]
     if: always()
 
     steps:
@@ -792,6 +818,7 @@ jobs:
              [ "${{ needs.integration-test.result }}" = "success" -o "${{ needs.integration-test.result }}" = "skipped" ] && \
              [ "${{ needs.lint.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ] && \
+             [ "${{ needs.cli-bundle-test.result }}" = "success" ] && \
              [ "${{ needs.gateway.result }}" = "success" -o "${{ needs.gateway.result }}" = "skipped" ]; then
             echo "✅ All checks passed!"
             exit 0
@@ -801,6 +828,7 @@ jobs:
             echo "  Integration Tests: ${{ needs.integration-test.result }}"
             echo "  Lint: ${{ needs.lint.result }}"
             echo "  Build: ${{ needs.build.result }}"
+            echo "  CLI Bundle Tests: ${{ needs.cli-bundle-test.result }}"
             echo "  Gateway: ${{ needs.gateway.result }}"
             exit 1
           fi
