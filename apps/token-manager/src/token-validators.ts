@@ -185,10 +185,16 @@ async function validateGitHubOAuthCookieState(
 }
 
 /**
- * Validate an Azure AI Foundry credential. The secret is a JSON blob with
- * `endpoint` + `apiKey` (+ optional `model`). We probe the inference
- * endpoint's `/info` route which returns model metadata for the deployment
- * targeted by the key — cheap enough to run on the validation schedule.
+ * Validate an Azure AI Foundry credential.
+ *
+ * The secret is a JSON blob with `endpoint` + `apiKey` (+ optional `model`).
+ * We probe the inference endpoint with a minimal `chat/completions` POST
+ * (max_tokens=1) — this matches exactly how the portal actually uses the
+ * endpoint, so any 404/401 here also means production calls will fail.
+ *
+ * Foundry endpoints typically end in `/models` (e.g.
+ * `https://<resource>.services.ai.azure.com/models`); we detect a missing
+ * suffix on 404 and return a helpful hint.
  */
 async function validateAzureAiFoundry(
   value: string
@@ -201,30 +207,56 @@ async function validateAzureAiFoundry(
     };
   }
 
-  // Try `/info` first (cheapest probe). Some Foundry resources require an
-  // api-version query parameter — pin to a recent inference API version.
-  const url = `${parsed.endpoint}/info?api-version=2024-05-01-preview`;
+  const url = `${parsed.endpoint}/chat/completions?api-version=2024-05-01-preview`;
+  const body = JSON.stringify({
+    messages: [{ role: "user", content: "ping" }],
+    max_tokens: 1,
+    ...(parsed.model ? { model: parsed.model } : {}),
+  });
+
   try {
     const response = await fetch(url, {
+      method: "POST",
       headers: {
+        "Content-Type": "application/json",
         "api-key": parsed.apiKey,
         Authorization: `Bearer ${parsed.apiKey}`,
       },
-      signal: AbortSignal.timeout(10_000),
+      body,
+      signal: AbortSignal.timeout(15_000),
     });
 
-    if (response.status === 401 || response.status === 403) {
-      return { status: "invalid", error: `Authentication failed (HTTP ${response.status})` };
+    if (response.status === 200) {
+      return { status: "valid" };
     }
 
-    if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      return { status: "invalid", error: `Authentication failed (HTTP ${response.status}) — check the API key` };
+    }
+
+    if (response.status === 404) {
+      const hint = parsed.endpoint.endsWith("/models")
+        ? "verify the resource name in the URL"
+        : "the endpoint URL usually ends with `/models` (e.g. `https://<resource>.services.ai.azure.com/models`)";
       return {
-        status: "error",
-        error: `Foundry endpoint returned HTTP ${response.status} for ${url}`,
+        status: "invalid",
+        error: `Endpoint not found (HTTP 404) at ${url} — ${hint}`,
       };
     }
 
-    return { status: "valid" };
+    if (response.status === 400) {
+      // 400 generally means the endpoint accepted us but the request body
+      // shape was off — auth is fine, endpoint resolves, so treat as valid.
+      // Most often this happens when the deployment requires a specific
+      // model name we did not provide.
+      return { status: "valid" };
+    }
+
+    const errBody = await response.text().catch(() => "");
+    return {
+      status: "error",
+      error: `Foundry endpoint returned HTTP ${response.status} for ${url}${errBody ? ` — ${errBody.slice(0, 200)}` : ""}`,
+    };
   } catch (err) {
     return {
       status: "error",

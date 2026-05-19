@@ -390,7 +390,7 @@ export function CreateToken() {
                         className="font-mono text-xs"
                       />
                       <p className="text-[11px] text-muted-foreground">
-                        Base URL of your Azure AI Foundry inference endpoint. Do not include a trailing slash or path.
+                        Base URL of your Azure AI Foundry inference endpoint. Must include the <code>/models</code> path segment (this is the inference data-plane root). No trailing slash.
                       </p>
                     </div>
                     <div className="space-y-1.5">
