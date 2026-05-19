@@ -8,14 +8,28 @@ import { generateOutputFormatsHelp } from "./helpFormatter.js";
 /** Strip trailing slashes from a URL to avoid double-slash issues when appending paths */
 export const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
 
+/**
+ * Detect how the CLI was invoked and return the appropriate command prefix.
+ * - Bundled binary (scope.mjs): "scope"
+ * - Development via tsx/pnpm: "pnpm cli"
+ */
+export function getCliName(): string {
+  const argv1 = process.argv[1] ?? "";
+  if (argv1.endsWith("/scope.mjs") || argv1.endsWith("/dist/scope.mjs")) {
+    return "scope";
+  }
+  return "pnpm cli";
+}
+
 export function printFollowUpCommands(id: string): void {
+  const cli = getCliName();
   console.log(`\n${label('Run ID:')} ${value(id)}`);
   console.log(`\n${label('Next steps:')}`);
-  console.log(`  ${dimTimestamp('Get details:')}   scope run get -i ${id}`);
-  console.log(`  ${dimTimestamp('Check status:')}  scope run status -i ${id}`);
-  console.log(`  ${dimTimestamp('Stream logs:')}   scope run logs -i ${id}`);
-  console.log(`  ${dimTimestamp('Download:')}      scope run download -i ${id}`);
-  console.log(`  ${dimTimestamp('List all runs:')} scope run list`);
+  console.log(`  ${dimTimestamp('Get details:')}   ${cli} run get -i ${id}`);
+  console.log(`  ${dimTimestamp('Check status:')}  ${cli} run status -i ${id}`);
+  console.log(`  ${dimTimestamp('Stream logs:')}   ${cli} run logs -i ${id}`);
+  console.log(`  ${dimTimestamp('Download:')}      ${cli} run download -i ${id}`);
+  console.log(`  ${dimTimestamp('List all runs:')} ${cli} run list`);
 }
 
 export const DEFAULT_WORKERS = [

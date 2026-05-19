@@ -7,7 +7,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { banner, colorLevel, dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getCliName } from "../utils/shared.js";
 
 export function registerReportCommands(program: Command): void {
 // ─── Report management ──────────────────────────────────────────────────────
@@ -73,7 +73,7 @@ report
         eventSource.addEventListener("done", () => {
           console.log(`\n${successText("Report generation complete")}`);
           console.log(`\n${label('Next steps:')}`);
-          console.log(`  ${dimTimestamp('View report:')} scope report get -i ${result.id}`);
+          console.log(`  ${dimTimestamp('View report:')} ${getCliName()} report get -i ${result.id}`);
           eventSource.close();
           process.exit(0);
         });
@@ -90,8 +90,8 @@ report
         };
       } else {
         console.log(`\n${label('Next steps:')}`);
-        console.log(`  ${dimTimestamp('Stream logs:')}  scope report logs -i ${result.id}`);
-        console.log(`  ${dimTimestamp('View report:')} scope report get -i ${result.id}`);
+        console.log(`  ${dimTimestamp('Stream logs:')}  ${getCliName()} report logs -i ${result.id}`);
+        console.log(`  ${dimTimestamp('View report:')} ${getCliName()} report get -i ${result.id}`);
       }
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
@@ -168,7 +168,7 @@ report
         console.log(report.content);
       } else if (report.status === "pending" || report.status === "generating") {
         console.log(`\n${dimTimestamp('Report is still being generated. Stream logs with:')}`);
-        console.log(`  scope report logs -i ${report.id}`);
+        console.log(`  ${getCliName()} report logs -i ${report.id}`);
       }
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);

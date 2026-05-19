@@ -16,6 +16,7 @@ export function checkForUpdates(currentVersion: string): void {
 }
 
 const RELEASES_URL =
+  process.env.SCOPE_RELEASES_URL ||
   "https://api.github.com/repos/growth-ecosystems/scope-doc/releases/latest";
 
 async function checkLatestVersion(currentVersion: string): Promise<void> {
