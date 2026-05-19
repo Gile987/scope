@@ -177,6 +177,13 @@ services:
     restart: on-failure:5
     ports:
       - "${API_PORT:-3100}:80"
+    env_file:
+      # .env.local holds developer-managed values that worktree-env must not
+      # overwrite: AZURE_AI_INFERENCE_ENDPOINT, AZURE_AI_INFERENCE_API_KEY,
+      # and LLM_MODEL. Optional — the API falls back to GitHub Models when
+      # the Foundry vars aren't set, and uses gpt-4.1 when LLM_MODEL isn't.
+      - path: .env.local
+        required: false
     environment:
       <<: *common-env
       PORT: "80"
@@ -186,9 +193,6 @@ services:
       AZURE_STORAGE_QUEUE_REPORT: report-queue
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_MODELS_API_KEY: ${GITHUB_MODELS_API_KEY:-${GITHUB_TOKEN}}
-      AZURE_AI_INFERENCE_ENDPOINT: ${AZURE_AI_INFERENCE_ENDPOINT:-}
-      AZURE_AI_INFERENCE_API_KEY: ${AZURE_AI_INFERENCE_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4.1}
       GIT_COMMIT: ${GIT_COMMIT:-development}
       BUILD_TIME: ${BUILD_TIME:-}
       SCOPE_ENVIRONMENT: ${SCOPE_ENVIRONMENT:-}

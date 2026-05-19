@@ -26,6 +26,19 @@ SDK. Two backends are supported, resolved in this priority order:
 If neither backend is configured, the portal's AI buttons return HTTP `503`
 and the rest of the API works unchanged.
 
+> **Local dev with Docker Compose:** the three Foundry-related variables
+> (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, `LLM_MODEL`)
+> must live in **`.env.local`** at the repo root, **not** `.env`. The `.env`
+> file is auto-generated per worktree by `worktree-env` and will overwrite
+> manual edits. `.env.local` is gitignored and is loaded into the `api`
+> service via Compose's `env_file:` directive (`required: false`).
+>
+> ```bash
+> cp .env.local.example .env.local
+> # edit .env.local with your Foundry endpoint, key, and model
+> pnpm docker:up:copilot
+> ```
+
 ### AZURE_AI_INFERENCE_ENDPOINT
 **Required (with `AZURE_AI_INFERENCE_API_KEY`) to use Azure AI Foundry**
 **Type:** URL string
@@ -38,16 +51,19 @@ configuration: GitHub Models' public endpoint regularly takes >1 minute under
 load (see [#847](https://github.com/growth-ecosystems/scope-core/issues/847)),
 while a Foundry deployment of the same model returns in well under a second.
 
-In Kubernetes the value comes from the `azure-ai-inference-secrets`
-ExternalSecret (Key Vault key `azure-ai-inference-endpoint`).
+- **Docker Compose:** put in `.env.local` (see note above).
+- **Kubernetes:** sourced from the `azure-ai-inference-secrets`
+  ExternalSecret (Key Vault key `azure-ai-inference-endpoint`).
 
 ### AZURE_AI_INFERENCE_API_KEY
 **Required (with `AZURE_AI_INFERENCE_ENDPOINT`) to use Azure AI Foundry**
 **Type:** string
 
-API key for the Foundry endpoint. In Kubernetes the value comes from the
-`azure-ai-inference-secrets` ExternalSecret (Key Vault key
-`azure-ai-inference-api-key`).
+API key for the Foundry endpoint.
+
+- **Docker Compose:** put in `.env.local` (see note above).
+- **Kubernetes:** sourced from the `azure-ai-inference-secrets`
+  ExternalSecret (Key Vault key `azure-ai-inference-api-key`).
 
 ### GITHUB_MODELS_API_KEY
 **Optional (used as fallback when Foundry is not configured)**
@@ -55,7 +71,9 @@ API key for the Foundry endpoint. In Kubernetes the value comes from the
 
 GitHub personal access token (with the `models` read permission) used to
 authenticate with GitHub Models (`https://models.inference.ai.azure.com`).
-Useful for local dev where no Foundry endpoint is available.
+Useful for local dev where no Foundry endpoint is available. Goes in `.env`
+(or `.env.base`) since it is read via Compose variable substitution, not
+the api service's `env_file`.
 
 > **Note:** This is separate from `GITHUB_TOKEN`, which is used by the Judge
 > and worker services for Copilot SDK / ACP access and does **not** need the
@@ -64,12 +82,12 @@ Useful for local dev where no Foundry endpoint is available.
 > `github-models` token) as a fallback.
 
 ### LLM_MODEL
-**Default:** `gpt-4.1`
+**Default:** `gpt-4.1` (applied inside the API when unset)
 **Type:** string
 
 Model name / deployment name used by both backends. For Foundry, this must
 match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
-`gpt-4o`, `gpt-4.1-mini`.
+`gpt-4o`, `gpt-4.1-mini`. Put in `.env.local` (see note above).
 
 ## Judge Strategy Configuration
 
