@@ -483,10 +483,10 @@ export interface ReportTemplate {
 // =============================================================================
 
 export type KeyType =
-  "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth";
+  "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth" | "azure-ai-foundry";
 
 export type KeyCapability =
-  "github-models" | "github-public-api" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
+  "github-models" | "github-public-api" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api" | "azure-ai-inference";
 
 export type KeyValidationStatus =
   | "valid"
@@ -547,6 +547,7 @@ export const KEY_TYPE_LABELS: Record<KeyType, string> = {
   "github-oauth-cookie-state": "GitHub OAuth Cookie State",
   "anthropic-api-key": "Anthropic API Key",
   "anthropic-oauth": "Anthropic OAuth (Subscription)",
+  "azure-ai-foundry": "Azure AI Foundry",
 };
 
 export const KEY_CAPABILITY_LABELS: Record<KeyCapability, string> = {
@@ -556,7 +557,8 @@ export const KEY_CAPABILITY_LABELS: Record<KeyCapability, string> = {
   "copilot-sdk": "Copilot SDK",
   "copilot-cli": "Copilot CLI",
   "claude-code-cli": "Claude Code CLI",
-  "anthropic-api": "Anthropic API"
+  "anthropic-api": "Anthropic API",
+  "azure-ai-inference": "Azure AI Inference",
 };
 
 export const KEY_CAPABILITY_DESCRIPTIONS: Record<KeyCapability, string> = {
@@ -566,7 +568,8 @@ export const KEY_CAPABILITY_DESCRIPTIONS: Record<KeyCapability, string> = {
   "copilot-sdk": "Use the Copilot SDK to make LLM requests programmatically",
   "copilot-cli": "Run GitHub Copilot in the CLI for code suggestions",
   "claude-code-cli": "Run Claude Code as an agentic coding assistant",
-  "anthropic-api": "Access the Anthropic REST API (model scanning, direct API calls)"
+  "anthropic-api": "Access the Anthropic REST API (model scanning, direct API calls)",
+  "azure-ai-inference": "Chat-completion inference against an Azure AI Foundry deployment (used by the portal's AI features for fast, dedicated capacity)",
 };
 
 /**
@@ -582,10 +585,11 @@ export const KEY_TYPE_EXPECTED_CAPABILITIES: Record<KeyType, KeyCapability[]> = 
   "github-oauth-cookie-state": [],
   "anthropic-api-key": ["claude-code-cli", "anthropic-api"],
   "anthropic-oauth": ["claude-code-cli"],
+  "azure-ai-foundry": ["azure-ai-inference"],
 };
 
 export const ALL_CAPABILITIES: KeyCapability[] = [
-  "github-models", "github-public-api", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli", "anthropic-api"
+  "github-models", "github-public-api", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli", "anthropic-api", "azure-ai-inference",
 ];
 
 // Account types

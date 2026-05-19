@@ -18,10 +18,17 @@ OpenAI-style chat-completions endpoint through the
 [`@azure-rest/ai-inference`](https://www.npmjs.com/package/@azure-rest/ai-inference)
 SDK. Two backends are supported, resolved in this priority order:
 
-1. **Azure AI Foundry** (preferred, dedicated capacity, fast) —
+1. **Azure AI Foundry via env vars** (explicit override, mostly for local dev) —
    `AZURE_AI_INFERENCE_ENDPOINT` + `AZURE_AI_INFERENCE_API_KEY`.
-2. **GitHub Models** (public endpoint, slow under load; fine for local dev) —
-   `GITHUB_MODELS_API_KEY` / `GITHUB_TOKEN` / `TOKEN_MANAGER_URL`.
+2. **Azure AI Foundry via the Token Manager** (preferred in production) —
+   register one or more `azure-ai-foundry` keys via the Portal at
+   `/secrets/keys/new`. The API round-robins across the registered keys
+   that have a valid validation status, so this is the recommended path
+   for integration and prod where the credentials should not live in plain
+   env vars.
+3. **GitHub Models** (public endpoint, slow under load; only used as a last
+   resort fallback) — `GITHUB_MODELS_API_KEY` / `GITHUB_TOKEN` /
+   `TOKEN_MANAGER_URL`.
 
 If neither backend is configured, the portal's AI buttons return HTTP `503`
 and the rest of the API works unchanged.

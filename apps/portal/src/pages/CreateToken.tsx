@@ -83,6 +83,17 @@ const KEY_INSTRUCTIONS: Record<KeyType, { steps: string[]; link?: { label: strin
     ],
     note: "OAuth tokens from Claude Code subscriptions use Bearer authentication. The token format varies (not sk-ant-).",
   },
+  "azure-ai-foundry": {
+    steps: [
+      "In the Azure portal, open (or create) an Azure AI Foundry / Azure AI Services resource",
+      "Create a model deployment for the model you want to use (e.g. gpt-4.1, gpt-4.1-mini)",
+      "Copy the endpoint URL — typically https://<resource>.services.ai.azure.com/models",
+      "Copy one of the resource API keys",
+      "Paste the endpoint, key, and (optionally) the deployment name below",
+    ],
+    link: { label: "Open Azure AI Foundry", url: "https://ai.azure.com/" },
+    note: "Used by the portal's AI features (criteria / prompt-feature / task-prompt generation). When at least one valid Foundry key is registered the API prefers it over the slow public GitHub Models endpoint.",
+  },
 };
 
 const KEY_TYPES: KeyType[] = [
@@ -92,6 +103,7 @@ const KEY_TYPES: KeyType[] = [
   "github-oauth-cookie-state",
   "anthropic-api-key",
   "anthropic-oauth",
+  "azure-ai-foundry",
 ];
 
 /** Expected prefix per token type for surface-level validation. */
@@ -102,6 +114,7 @@ const KEY_PREFIXES: Record<KeyType, { prefix: string; description: string }> = {
   "github-oauth-cookie-state": { prefix: "{", description: "JSON object" },
   "anthropic-api-key": { prefix: "sk-ant-", description: "sk-ant-" },
   "anthropic-oauth": { prefix: "", description: "(any format — OAuth token)" },
+  "azure-ai-foundry": { prefix: "{", description: "JSON object (endpoint + apiKey)" },
 };
 
 /** Check if the token value matches the expected prefix for the selected type. */
@@ -119,6 +132,12 @@ function validateKeyPrefix(tokenType: KeyType, tokenValue: string): string | nul
 
   // Special case: anthropic-oauth has no fixed prefix
   if (tokenType === "anthropic-oauth") {
+    return null;
+  }
+
+  // Special case: azure-ai-foundry is built from structured inputs, not a
+  // raw paste — its prefix check is implicit (we serialize to JSON ourselves).
+  if (tokenType === "azure-ai-foundry") {
     return null;
   }
 
@@ -149,12 +168,43 @@ export function CreateToken() {
   const [step, setStep] = useState<Step>("input");
   const [type, setType] = useState<KeyType>("github-pat-classic");
   const [value, setValue] = useState("");
+  // Structured fields for "azure-ai-foundry": the secret value is a JSON
+  // blob built from { endpoint, apiKey, model? }. We keep them in separate
+  // state so the form can render labelled inputs and we serialize on submit.
+  const [foundryEndpoint, setFoundryEndpoint] = useState("");
+  const [foundryApiKey, setFoundryApiKey] = useState("");
+  const [foundryModel, setFoundryModel] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [comment, setComment] = useState("");
   const [previewResult, setPreviewResult] = useState<KeyValidationResult | null>(null);
 
+  /**
+   * Returns the secret string to send to the API. For Azure AI Foundry we
+   * serialize the three structured fields into a JSON blob the token-manager
+   * validator + the API's `acquireInferenceClient` know how to parse.
+   */
+  const getSubmitValue = (): string => {
+    if (type === "azure-ai-foundry") {
+      const endpoint = foundryEndpoint.trim().replace(/\/+$/, "");
+      const apiKey = foundryApiKey.trim();
+      const model = foundryModel.trim();
+      const payload: Record<string, string> = { endpoint, apiKey };
+      if (model) payload.model = model;
+      return JSON.stringify(payload);
+    }
+    return value.trim();
+  };
+
+  /** True when the user has supplied enough input to attempt validation. */
+  const hasInput = (): boolean => {
+    if (type === "azure-ai-foundry") {
+      return !!foundryEndpoint.trim() && !!foundryApiKey.trim();
+    }
+    return !!value.trim();
+  };
+
   const previewMutation = useMutation({
-    mutationFn: () => api.previewKey({ type, value: value.trim() }),
+    mutationFn: () => api.previewKey({ type, value: getSubmitValue() }),
     onSuccess: (result) => {
       setPreviewResult(result);
       setStep("review");
@@ -176,14 +226,32 @@ export function CreateToken() {
   });
 
   const doValidate = () => {
-    if (!value.trim()) {
-      toast.error("Key value is required");
+    if (!hasInput()) {
+      toast.error(
+        type === "azure-ai-foundry"
+          ? "Endpoint URL and API key are required"
+          : "Key value is required"
+      );
       return;
     }
-    const prefixError = validateKeyPrefix(type, value);
-    if (prefixError) {
-      toast.error(`Invalid key format: ${prefixError}`);
-      return;
+    if (type === "azure-ai-foundry") {
+      const trimmed = foundryEndpoint.trim();
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== "https:") {
+          toast.error("Endpoint URL must use https://");
+          return;
+        }
+      } catch {
+        toast.error("Endpoint URL is not a valid URL");
+        return;
+      }
+    } else {
+      const prefixError = validateKeyPrefix(type, value);
+      if (prefixError) {
+        toast.error(`Invalid key format: ${prefixError}`);
+        return;
+      }
     }
     previewMutation.mutate();
   };
@@ -196,7 +264,7 @@ export function CreateToken() {
   const handleRegister = () => {
     createMutation.mutate({
       type,
-      value: value.trim(),
+      value: getSubmitValue(),
       expiresAt: expiresAt || undefined,
       comment: comment.trim() || undefined,
     });
@@ -211,7 +279,7 @@ export function CreateToken() {
   useCommandEnter(
     step === "input" ? doValidate : handleRegister,
     step === "input"
-      ? !previewMutation.isPending && !!value.trim() && !validateKeyPrefix(type, value)
+      ? !previewMutation.isPending && hasInput() && (type === "azure-ai-foundry" || !validateKeyPrefix(type, value))
       : !createMutation.isPending,
   );
 
@@ -309,6 +377,49 @@ export function CreateToken() {
                     rows={6}
                     className="font-mono text-xs"
                   />
+                ) : type === "azure-ai-foundry" ? (
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="foundry-endpoint" className="text-xs font-medium">Endpoint URL</Label>
+                      <Input
+                        id="foundry-endpoint"
+                        type="url"
+                        value={foundryEndpoint}
+                        onChange={(e) => setFoundryEndpoint(e.target.value)}
+                        placeholder="https://<resource>.services.ai.azure.com/models"
+                        className="font-mono text-xs"
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Base URL of your Azure AI Foundry inference endpoint. Do not include a trailing slash or path.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="foundry-api-key" className="text-xs font-medium">API Key</Label>
+                      <Input
+                        id="foundry-api-key"
+                        type="password"
+                        value={foundryApiKey}
+                        onChange={(e) => setFoundryApiKey(e.target.value)}
+                        placeholder="Paste Foundry resource key…"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="foundry-model" className="text-xs font-medium">
+                        Deployment / Model name <span className="text-muted-foreground">(optional)</span>
+                      </Label>
+                      <Input
+                        id="foundry-model"
+                        type="text"
+                        value={foundryModel}
+                        onChange={(e) => setFoundryModel(e.target.value)}
+                        placeholder="gpt-4.1"
+                        className="font-mono text-xs"
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        If set, overrides the API's default <code>LLM_MODEL</code> for this key.
+                      </p>
+                    </div>
+                  </div>
                 ) : (
                   <Input
                     id="value"
@@ -322,7 +433,7 @@ export function CreateToken() {
                   Will be stored securely in KeyVault. Cannot be retrieved after creation.
                 </p>
                 {/* Prefix validation warning */}
-                {(() => {
+                {type !== "azure-ai-foundry" && (() => {
                   const warning = validateKeyPrefix(type, value);
                   if (!warning) return null;
                   return (
@@ -363,7 +474,7 @@ export function CreateToken() {
               {/* Validate */}
               <Button
                 type="submit"
-                disabled={previewMutation.isPending || !value.trim() || !!validateKeyPrefix(type, value)}
+                disabled={previewMutation.isPending || !hasInput() || (type !== "azure-ai-foundry" && !!validateKeyPrefix(type, value))}
                 className="gap-1.5"
               >
                 {previewMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}

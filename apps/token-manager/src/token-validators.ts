@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { KeyType, KeyValidationResult, deriveCapabilities } from "shared";
+import { KeyType, KeyValidationResult, deriveCapabilities, parseAzureAiFoundrySecret } from "shared";
 
 /**
  * Validate a key by calling the provider's API and derive its capabilities.
@@ -31,6 +31,9 @@ export async function validateToken(
       break;
     case "github-oauth-cookie-state":
       result = await validateGitHubOAuthCookieState(value);
+      break;
+    case "azure-ai-foundry":
+      result = await validateAzureAiFoundry(value);
       break;
     default:
       return { status: "error", error: `Unknown token type: ${type}` };
@@ -177,6 +180,55 @@ async function validateGitHubOAuthCookieState(
     return {
       status: "invalid",
       error: `OAuth cookie state is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Validate an Azure AI Foundry credential. The secret is a JSON blob with
+ * `endpoint` + `apiKey` (+ optional `model`). We probe the inference
+ * endpoint's `/info` route which returns model metadata for the deployment
+ * targeted by the key — cheap enough to run on the validation schedule.
+ */
+async function validateAzureAiFoundry(
+  value: string
+): Promise<KeyValidationResult> {
+  const parsed = parseAzureAiFoundrySecret(value);
+  if (!parsed) {
+    return {
+      status: "invalid",
+      error: "Foundry credential must be a JSON object with `endpoint` and `apiKey` string fields",
+    };
+  }
+
+  // Try `/info` first (cheapest probe). Some Foundry resources require an
+  // api-version query parameter — pin to a recent inference API version.
+  const url = `${parsed.endpoint}/info?api-version=2024-05-01-preview`;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "api-key": parsed.apiKey,
+        Authorization: `Bearer ${parsed.apiKey}`,
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return { status: "invalid", error: `Authentication failed (HTTP ${response.status})` };
+    }
+
+    if (!response.ok) {
+      return {
+        status: "error",
+        error: `Foundry endpoint returned HTTP ${response.status} for ${url}`,
+      };
+    }
+
+    return { status: "valid" };
+  } catch (err) {
+    return {
+      status: "error",
+      error: `Foundry validation failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }

@@ -5,11 +5,14 @@
  * Shared helper for acquiring an inference client for the portal AI features.
  *
  * Endpoint resolution priority:
- *   1. Azure AI Foundry — AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY
- *      (preferred; dedicated capacity, fast).
- *   2. GitHub Models — https://models.inference.ai.azure.com via
+ *   1. Azure AI Foundry env vars — AZURE_AI_INFERENCE_ENDPOINT +
+ *      AZURE_AI_INFERENCE_API_KEY (preferred for local dev; explicit override).
+ *   2. Azure AI Foundry via the Token Manager — TOKEN_MANAGER_URL with at
+ *      least one registered `azure-ai-foundry` key (preferred for prod;
+ *      round-robins across registered keys).
+ *   3. GitHub Models — https://models.inference.ai.azure.com via
  *      GITHUB_MODELS_API_KEY → TokenManagerClient("github-models") → GITHUB_TOKEN
- *      (fallback; slow public endpoint, fine for local dev).
+ *      (fallback; slow public endpoint, fine for local dev only).
  *
  * All three portal LLM modules (llm.ts, prompt-feature-llm.ts,
  * task-prompt-llm.ts) call acquireInferenceClient() instead of constructing
@@ -17,7 +20,7 @@
  */
 import ModelClient, { type ModelClient as ModelClientType } from "@azure-rest/ai-inference";
 import { AzureKeyCredential } from "@azure/core-auth";
-import { TokenManagerClient } from "shared";
+import { TokenManagerClient, parseAzureAiFoundrySecret } from "shared";
 
 const GITHUB_MODELS_ENDPOINT = "https://models.inference.ai.azure.com";
 
@@ -87,19 +90,67 @@ export interface InferenceClientHandle {
   client: ModelClientType;
   endpoint: string;
   source: InferenceSource;
+  /**
+   * When the source is "azure-ai-foundry" via the Token Manager, the
+   * registered secret can override the default model name. Callers should
+   * honour this when present (and fall back to `process.env.LLM_MODEL`).
+   */
+  model?: string;
+}
+
+/**
+ * Try to acquire a Foundry credential from the Token Manager.
+ *
+ * Bypasses TokenManagerClient.acquireToken's env-var shortcut on purpose:
+ * the env-var fallback only carries the API key, not the endpoint+key+model
+ * JSON blob this code path needs.
+ *
+ * Returns null when no token-manager is configured, when no key is
+ * registered for the capability, or when the registered secret is malformed.
+ */
+async function tryAcquireFoundryFromTokenManager(): Promise<{
+  endpoint: string;
+  apiKey: string;
+  model?: string;
+} | null> {
+  const baseUrl = process.env.TOKEN_MANAGER_URL;
+  if (!baseUrl) return null;
+
+  try {
+    const response = await fetch(`${baseUrl}/api/v1/keys/acquire`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ capability: "azure-ai-inference" }),
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (response.status === 404) {
+      // No keys registered for this capability — fall through to next backend
+      return null;
+    }
+    if (!response.ok) {
+      return null;
+    }
+
+    const result = (await response.json()) as { value?: string };
+    if (!result.value) return null;
+
+    return parseAzureAiFoundrySecret(result.value);
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Build a ModelClient for the configured inference backend.
  *
- * Prefers Azure AI Foundry when AZURE_AI_INFERENCE_ENDPOINT and
- * AZURE_AI_INFERENCE_API_KEY are both set; otherwise falls back to GitHub
- * Models with the existing GitHub token acquisition logic.
+ * Tries Azure AI Foundry first (env vars, then Token Manager), then falls
+ * back to GitHub Models. See module docstring for the full priority order.
  *
  * @throws Error if no inference backend is configured.
  */
 export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
-  // 1. Azure AI Foundry — preferred, dedicated capacity
+  // 1. Azure AI Foundry via env vars — explicit override, preferred locally.
   if (isFoundryConfigured()) {
     const endpoint = process.env.AZURE_AI_INFERENCE_ENDPOINT!;
     const apiKey = process.env.AZURE_AI_INFERENCE_API_KEY!;
@@ -110,7 +161,18 @@ export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
     };
   }
 
-  // 2. GitHub Models — public fallback (slow; fine for local dev)
+  // 2. Azure AI Foundry via the Token Manager — preferred in production.
+  const tmFoundry = await tryAcquireFoundryFromTokenManager();
+  if (tmFoundry) {
+    return {
+      client: ModelClient(tmFoundry.endpoint, new AzureKeyCredential(tmFoundry.apiKey)),
+      endpoint: tmFoundry.endpoint,
+      source: "azure-ai-foundry",
+      model: tmFoundry.model,
+    };
+  }
+
+  // 3. GitHub Models — public fallback (slow; fine for local dev).
   if (isGitHubModelsTokenAvailable()) {
     const token = await acquireGitHubModelsToken();
     return {
@@ -121,6 +183,6 @@ export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
   }
 
   throw new Error(
-    "No inference backend configured: set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY (preferred), or GITHUB_MODELS_API_KEY / GITHUB_TOKEN / TOKEN_MANAGER_URL"
+    "No inference backend configured: set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY (preferred), register an `azure-ai-foundry` key in the Token Manager, or fall back to GITHUB_MODELS_API_KEY / GITHUB_TOKEN / TOKEN_MANAGER_URL"
   );
 }
