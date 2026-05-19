@@ -23,6 +23,7 @@ import { registerExtensionCommands } from "./commands/extension.js";
 import { registerInsightCommands } from "./commands/insight.js";
 import { registerTaskPromptCommands } from "./commands/task-prompt.js";
 import { registerProfileCommands } from "./commands/profile.js";
+import { registerUpdateCommand } from "./commands/update.js";
 import { checkForUpdates } from "./utils/update-check.js";
 
 /**
@@ -79,6 +80,7 @@ registerExtensionCommands(program);
 registerInsightCommands(program);
 registerTaskPromptCommands(program);
 registerProfileCommands(program);
+registerUpdateCommand(program);
 
 // Only parse when run directly (not when imported by tests)
 const isDirectRun = process.argv[1] && (
