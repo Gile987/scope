@@ -418,6 +418,13 @@ jobs:
       - name: Run integration tests
         run: pnpm vitest run --config vitest.integration.config.ts apps/cli/src/bundle.integration.test.ts
 
+      - name: Upload CLI bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: scope-cli-bundle
+          path: apps/cli/dist/scope.mjs
+          retention-days: 7
+
   gateway:
     name: "Gateway: lint, test & build"
     needs: [detect-changes]
