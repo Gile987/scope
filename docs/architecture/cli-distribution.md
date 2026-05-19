@@ -6,17 +6,11 @@ How the Scope CLI is bundled, distributed, and updated as a standalone tool.
 
 The CLI is bundled into a single `.mjs` file using [esbuild](https://esbuild.github.io/), distributed via GitHub Releases on the `scope-doc` repo, and installed using the `gh` CLI. This allows users to run the CLI without checking out the monorepo.
 
-```
-┌──────────────────┐     ┌──────────────────┐     ┌────────────────────┐
-│  scope-core repo │────▶│  GitHub Actions   │────▶│  scope-doc releases│
-│  apps/cli/       │     │  publish-cli.yml  │     │  scope.mjs         │
-└──────────────────┘     └──────────────────┘     └────────────────────┘
-                                                            │
-                                                            ▼
-                                                   ┌────────────────────┐
-                                                   │  User workstation  │
-                                                   │  ~/.local/bin/scope│
-                                                   └────────────────────┘
+```mermaid
+flowchart LR
+    A[scope-core<br/>apps/cli/] -->|publish-cli.yml| B[GitHub Actions]
+    B -->|gh release create| C[scope-doc releases<br/>scope.mjs + install.sh]
+    C -->|gh release download| D[User workstation<br/>~/.local/bin/scope]
 ```
 
 ## Building
