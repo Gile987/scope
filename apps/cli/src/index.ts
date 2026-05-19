@@ -7,7 +7,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { Command } from "commander";
 import { configureHelp, generateOutputFormatsHelp, generateEnvVarsHelp } from "./utils/helpFormatter.js";
-import { OUTPUT_FORMATS, ENV_VARS, applyApiPortFallback } from "./utils/shared.js";
+import { OUTPUT_FORMATS, ENV_VARS, applyApiPortFallback, getCliName } from "./utils/shared.js";
 import { registerRunCommands } from "./commands/run.js";
 import { registerCriteriaCommands } from "./commands/criteria.js";
 import { registerPromptFeatureCommands } from "./commands/prompt-feature.js";
@@ -55,7 +55,7 @@ applyApiPortFallback();
 export const program = new Command();
 
 program
-  .name("scope")
+  .name(getCliName())
   .description("Scope — AI coding agent benchmarking CLI")
   .version(CLI_VERSION)
   .action(() => {
