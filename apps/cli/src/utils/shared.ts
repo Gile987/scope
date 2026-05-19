@@ -37,11 +37,18 @@ export const DEFAULT_WORKERS = [
   "coder-acp-copilot"
 ];
 
+/**
+ * Default API URL. In dev mode this is localhost; the esbuild bundle replaces
+ * this with the production URL at build time via the SCOPE_DEFAULT_API_URL define.
+ */
+export const DEFAULT_API_URL: string =
+  process.env.SCOPE_API_URL || process.env.SCOPE_DEFAULT_API_URL || "http://localhost:3100";
+
 // Environment variable definitions surfaced in `--help`
 export const ENV_VARS = {
   SCOPE_API_URL: {
     description: 'Default API base URL used by the -u, --url option of every command',
-    default: 'http://localhost:3100',
+    default: DEFAULT_API_URL,
   },
   SCOPE_API_PORT: {
     description: 'When SCOPE_API_URL is unset, derive it as http://localhost:$SCOPE_API_PORT (useful for local docker-compose setups)',

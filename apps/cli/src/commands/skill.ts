@@ -6,7 +6,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, DEFAULT_API_URL } from "../utils/shared.js";
 
 export function registerSkillCommands(program: Command): void {
 // ─── Skill management ────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ withOutputOption(
 skill
   .command("list")
   .description("List all imported skills")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -63,7 +63,7 @@ skill
   .description("Search skills (internal + skills.sh registry)")
   .requiredOption("-q, --query <query>", "Search query")
   .option("--limit <number>", "Maximum results", parseInt)
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -104,7 +104,7 @@ skill
   .command("get")
   .description("Get details of a skill")
   .requiredOption("-i, --id <id>", "Skill slug (e.g. vercel-labs/agent-skills/my-skill)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -154,7 +154,7 @@ skill
   .requiredOption("--name <displayName>", "Display name")
   .option("--description <desc>", "Description")
   .option("--origin <origin>", "Origin: skills-sh or manual", "manual")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -187,7 +187,7 @@ skill
   .command("delete")
   .description("Delete a skill (soft-delete)")
   .requiredOption("-i, --id <id>", "Skill slug")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/skills/${options.id}`, {
@@ -210,7 +210,7 @@ skill
   .command("resolve")
   .description("Resolve a skill from GitHub (fetch latest version and create a revision)")
   .requiredOption("-i, --id <id>", "Skill slug")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -253,7 +253,7 @@ skill
   .description("List revisions for a skill")
   .requiredOption("-i, --id <id>", "Skill slug")
   .option("--limit <number>", "Maximum results", parseInt)
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;

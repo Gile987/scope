@@ -6,7 +6,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, DEFAULT_API_URL } from "../utils/shared.js";
 
 export function registerProfileCommands(program: Command): void {
 // ─── Profile commands ──────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ withOutputOption(
 profile
   .command("list")
   .description("List all profiles")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -63,7 +63,7 @@ profile
   .command("get")
   .description("Get details of a profile (latest version)")
   .requiredOption("-i, --id <id>", "Profile ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -118,7 +118,7 @@ profile
   .option("--mcp-servers <ids...>", "MCP server IDs")
   .option("--skills <refs...>", "Skill revision references")
   .option("--extensions <ids...>", "Extension IDs (publisher.name or publisher.name@version)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -157,7 +157,7 @@ profile
   .command("delete")
   .description("Delete a profile (soft-delete)")
   .requiredOption("-i, --id <id>", "Profile ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/profiles/${options.id}`, {
@@ -191,7 +191,7 @@ version
   .command("list")
   .description("List all versions of a profile")
   .requiredOption("-i, --id <id>", "Profile ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -229,7 +229,7 @@ version
   .description("Get details of a specific profile version")
   .requiredOption("-i, --id <id>", "Profile ID")
   .requiredOption("-v, --version <version>", "Version number")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -279,7 +279,7 @@ version
   .option("--mcp-servers <ids...>", "MCP server IDs")
   .option("--skills <refs...>", "Skill revision references")
   .option("--extensions <ids...>", "Extension IDs (publisher.name or publisher.name@version)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {

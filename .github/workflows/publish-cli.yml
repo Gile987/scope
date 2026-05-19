@@ -49,6 +49,8 @@ jobs:
 
       - name: Build CLI bundle
         working-directory: apps/cli
+        env:
+          SCOPE_DEFAULT_API_URL: ${{ vars.SCOPE_API_URL }}
         run: node build.mjs
 
       - name: Verify bundle
