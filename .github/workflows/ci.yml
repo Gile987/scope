@@ -388,7 +388,10 @@ jobs:
 
   cli-bundle-test:
     name: CLI Bundle Integration Tests
-    needs: [build]
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.typescript == 'true'
     runs-on: ubuntu-latest
 
     steps:
