@@ -3,10 +3,15 @@ name: Publish CLI
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to release (e.g. 0.2.0). Will create tag v<version>."
+      bump:
+        description: "Version bump type"
         required: true
-        type: string
+        default: "minor"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
@@ -37,15 +42,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Set version in package.json
+      - name: Bump version in package.json
+        id: version
         working-directory: apps/cli
         run: |
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = '${{ inputs.version }}';
+            const [major, minor, patch] = pkg.version.split('.').map(Number);
+            const bump = '${{ inputs.bump }}';
+            if (bump === 'major') pkg.version = \`\${major + 1}.0.0\`;
+            else if (bump === 'minor') pkg.version = \`\${major}.\${minor + 1}.0\`;
+            else pkg.version = \`\${major}.\${minor}.\${patch + 1}\`;
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
+            console.log(\`version=\${pkg.version}\`);
+          " >> "$GITHUB_OUTPUT"
 
       - name: Build CLI bundle
         working-directory: apps/cli
@@ -60,19 +71,22 @@ jobs:
           node dist/scope.mjs --help
 
       - name: Create tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"
-          git push origin "v${{ inputs.version }}"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
 
       - name: Create release on scope-doc
         env:
           GH_TOKEN: ${{ secrets.SCOPE_DOC_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "v${{ inputs.version }}" \
+          gh release create "v${VERSION}" \
             --repo "$SCOPE_DOC_REPO" \
-            --title "Scope CLI v${{ inputs.version }}" \
+            --title "Scope CLI v${VERSION}" \
             --notes "## Installation
 
           \`\`\`bash
