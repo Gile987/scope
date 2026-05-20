@@ -16,25 +16,37 @@ The portal's AI features — criteria prompt generation, prompt-feature
 extraction/generation, and task-prompt generation/variation — all call an
 OpenAI-style chat-completions endpoint through the
 [`@azure-rest/ai-inference`](https://www.npmjs.com/package/@azure-rest/ai-inference)
-SDK. Two backends are supported, resolved in this priority order:
+SDK. Two backends are supported, resolved in `acquireInferenceClient`
+([`apps/api/src/llm-token.ts`](apps/api/src/llm-token.ts)) using the
+following priority order. The **first source that returns a credential
+wins**; later sources are not consulted.
 
-1. **Azure AI Foundry via env vars** (explicit override, mostly for local dev) —
-   `AZURE_AI_INFERENCE_ENDPOINT` + `AZURE_AI_INFERENCE_API_KEY`.
-2. **Azure AI Foundry via the Token Manager** (preferred in production) —
-   register one or more `azure-ai-foundry` keys via the Portal at
-   `/secrets/keys/new`. The API round-robins across the registered keys
-   that have a valid validation status, so this is the recommended path
-   for integration and prod where the credentials should not live in plain
-   env vars.
-3. **GitHub Models** (public endpoint, slow under load; only used as a last
-   resort fallback) — `GITHUB_MODELS_API_KEY` / `GITHUB_TOKEN` /
-   `TOKEN_MANAGER_URL`.
+| # | Source | Trigger | `via` log tag |
+|---|--------|---------|---------------|
+| 1 | Azure AI Foundry via env vars | `AZURE_AI_INFERENCE_ENDPOINT` + `AZURE_AI_INFERENCE_API_KEY` both set | `azure-ai-foundry-env` |
+| 2 | Azure AI Foundry via Token Manager | At least one `azure-ai-foundry` key registered at the Portal `/secrets/keys/new` (recommended for integration / prod — credentials live in Key Vault, the API round-robins across valid keys) | `azure-ai-foundry-token-manager` |
+| 3 | GitHub Models via env var | `GITHUB_MODELS_API_KEY` set | `github-models-env` |
+| 4 | GitHub Models via Token Manager | A `github-models` key registered at `/secrets/keys/new` | `github-models-token-manager` |
+| 5 | Bare GitHub token fallback | `GITHUB_TOKEN` set | `github-token` |
 
-If neither backend is configured, the portal's AI buttons return HTTP `503`
-with a single actionable error message
-(`LLM not configured: no inference backend available. Please register a
-new secret key for GitHub Model or Azure Foundry.`), and the rest of the
-API works unchanged.
+**Two important properties of this chain:**
+
+- **Foundry beats GitHub Models, and env vars beat the Token Manager
+  within each backend.** Having both a Foundry env var and a registered
+  `github-models` key means every call goes to Foundry; the GitHub
+  Models key is dormant.
+- **There is no automatic failover at request time.** The chain only
+  steps down when the predecessor returns *nothing* (env var unset, no
+  key registered). It does **not** step down when the predecessor
+  returns a credential that then 4xx/5xx's on the actual chat-completion
+  call. This is intentional — silent fallback would mask misconfiguration
+  (e.g. a wrong Foundry deployment name) and hide the real error from
+  the user.
+
+If no source returns a credential, the portal's AI buttons return HTTP
+`503` with a single actionable error message (`LLM not configured: no
+inference backend available. Please register a new secret key for GitHub
+Model or Azure Foundry.`), and the rest of the API works unchanged.
 
 Every successful acquisition also logs a single line so operators can
 verify which provider served a given AI call:
@@ -42,10 +54,6 @@ verify which provider served a given AI call:
 ```
 [llm-token] inference provider: source=azure-ai-foundry via=azure-ai-foundry-env endpoint=https://<resource>.services.ai.azure.com/models model=gpt-4.1-mini
 ```
-
-The `via` field disambiguates the five possible resolution paths:
-`azure-ai-foundry-env`, `azure-ai-foundry-token-manager`,
-`github-models-env`, `github-models-token-manager`, `github-token`.
 
 > **Local dev with Docker Compose:** the three Foundry-related variables
 > (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, `LLM_MODEL`)

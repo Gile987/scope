@@ -239,6 +239,15 @@ When none of the three tiers is configured, the helper throws a single
 "LLM not configured" error that the route handlers convert into a 503
 with an actionable message pointing at `/secrets/keys/new`.
 
+**No automatic failover at request time.** The chain only steps down
+when the predecessor returns *nothing* (env var unset, no key
+registered). It does **not** step down when the predecessor returns a
+credential that then 4xx/5xx's on the chat-completion call — that error
+propagates to the user verbatim. This is intentional: silent fallback
+would mask a misconfigured higher-priority backend (e.g. a wrong Foundry
+deployment name) and the operator would never realise they were paying
+the slower fallback's latency.
+
 ```typescript
 import { acquireInferenceClient } from "./llm-token.js";
 

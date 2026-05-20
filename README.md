@@ -147,15 +147,22 @@ pnpm open:portal
 The portal has three AI-assisted flows — criteria prompt generation,
 prompt-feature extract/generate, and task-prompt generate/variation. They
 need a chat-completions backend. Resolution order in
-[`apps/api/src/llm-token.ts`](apps/api/src/llm-token.ts):
+[`apps/api/src/llm-token.ts`](apps/api/src/llm-token.ts) — first source
+that returns a credential wins, with no automatic failover at request
+time:
 
-1. **Azure AI Foundry via env vars** (`AZURE_AI_INFERENCE_ENDPOINT` +
-   `AZURE_AI_INFERENCE_API_KEY` in `.env.local`) — recommended for local dev.
-2. **Azure AI Foundry via Token Manager** — register a key at the Portal
-   `/secrets/keys/new` (type **Azure AI Foundry**). Recommended for
-   integration / prod.
-3. **GitHub Models** (`GITHUB_MODELS_API_KEY` / a registered `github-models`
-   key / `GITHUB_TOKEN`) — slow public fallback, fine for dev only.
+| # | Source | Trigger |
+|---|--------|---------|
+| 1 | Azure AI Foundry via env vars | `AZURE_AI_INFERENCE_ENDPOINT` + `AZURE_AI_INFERENCE_API_KEY` (recommended for local dev, set in `.env.local`) |
+| 2 | Azure AI Foundry via Token Manager | `azure-ai-foundry` key at Portal `/secrets/keys/new` (recommended for integration / prod) |
+| 3 | GitHub Models via env var | `GITHUB_MODELS_API_KEY` |
+| 4 | GitHub Models via Token Manager | `github-models` key at `/secrets/keys/new` |
+| 5 | Bare GitHub token | `GITHUB_TOKEN` (slow public fallback) |
+
+Foundry always beats GitHub Models, and env vars beat the Token Manager
+within each backend. See
+[`ENV_VARIABLES.md`](ENV_VARIABLES.md#llm-configuration-portal-ai-features)
+for the full table and the no-failover semantics.
 
 Quick local setup with Foundry:
 
