@@ -83,6 +83,9 @@ function saveHiddenColumns(hidden: Set<ColumnId>) {
 function toIsoOrUndefined(value: string): string | undefined {
   if (!value) return undefined;
   const date = new Date(value);
+  // Keep typing UX smooth for datetime-local inputs: while users are in the
+  // middle of editing an incomplete value, we treat it as "no filter" instead
+  // of surfacing a hard error.
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
