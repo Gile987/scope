@@ -41,7 +41,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     if (!isLlmAvailable()) {
-      res.status(503).json({ error: "LLM not configured: register an azure-ai-foundry or github-models key in the Token Manager, or set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: no inference backend available. Please register a new secret key for GitHub Model or Azure Foundry." });
       return;
     }
 

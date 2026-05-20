@@ -32,10 +32,9 @@ SDK. Two backends are supported, resolved in this priority order:
 
 If neither backend is configured, the portal's AI buttons return HTTP `503`
 with a single actionable error message
-(`LLM not configured: no inference backend available. Register an Azure AI
-Foundry key (recommended) or a GitHub Models key at /secrets/keys/new, or
-set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY in
-.env.local.`), and the rest of the API works unchanged.
+(`LLM not configured: no inference backend available. Please register a
+new secret key for GitHub Model or Azure Foundry.`), and the rest of the
+API works unchanged.
 
 Every successful acquisition also logs a single line so operators can
 verify which provider served a given AI call:
