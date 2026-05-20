@@ -142,6 +142,45 @@ pnpm open:portal
 
 > **Worktree note:** In a [git worktree](#git-worktree-support), ports are offset for isolation so the portal may run on a different port (e.g. `5103`). Check `PORTAL_PORT` in your `.env` file for the actual port, or just run `pnpm open:portal` — it reads `.env` and opens the correct URL.
 
+### Enabling the Portal AI features (optional)
+
+The portal has three AI-assisted flows — criteria prompt generation,
+prompt-feature extract/generate, and task-prompt generate/variation. They
+need a chat-completions backend. Resolution order in
+[`apps/api/src/llm-token.ts`](apps/api/src/llm-token.ts):
+
+1. **Azure AI Foundry via env vars** (`AZURE_AI_INFERENCE_ENDPOINT` +
+   `AZURE_AI_INFERENCE_API_KEY` in `.env.local`) — recommended for local dev.
+2. **Azure AI Foundry via Token Manager** — register a key at the Portal
+   `/secrets/keys/new` (type **Azure AI Foundry**). Recommended for
+   integration / prod.
+3. **GitHub Models** (`GITHUB_MODELS_API_KEY` / a registered `github-models`
+   key / `GITHUB_TOKEN`) — slow public fallback, fine for dev only.
+
+Quick local setup with Foundry:
+
+```bash
+cp .env.local.example .env.local
+# fill in AZURE_AI_INFERENCE_ENDPOINT (must end in /models),
+# AZURE_AI_INFERENCE_API_KEY, and LLM_MODEL
+docker compose up -d --force-recreate --no-deps api
+```
+
+> Compose only re-reads `env_file:` on container **create**, so
+> `docker compose restart api` won't pick up `.env.local` edits — use
+> `--force-recreate` (or restart the whole stack).
+
+Each AI call logs the resolved provider, e.g.
+
+```
+[llm-token] inference provider: source=azure-ai-foundry via=azure-ai-foundry-env endpoint=… model=gpt-4.1-mini
+```
+
+If nothing is configured the portal renders a single actionable error
+("LLM not configured … register a key at /secrets/keys/new …"). See
+[`ENV_VARIABLES.md`](ENV_VARIABLES.md#llm-configuration-portal-ai-features)
+for full variable docs.
+
 ### Other useful commands
 
 ```bash

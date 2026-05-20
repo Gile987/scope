@@ -31,7 +31,22 @@ SDK. Two backends are supported, resolved in this priority order:
    `TOKEN_MANAGER_URL`.
 
 If neither backend is configured, the portal's AI buttons return HTTP `503`
-and the rest of the API works unchanged.
+with a single actionable error message
+(`LLM not configured: no inference backend available. Register an Azure AI
+Foundry key (recommended) or a GitHub Models key at /secrets/keys/new, or
+set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY in
+.env.local.`), and the rest of the API works unchanged.
+
+Every successful acquisition also logs a single line so operators can
+verify which provider served a given AI call:
+
+```
+[llm-token] inference provider: source=azure-ai-foundry via=azure-ai-foundry-env endpoint=https://<resource>.services.ai.azure.com/models model=gpt-4.1-mini
+```
+
+The `via` field disambiguates the five possible resolution paths:
+`azure-ai-foundry-env`, `azure-ai-foundry-token-manager`,
+`github-models-env`, `github-models-token-manager`, `github-token`.
 
 > **Local dev with Docker Compose:** the three Foundry-related variables
 > (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, `LLM_MODEL`)
@@ -43,8 +58,14 @@ and the rest of the API works unchanged.
 > ```bash
 > cp .env.local.example .env.local
 > # edit .env.local with your Foundry endpoint, key, and model
-> pnpm docker:up:copilot
+> docker compose up -d --force-recreate --no-deps api
 > ```
+>
+> Compose only re-reads `env_file:` when the container is **created**, so
+> `docker compose restart api` will *not* pick up `.env.local` changes.
+> Use `--force-recreate` (or restart the whole stack with
+> `pnpm docker:up:copilot` / `pnpm docker:dev:copilot`) after editing the
+> file.
 
 ### AZURE_AI_INFERENCE_ENDPOINT
 **Required (with `AZURE_AI_INFERENCE_API_KEY`) to use Azure AI Foundry**
@@ -57,6 +78,18 @@ endpoint and ignores GitHub Models. This is the recommended production
 configuration: GitHub Models' public endpoint regularly takes >1 minute under
 load (see [#847](https://github.com/growth-ecosystems/scope-core/issues/847)),
 while a Foundry deployment of the same model returns in well under a second.
+
+> **The `/models` suffix is required.** The Azure portal shows the resource
+> URL without it, but the inference data plane only responds on
+> `/models/chat/completions`. Without the suffix every call returns HTTP
+> 404 "Resource not found". The API auto-appends `/models` when it detects
+> a bare `services.ai.azure.com` host and emits a warning at startup, but
+> you should fix the env var to silence it.
+>
+> ```
+> ✅ https://<resource>.services.ai.azure.com/models
+> ❌ https://<resource>.services.ai.azure.com
+> ```
 
 - **Docker Compose:** put in `.env.local` (see note above).
 - **Kubernetes:** sourced from the `azure-ai-inference-secrets`
