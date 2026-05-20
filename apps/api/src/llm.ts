@@ -69,7 +69,8 @@ export async function generateCriteriaPrompt(
 ): Promise<GenerateResult> {
   const { client: llm, model: foundryModel } = await acquireInferenceClient();
 
-  const modelName = model || process.env.LLM_MODEL || foundryModel || "gpt-4.1";
+  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
+  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
   const userMessage = buildUserMessage(behavior, existingCriteria);
 
   const response = await llm.path("/chat/completions").post({

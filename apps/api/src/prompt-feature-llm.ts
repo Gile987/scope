@@ -72,7 +72,8 @@ export async function generatePromptFeaturePrompt(
 ): Promise<GeneratePromptFeatureResult> {
   const { client: llm, model: foundryModel } = await acquireInferenceClient();
 
-  const modelName = model || process.env.LLM_MODEL || foundryModel || "gpt-4.1";
+  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
+  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
   const userMessage = buildGenerateUserMessage(behavior, existingFeatures);
 
   const response = await llm.path("/chat/completions").post({
@@ -181,7 +182,8 @@ export async function extractPromptFeatures(
 ): Promise<ExtractionResult> {
   const { client: llm, model: foundryModel } = await acquireInferenceClient();
 
-  const modelName = model || process.env.LLM_MODEL || foundryModel || "gpt-4.1";
+  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
+  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
   const userMessage = buildExtractUserMessage(taskText, features);
 
   const response = await llm.path("/chat/completions").post({

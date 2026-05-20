@@ -40,7 +40,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register an azure-ai-foundry or github-models key in the Token Manager, or set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY" });
       return;
     }
 
@@ -61,9 +61,19 @@ apiRoute(ctx.app, ctx.registry, {
       console.log("[prompt-features/generate-prompt] LLM result:", JSON.stringify(result));
       res.json(result);
     } catch (err) {
-      if (err instanceof Error && err.message.includes("not configured")) {
-        res.status(503).json({ error: err.message });
-        return;
+      if (err instanceof Error) {
+        // Surface inference-time failures (bad endpoint, missing deployment,
+        // auth failure, etc.) as a 503 with the underlying message so the
+        // Portal can show a useful, actionable error.
+        if (
+          err.message.includes("not configured") ||
+          err.message.toLowerCase().includes("llm request failed") ||
+          err.message.toLowerCase().includes("resource not found") ||
+          err.message.toLowerCase().includes("authentication failed")
+        ) {
+          res.status(503).json({ error: err.message });
+          return;
+        }
       }
       next(err);
     }
@@ -148,7 +158,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register an azure-ai-foundry or github-models key in the Token Manager, or set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY" });
       return;
     }
 
@@ -166,7 +176,12 @@ apiRoute(ctx.app, ctx.registry, {
         cached: false,
       });
     } catch (err) {
-      if (err instanceof Error && err.message.includes("not configured")) {
+      if (err instanceof Error && (
+          err.message.includes("not configured") ||
+          err.message.toLowerCase().includes("llm request failed") ||
+          err.message.toLowerCase().includes("resource not found") ||
+          err.message.toLowerCase().includes("authentication failed")
+        )) {
         res.status(503).json({ error: err.message });
         return;
       }

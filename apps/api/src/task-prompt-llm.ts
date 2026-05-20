@@ -85,7 +85,8 @@ export async function generateTaskPrompt(
 
   const { client: llm, model: foundryModel } = await acquireInferenceClient();
 
-  const modelName = model || process.env.LLM_MODEL || foundryModel || "gpt-4.1";
+  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
+  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
 
   const isVariation = !!existingPrompt;
   const systemPrompt = isVariation ? VARIATION_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT;

@@ -39,7 +39,7 @@ apiRoute(ctx.app, ctx.registry, {
     const { description, existingPrompt } = req.body;
 
     if (!isTaskPromptLlmAvailable()) {
-      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register an azure-ai-foundry or github-models key in the Token Manager, or set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY" });
       return;
     }
 
@@ -206,7 +206,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     if (!isPromptFeatureLlmAvailable()) {
-      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: register an azure-ai-foundry or github-models key in the Token Manager, or set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY" });
       return;
     }
 
@@ -229,7 +229,12 @@ apiRoute(ctx.app, ctx.registry, {
         cached: false,
       });
     } catch (err) {
-      if (err instanceof Error && err.message.includes("not configured")) {
+      if (err instanceof Error && (
+          err.message.includes("not configured") ||
+          err.message.toLowerCase().includes("llm request failed") ||
+          err.message.toLowerCase().includes("resource not found") ||
+          err.message.toLowerCase().includes("authentication failed")
+        )) {
         res.status(503).json({ error: err.message });
         return;
       }

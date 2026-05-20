@@ -208,10 +208,13 @@ async function validateAzureAiFoundry(
   }
 
   const url = `${parsed.endpoint}/chat/completions?api-version=2024-05-01-preview`;
+  // Validate with the same model name production will use so a missing
+  // deployment surfaces as an invalid key instead of a runtime 404.
+  const probeModel = parsed.model || "gpt-4.1";
   const body = JSON.stringify({
     messages: [{ role: "user", content: "ping" }],
     max_tokens: 1,
-    ...(parsed.model ? { model: parsed.model } : {}),
+    model: probeModel,
   });
 
   try {
@@ -235,20 +238,23 @@ async function validateAzureAiFoundry(
     }
 
     if (response.status === 404) {
+      // 404 here means either the endpoint URL is wrong OR the model
+      // deployment doesn't exist on the resource. Both are user errors that
+      // would also break production, so mark as invalid with both hints.
       const hint = parsed.endpoint.endsWith("/models")
-        ? "verify the resource name in the URL"
+        ? `model deployment '${probeModel}' may not exist on this resource — verify the deployment name in the Azure portal and set it in the "Deployment / Model name" field`
         : "the endpoint URL usually ends with `/models` (e.g. `https://<resource>.services.ai.azure.com/models`)";
       return {
         status: "invalid",
-        error: `Endpoint not found (HTTP 404) at ${url} — ${hint}`,
+        error: `HTTP 404 from ${url} — ${hint}`,
       };
     }
 
     if (response.status === 400) {
-      // 400 generally means the endpoint accepted us but the request body
-      // shape was off — auth is fine, endpoint resolves, so treat as valid.
-      // Most often this happens when the deployment requires a specific
-      // model name we did not provide.
+      // 400 means the endpoint accepted us but rejected the request body.
+      // Auth is fine and the URL resolves; common causes are model mismatch
+      // on some Foundry shapes. Treat as valid; production will surface the
+      // exact error if it actually happens.
       return { status: "valid" };
     }
 
