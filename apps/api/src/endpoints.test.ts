@@ -523,6 +523,32 @@ describe("API Endpoints", () => {
         }),
       );
     });
+
+    it("passes createdAt date/time range filters to find query", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            toArray: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?createdAfter=2026-01-01T00:00:00.000Z&createdBefore=2026-01-31T23:59:59.000Z");
+      expect(mocks.collection.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          createdAt: {
+            $gte: new Date("2026-01-01T00:00:00.000Z"),
+            $lte: new Date("2026-01-31T23:59:59.000Z"),
+          },
+        }),
+      );
+    });
+
+    it("returns 400 when createdAfter is after createdBefore", async () => {
+      const res = await request(app).get("/api/v1/requests?createdAfter=2026-02-01T00:00:00.000Z&createdBefore=2026-01-01T00:00:00.000Z");
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("createdAfter must be less than or equal to createdBefore");
+    });
   });
 
   describe("GET /api/v1/requests/:id", () => {

@@ -211,6 +211,8 @@ export const ListRequestsQuerySchema = z
     turnsOp: z.enum(["eq", "gte", "lte"]).optional(),
     maxIterations: z.coerce.number().int().min(0).optional(),
     maxIterationsOp: z.enum(["eq", "gte", "lte"]).optional(),
+    createdAfter: z.coerce.date().optional(),
+    createdBefore: z.coerce.date().optional(),
   })
   .openapi("ListRequestsQuery");
 

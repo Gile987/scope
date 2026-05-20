@@ -155,6 +155,18 @@ describe("run list", () => {
     expect(output).toContain("status: done");
     expect(output).not.toContain("Found 1 request(s):");
   });
+
+  it("passes created-after and created-before filters to API query", async () => {
+    mockFetchWith({ data: [] });
+    await runListAndCaptureOutput([
+      "--created-after", "2026-01-01T00:00:00Z",
+      "--created-before", "2026-01-31T23:59:59Z",
+    ]);
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("createdAfter=2026-01-01T00%3A00%3A00.000Z&createdBefore=2026-01-31T23%3A59%3A59.000Z"),
+    );
+  });
 });
 
 describe("run retry", () => {

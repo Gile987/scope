@@ -31,7 +31,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   /** List runs with cursor-based pagination */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; profileId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {
+  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; profileId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; createdAfter?: string; createdBefore?: string; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {
     return request(`/requests${qs({
       worker: opts?.worker,
       taskPromptId: opts?.taskPromptId,
@@ -44,6 +44,8 @@ export const api = {
       turnsOp: opts?.turns !== undefined ? opts?.turnsOp : undefined,
       maxIterations: opts?.maxIterations !== undefined ? String(opts.maxIterations) : undefined,
       maxIterationsOp: opts?.maxIterations !== undefined ? opts?.maxIterationsOp : undefined,
+      createdAfter: opts?.createdAfter,
+      createdBefore: opts?.createdBefore,
       limit: opts?.limit ? String(opts.limit) : undefined,
       after: opts?.after,
       before: opts?.before,
@@ -52,7 +54,7 @@ export const api = {
   },
 
   /** List runs grouped by task or submissionId, with cursor-based pagination */
-  listRunGroups: (opts: { groupBy: "task" | "submissionId" | "profile"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
+  listRunGroups: (opts: { groupBy: "task" | "submissionId" | "profile"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; createdAfter?: string; createdBefore?: string; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
     return request(`/requests${qs({
       groupBy: opts.groupBy,
       worker: opts.worker,
@@ -65,6 +67,8 @@ export const api = {
       turnsOp: opts.turns !== undefined ? opts.turnsOp : undefined,
       maxIterations: opts.maxIterations !== undefined ? String(opts.maxIterations) : undefined,
       maxIterationsOp: opts.maxIterations !== undefined ? opts.maxIterationsOp : undefined,
+      createdAfter: opts.createdAfter,
+      createdBefore: opts.createdBefore,
       limit: opts.limit ? String(opts.limit) : undefined,
       after: opts.after,
       before: opts.before,

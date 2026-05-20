@@ -80,6 +80,12 @@ function saveHiddenColumns(hidden: Set<ColumnId>) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify([...hidden]));
 }
 
+function toIsoOrUndefined(value: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
 export function RunsList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const taskPromptId = searchParams.get("taskPromptId") ?? undefined;
@@ -94,6 +100,8 @@ export function RunsList() {
   const [turnsValue, setTurnsValue] = useState("");
   const [maxIterOp, setMaxIterOp] = useState<IterationOp>("gte");
   const [maxIterValue, setMaxIterValue] = useState("");
+  const [createdAfterValue, setCreatedAfterValue] = useState("");
+  const [createdBeforeValue, setCreatedBeforeValue] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [groupBy, setGroupBy] = useState<GroupByKey>("none");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -136,6 +144,8 @@ export function RunsList() {
   const effectiveTurns = parsedTurns !== undefined && Number.isFinite(parsedTurns) && parsedTurns >= 0 ? parsedTurns : undefined;
   const parsedMaxIter = maxIterValue.trim() === "" ? undefined : Number(maxIterValue);
   const effectiveMaxIter = parsedMaxIter !== undefined && Number.isFinite(parsedMaxIter) && parsedMaxIter >= 0 ? parsedMaxIter : undefined;
+  const effectiveCreatedAfter = toIsoOrUndefined(createdAfterValue);
+  const effectiveCreatedBefore = toIsoOrUndefined(createdBeforeValue);
 
   const goToLastPage = useCallback(() => {
     if (isJumpingToLast) return;
@@ -145,7 +155,7 @@ export function RunsList() {
   }, [isJumpingToLast]);
 
   const { data: runsResponse, isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, effectiveTurns, turnsOp, effectiveMaxIter, maxIterOp, cursor, cursorDirection, limit],
+    queryKey: ["runs", workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, effectiveTurns, turnsOp, effectiveMaxIter, maxIterOp, effectiveCreatedAfter, effectiveCreatedBefore, cursor, cursorDirection, limit],
     queryFn: () => api.listRuns({
       worker: workerFilter === "all" ? undefined : workerFilter,
       taskPromptId: effectiveTaskPromptId,
@@ -157,6 +167,8 @@ export function RunsList() {
       turnsOp: effectiveTurns !== undefined ? turnsOp : undefined,
       maxIterations: effectiveMaxIter,
       maxIterationsOp: effectiveMaxIter !== undefined ? maxIterOp : undefined,
+      createdAfter: effectiveCreatedAfter,
+      createdBefore: effectiveCreatedBefore,
       limit: limit,
       last: cursorDirection === "last",
       after: cursorDirection === "after" ? cursor : undefined,
@@ -170,7 +182,7 @@ export function RunsList() {
 
   // Fetch server-side groups when groupBy is active
   const { data: groupsResponse, isLoading: isGroupsLoading, isRefetching: isGroupsRefetching } = useQuery({
-    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, effectiveTurns, turnsOp, effectiveMaxIter, maxIterOp, cursor, cursorDirection, limit],
+    queryKey: ["run-groups", groupBy, workerFilter, effectiveTaskPromptId, statusFilter, outcomeFilter, criteriaState, submissionId, effectiveTurns, turnsOp, effectiveMaxIter, maxIterOp, effectiveCreatedAfter, effectiveCreatedBefore, cursor, cursorDirection, limit],
     queryFn: () => api.listRunGroups({
       groupBy: groupBy as "task" | "submissionId" | "profile",
       worker: workerFilter === "all" ? undefined : workerFilter,
@@ -183,6 +195,8 @@ export function RunsList() {
       turnsOp: effectiveTurns !== undefined ? turnsOp : undefined,
       maxIterations: effectiveMaxIter,
       maxIterationsOp: effectiveMaxIter !== undefined ? maxIterOp : undefined,
+      createdAfter: effectiveCreatedAfter,
+      createdBefore: effectiveCreatedBefore,
       limit: limit,
       last: cursorDirection === "last",
       after: cursorDirection === "after" ? cursor : undefined,
@@ -714,6 +728,26 @@ export function RunsList() {
             value={maxIterValue}
             disabled={isJumpingToLast}
             onChange={(e) => { setMaxIterValue(e.target.value); resetCursor(); }}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Created from:</span>
+          <Input
+            type="datetime-local"
+            className="w-[220px]"
+            value={createdAfterValue}
+            disabled={isJumpingToLast}
+            onChange={(e) => { setCreatedAfterValue(e.target.value); resetCursor(); }}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">to:</span>
+          <Input
+            type="datetime-local"
+            className="w-[220px]"
+            value={createdBeforeValue}
+            disabled={isJumpingToLast}
+            onChange={(e) => { setCreatedBeforeValue(e.target.value); resetCursor(); }}
           />
         </div>
         <div className="flex items-center gap-2">

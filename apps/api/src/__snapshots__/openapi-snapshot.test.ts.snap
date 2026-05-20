@@ -6612,6 +6612,30 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "createdAfter",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "createdBefore",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+          },
         ],
         "responses": {
           "200": {

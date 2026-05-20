@@ -505,6 +505,8 @@ apiRoute(ctx.app, ctx.registry, {
     const turnsOpFilter = (req.query.turnsOp as string | undefined) ?? "eq";
     const maxIterationsFilterRaw = req.query.maxIterations as string | undefined;
     const maxIterationsOpFilter = (req.query.maxIterationsOp as string | undefined) ?? "eq";
+    const createdAfterRaw = req.query.createdAfter as string | Date | undefined;
+    const createdBeforeRaw = req.query.createdBefore as string | Date | undefined;
     const includeDeleted = req.query.includeDeleted === "true";
     const groupByParam = req.query.groupBy as "task" | "submissionId" | "profile" | undefined;
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
@@ -518,6 +520,21 @@ apiRoute(ctx.app, ctx.registry, {
     }
     if (lastParam && (afterParam || beforeParam)) {
       res.status(400).json({ error: "Cannot combine 'last=true' with 'after' or 'before'" });
+      return;
+    }
+
+    const createdAfter = createdAfterRaw
+      ? (createdAfterRaw instanceof Date ? createdAfterRaw : new Date(createdAfterRaw))
+      : undefined;
+    const createdBefore = createdBeforeRaw
+      ? (createdBeforeRaw instanceof Date ? createdBeforeRaw : new Date(createdBeforeRaw))
+      : undefined;
+    if ((createdAfter && Number.isNaN(createdAfter.getTime())) || (createdBefore && Number.isNaN(createdBefore.getTime()))) {
+      res.status(400).json({ error: "Invalid createdAfter or createdBefore datetime" });
+      return;
+    }
+    if (createdAfter && createdBefore && createdAfter > createdBefore) {
+      res.status(400).json({ error: "createdAfter must be less than or equal to createdBefore" });
       return;
     }
     
@@ -544,6 +561,12 @@ apiRoute(ctx.app, ctx.registry, {
     }
     if (!includeDeleted) {
       filter.deletedAt = { $exists: false };
+    }
+    if (createdAfter || createdBefore) {
+      filter.createdAt = {
+        ...(createdAfter ? { $gte: createdAfter } : {}),
+        ...(createdBefore ? { $lte: createdBefore } : {}),
+      };
     }
 
     // Iteration-count filters. `maxIterations` is a top-level field; `turns`

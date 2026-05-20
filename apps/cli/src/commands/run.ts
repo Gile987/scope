@@ -342,6 +342,8 @@ run
   .option("--submission-id <id>", "Filter by submission ID")
   .option("--turns <expr>", "Filter by actual turns (e.g. '>=5', '<=10', '=3')")
   .option("--max-iterations <expr>", "Filter by configured maxIterations (e.g. '>=5', '<=10', '=3')")
+  .option("--created-after <datetime>", "Filter runs created at or after a datetime (ISO-8601)")
+  .option("--created-before <datetime>", "Filter runs created at or before a datetime (ISO-8601)")
   .option("--include-deleted", "Include soft-deleted runs")
 )
   .action(async (options) => {
@@ -364,6 +366,13 @@ run
         const op = opSym === ">=" ? "gte" : opSym === "<=" ? "lte" : "eq";
         return { op, value: Number(m[2]) };
       };
+      const parseDateTime = (raw: string, name: string): string => {
+        const parsed = new Date(String(raw).trim());
+        if (Number.isNaN(parsed.getTime())) {
+          throw new Error(`Invalid ${name} datetime '${raw}'. Use an ISO-8601 datetime, e.g. 2026-01-01T10:00:00Z.`);
+        }
+        return parsed.toISOString();
+      };
       if (options.turns !== undefined) {
         const { op, value } = parseIterExpr(options.turns, "--turns");
         params.set("turns", String(value));
@@ -373,6 +382,12 @@ run
         const { op, value } = parseIterExpr(options.maxIterations, "--max-iterations");
         params.set("maxIterations", String(value));
         params.set("maxIterationsOp", op);
+      }
+      if (options.createdAfter !== undefined) {
+        params.set("createdAfter", parseDateTime(options.createdAfter, "--created-after"));
+      }
+      if (options.createdBefore !== undefined) {
+        params.set("createdBefore", parseDateTime(options.createdBefore, "--created-before"));
       }
       if (options.includeDeleted) {
         params.set("includeDeleted", "true");

@@ -114,6 +114,8 @@ The REST API exposes an auto-generated **OpenAPI 3.1** spec built with [Zod](htt
 | `GET /openapi.json` | Raw OpenAPI 3.1 specification (JSON) |
 | `GET /api-docs` | Interactive Swagger UI |
 
+The run-listing endpoint (`GET /api/v1/requests`) supports server-side filtering by worker/task/status/outcome/submission, iteration stats (`turns`, `maxIterations`), and created-at date/time range (`createdAfter`, `createdBefore`).
+
 ### Schema organization
 
 Zod schemas live in `packages/shared/src/schemas/` (16 files, ~78 schemas) so they can be reused by the API, CLI, and workers. Each entity has separate **input** (what the client sends) and **response** (what the API returns) schemas.

@@ -408,6 +408,19 @@ describe("request schemas", () => {
     it("rejects negative turns", () => {
       expect(() => ListRequestsQuerySchema.parse({ turns: "-1" })).toThrow();
     });
+
+    it("accepts createdAt date/time range filters", () => {
+      const result = ListRequestsQuerySchema.parse({
+        createdAfter: "2026-01-01T10:00:00.000Z",
+        createdBefore: "2026-01-31T10:00:00.000Z",
+      });
+      expect(result.createdAfter?.toISOString()).toBe("2026-01-01T10:00:00.000Z");
+      expect(result.createdBefore?.toISOString()).toBe("2026-01-31T10:00:00.000Z");
+    });
+
+    it("rejects invalid createdAt date/time filters", () => {
+      expect(() => ListRequestsQuerySchema.parse({ createdAfter: "not-a-date" })).toThrow();
+    });
   });
 
   describe("BulkResubmitInputSchema", () => {
