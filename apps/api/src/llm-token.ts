@@ -39,6 +39,35 @@ function isFoundryConfigured(): boolean {
 }
 
 /**
+ * Normalize the Azure AI Foundry endpoint URL.
+ *
+ * The inference data plane on an Azure AI Services / Foundry resource sits
+ * at `<resource>.services.ai.azure.com/models` — without the `/models`
+ * suffix every `chat/completions` call returns a 404. This is a very common
+ * configuration footgun (the Azure portal shows the resource URL without
+ * the path), so we auto-append it for `services.ai.azure.com` hosts that
+ * have no path and warn loudly. For any other host or any URL that already
+ * has a path we pass through untouched.
+ */
+function normalizeFoundryEndpoint(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  try {
+    const url = new URL(trimmed);
+    const hasPath = url.pathname && url.pathname !== "/";
+    if (!hasPath && url.hostname.endsWith(".services.ai.azure.com")) {
+      const fixed = `${trimmed}/models`;
+      console.warn(
+        `[llm-token] AZURE_AI_INFERENCE_ENDPOINT='${trimmed}' is missing the /models path. Auto-correcting to '${fixed}'. Update your .env.local to silence this warning.`
+      );
+      return fixed;
+    }
+  } catch {
+    // Let the SDK surface the malformed-URL error downstream.
+  }
+  return trimmed;
+}
+
+/**
  * Returns true if a GitHub Models token is available from any source:
  * - GITHUB_MODELS_API_KEY env var
  * - TOKEN_MANAGER_URL (token manager with registered github-models tokens)
@@ -152,7 +181,7 @@ async function tryAcquireFoundryFromTokenManager(): Promise<{
 export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
   // 1. Azure AI Foundry via env vars — explicit override, preferred locally.
   if (isFoundryConfigured()) {
-    const endpoint = process.env.AZURE_AI_INFERENCE_ENDPOINT!;
+    const endpoint = normalizeFoundryEndpoint(process.env.AZURE_AI_INFERENCE_ENDPOINT!);
     const apiKey = process.env.AZURE_AI_INFERENCE_API_KEY!;
     return {
       client: ModelClient(endpoint, new AzureKeyCredential(apiKey)),
