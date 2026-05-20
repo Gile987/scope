@@ -115,16 +115,36 @@ export async function acquireGitHubModelsToken(): Promise<string> {
 
 export type InferenceSource = "azure-ai-foundry" | "github-models";
 
+/**
+ * How the credential was actually resolved. Useful for log lines so an
+ * operator can tell at a glance whether the active LLM came from a local
+ * env override, the Token Manager, or the bare GITHUB_TOKEN fallback.
+ */
+export type InferenceVia =
+  | "azure-ai-foundry-env"
+  | "azure-ai-foundry-token-manager"
+  | "github-models-env"
+  | "github-models-token-manager"
+  | "github-token";
+
 export interface InferenceClientHandle {
   client: ModelClientType;
   endpoint: string;
   source: InferenceSource;
+  via: InferenceVia;
   /**
    * When the source is "azure-ai-foundry" via the Token Manager, the
    * registered secret can override the default model name. Callers should
    * honour this when present (and fall back to `process.env.LLM_MODEL`).
    */
   model?: string;
+}
+
+function logInferenceAcquired(handle: InferenceClientHandle): void {
+  const model = handle.model || process.env.LLM_MODEL || "gpt-4.1";
+  console.log(
+    `[llm-token] inference provider: source=${handle.source} via=${handle.via} endpoint=${handle.endpoint} model=${model}`,
+  );
 }
 
 /**
@@ -183,32 +203,46 @@ export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
   if (isFoundryConfigured()) {
     const endpoint = normalizeFoundryEndpoint(process.env.AZURE_AI_INFERENCE_ENDPOINT!);
     const apiKey = process.env.AZURE_AI_INFERENCE_API_KEY!;
-    return {
+    const handle: InferenceClientHandle = {
       client: ModelClient(endpoint, new AzureKeyCredential(apiKey)),
       endpoint,
       source: "azure-ai-foundry",
+      via: "azure-ai-foundry-env",
     };
+    logInferenceAcquired(handle);
+    return handle;
   }
 
   // 2. Azure AI Foundry via the Token Manager — preferred in production.
   const tmFoundry = await tryAcquireFoundryFromTokenManager();
   if (tmFoundry) {
-    return {
+    const handle: InferenceClientHandle = {
       client: ModelClient(tmFoundry.endpoint, new AzureKeyCredential(tmFoundry.apiKey)),
       endpoint: tmFoundry.endpoint,
       source: "azure-ai-foundry",
+      via: "azure-ai-foundry-token-manager",
       model: tmFoundry.model,
     };
+    logInferenceAcquired(handle);
+    return handle;
   }
 
   // 3. GitHub Models — public fallback (slow; fine for local dev).
   if (isGitHubModelsTokenAvailable()) {
     const token = await acquireGitHubModelsToken();
-    return {
+    const via: InferenceVia = process.env.GITHUB_MODELS_API_KEY
+      ? "github-models-env"
+      : process.env.TOKEN_MANAGER_URL
+        ? "github-models-token-manager"
+        : "github-token";
+    const handle: InferenceClientHandle = {
       client: ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token)),
       endpoint: GITHUB_MODELS_ENDPOINT,
       source: "github-models",
+      via,
     };
+    logInferenceAcquired(handle);
+    return handle;
   }
 
   throw new Error(
