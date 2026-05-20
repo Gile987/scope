@@ -569,7 +569,7 @@ export const KEY_CAPABILITY_DESCRIPTIONS: Record<KeyCapability, string> = {
   "copilot-cli": "Run GitHub Copilot in the CLI for code suggestions",
   "claude-code-cli": "Run Claude Code as an agentic coding assistant",
   "anthropic-api": "Access the Anthropic REST API (model scanning, direct API calls)",
-  "azure-ai-inference": "Chat-completion inference against an Azure AI Foundry deployment (used by the portal's AI features for fast, dedicated capacity)",
+  "azure-ai-inference": "Chat-completion inference against an Azure AI Foundry deployment",
 };
 
 /**

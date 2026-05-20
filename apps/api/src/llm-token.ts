@@ -91,25 +91,40 @@ export function isLlmAvailable(): boolean {
 /**
  * Acquire a GitHub Models API token.
  *
- * @throws Error if no token source is available.
+ * Tries (in order):
+ *   1. GITHUB_MODELS_API_KEY env var
+ *   2. Token Manager: registered `github-models` key
+ *   3. GITHUB_TOKEN env var (bare fallback)
+ *
+ * If the Token Manager is configured but has no `github-models` key
+ * registered (HTTP 404), we suppress that and try the bare GITHUB_TOKEN
+ * fallback instead of propagating the cryptic acquisition error.
+ *
+ * @throws Error with a user-actionable message when no source is available.
  */
 export async function acquireGitHubModelsToken(): Promise<string> {
   // 1. Explicit env var override
   const explicit = process.env.GITHUB_MODELS_API_KEY;
   if (explicit) return explicit;
 
-  // 2. Token Manager (handles its own GITHUB_TOKEN fallback internally)
+  // 2. Token Manager — but suppress acquisition errors so we can fall
+  // through to GITHUB_TOKEN instead of propagating an opaque 404.
   const client = getTokenManagerClient();
   if (client) {
-    return client.acquireToken("github-models");
+    try {
+      return await client.acquireToken("github-models");
+    } catch {
+      // No github-models key registered (or token manager unreachable);
+      // fall through to bare GITHUB_TOKEN below.
+    }
   }
 
-  // 3. Bare GITHUB_TOKEN fallback (no token manager)
+  // 3. Bare GITHUB_TOKEN fallback
   const fallback = process.env.GITHUB_TOKEN;
   if (fallback) return fallback;
 
   throw new Error(
-    "No GitHub Models token available: set GITHUB_MODELS_API_KEY, GITHUB_TOKEN, or configure TOKEN_MANAGER_URL"
+    "No GitHub Models token available: register a `github-models` key at /secrets/keys/new, or set GITHUB_MODELS_API_KEY / GITHUB_TOKEN"
   );
 }
 
@@ -229,23 +244,30 @@ export async function acquireInferenceClient(): Promise<InferenceClientHandle> {
 
   // 3. GitHub Models — public fallback (slow; fine for local dev).
   if (isGitHubModelsTokenAvailable()) {
-    const token = await acquireGitHubModelsToken();
-    const via: InferenceVia = process.env.GITHUB_MODELS_API_KEY
-      ? "github-models-env"
-      : process.env.TOKEN_MANAGER_URL
-        ? "github-models-token-manager"
-        : "github-token";
-    const handle: InferenceClientHandle = {
-      client: ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token)),
-      endpoint: GITHUB_MODELS_ENDPOINT,
-      source: "github-models",
-      via,
-    };
-    logInferenceAcquired(handle);
-    return handle;
+    try {
+      const token = await acquireGitHubModelsToken();
+      const via: InferenceVia = process.env.GITHUB_MODELS_API_KEY
+        ? "github-models-env"
+        : process.env.TOKEN_MANAGER_URL
+          ? "github-models-token-manager"
+          : "github-token";
+      const handle: InferenceClientHandle = {
+        client: ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token)),
+        endpoint: GITHUB_MODELS_ENDPOINT,
+        source: "github-models",
+        via,
+      };
+      logInferenceAcquired(handle);
+      return handle;
+    } catch {
+      // No usable GitHub Models token after all — drop through to the
+      // unified "no backend configured" error below so the UI gets a
+      // single actionable message instead of the opaque acquisition
+      // failure from the token manager.
+    }
   }
 
   throw new Error(
-    "No inference backend configured: set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY (preferred), register an `azure-ai-foundry` key in the Token Manager, or fall back to GITHUB_MODELS_API_KEY / GITHUB_TOKEN / TOKEN_MANAGER_URL"
+    "LLM not configured: no inference backend available. Register an Azure AI Foundry key (recommended) or a GitHub Models key at /secrets/keys/new, or set AZURE_AI_INFERENCE_ENDPOINT + AZURE_AI_INFERENCE_API_KEY in .env.local."
   );
 }
