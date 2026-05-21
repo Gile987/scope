@@ -83,7 +83,7 @@ async function checkLatestVersion(currentVersion: string): Promise<void> {
     if (isNewerVersion(latest, currentVersion)) {
       process.stderr.write(
         `\n  A newer version of scope is available: ${latest} (current: ${currentVersion})\n` +
-          `  Run: gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash\n\n`,
+          `  Run: scope update\n\n`,
       );
     }
   } catch {
