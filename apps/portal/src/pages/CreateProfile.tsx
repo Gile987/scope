@@ -129,7 +129,10 @@ export function CreateProfile() {
     setDescription(descParts.join(". ").slice(0, 512));
   };
 
-  const canSubmit = name.trim() && name.length <= 128 && description.length <= 512 && worker && model;
+  // Model is only required when the selected agent declares supportedModels;
+  // otherwise the Model dropdown isn't rendered and we shouldn't gate on it.
+  const requiresModel = supportedModels.length > 0;
+  const canSubmit = name.trim() && name.length <= 128 && description.length <= 512 && worker && (!requiresModel || model);
 
   return (
     <div className="space-y-6 max-w-3xl">
