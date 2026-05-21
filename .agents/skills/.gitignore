@@ -7,3 +7,5 @@
 !rust-best-practices/**
 !storybook/
 !storybook/**
+!scope-api/
+!scope-api/**
