@@ -207,7 +207,11 @@ async function validateAzureAiFoundry(
     };
   }
 
-  const url = `${parsed.endpoint}/chat/completions?api-version=2024-05-01-preview`;
+  const endpointResult = buildFoundryChatCompletionsUrl(parsed.endpoint);
+  if (endpointResult.status === "invalid") {
+    return endpointResult;
+  }
+  const { url, hasModelsSuffix } = endpointResult;
   // Validate with the same model name production will use so a missing
   // deployment surfaces as an invalid key instead of a runtime 404.
   const probeModel = parsed.model || "gpt-4.1";
@@ -240,7 +244,7 @@ async function validateAzureAiFoundry(
       // 404 here means either the endpoint URL is wrong OR the model
       // deployment doesn't exist on the resource. Both are user errors that
       // would also break production, so mark as invalid with both hints.
-      const hint = parsed.endpoint.endsWith("/models")
+      const hint = hasModelsSuffix
         ? `model deployment '${probeModel}' may not exist on this resource — verify the deployment name in the Azure portal and set it in the "Deployment / Model name" field`
         : "the endpoint URL usually ends with `/models` (e.g. `https://<resource>.services.ai.azure.com/models`)";
       return {
@@ -268,6 +272,49 @@ async function validateAzureAiFoundry(
       error: `Foundry validation failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+function stripTrailingSlashes(value: string): string {
+  let result = value;
+  while (result.endsWith("/")) {
+    result = result.slice(0, -1);
+  }
+  return result;
+}
+
+function buildFoundryChatCompletionsUrl(
+  endpoint: string
+):
+  | { status: "invalid"; error: string }
+  | { status: "valid"; url: string; hasModelsSuffix: boolean } {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(endpoint);
+  } catch {
+    return { status: "invalid", error: "Foundry endpoint must be a valid URL" };
+  }
+
+  if (parsedUrl.protocol !== "https:") {
+    return { status: "invalid", error: "Foundry endpoint must use HTTPS" };
+  }
+
+  if (parsedUrl.username || parsedUrl.password) {
+    return { status: "invalid", error: "Foundry endpoint must not include credentials" };
+  }
+
+  const hostname = parsedUrl.hostname.toLowerCase();
+  const isAzureFoundryHost = hostname === "services.ai.azure.com" || hostname.endsWith(".services.ai.azure.com");
+  if (!isAzureFoundryHost) {
+    return { status: "invalid", error: "Foundry endpoint must target *.services.ai.azure.com" };
+  }
+
+  const normalizedPath = stripTrailingSlashes(parsedUrl.pathname);
+  const hasModelsSuffix = normalizedPath.endsWith("/models");
+
+  parsedUrl.pathname = `${normalizedPath}/chat/completions`;
+  parsedUrl.search = "api-version=2024-05-01-preview";
+
+  return { status: "valid", url: parsedUrl.toString(), hasModelsSuffix };
 }
 
 function parseRateLimit(

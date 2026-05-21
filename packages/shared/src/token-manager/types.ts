@@ -149,6 +149,14 @@ export interface AzureAiFoundrySecretValue {
   model?: string;
 }
 
+function trimTrailingSlashes(value: string): string {
+  let result = value;
+  while (result.endsWith("/")) {
+    result = result.slice(0, -1);
+  }
+  return result;
+}
+
 /**
  * Parse a JSON-encoded Foundry secret value. Returns null when the input
  * is not a well-formed AzureAiFoundrySecretValue.
@@ -165,7 +173,7 @@ export function parseAzureAiFoundrySecret(raw: string): AzureAiFoundrySecretValu
       parsed.apiKey.trim() !== ""
     ) {
       return {
-        endpoint: parsed.endpoint.trim().replace(/\/+$/, ""),
+        endpoint: trimTrailingSlashes(parsed.endpoint.trim()),
         apiKey: parsed.apiKey.trim(),
         model: typeof parsed.model === "string" && parsed.model.trim() ? parsed.model.trim() : undefined,
       };
