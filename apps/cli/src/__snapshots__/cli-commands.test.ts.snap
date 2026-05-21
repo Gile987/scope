@@ -595,6 +595,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "submit": {
         "options": [
           "--agent-version",
+          "--base-profile",
           "--criteria",
           "--extensions",
           "--max-iterations",
@@ -603,6 +604,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--model",
           "--no-stream",
           "--persona",
+          "--profile-variations-file",
           "--scenario",
           "--skills",
           "--traits",

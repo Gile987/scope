@@ -641,6 +641,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "CreateRequestInput": {
         "properties": {
+          "baseProfileId": {
+            "type": "string",
+          },
+          "baseProfileVersion": {
+            "type": "integer",
+          },
           "extensions": {
             "items": {
               "type": "string",
@@ -670,6 +676,15 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "profileId": {
             "type": "string",
+          },
+          "profileVariations": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileVariationInput",
+            },
+            "type": "array",
+          },
+          "profileVersion": {
+            "type": "integer",
           },
           "scenario": {
             "$ref": "#/components/schemas/Scenario",
@@ -1524,6 +1539,23 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "ProfileVariationInput": {
+        "properties": {
+          "label": {
+            "type": "string",
+          },
+          "profileId": {
+            "type": "string",
+          },
+          "profileVersion": {
+            "type": "integer",
+          },
+        },
+        "required": [
+          "profileId",
+        ],
+        "type": "object",
+      },
       "ProfileVersionResponse": {
         "properties": {
           "_id": {
@@ -2066,6 +2098,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "profileId": {
             "type": "string",
           },
+          "profileVariation": {
+            "$ref": "#/components/schemas/RequestVariation",
+          },
           "profileVersionId": {
             "type": "string",
           },
@@ -2103,6 +2138,28 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "scenario",
           "workerType",
           "createdAt",
+        ],
+        "type": "object",
+      },
+      "RequestVariation": {
+        "properties": {
+          "baseProfileId": {
+            "type": "string",
+          },
+          "label": {
+            "type": "string",
+          },
+          "profileId": {
+            "type": "string",
+          },
+          "profileVersionId": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "baseProfileId",
+          "profileId",
+          "profileVersionId",
         ],
         "type": "object",
       },
@@ -6673,6 +6730,26 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                         "maximum": 10,
                         "minimum": 1,
                         "type": "number",
+                      },
+                      "profileVariations": {
+                        "items": {
+                          "properties": {
+                            "label": {
+                              "type": "string",
+                            },
+                            "profileId": {
+                              "type": "string",
+                            },
+                            "profileVersion": {
+                              "type": "integer",
+                            },
+                          },
+                          "required": [
+                            "profileId",
+                          ],
+                          "type": "object",
+                        },
+                        "type": "array",
                       },
                       "promptFeatureExtractionId": {
                         "type": "string",
