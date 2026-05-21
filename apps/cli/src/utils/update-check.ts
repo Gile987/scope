@@ -57,7 +57,7 @@ const RELEASES_URL =
 
 async function checkLatestVersion(currentVersion: string): Promise<void> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
+  const timeout = setTimeout(() => controller.abort(), 2000);
 
   try {
     const headers: Record<string, string> = {
