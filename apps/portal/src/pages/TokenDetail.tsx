@@ -4,8 +4,8 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { UpdateTokenRequest } from "@/types";
-import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS, TOKEN_CAPABILITY_DESCRIPTIONS, ALL_CAPABILITIES } from "@/types";
+import type { UpdateKeyRequest } from "@/types";
+import { KEY_TYPE_LABELS, KEY_CAPABILITY_LABELS, KEY_CAPABILITY_DESCRIPTIONS, ALL_CAPABILITIES } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +40,7 @@ export function TokenDetail() {
 
   const { data: token, isLoading, error } = useQuery({
     queryKey: ["token", id],
-    queryFn: () => api.getToken(id!),
+    queryFn: () => api.getKey(id!),
     enabled: !!id,
     // Poll every 2s while validation hasn't landed yet
     refetchInterval: (query) => {
@@ -63,7 +63,7 @@ export function TokenDetail() {
   }, [token]);
 
   const updateMutation = useMutation({
-    mutationFn: (body: UpdateTokenRequest) => api.updateToken(id!, body),
+    mutationFn: (body: UpdateKeyRequest) => api.updateKey(id!, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["token", id] });
       queryClient.invalidateQueries({ queryKey: ["tokens"] });
@@ -73,7 +73,7 @@ export function TokenDetail() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.deleteToken(id!),
+    mutationFn: () => api.deleteKey(id!),
     onSuccess: () => {
       toast.success("Key deleted");
       navigate("/secrets/keys");
@@ -81,7 +81,7 @@ export function TokenDetail() {
   });
 
   const validateMutation = useMutation({
-    mutationFn: () => api.validateToken(id!),
+    mutationFn: () => api.validateKey(id!),
     onSuccess: (updatedToken) => {
       // Immediately update the cached token with the server response
       queryClient.setQueryData(["token", id], updatedToken);
@@ -132,7 +132,7 @@ export function TokenDetail() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight font-mono">{token.secretName}</h1>
           <p className="text-sm text-muted-foreground">
-            {TOKEN_TYPE_LABELS[token.type]}
+            {KEY_TYPE_LABELS[token.type]}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -223,10 +223,10 @@ export function TokenDetail() {
                   />
                   <div className="min-w-0">
                     <p className={`text-sm font-medium ${active ? "" : "text-muted-foreground"}`}>
-                      {TOKEN_CAPABILITY_LABELS[cap]}
+                      {KEY_CAPABILITY_LABELS[cap]}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {TOKEN_CAPABILITY_DESCRIPTIONS[cap]}
+                      {KEY_CAPABILITY_DESCRIPTIONS[cap]}
                     </p>
                   </div>
                 </div>

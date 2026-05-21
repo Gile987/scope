@@ -3,7 +3,14 @@
 
 // Types mirroring the API response shapes (from shared/src/types.ts)
 
-export type RunStatus = "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
+export type RunStatus = "pending" | "queued" | "processing" | "paused" | "done";
+export type RunOutcome = "succeeded" | "failed" | "finished";
+
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
 
 export interface CriterionResult {
   criterionId: string;
@@ -22,7 +29,7 @@ export interface ToolCall {
 
 export interface ConversationTurn {
   iteration: number;
-  codingAgentResponse: string;
+  codingAgentResponse?: string;
   judgeFeedback: string;
   snapshotUrl: string;
   passed: boolean;
@@ -30,6 +37,17 @@ export interface ConversationTurn {
   criteriaResults?: CriterionResult[];
   harUrl?: string;
   videoUrls?: string[];
+  tokenUsage?: TokenUsage;
+  startedAt?: string;
+  durationMs?: number;
+  toolCalls?: ToolCall[];
+  /** Blob storage URL to the per-iteration tool-calls JSONL append blob.
+   *  Replaces the inline `toolCalls` array for new runs. */
+  toolCallsUrl?: string;
+  /** Number of tool calls in `toolCallsUrl` — used for counts/aggregates
+   *  without fetching the JSONL blob. */
+  toolCallCount?: number;
+  aiCallCount?: number;
 }
 
 export interface Scenario {
@@ -53,6 +71,46 @@ export interface LogEvent {
   data?: Record<string, unknown>;
 }
 
+export interface OsInfo {
+  platform: string;
+  release: string;
+  arch: string;
+}
+
+/**
+ * Per-attempt mutable state (nested under `Run.run` in API responses since
+ * migration 014). Fields here change as a single attempt progresses; fields
+ * on the parent `Run` are immutable across attempts.
+ */
+export interface RunState {
+  _id: string;
+  attemptNumber: number;
+  status: RunStatus;
+  outcome?: RunOutcome;
+  result?: string;
+  error?: string;
+  logsUrl?: string;
+  turns?: ConversationTurn[];
+  workerVersion?: string;
+  os?: OsInfo;
+  /** Wall-clock time the owning worker last extended visibility for this run's queue message. */
+  lastHeartbeatAt?: string;
+  /** Identity of the worker process currently processing the run. */
+  worker?: { instanceId: string; podName?: string };
+  harUrl?: string;
+  videoUrls?: string[];
+  setupVideoUrls?: string[];
+  tokenUsage?: TokenUsage;
+  aiCallCount?: number;
+  rawChatUrl?: string;
+  rawChatFormat?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt?: string;
+  pausedAt?: string;
+  resumedAt?: string;
+}
+
 export interface Run {
   _id: string;
   id: string;
@@ -60,12 +118,9 @@ export interface Run {
   workerType: string;
   model?: string;
   agentVersion?: string;
-  status: RunStatus;
-  result?: string;
-  error?: string;
-  logs?: LogEvent[];
+  /** Per-attempt mutable state for the current attempt. */
+  run?: RunState;
   maxIterations?: number;
-  turns?: ConversationTurn[];
   personaInstructions?: string;
   persona?: Persona;
   createdAt: string;
@@ -77,9 +132,21 @@ export interface Run {
   mcpServers?: string[];
   skills?: string[];
   skillRevisions?: string[];
-  harUrl?: string;
-  videoUrls?: string[];
-  setupVideoUrls?: string[];
+  extensions?: string[];
+  priority?: number;
+  submissionId?: string;
+  profileId?: string;
+  profileVersionId?: string;
+}
+
+export interface CursorPaginatedResponse<T> {
+  data: T[];
+  limit: number;
+  estimatedTotal: number;
+  cursors: {
+    next: string | null;
+    prev: string | null;
+  };
 }
 
 export const WORKER_TYPES = [
@@ -91,12 +158,20 @@ export type WorkerType = (typeof WORKER_TYPES)[number];
 
 export const STATUS_LIST: RunStatus[] = [
   "pending",
+  "queued",
   "processing",
-  "iterating",
-  "completed",
-  "failed",
-  "exhausted",
+  "paused",
+  "done",
 ];
+
+export const OUTCOME_LIST: RunOutcome[] = [
+  "succeeded",
+  "failed",
+  "finished",
+];
+
+/** Comparison operator for iteration-count filters. */
+export type IterationOp = "eq" | "gte" | "lte";
 
 // Criteria types
 export interface CriteriaConfig {
@@ -127,18 +202,12 @@ export interface GeneratePromptResponse {
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
-  dependsOn?: string[];
 }
 
 export interface PromptFeatureDocument extends PromptFeatureConfig {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
-}
-
-export interface PromptFeatureGraphData {
-  nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
-  edges: Array<{ source: string; target: string }>;
 }
 
 export interface PromptFeatureResult {
@@ -200,6 +269,12 @@ export interface TaskWorkerGroup {
     min: number;
     max: number;
   } | null;  // null if no passed runs
+  durationStats: {
+    mean: number;
+    stdDev: number;
+    min: number;
+    max: number;
+  } | null;  // Total run duration in ms (null if no timing data)
 }
 
 export interface AnalysisResponse {
@@ -284,11 +359,13 @@ export interface MdpResponse {
 
 // Bulk re-submit overrides
 export interface BulkResubmitOverrides {
+  profileId?: string | null;
   workerType?: string;
   model?: string | null;
   maxIterations?: number | null;
   mcpServers?: string[] | null;
   skillRevisions?: string[] | null;
+  extensions?: string[] | null;
 }
 
 // Bulk re-submit response
@@ -319,7 +396,6 @@ export interface Report {
   content?: string;
   status: ReportStatus;
   error?: string;
-  logs: LogEvent[];
   insightReferences?: InsightReference[];
   templateId?: string;
   createdAt: string;
@@ -335,6 +411,18 @@ export const REPORT_STATUS_LIST: ReportStatus[] = [
 
 export interface BulkReportStatus {
   [requestId: string]: { reportId: string; status: ReportStatus };
+}
+
+export interface ReportSummary {
+  total: number;
+  pending: number;
+  generating: number;
+  completed: number;
+  failed: number;
+}
+
+export interface BulkReportSummary {
+  [requestId: string]: ReportSummary;
 }
 
 // =============================================================================
@@ -383,40 +471,38 @@ export interface ReportTemplate {
   userPrompt: string;
   systemPrompt?: ReportTemplateSystemPrompt;
   trigger?: ReportTrigger;
+  model?: string;
+  timeoutMs?: number;
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
 }
 
 // =============================================================================
-// Token Manager types
+// Key Manager types
 // =============================================================================
 
-export type TokenType =
-  | "github-pat-classic"
-  | "github-pat-fine-grained"
-  | "github-oauth"
-  | "github-oauth-cookie-state"
-  | "anthropic-api-key";
+export type KeyType =
+  "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth";
 
-export type TokenCapability =
-  "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
+export type KeyCapability =
+  "github-models" | "github-public-api" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
 
-export type TokenValidationStatus =
+export type KeyValidationStatus =
   | "valid"
   | "invalid"
   | "expired"
   | "error"
   | "unknown";
 
-export interface TokenDocument {
+export interface KeyDocument {
   _id: string;
-  type: TokenType;
-  capabilities: TokenCapability[];
+  type: KeyType;
+  capabilities: KeyCapability[];
   secretName: string;
   expiresAt?: string;
   lastValidatedAt?: string;
-  lastValidationStatus: TokenValidationStatus;
+  lastValidationStatus: KeyValidationStatus;
   lastValidationError?: string;
   enabled: boolean;
   comment?: string;
@@ -427,10 +513,10 @@ export interface TokenDocument {
   deletedAt?: string;
 }
 
-export interface TokenValidationResult {
-  status: TokenValidationStatus;
+export interface KeyValidationResult {
+  status: KeyValidationStatus;
   scopes?: string[];
-  capabilities?: TokenCapability[];
+  capabilities?: KeyCapability[];
   expiresAt?: string;
   error?: string;
   rateLimit?: {
@@ -440,60 +526,66 @@ export interface TokenValidationResult {
   };
 }
 
-export interface CreateTokenRequest {
-  type: TokenType;
+export interface CreateKeyRequest {
+  type: KeyType;
   value: string;
   expiresAt?: string;
   enabled?: boolean;
   comment?: string;
 }
 
-export interface UpdateTokenRequest {
+export interface UpdateKeyRequest {
   enabled?: boolean;
   expiresAt?: string | null;
   comment?: string | null;
 }
 
-export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
+export const KEY_TYPE_LABELS: Record<KeyType, string> = {
   "github-pat-classic": "GitHub PAT (classic)",
   "github-pat-fine-grained": "GitHub PAT (fine-grained)",
   "github-oauth": "GitHub OAuth",
   "github-oauth-cookie-state": "GitHub OAuth Cookie State",
   "anthropic-api-key": "Anthropic API Key",
+  "anthropic-oauth": "Anthropic OAuth (Subscription)",
 };
 
-export const TOKEN_CAPABILITY_LABELS: Record<TokenCapability, string> = {
+export const KEY_CAPABILITY_LABELS: Record<KeyCapability, string> = {
   "github-models": "GitHub Models",
+  "github-public-api": "GitHub Public API",
   "copilot-models": "Copilot Models",
   "copilot-sdk": "Copilot SDK",
   "copilot-cli": "Copilot CLI",
-  "claude-code-cli": "Claude Code CLI"
+  "claude-code-cli": "Claude Code CLI",
+  "anthropic-api": "Anthropic API"
 };
 
-export const TOKEN_CAPABILITY_DESCRIPTIONS: Record<TokenCapability, string> = {
+export const KEY_CAPABILITY_DESCRIPTIONS: Record<KeyCapability, string> = {
   "github-models": "Access AI models hosted on GitHub (GPT-4o, Claude, etc.)",
+  "github-public-api": "Read public repository contents (used for skill discovery and resolution)",
   "copilot-models": "List models available via the Copilot API (OAuth only, PATs rejected)",
   "copilot-sdk": "Use the Copilot SDK to make LLM requests programmatically",
   "copilot-cli": "Run GitHub Copilot in the CLI for code suggestions",
-  "claude-code-cli": "Run Claude Code as an agentic coding assistant"
+  "claude-code-cli": "Run Claude Code as an agentic coding assistant",
+  "anthropic-api": "Access the Anthropic REST API (model scanning, direct API calls)"
 };
 
 /**
- * Static matrix of which capabilities each token type can provide.
+ * Static matrix of which capabilities each key type can provide.
  * Mirrors the server-side deriveCapabilities() logic for display purposes.
  * Conditional capabilities (require specific scopes) are included — actual
  * detection happens during validation.
  */
-export const TOKEN_TYPE_EXPECTED_CAPABILITIES: Record<TokenType, TokenCapability[]> = {
-  "github-pat-classic": ["copilot-sdk", "copilot-cli"],
-  "github-pat-fine-grained": ["github-models"],
-  "github-oauth": ["github-models", "copilot-models", "copilot-sdk", "copilot-cli"],
+export const KEY_TYPE_EXPECTED_CAPABILITIES: Record<KeyType, KeyCapability[]> = {
+  "github-pat-classic": ["github-public-api", "copilot-sdk", "copilot-cli"],
+  "github-pat-fine-grained": ["github-public-api", "github-models"],
+  "github-oauth": ["github-public-api", "github-models", "copilot-models", "copilot-sdk", "copilot-cli"],
   "github-oauth-cookie-state": [],
-  "anthropic-api-key": ["claude-code-cli"],
+  "anthropic-api-key": ["claude-code-cli", "anthropic-api"],
+  "anthropic-oauth": ["claude-code-cli"],
 };
 
-export const ALL_CAPABILITIES: TokenCapability[] = [
-  "github-models", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli"
+export const ALL_CAPABILITIES: KeyCapability[] = [
+  "github-models", "github-public-api", "copilot-models", "copilot-sdk", "copilot-cli", "claude-code-cli", "anthropic-api"
 ];
 
 // Account types
@@ -531,20 +623,37 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   github: "GitHub",
 };
 
+// Agent version entry (embedded in CodingAgent)
+export interface AgentVersion {
+  agentVersion: string;
+  workerVersion: string;
+  components: Record<string, string>;
+  gitCommit: string;
+  buildTime: string;
+  imageTag: string;
+  queueName: string;
+  status: "active" | "retired";
+  createdAt: string;
+}
+
 // Coding Agent types
 export interface CodingAgent {
   _id: string;
   name: string;
   description?: string;
+  modelProvider?: string;
   supportedModels: string[];
   defaultModel?: string;
+  available?: boolean;
+  versions?: AgentVersion[];
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
 }
 
 // MCP Server types
-export type McpTransportType = "sse" | "http";
+export type McpTransportType = "sse" | "http" | "stdio";
+export type McpSessionMode = "stateful" | "stateless";
 
 export interface McpServerHeader {
   name: string;
@@ -555,8 +664,13 @@ export interface McpServerDocument {
   _id: string;
   name: string;
   type: McpTransportType;
-  url: string;
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   headers?: McpServerHeader[];
+  sessionMode?: McpSessionMode;
+  version?: string;
   description?: string;
   createdAt: string;
   updatedAt?: string;
@@ -567,8 +681,13 @@ export interface CreateMcpServerRequest {
   _id: string;
   name: string;
   type: McpTransportType;
-  url: string;
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   headers?: McpServerHeader[];
+  sessionMode?: McpSessionMode;
+  version?: string;
   description?: string;
 }
 
@@ -576,7 +695,12 @@ export interface UpdateMcpServerRequest {
   name?: string;
   type?: McpTransportType;
   url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   headers?: McpServerHeader[];
+  sessionMode?: McpSessionMode;
+  version?: string;
   description?: string;
 }
 
@@ -670,6 +794,7 @@ export interface SkillRevisionDocument {
   metadata?: Record<string, string>;
   content: string;
   archiveUrl?: string;
+  validationWarnings?: string[];
   resolvedAt: string;
 }
 
@@ -683,6 +808,51 @@ export interface SkillSearchResult {
   installs?: number;
 }
 
+/** A skill discovered by enumerating a GitHub repo's well-known directories */
+export interface SkillDiscoveryResult {
+  skillName: string;
+  skillPath: string;
+  name?: string;
+  description?: string;
+  existsInLibrary?: boolean;
+  currentRevisionCommitSha?: string;
+  latestUpstreamCommitSha?: string;
+  updateAvailable?: boolean;
+  lastImportedAt?: string;
+}
+
+// =============================================================================
+// VS Code extension types
+// =============================================================================
+
+export type ExtensionOrigin = "marketplace" | "manual";
+
+export interface ExtensionDocument {
+  _id: string;
+  publisher: string;
+  name: string;
+  description?: string;
+  origin: ExtensionOrigin;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+export interface ExtensionSearchResult {
+  id: string;
+  name: string;
+  publisher: string;
+  description?: string;
+  internal: boolean;
+  version?: string;
+}
+
+export interface ExtensionVersionInfo {
+  version: string;
+  preRelease: boolean;
+  lastUpdated: string;
+}
+
 // =============================================================================
 // Feature flag types
 // =============================================================================
@@ -693,4 +863,81 @@ export interface FeatureFlag {
   label: string;
   enabled: boolean;
   updatedAt: string;
+}
+
+// =============================================================================
+// Profile types
+// =============================================================================
+
+/** Profile identity document (mutable) */
+export interface ProfileDocument {
+  _id: string;
+  name: string;
+  description?: string;
+  latestVersion: number;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** Profile version document (immutable snapshot) */
+export interface ProfileVersionDocument {
+  _id: string;
+  profileId: string;
+  version: number;
+  workerType: string;
+  model: string;
+  agentVersion?: string;
+  mcpServers?: string[];
+  skillRevisions?: string[];
+  extensions?: string[];
+  createdAt: string;
+}
+
+/** Profile with its latest (or specified) version embedded */
+export interface ProfileWithVersion extends ProfileDocument {
+  version: ProfileVersionDocument;
+}
+
+// --- Runs grouping types (mirrored from shared) ---
+
+export type GroupByKey = "none" | "task" | "submissionId" | "profile";
+
+export interface AggregateStats {
+  min: number;
+  max: number;
+  mean: number;
+  stdDev: number;
+}
+
+export interface GroupUniformValues {
+  workerType?: string;
+  model?: string;
+  agentVersion?: string;
+  platform?: string;
+  mcpServers?: string[];
+  skillRevisions?: string[];
+  extensions?: string[];
+  status?: RunStatus;
+  submissionId?: string;
+  task?: string;
+}
+
+export interface GroupAggregates {
+  count: number;
+  turns: AggregateStats | null;
+  duration: AggregateStats | null;
+  promptTokens: AggregateStats | null;
+  completionTokens: AggregateStats | null;
+  llmCalls: AggregateStats | null;
+  statusCounts: Record<string, number>;
+  outcomeCounts: Record<string, number>;
+}
+
+export interface RunGroup {
+  key: string;
+  label: string;
+  runIds: string[];
+  aggregates: GroupAggregates;
+  uniform: GroupUniformValues;
 }

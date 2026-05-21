@@ -2,29 +2,37 @@
 // Licensed under the MIT License.
 
 /**
- * ACP Client for Claude Code
- * 
- * This module provides functionality to communicate with Claude Code
+ * ACP Client for Copilot CLI
+ *
+ * This module provides functionality to communicate with the Copilot CLI
  * via the Agent Client Protocol (ACP) using stdio communication.
  */
 
 import { spawn, ChildProcess } from "node:child_process";
-import { Duplex } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { McpServerConfig } from "shared";
+
+/** Default ACP session timeout: 30 minutes */
+const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface ACPClientOptions {
   command: string;
   args?: string[];
   env?: Record<string, string>;
-  cwd?: string;
+  cwd: string;
   onLog?: (message: string) => void;
   mcpServers?: McpServerConfig[];
+  /** Session timeout in milliseconds (default: 30 min). Set to 0 to disable. */
+  sessionTimeoutMs?: number;
+  /** Model to select after the session is created (e.g. "gpt-5.4"). */
+  model?: string;
 }
 
 export interface ACPSessionResult {
   response: string;
   stopReason: string;
+  /** Model that was successfully activated via ACP set_model, or undefined if model selection was not requested or did not succeed. */
+  confirmedModel?: string;
 }
 
 /**
@@ -109,13 +117,77 @@ class ACPClientHandler implements acp.Client {
 }
 
 /**
- * Run an ACP session with Claude Code
+ * Attempt to select the requested model via ACP after a session is created.
+ *
+ * Tries two mechanisms in order of preference:
+ * 1. `unstable_setSessionModel` — if the session response includes a `models` field
+ * 2. `session/set_config_option` — if a config option with `category: "model"` exists
+ *
+ * Logs a warning if the requested model is not in the available list.
+ * Logs a warning and proceeds without error if neither mechanism is available.
+ */
+export async function selectModel(
+  connection: acp.ClientSideConnection,
+  sessionResult: acp.NewSessionResponse,
+  model: string,
+  onLog: (message: string) => void
+): Promise<string | undefined> {
+  // Path 1: unstable session/set_model (models field in newSession response)
+  if (sessionResult.models) {
+    const available = sessionResult.models.availableModels.map(
+      (m: { modelId: string; name: string }) => m.modelId
+    );
+    if (!available.includes(model)) {
+      onLog(`Warning: requested model "${model}" not in available models [${available.join(", ")}] — attempting anyway`);
+    }
+    try {
+      await connection.unstable_setSessionModel({
+        sessionId: sessionResult.sessionId,
+        modelId: model,
+      });
+      onLog(`Model set to "${model}" via session/set_model`);
+      return model;
+    } catch (err) {
+      onLog(`Warning: session/set_model failed for "${model}": ${err instanceof Error ? err.message : String(err)}`);
+      return undefined;
+    }
+  }
+
+  // Path 2: stable session/set_config_option with category "model"
+  if (sessionResult.configOptions) {
+    const modelConfigOption = sessionResult.configOptions.find(
+      (o) => o.category === "model"
+    );
+    if (modelConfigOption) {
+      try {
+        await connection.setSessionConfigOption({
+          sessionId: sessionResult.sessionId,
+          configId: modelConfigOption.id,
+          value: model,
+        });
+        onLog(`Model set to "${model}" via session/set_config_option (configId: ${modelConfigOption.id})`);
+        return model;
+      } catch (err) {
+        onLog(`Warning: session/set_config_option failed for model "${model}": ${err instanceof Error ? err.message : String(err)}`);
+        return undefined;
+      }
+    }
+  }
+
+  // Neither mechanism available — warn and continue
+  onLog(`Warning: agent does not advertise model selection capability (no models field or model config option); model "${model}" may not be honoured`);
+  return undefined;
+}
+
+/**
+ * Run an ACP session with the Copilot CLI (or any ACP-compatible agent).
  */
 export async function runACPSession(
   prompt: string,
   options: ACPClientOptions
 ): Promise<ACPSessionResult> {
-  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [] } = options;
+  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [], model } = options;
+  const sessionTimeoutMs = options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
 
   onLog(`Starting ACP agent: ${command} ${args.join(" ")}`);
 
@@ -129,6 +201,24 @@ export async function runACPSession(
   if (!agentProcess.stdin || !agentProcess.stdout) {
     throw new Error("Failed to create agent process streams");
   }
+
+  // Track whether the ACP session has completed (to avoid spurious exit errors)
+  let sessionCompleted = false;
+
+  // Create a promise that rejects when the subprocess exits unexpectedly
+  const exitPromise = new Promise<never>((_, reject) => {
+    agentProcess.on("exit", (code, signal) => {
+      if (!sessionCompleted) {
+        const reason = signal ? `signal ${signal}` : `code ${code}`;
+        reject(new Error(`ACP agent process exited unexpectedly (${reason})`));
+      }
+    });
+    agentProcess.on("error", (err) => {
+      if (!sessionCompleted) {
+        reject(new Error(`ACP agent process failed to start: ${err.message}`));
+      }
+    });
+  });
 
   // Create duplex stream for ACP communication
   const stdinStream = agentProcess.stdin;
@@ -164,6 +254,8 @@ export async function runACPSession(
   );
 
   try {
+    // Build the actual ACP session work as a promise
+    const sessionWork = async (): Promise<ACPSessionResult> => {
     // Initialize the connection
     const initResult = await connection.initialize({
       protocolVersion: acp.PROTOCOL_VERSION,
@@ -187,12 +279,10 @@ export async function runACPSession(
 
     // Create a new session
     if (mcpServers.length > 0) {
-      onLog(`Configuring ${mcpServers.length} MCP server(s): ${mcpServers.map((s) => `${s.name} (${s.type})`).join(", ")}`);
-    } else {
-      onLog(`No MCP servers configured for this session`);
+      onLog(`Configuring ${mcpServers.length} MCP server(s) via ACP session: ${mcpServers.map((s) => `${s.name} (${s.type})`).join(", ")}`);
     }
     const sessionResult = await connection.newSession({
-      cwd: cwd || "/workspace",
+      cwd,
       mcpServers: mcpServers.map((s) => ({
         type: s.type,
         name: s.name,
@@ -205,8 +295,20 @@ export async function runACPSession(
     if (sessionResult._meta) {
       onLog(`Session meta: ${JSON.stringify(sessionResult._meta)}`);
     }
+
+    // Log the model state advertised by the agent
+    if (sessionResult.models) {
+      const availableModelIds = sessionResult.models.availableModels.map((m: { modelId: string; name: string }) => m.modelId);
+      onLog(`Session models: current=${sessionResult.models.currentModelId}, available=[${availableModelIds.join(", ")}]`);
+    }
     if (sessionResult.configOptions) {
-      onLog(`Session config options: ${sessionResult.configOptions.map((o: { configId: string }) => o.configId).join(", ")}`);
+      onLog(`Session config options: ${sessionResult.configOptions.map((o: acp.SessionConfigOption) => `${o.id}${o.category ? ` (${o.category})` : ""}`).join(", ")}`);
+    }
+
+    // Select model if requested
+    let confirmedModel: string | undefined;
+    if (model) {
+      confirmedModel = await selectModel(connection, sessionResult, model, onLog);
     }
 
     // Set permission mode to bypass all permission checks (yolo mode).
@@ -240,7 +342,26 @@ export async function runACPSession(
     return {
       response: clientHandler.getResponse(),
       stopReason: promptResult.stopReason,
+      confirmedModel,
     };
+    };
+
+    // Race the session work against subprocess exit and optional timeout
+    const racers: Promise<ACPSessionResult>[] = [sessionWork(), exitPromise];
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (sessionTimeoutMs > 0) {
+      racers.push(new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`ACP session timed out after ${sessionTimeoutMs}ms`));
+        }, sessionTimeoutMs);
+      }));
+    }
+
+    const result = await Promise.race(racers);
+    sessionCompleted = true;
+    if (timeoutId) clearTimeout(timeoutId);
+    return result;
   } catch (error) {
     // Better error serialization
     if (error instanceof Error) {
@@ -248,6 +369,7 @@ export async function runACPSession(
     }
     throw new Error(JSON.stringify(error, null, 2));
   } finally {
+    sessionCompleted = true;
     // Cleanup
     stdinStream.end();
     agentProcess.kill();

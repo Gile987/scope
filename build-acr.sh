@@ -28,7 +28,7 @@ IMAGE_ARGS=("${@:-all}")
 echo "Using ACR: ${ACR_NAME}"
 
 # Image list
-ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal token-manager model-scanner-copilot model-scanner-anthropic report-generator"
+ALL_IMAGES="api coder-acp-claude-code coder-acp-copilot judge portal token-manager model-scanner-copilot model-scanner-anthropic report-generator scheduler gateway"
 
 get_dockerfile() {
   local name=$1
@@ -38,6 +38,7 @@ get_dockerfile() {
     report-generator) echo "apps/workers/${name}/Dockerfile" ;;
     model-scanner-copilot) echo "apps/model-scanners/copilot/Dockerfile" ;;
     model-scanner-anthropic) echo "apps/model-scanners/anthropic/Dockerfile" ;;
+    gateway) echo "apps/gateway/Dockerfile" ;;
     *) echo "apps/${name}/Dockerfile" ;;
   esac
 }
@@ -48,9 +49,11 @@ build_image() {
   local full_image="scoped/${name}:latest"
   local git_commit=$(git rev-parse --short HEAD)
   local build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 
   # Source pinned versions if available (e.g. coder-acp-copilot/versions.env)
   local extra_args=""
+  local version_prefix=""
   local versions_file
   for versions_file in "apps/workers/${name}/versions.env" "apps/${name}/versions.env"; do
     if [ -f "$versions_file" ]; then
@@ -58,14 +61,29 @@ build_image() {
       while IFS='=' read -r key value; do
         [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
         extra_args="${extra_args} --build-arg ${key}=${value}"
+        export "$key=$value"
       done < "$versions_file"
       break
     fi
   done
 
+  # Build version prefix from component versions
+  case "$name" in
+    coder-acp-copilot)
+      version_prefix="copilot-${COPILOT_CLI_VERSION}" ;;
+    coder-acp-claude-code)
+      version_prefix="claude-agent-acp-${CLAUDE_CODE_ACP_VERSION}-sdk-${CLAUDE_AGENT_SDK_VERSION}" ;;
+  esac
+
+  local image_args="--image $full_image"
+  image_args="${image_args} --image scoped/${name}:${timestamp}-${git_commit}"
+  if [ -n "$version_prefix" ]; then
+    image_args="${image_args} --image scoped/${name}:${version_prefix}-${timestamp}-${git_commit}"
+  fi
+
   az acr build \
     --registry "$ACR_NAME" \
-    --image "$full_image" \
+    ${image_args} \
     --build-arg GIT_COMMIT="$git_commit" \
     --build-arg BUILD_TIME="$build_time" \
     ${extra_args} \

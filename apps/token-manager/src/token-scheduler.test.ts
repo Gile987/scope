@@ -3,9 +3,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { startTokenScheduler, TokenSchedulerDeps } from "./token-scheduler.js";
-import { TokenDocument } from "shared";
+import { KeyDocument } from "shared";
 
-function makeToken(overrides: Partial<TokenDocument> = {}): TokenDocument {
+function makeToken(overrides: Partial<KeyDocument> = {}): KeyDocument {
   return {
     _id: "test-id-1",
     type: "github-pat-classic",
@@ -28,7 +28,7 @@ describe("TokenScheduler", () => {
     vi.restoreAllMocks();
   });
 
-  function createMockDeps(tokens: TokenDocument[] = []): TokenSchedulerDeps & {
+  function createMockDeps(tokens: KeyDocument[] = []): TokenSchedulerDeps & {
     mockCollection: any;
     mockGetSecret: ReturnType<typeof vi.fn>;
     mockValidate: ReturnType<typeof vi.fn>;

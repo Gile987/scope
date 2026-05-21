@@ -14,25 +14,10 @@ import {
   ReportTemplateDocument,
   Reporter,
   TokenManagerClient,
+  type VisibilityHeartbeat,
 } from "shared";
 import { createReportTools } from "./tools.js";
-import { REPORT_SYSTEM_PROMPT } from "./prompt.js";
-
-/** Default user prompt used when no report template is configured */
-const DEFAULT_USER_PROMPT = (requestId: string) =>
-  `Generate a comprehensive benchmark report for run ${requestId}.
-
-Start by fetching the run summary, then examine the criteria trajectory, and inspect individual turns for detailed analysis. If snapshots are available, extract and inspect key files to understand what the coding agent produced.
-
-Structure the report as follows:
-
-1. **Executive Summary** — Scenario task, worker type & persona, final outcome (completed/exhausted/failed), total iterations, overall pass rate.
-2. **Criteria Trajectory** — A table of criterion pass/fail per turn. Highlight regressions, flip-flops, and never-passed criteria.
-3. **Agent Behavior Analysis** — Did the agent follow judge feedback? Was the approach infrastructure-first or application-first? Signs of stubbornness? How did strategy evolve?
-4. **Per-Turn Breakdown** — For each turn: what the agent did, what the judge said, what improved or regressed.
-5. **Key Observations & Recommendations** — What went well, what the agent struggled with, suggestions for improving the scenario/criteria/agent.
-
-Compare snapshots across iterations when relevant to show progression. Use concrete code references.`;
+import { REPORT_SYSTEM_PROMPT, withRetry } from "shared";
 
 export interface ReportQueueProcessorConfig extends BaseQueueProcessorConfig {
   /** The LLM model to use for report generation, e.g. "gpt-4.1" */
@@ -70,37 +55,13 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
   protected override async handleRequest(
     doc: ReportDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<void> {
     const reportId = doc._id;
     const requestId = doc.requestId;
 
     await log("info", `Starting report generation for run ${requestId}`);
-
-    // --- Build reporter identity ---
-    const reporter: Reporter = {
-      id: "report-generator",
-      name: "Report Generator",
-      gitHash: process.env.GIT_COMMIT || "unknown",
-      model: this.reportConfig.reportModel,
-      agentId: "copilot-sdk",
-      agentVersion: this.getAgentVersion(),
-    };
-
-    // Update status to "generating" and set reporter
-    await this.collection.updateOne(
-      { _id: reportId } as any,
-      {
-        $set: {
-          status: "generating",
-          reporter,
-          updatedAt: new Date(),
-        },
-      } as any
-    );
-
-    await log("info", `Reporter: ${reporter.agentId}@${reporter.agentVersion}, model: ${reporter.model}`);
 
     // --- Prepare snapshots temp directory ---
     const snapshotsDir = join(tmpdir(), `report-${reportId}`);
@@ -117,48 +78,73 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
 
       await log("info", "Initialized tools, starting Copilot SDK session");
 
-      // --- Resolve report template (if any) ---
-      let resolvedUserPrompt: string;
+      // --- Resolve report template ---
+      if (!doc.templateId) {
+        throw new Error(`Report ${reportId} has no templateId — reports without a template are no longer supported`);
+      }
+
+      const template = await this.fetchReportTemplate(doc.templateId);
+      if (!template) {
+        throw new Error(`Report template '${doc.templateId}' not found for report ${reportId}`);
+      }
+
+      await log("info", `Using report template '${template.id}' (${template.name})`);
+
+      // Resolve model: template override → global config fallback
+      const resolvedModel = template.model ?? this.reportConfig.reportModel;
+
+      // --- Build reporter identity ---
+      const reporter: Reporter = {
+        id: "report-generator",
+        name: "Report Generator",
+        gitHash: process.env.GIT_COMMIT || "unknown",
+        model: resolvedModel,
+        agentId: "copilot-sdk",
+        agentVersion: this.getAgentVersion(),
+      };
+
+      // Update status to "generating" and set reporter
+      await withRetry(() => this.collection.updateOne(
+        { _id: reportId } as any,
+        {
+          $set: {
+            status: "generating",
+            reporter,
+            updatedAt: new Date(),
+          },
+        } as any
+      ));
+
+      await log("info", `Reporter: ${reporter.agentId}@${reporter.agentVersion}, model: ${reporter.model}`);
+
+      const resolvedUserPrompt = template.userPrompt.replace(/\{\{requestId\}\}|\{requestId\}/g, requestId);
+
+      // Resolve system prompt
       let resolvedSystemPrompt: string;
-
-      if (doc.templateId) {
-        const template = await this.fetchReportTemplate(doc.templateId);
-        if (template) {
-          await log("info", `Using report template '${template.id}' (${template.name})`);
-          // Resolve user prompt — substitute {{requestId}} or {requestId} placeholder
-          resolvedUserPrompt = template.userPrompt.replace(/\{\{requestId\}\}|\{requestId\}/g, requestId);
-
-          // Resolve system prompt
-          if (template.systemPrompt) {
-            if (template.systemPrompt.mode === "override") {
-              resolvedSystemPrompt = template.systemPrompt.content;
-            } else {
-              // mode === "append"
-              resolvedSystemPrompt = REPORT_SYSTEM_PROMPT + "\n\n" + template.systemPrompt.content;
-            }
-          } else {
-            resolvedSystemPrompt = REPORT_SYSTEM_PROMPT;
-          }
+      if (template.systemPrompt) {
+        if (template.systemPrompt.mode === "override") {
+          resolvedSystemPrompt = template.systemPrompt.content;
         } else {
-          await log("warn", `Report template '${doc.templateId}' not found, using defaults`);
-          resolvedUserPrompt = DEFAULT_USER_PROMPT(requestId);
-          resolvedSystemPrompt = REPORT_SYSTEM_PROMPT;
+          // mode === "append"
+          resolvedSystemPrompt = REPORT_SYSTEM_PROMPT + "\n\n" + template.systemPrompt.content;
         }
       } else {
-        resolvedUserPrompt = DEFAULT_USER_PROMPT(requestId);
         resolvedSystemPrompt = REPORT_SYSTEM_PROMPT;
       }
 
       // --- Run Copilot SDK session ---
+      const resolvedTimeoutMs = template.timeoutMs ?? this.reportConfig.sessionTimeoutMs ?? 5 * 60 * 1000;
       const content = await this.runCopilotSession(
         tools,
         resolvedUserPrompt,
         resolvedSystemPrompt,
+        resolvedModel,
+        resolvedTimeoutMs,
         log
       );
 
       // --- Persist report content ---
-      await this.collection.updateOne(
+      await withRetry(() => this.collection.updateOne(
         { _id: reportId } as any,
         {
           $set: {
@@ -167,7 +153,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
             updatedAt: new Date(),
           },
         } as any
-      );
+      ));
 
       await log("info", `Report completed (${content.length} chars)`, { final: true });
     } finally {
@@ -181,8 +167,10 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       }
     }
 
-    // Delete the queue message on success
-    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    // Stop the heartbeat before deleting so the pop receipt is stable.
+    // The base class also calls stop() in its finally block (idempotent).
+    const finalPopReceipt = heartbeat.stop();
+    await this.safeDeleteMessage(message.messageId, finalPopReceipt);
   }
 
   /** Char-count interval for emitting delta progress logs */
@@ -198,6 +186,8 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     tools: ReturnType<typeof createReportTools>,
     userPrompt: string,
     systemPrompt: string,
+    model: string,
+    timeoutMs: number,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<string> {
     const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
@@ -212,7 +202,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
 
     try {
       const session = await client.createSession({
-        model: this.reportConfig.reportModel,
+        model,
         streaming: true,
         tools,
         systemMessage: { mode: "replace", content: systemPrompt },
@@ -286,9 +276,9 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         }
       });
 
-      const timeout = this.reportConfig.sessionTimeoutMs ?? 5 * 60 * 1000;
+      const timeout = timeoutMs;
 
-      await log("info", "Sending prompt to Copilot SDK, awaiting response...");
+      await log("info", `Sending prompt to Copilot SDK, awaiting response (timeout: ${Math.round(timeout / 1000)}s)...`);
       await session.sendAndWait({ prompt: userPrompt }, timeout);
       await client.stop();
 

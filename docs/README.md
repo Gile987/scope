@@ -1,6 +1,6 @@
-# Scope MT Documentation
+# Scope Documentation
 
-Central documentation hub for the Scope MT platform — an AI coding agent benchmarking system.
+Central documentation hub for the Scope platform — an AI coding agent benchmarking system.
 
 ## Architecture & Design
 
@@ -9,8 +9,12 @@ Central documentation hub for the Scope MT platform — an AI coding agent bench
 | [System Overview](architecture/overview.md) | High-level architecture, component interactions, data flow |
 | [Architecture Layers](architecture/architecture-layers.md) | 5-layer responsibility model — from cloud foundation to app workloads |
 | [Application Design](architecture/app-design.md) | Data models, API design, judge pipeline, queue patterns, criteria system |
+| [VS Code Web Worker](architecture/vscode-web-worker.md) | XState chat machine, GitHub auth flow, ARIA snapshots, AI dev loop |
 | [Token Manager](architecture/token-manager.md) | Capability-based token management, validation, round-robin distribution |
+| [Worker Requirements](architecture/worker-requirements.md) | Requirements checklist for coding agent workers |
+| [Worker Compliance](architecture/worker-compliance.md) | Per-worker compliance matrix against requirements |
 | [Database Migrations](architecture/db-migrations.md) | Lightweight MongoDB migration framework, writing and running migrations |
+| [Database Collection Scaling](architecture/db-collection-scaling.md) | Per-collection autoscale throughput, ASO reconcile policy, operator runbook |
 | [GitOps & Deployment](architecture/gitops-deploy.md) | FluxCD design, kustomization phases, variable substitution |
 
 ## Infrastructure

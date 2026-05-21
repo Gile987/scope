@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { DequeuedMessageItem } from "@azure/storage-queue";
+import os from "node:os";
 import {
   RequestDocument,
   WorkerProcessor,
@@ -9,16 +10,24 @@ import {
   LogEvent,
   MULTI_TURN_DEFAULTS,
   ConversationTurn,
+  OsInfo,
 } from "../types/types.js";
 import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
+import type { ExtensionConfig } from "../types/extension.js";
 import { BaseQueueProcessor } from "./base-queue-processor.js";
+import { cancelExit } from "./cancel-exit.js";
+import type { VisibilityHeartbeat } from "./visibility-heartbeat.js";
+import { HEARTBEAT_VISIBILITY_SECONDS } from "./visibility-heartbeat.js";
 import { BlobStorage } from "../storage/blob-storage.js";
+import { withRetry } from "../utils/retry.js";
 import { sanitizeHarFile } from "../har/har-parser.js";
 import { JudgeClient } from "../judge/judge-client.js";
 import { runMultiTurnLoop } from "../judge/multi-turn-loop.js";
 import { McpServerClient } from "../mcp/mcp-server-client.js";
+import { McpSecretClient } from "../mcp/mcp-secret-client.js";
 import { SkillClient } from "../skills/skill-client.js";
+import { ExtensionClient } from "../extensions/extension-client.js";
 import { extractSkillsToWorkspace } from "../skills/skill-extractor.js";
 
 /**
@@ -34,12 +43,175 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     this.processor = processor;
   }
 
+  /** Build workerVersion and OS fields for stamping on request documents.
+   *  agentVersion is set at submission time by the API — the worker only adds workerVersion.
+   *  OS info is always captured regardless of agentVersion availability. */
+  private getVersionFields(): { os: OsInfo; workerVersion?: string } {
+    const fields: { os: OsInfo; workerVersion?: string } = {
+      os: {
+        platform: os.platform(),
+        release: os.release(),
+        arch: os.arch(),
+      },
+    };
+    const agentVersion = this.processor.getAgentVersion?.();
+    if (agentVersion) {
+      const gitCommit = process.env.GIT_COMMIT || "unknown";
+      const buildTime = process.env.BUILD_TIME || "unknown";
+      fields.workerVersion = `${agentVersion}-${buildTime}-${gitCommit}`;
+    }
+    return fields;
+  }
+
   protected async handleRequest(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
-    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
+    heartbeat: VisibilityHeartbeat,
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+    payload?: Record<string, unknown>,
   ): Promise<void> {
+    // Run-retry-attempts: verify the message targets the request's CURRENT run.
+    // If a retry has since started a new attempt, this message is stale and
+    // must be discarded so we don't clobber the new run's state.
+    const messageRunId = typeof payload?.runId === "string" ? payload.runId : undefined;
+    const currentRunId = requestDoc.run?._id;
+    if (messageRunId && currentRunId && messageRunId !== currentRunId) {
+      console.log(
+        `[${this.workerName}] Stale message for ${requestDoc._id}: runId=${messageRunId} but current=${currentRunId} \u2014 discarding`,
+      );
+      await log("warn", `Stale queue message discarded (runId mismatch)`, {
+        messageRunId,
+        currentRunId,
+      });
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    // If the request was paused while sitting in the queue, discard the
+    // message. The scheduler will re-enqueue when the user resumes.
+    if (requestDoc.run?.status === "paused") {
+      console.log(
+        `[${this.workerName}] Request ${requestDoc._id} is paused — discarding queue message`,
+      );
+      await log("info", `Request paused — discarding queue message`);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    // Terminal status guard: if the run is already done (e.g. cancelled while
+    // this message was in the queue or redelivered after process.exit), discard.
+    if (requestDoc.run?.status === "done") {
+      console.log(
+        `[${this.workerName}] Request ${requestDoc._id} is already terminal (done) — discarding queue message`,
+      );
+      await log("info", `Run already terminal — discarding queue message`);
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
+    // Redelivery handling: if the run is already in "processing" state, the
+    // message was redelivered by Azure Storage Queue while the original
+    // worker was busy. There are two cases we need to disambiguate using
+    // the per-run liveness heartbeat in Redis (run.worker stays in Mongo as
+    // persistent identity):
+    //
+    //   1. Original worker is alive (fresh Redis heartbeat) — a spurious
+    //      redelivery (transient queue-extension miss, throttling, etc.).
+    //      Drop the duplicate message and leave the run untouched so the
+    //      original worker keeps making progress.
+    //
+    //   2. Original worker is dead (stale or missing Redis heartbeat AND
+    //      run was picked up long enough ago) — mark the run failed
+    //      atomically so the user can retry.
+    //
+    // Atomicity of the claim is gated on the existing run.worker.instanceId
+    // in the findOneAndUpdate filter: if a peer worker has already taken
+    // over (rewriting run.worker.instanceId), our update no-ops.
+    if (requestDoc.run?.status === "processing") {
+      const staleThresholdMs =
+        Number(process.env.SCOPE_RUN_HEARTBEAT_STALE_MS) ||
+        2 * HEARTBEAT_VISIBILITY_SECONDS * 1000;
+      const heartbeatAt = await this.heartbeatStore.get(requestDoc.run._id);
+      const startedAt = requestDoc.run.startedAt instanceof Date
+        ? requestDoc.run.startedAt
+        : requestDoc.run.startedAt
+          ? new Date(requestDoc.run.startedAt as any)
+          : undefined;
+      const ageMs = heartbeatAt ? Date.now() - heartbeatAt.getTime() : Infinity;
+      // Missing-heartbeat guard: if Redis returns null we don't immediately
+      // declare the worker dead — a transient Redis blip would otherwise
+      // mass-fail healthy in-flight runs. Only treat "missing" as stale if
+      // the run was picked up longer ago than the staleness threshold.
+      const isStale = heartbeatAt
+        ? ageMs > staleThresholdMs
+        : (!startedAt || Date.now() - startedAt.getTime() > staleThresholdMs);
+      const workerInfo = requestDoc.run.worker;
+      const workerDesc = workerInfo
+        ? `instance=${workerInfo.instanceId}${workerInfo.podName ? ` pod=${workerInfo.podName}` : ""}`
+        : "unknown worker";
+
+      if (!isStale) {
+        // Original worker is still beating — drop the duplicate, keep run state.
+        const beatDesc = heartbeatAt
+          ? `last beat ${Math.round(ageMs / 1000)}s ago`
+          : `no heartbeat yet, picked up ${startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : "?"}s ago`;
+        console.warn(
+          `[${this.workerName}] Duplicate message for ${requestDoc._id} (runId=${requestDoc.run._id}) — original worker still alive (${workerDesc}, ${beatDesc}); dropping`,
+        );
+        await log(
+          "warn",
+          `Duplicate queue message dropped — original worker still heart-beating (${workerDesc}, ${beatDesc})`,
+          { runId: requestDoc.run._id },
+        );
+        await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+        return;
+      }
+
+      const errorMsg = `Worker presumed dead (${workerDesc}, last heartbeat ${heartbeatAt ? `${Math.round(ageMs / 1000)}s ago` : "never"}, threshold ${Math.round(staleThresholdMs / 1000)}s); queue message redelivered while run was in 'processing' state`;
+      // Atomic claim: gate on the *current* run.worker.instanceId. If a
+      // peer worker has already taken over (rewrote run.worker.instanceId)
+      // between our read and write, our filter no-ops and we drop the dupe.
+      const currentOwnerId = workerInfo?.instanceId;
+      const claim = await withRetry(() => this.collection.findOneAndUpdate(
+        {
+          _id: requestDoc._id,
+          "run._id": requestDoc.run!._id,
+          "run.status": "processing",
+          ...(currentOwnerId
+            ? { "run.worker.instanceId": currentOwnerId }
+            : { "run.worker": { $exists: false } }),
+        } as any,
+        {
+          $set: {
+            "run.status": "done",
+            "run.outcome": "failed",
+            "run.error": errorMsg,
+            "run.finishedAt": new Date(),
+            "run.updatedAt": new Date(),
+            updatedAt: new Date(),
+          },
+        } as any,
+      ));
+      if (claim) {
+        console.warn(
+          `[${this.workerName}] Stale-heartbeat redelivery for ${requestDoc._id} (runId=${requestDoc.run._id}, ${workerDesc}) — marked run as failed`,
+        );
+        await log(
+          "error",
+          `Run marked failed: ${errorMsg}. Use the retry endpoint to start a new attempt.`,
+          { final: true, runId: requestDoc.run._id },
+        );
+        // Run is terminal — drop the heartbeat key so the API stops
+        // surfacing it (TTL would expire it eventually anyway).
+        await this.heartbeatStore.delete(requestDoc.run!._id);
+      } else {
+        // Either the original worker resumed beating between our read and
+        // write, or a concurrent retry already demoted this run, or the
+        // original just finished. Nothing to do — drop the duplicate.
+        console.log(
+          `[${this.workerName}] Redelivery for ${requestDoc._id} but run state / heartbeat changed concurrently — discarding`,
+        );
+      }
+      await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+      return;
+    }
     // Resolve MCP server slugs to configs via API
     let mcpServerConfigs: McpServerConfig[] | undefined;
     if (requestDoc.mcpServers && requestDoc.mcpServers.length > 0) {
@@ -51,6 +223,39 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolving ${requestDoc.mcpServers.length} MCP server(s)`, { mcpServers: requestDoc.mcpServers });
       mcpServerConfigs = await mcpClient.resolveServers(requestDoc.mcpServers);
       await log("info", `Resolved MCP servers: ${mcpServerConfigs.map(s => s.name).join(", ")}`);
+
+      // Hydrate configs with real plaintext secrets from Token Manager
+      const tokenManagerUrl = (this.config as QueueProcessorConfig).tokenManagerUrl;
+      if (tokenManagerUrl) {
+        const secretClient = new McpSecretClient(tokenManagerUrl);
+        const hydratedNames: string[] = [];
+        mcpServerConfigs = await Promise.all(
+          mcpServerConfigs.map(async (config) => {
+            try {
+              const resolved = await secretClient.resolveSecrets(config.slug);
+              if ('env' in resolved && resolved.env && Object.keys(resolved.env).length > 0) {
+                hydratedNames.push(config.name);
+                return { ...config, env: resolved.env };
+              }
+              if ('headers' in resolved && resolved.headers && resolved.headers.length > 0) {
+                hydratedNames.push(config.name);
+                return { ...config, headers: resolved.headers };
+              }
+              return config;
+            } catch (err) {
+              await log("warn", `Failed to hydrate secrets for MCP server '${config.name}' (${config.slug})`, {
+                error: err instanceof Error ? err.message : String(err),
+              });
+              return config;
+            }
+          })
+        );
+        if (hydratedNames.length > 0) {
+          await log("info", `Hydrated secrets for MCP servers: ${hydratedNames.join(", ")}`);
+        }
+      } else {
+        await log("warn", "TOKEN_MANAGER_URL not configured — MCP server secrets will not be resolved");
+      }
     }
 
     // Resolve skill revision refs to configs via API
@@ -64,32 +269,22 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       await log("info", `Resolving ${requestDoc.skillRevisions.length} skill revision(s)`, { skillRevisions: requestDoc.skillRevisions });
       skillConfigs = await skillClient.resolveSkills(requestDoc.skillRevisions);
       await log("info", `Resolved skills: ${skillConfigs.map(s => s.name).join(", ")}`);
-
-      // Extract skill archives to workspace filesystem for agent discovery
-      const workspacePath = process.env.WORKSPACE_PATH || "/workspace";
-      // Derive agent type from workerType for agent-specific skill directories
-      const agentType = requestDoc.workerType.includes("claude") ? "claude-code"
-        : requestDoc.workerType.includes("copilot") ? "copilot"
-        : undefined;
-      const installedPaths = await extractSkillsToWorkspace({
-        refs: requestDoc.skillRevisions,
-        skillConfigs,
-        skillClient,
-        workspacePath,
-        agentType,
-        log: async (msg) => { await log("info", msg); },
-      });
-      await log("info", `Installed ${installedPaths.length} skill path(s) to workspace`, { installedPaths });
     }
 
-    // Determine if this is a multi-turn request (criteria present in scenario)
-    const isMultiTurn = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
-
-    if (isMultiTurn) {
-      await this.processMultiTurn(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs);
-    } else {
-      await this.processOneShot(requestDoc, message, currentPopReceipt, log, mcpServerConfigs, skillConfigs);
+    // Resolve extension specs (id or id@version) to configs via API
+    let extensionConfigs: ExtensionConfig[] | undefined;
+    if (requestDoc.extensions && requestDoc.extensions.length > 0) {
+      const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+      if (!apiBaseUrl) {
+        throw new Error("Extensions requested but SCOPE_MT_API_URL is not configured");
+      }
+      const extensionClient = new ExtensionClient(apiBaseUrl);
+      await log("info", `Resolving ${requestDoc.extensions.length} extension(s)`, { extensions: requestDoc.extensions });
+      extensionConfigs = await extensionClient.resolveExtensions(requestDoc.extensions);
+      await log("info", `Resolved extensions: ${extensionConfigs.map(e => e.version ? `${e.id}@${e.version}` : e.id).join(", ")}`);
     }
+
+    await this.processMultiTurn(requestDoc, message, heartbeat, log, mcpServerConfigs, skillConfigs, extensionConfigs);
   }
 
   /**
@@ -119,40 +314,128 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
   }
 
   /**
-   * Original one-shot processing (backward compatible).
+   * Extract skill archives to the workspace filesystem so agents can discover them.
+   * Must be called after setup() so that processor.workspacePath points to the
+   * freshly-created temp directory rather than the stale default.
    */
-  private async processOneShot(
+  private async extractSkills(
+    requestDoc: RequestDocument,
+    skillConfigs: SkillConfig[],
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
+  ): Promise<void> {
+    if (!requestDoc.skillRevisions || requestDoc.skillRevisions.length === 0) return;
+
+    const apiBaseUrl = (this.config as QueueProcessorConfig).apiBaseUrl;
+    if (!apiBaseUrl) return;
+
+    const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+    const agentType = requestDoc.workerType.includes("claude") ? "claude-code"
+      : requestDoc.workerType.includes("copilot") ? "copilot"
+      : undefined;
+    const skillClient = new SkillClient(apiBaseUrl);
+    const installedPaths = await extractSkillsToWorkspace({
+      refs: requestDoc.skillRevisions,
+      skillConfigs,
+      skillClient,
+      workspacePath,
+      agentType,
+      log: async (msg) => { await log("info", msg); },
+    });
+    await log("info", `Installed ${installedPaths.length} skill path(s) to workspace`, { installedPaths });
+  }
+
+  /**
+   * Multi-turn processing with judge loop.
+   */
+  private async processMultiTurn(
     requestDoc: RequestDocument,
     message: DequeuedMessageItem,
-    currentPopReceipt: string,
+    heartbeat: VisibilityHeartbeat,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     mcpServerConfigs?: McpServerConfig[],
-    skillConfigs?: SkillConfig[]
+    skillConfigs?: SkillConfig[],
+    extensionConfigs?: ExtensionConfig[]
   ): Promise<void> {
     const requestId = requestDoc._id;
+    // Resolve the runId for blob paths. New requests always have run._id;
+    // legacy/pre-migration docs may not, in which case we fall back to the
+    // requestId so the layout matches the legacy `{requestId}/...` scheme.
+    const runId = requestDoc.run?._id ?? requestId;
+    const hasCriteria = requestDoc.scenario.criteria && requestDoc.scenario.criteria.length > 0;
+    const judgeServiceUrl = process.env.JUDGE_SERVICE_URL;
 
-    // Update status to processing (preserve logs from handleRequest — MCP/skill resolution)
-    await this.collection.updateOne(
+    if (hasCriteria && !judgeServiceUrl) {
+      throw new Error("JUDGE_SERVICE_URL is not configured but request has criteria to evaluate");
+    }
+
+    // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution).
+    // Write to run.* (run-retry-attempts) plus a top-level updatedAt for index freshness.
+    // Stamp run.worker (instance identity) atomically with the status change
+    // so the redelivery handler in another worker can immediately see this
+    // pickup. The accompanying liveness heartbeat is written to Redis (not
+    // Mongo) immediately after to avoid recurring CosmosDB RU cost.
+    const versionFields = this.getVersionFields();
+    const now = new Date();
+    await withRetry(() => this.collection.updateOne(
       { _id: requestId },
-      { $set: { status: "processing", updatedAt: new Date(), ...(this.processor.getAgentVersion ? { agentVersion: this.processor.getAgentVersion() } : {}) } }
+      {
+        $set: {
+          "run.status": "processing",
+          "run.startedAt": now,
+          "run.updatedAt": now,
+          "run.worker": {
+            instanceId: this.instanceId,
+            ...(this.podName ? { podName: this.podName } : {}),
+          },
+          "run.turns": [],
+          "run.workerVersion": versionFields.workerVersion,
+          "run.os": versionFields.os,
+          updatedAt: now,
+        },
+      }
+    ));
+    // Seed the Redis liveness heartbeat right after pickup so a redelivery
+    // arriving immediately afterwards sees a fresh beat instead of falling
+    // through to the missing-heartbeat guard.
+    await this.heartbeatStore.set(requestDoc.run!._id, now);
+
+    // Subscribe to instant cancel notifications via Redis Pub/Sub.
+    // If a cancel signal arrives, exit immediately — the run is already
+    // marked done/failed in DB by the cancel API. K8s (or docker compose
+    // restart) will bring up a fresh worker.
+    const unsubCancel = this.heartbeatStore.subscribeCancellation(
+      requestDoc.run!._id,
+      () => {
+        console.log(
+          `[${this.workerName}] Run ${requestDoc.run!._id} cancelled via pub/sub — exiting process`,
+        );
+        cancelExit();
+      },
     );
 
-    await log("info", `Starting processing with ${this.processor.workerName}`);
+    await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
+      criteria: requestDoc.scenario.criteria,
+      maxIterations: requestDoc.maxIterations,
+    });
 
-    // Lifecycle: call setup() before processMessage so workers can acquire expensive resources
+    // Only create JudgeClient when criteria exist and judge will actually be called
+    const judgeClient = hasCriteria && judgeServiceUrl ? new JudgeClient(judgeServiceUrl) : undefined;
+    const blobStorage = new BlobStorage({
+      storageAccountName: this.config.storageAccountName,
+      storageConnectionString: this.config.storageConnectionString,
+    });
+
+    const maxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
+
+    // Setup: create workspace, extract skills, upload setup videos
     if (this.processor.setup) {
-      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
+      const setupResult = await this.processor.setup(log, { model: requestDoc.model, mcpServerConfigs, skillConfigs, extensionConfigs });
 
-      // Upload setup-phase videos (e.g. TOTP login recording) to a dedicated blob path
       if (setupResult?.videoFilePaths && setupResult.videoFilePaths.length > 0) {
         try {
-          const blobStorage = new BlobStorage({
-            storageAccountName: this.config.storageAccountName,
-            storageConnectionString: this.config.storageConnectionString,
-          });
           const setupVideoUrls: string[] = [];
           for (let i = 0; i < setupResult.videoFilePaths.length; i++) {
-            const videoBlobName = `${requestId}/setup/video-${i}.webm`;
+            const videoBlobName = `${requestId}/runs/${runId}/setup/video-${i}.webm`;
             const videoUrl = await blobStorage.uploadFile(
               setupResult.videoFilePaths[i],
               videoBlobName,
@@ -162,10 +445,10 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           }
           await log("info", "Setup video files uploaded", { videoCount: setupResult.videoFilePaths.length });
           if (setupVideoUrls.length > 0) {
-            await this.collection.updateOne(
+            await withRetry(() => this.collection.updateOne(
               { _id: requestId },
-              { $set: { setupVideoUrls, updatedAt: new Date() } }
-            );
+              { $set: { "run.setupVideoUrls": setupVideoUrls, "run.updatedAt": new Date(), updatedAt: new Date() } }
+            ));
           }
         } catch (uploadError) {
           const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
@@ -174,202 +457,109 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       }
     }
 
-    let workerResult;
+    // Extract skills to the workspace (after setup so workspacePath is resolved)
+    if (skillConfigs) {
+      await this.extractSkills(requestDoc, skillConfigs, log);
+    }
+
+    // Resolve workspace path after setup
+    const workspacePath = this.processor.workspacePath || process.env.WORKSPACE_PATH || "/workspace";
+
+    let result;
     try {
-      // Process the task using the worker-specific processor
-      workerResult = await this.processor.processMessage(requestDoc.scenario.task, log, { model: requestDoc.model, mcpServerConfigs, skillConfigs });
+      result = await runMultiTurnLoop({
+        processor: this.processor,
+        task: requestDoc.scenario.task,
+        criteria: requestDoc.scenario.criteria,
+        maxIterations,
+        workspacePath,
+        judgeClient,
+        blobStorage,
+        requestId,
+        runId,
+        log,
+        personaInstructions: requestDoc.personaInstructions,
+        model: requestDoc.model,
+        mcpServerConfigs,
+        skillConfigs,
+        extensionConfigs,
+        onTurnComplete: async (turn: ConversationTurn) => {
+          // Persist each turn incrementally to MongoDB (retry on CosmosDB 429).
+          // Push to run.turns (run-retry-attempts shape).
+          await withRetry(() => this.collection.updateOne(
+            { _id: requestId },
+            {
+              $push: { "run.turns": turn },
+              $set: { "run.updatedAt": new Date(), updatedAt: new Date() },
+            } as any
+          ));
+        },
+      });
     } finally {
       // Lifecycle: always call teardown() if setup() exists, even on error
       if (this.processor.teardown) {
         await this.processor.teardown(log);
       }
+      // Unsubscribe from cancel notifications — normal completion path
+      unsubCancel();
     }
 
-    await log("info", "Processing completed", { responseLength: workerResult.response.length, final: true });
-
-    // Upload HAR file to blob storage if available (sanitized to strip credentials)
-    let harUrl: string | undefined;
-    if (workerResult.harFilePath) {
-      try {
-        await sanitizeHarFile(workerResult.harFilePath, workerResult.harFilePath);
-        const blobStorage = new BlobStorage({
-          storageAccountName: this.config.storageAccountName,
-          storageConnectionString: this.config.storageConnectionString,
-        });
-        harUrl = await blobStorage.uploadFile(
-          workerResult.harFilePath,
-          `${requestId}/devproxy.har`,
-          "application/json"
-        );
-        await log("info", "HAR file uploaded to blob storage", { harUrl });
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        await log("warn", `Failed to upload HAR file: ${msg}`);
-      }
-    }
-
-    // Upload video files to blob storage if available
-    let videoUrls: string[] | undefined;
-    if (workerResult.videoFilePaths && workerResult.videoFilePaths.length > 0) {
-      try {
-        const blobStorage = new BlobStorage({
-          storageAccountName: this.config.storageAccountName,
-          storageConnectionString: this.config.storageConnectionString,
-        });
-        videoUrls = [];
-        for (let i = 0; i < workerResult.videoFilePaths.length; i++) {
-          const videoUrl = await blobStorage.uploadFile(
-            workerResult.videoFilePaths[i],
-            `${requestId}/video-${i}.webm`,
-            "video/webm"
-          );
-          videoUrls.push(videoUrl);
-        }
-        await log("info", "Video files uploaded to blob storage", { videoUrls });
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        await log("warn", `Failed to upload video files: ${msg}`);
-      }
-    }
-
-    // Update request with result and HAR URL
-    await this.collection.updateOne(
-      { _id: requestId },
-      {
-        $set: {
-          status: "completed",
-          result: workerResult.response,
-          ...(harUrl && { harUrl }),
-          ...(videoUrls && videoUrls.length > 0 && { videoUrls }),
-          updatedAt: new Date(),
-        },
-      }
-    );
-
-    console.log(`[${this.workerName}] Completed request ${requestId}`);
-
-    // Fire-and-forget report generation
-    await this.triggerReportGeneration(requestId);
-
-    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
-  }
-
-  /**
-   * Multi-turn processing with judge loop.
-   */
-  private async processMultiTurn(
-    requestDoc: RequestDocument,
-    message: DequeuedMessageItem,
-    currentPopReceipt: string,
-    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
-    mcpServerConfigs?: McpServerConfig[],
-    skillConfigs?: SkillConfig[]
-  ): Promise<void> {
-    const requestId = requestDoc._id;
-    const judgeServiceUrl = process.env.JUDGE_SERVICE_URL;
-
-    if (!judgeServiceUrl) {
-      throw new Error("JUDGE_SERVICE_URL is not configured but multi-turn request received (criteria present)");
-    }
-
-    // Update status to iterating (preserve logs from handleRequest — MCP/skill resolution)
-    await this.collection.updateOne(
-      { _id: requestId },
-      { $set: { status: "iterating", turns: [], updatedAt: new Date(), ...(this.processor.getAgentVersion ? { agentVersion: this.processor.getAgentVersion() } : {}) } }
-    );
-
-    // Extend queue message visibility for long-running multi-turn.
-    // updateMessage returns a new pop receipt that must be used for subsequent operations.
-    const visibilityTimeout = MULTI_TURN_DEFAULTS.VISIBILITY_TIMEOUT_SECONDS;
-    try {
-      const updateResponse = await this.queueClient.updateMessage(
-        message.messageId,
-        currentPopReceipt,
-        message.messageText,
-        visibilityTimeout
-      );
-      currentPopReceipt = updateResponse.popReceipt!;
-    } catch (error) {
-      console.warn(`[${this.workerName}] Failed to extend message visibility: ${error}`);
-    }
-
-    await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
-      criteria: requestDoc.scenario.criteria,
-      maxIterations: requestDoc.maxIterations,
-    });
-
-    const judgeClient = new JudgeClient(judgeServiceUrl);
-    const blobStorage = new BlobStorage({
-      storageAccountName: this.config.storageAccountName,
-      storageConnectionString: this.config.storageConnectionString,
-    });
-
-    const workspacePath = process.env.WORKSPACE_PATH || "/workspace";
-    const maxIterations = requestDoc.maxIterations || MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
-
-    const result = await runMultiTurnLoop({
-      processor: this.processor,
-      task: requestDoc.scenario.task,
-      criteria: requestDoc.scenario.criteria,
-      scenarioVersion: requestDoc.scenario.version,
-      maxIterations,
-      workspacePath,
-      judgeClient,
-      blobStorage,
-      requestId,
-      log,
-      personaInstructions: requestDoc.personaInstructions,
-      model: requestDoc.model,
-      mcpServerConfigs,
-      skillConfigs,
-      onTurnComplete: async (turn: ConversationTurn) => {
-        // Persist each turn incrementally to MongoDB
-        await this.collection.updateOne(
-          { _id: requestId },
-          {
-            $push: { turns: turn },
-            $set: { updatedAt: new Date() },
-          }
-        );
-      },
-      onSetupVideosUploaded: async (setupVideoUrls: string[]) => {
-        await this.collection.updateOne(
-          { _id: requestId },
-          { $set: { setupVideoUrls, updatedAt: new Date() } }
-        );
-      },
-    });
-
-    const finalStatus = result.passed
-      ? "completed"
-      : result.turns.length >= maxIterations
-        ? "exhausted"
-        : "failed";
-    await log("info", `Multi-turn processing ${finalStatus}`, {
+    const finalStatus = "done";
+    const finalOutcome = result.passed
+      ? "succeeded"
+      : result.hadError
+        ? "failed"
+        : result.turns.length >= maxIterations
+          ? "finished"
+          : "failed";
+    await log("info", `Multi-turn processing ${finalOutcome}`, {
       passed: result.passed,
       totalIterations: result.turns.length,
       final: true,
     });
 
-    await this.collection.updateOne(
-      { _id: requestId },
+    const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
+
+    // Guard final write: only update if the run is still "processing" for this
+    // specific run._id. If a cancel already set status="done", this no-ops.
+    const finalWrite = await withRetry(() => this.collection.updateOne(
+      { _id: requestId, "run._id": runId, "run.status": "processing" },
       {
         $set: {
-          status: finalStatus,
-          result: result.finalResult,
+          "run.status": finalStatus,
+          "run.outcome": finalOutcome,
+          "run.result": result.finalResult,
+          "run.finishedAt": new Date(),
+          "run.updatedAt": new Date(),
           updatedAt: new Date(),
-          ...(result.passed ? {} : { error: result.finalResult }),
+          ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
+          ...(result.passed ? {} : { "run.error": result.finalResult }),
         },
       }
-    );
+    ));
 
-    console.log(
-      `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
-    );
+    if (finalWrite.matchedCount === 0) {
+      console.warn(
+        `[${this.workerName}] Final write for ${requestId} (runId=${runId}) did not match — run was cancelled or retried concurrently`,
+      );
+      await log("warn", "Run was cancelled or retried concurrently — skipping final update");
+    } else {
+      // Fire-and-forget report generation (only if we actually wrote the final status)
+      await this.triggerReportGeneration(requestId);
+      console.log(
+        `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
+      );
+    }
 
-    // Fire-and-forget report generation
-    await this.triggerReportGeneration(requestId);
+    // Drop the Redis liveness heartbeat now that the run is terminal so it
+    // doesn't surface in the API's "still processing" enrichment. (TTL would
+    // eventually expire it anyway, but explicit cleanup is tidier.)
+    await this.heartbeatStore.delete(requestDoc.run!._id);
 
-    await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+    // Stop the heartbeat before deleting so the pop receipt is stable —
+    // a tick landing between read and delete would invalidate it. The
+    // base class also calls stop() in its finally block (it's idempotent).
+    const finalPopReceipt = heartbeat.stop();
+    await this.safeDeleteMessage(message.messageId, finalPopReceipt);
   }
 }

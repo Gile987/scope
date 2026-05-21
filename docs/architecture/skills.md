@@ -2,7 +2,7 @@
 
 > **Status:** Current as of February 2026.
 
-Skills are reusable instruction packages that enhance coding agents with domain-specific knowledge. Scope MT integrates the [Agent Skills specification](https://agentskills.io/specification) to let benchmarks include skills alongside scenarios, personas, and MCP servers.
+Skills are reusable instruction packages that enhance coding agents with domain-specific knowledge. Scope integrates the [Agent Skills specification](https://agentskills.io/specification) to let benchmarks include skills alongside scenarios, personas, and MCP servers.
 
 ## Overview
 
@@ -74,7 +74,21 @@ erDiagram
 
 ### 1. Registration
 
-Skills are registered via the API by providing a GitHub source (`owner/repo`) and skill name. The API fetches the `SKILL.md` from GitHub, parses its YAML frontmatter (name, description, license, compatibility, etc.), and stores both the skill record and an initial revision.
+Skills are registered via the API by providing a GitHub source (`owner/repo`) and skill name. The API stores the skill record and immediately attempts to auto-resolve it: it fetches `SKILL.md` from GitHub at the latest commit, parses its YAML frontmatter (name, description, license, compatibility, etc.), uploads a tar.gz archive of the skill directory to Blob Storage, and creates the first `SkillRevision`. If auto-resolution fails (e.g., GitHub 404, network error), the skill record is still saved and the user can retry via `POST /api/v1/skills/:id/resolve`.
+
+#### Discovery
+
+`GET /api/v1/skills/discover?source=owner/repo` lists every `SKILL.md` found under well-known directories (`skills/`, `.agents/skills/`, `.github/skills/`, `.claude/skills/`, `.copilot/skills/`, `.roo/skills/`, `.cursor/skills/`, and the repo root). Implementation: a single recursive Trees API call to enumerate the repo, then per-skill best-effort frontmatter parsing via `raw.githubusercontent.com` (which doesn't count against the API rate limit). The portal exposes this as a multi-step import wizard: the user enters a repository, picks one or more discovered skills, and the wizard fires parallel `POST /api/v1/skills` requests with per-skill progress feedback. Returns `404` if the repository does not exist, `400` for malformed sources, and `502` for upstream GitHub errors (including rate limits — set `GITHUB_TOKEN` on the API to raise the limit).
+
+Each discovery result is enriched with **library state** so the wizard can distinguish skills that are already imported from skills that have upstream updates:
+
+- `existsInLibrary` — a `SkillDocument` with this `source` + `skillName` exists.
+- `currentRevisionCommitSha` — `commitHash` of the most recent stored `SkillRevision`.
+- `latestUpstreamCommitSha` — latest commit touching the skill path on GitHub (resolved via `SkillResolver.getLatestCommitSha`).
+- `updateAvailable` — `existsInLibrary && currentRevisionCommitSha !== latestUpstreamCommitSha`.
+- `lastImportedAt` — ISO timestamp of the most recent revision.
+
+The API runs `listBySkill(limit:1)` + `getLatestCommitSha` in parallel for each already-imported skill; upstream-lookup failures fall back to no-update rather than blocking discovery. The wizard renders three per-row badges driven by these fields — **New** (not in library, default-selected), **Update available** (default-selected, tooltip shows `current → upstream` short SHAs), and **Up to date** (dimmed, default-unchecked) — and "Select all" skips up-to-date entries.
 
 ### 2. Resolution (Submit Time)
 

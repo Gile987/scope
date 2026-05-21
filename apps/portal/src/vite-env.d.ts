@@ -3,6 +3,7 @@
 // Build-time version info (injected via vite.config.ts define)
 declare const __GIT_COMMIT__: string;
 declare const __BUILD_TIME__: string;
+declare const __GIT_BRANCH__: string;
 
 interface ImportMetaEnv {
   /** Show the Pass@k metrics table on the Statistics page (default: hidden) */

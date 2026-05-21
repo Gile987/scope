@@ -1,0 +1,17 @@
+{
+  "name": "gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TLS-intercepting HTTP proxy with plugin architecture (Rust)",
+  "scripts": {
+    "build": "cargo build --release",
+    "dev": "cargo watch --no-vcs-ignores -w src -w Cargo.toml -x 'run -- --port 18000 --api-port 18897 --cert-dir /tmp/scope-gateway/certs'",
+    "start": "cargo run -- --port 18000 --api-port 18897 --cert-dir /tmp/scope-gateway/certs",
+    "test": "cargo test",
+    "lint": "cargo clippy -- -D warnings",
+    "fmt": "cargo fmt",
+    "fmt:check": "cargo fmt --check",
+    "check": "cargo check",
+    "clean": "cargo clean"
+  }
+}

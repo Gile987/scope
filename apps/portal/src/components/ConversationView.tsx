@@ -6,9 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Bot, Scale, CheckCircle2, AlertCircle, Brain, Wrench, ChevronRight, ChevronDown, Loader2 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import type { ConversationTurn, ToolCall } from "@/types";
 import { useHarExtraction, type ConversationSegment } from "@/hooks/useHarExtraction";
 
@@ -18,6 +16,8 @@ interface ConversationViewProps {
   task?: string;
   /** Run ID — needed to fetch HAR data for each turn */
   runId: string;
+  /** If provided, uses per-run URL for a specific historical attempt */
+  attemptRunId?: string;
 }
 
 /**
@@ -31,7 +31,7 @@ interface ConversationViewProps {
  *   - Tool calls (inline, collapsible)
  *   - Judge feedback (left-aligned, amber tint)
  */
-export function ConversationView({ turns, task, runId }: ConversationViewProps) {
+export function ConversationView({ turns, task, runId, attemptRunId }: ConversationViewProps) {
   if (turns.length === 0 && !task) {
     return (
       <div className="text-sm text-muted-foreground italic py-4 text-center">
@@ -53,7 +53,7 @@ export function ConversationView({ turns, task, runId }: ConversationViewProps) 
                 </Badge>
               </div>
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{task}</ReactMarkdown>
+                <MarkdownRenderer>{task}</MarkdownRenderer>
               </div>
             </CardContent>
           </Card>
@@ -62,7 +62,7 @@ export function ConversationView({ turns, task, runId }: ConversationViewProps) 
 
       {/* Turn messages */}
       {turns.map((turn) => (
-        <TurnMessages key={turn.iteration} turn={turn} runId={runId} />
+        <TurnMessages key={turn.iteration} turn={turn} runId={runId} attemptRunId={attemptRunId} />
       ))}
     </div>
   );
@@ -174,9 +174,9 @@ function ToolCallInline({ tc }: { tc: ToolCall }) {
   );
 }
 
-function TurnMessages({ turn, runId }: { turn: ConversationTurn; runId: string }) {
+function TurnMessages({ turn, runId, attemptRunId }: { turn: ConversationTurn; runId: string; attemptRunId?: string }) {
   const hasHar = !!turn.harUrl;
-  const { data: harData, isLoading: harLoading } = useHarExtraction(runId, turn.iteration, hasHar);
+  const { data: harData, isLoading: harLoading } = useHarExtraction(runId, turn.iteration, hasHar, attemptRunId);
 
   const segments = harData?.segments ?? [];
   const hasContentSegment = segments.some((s) => s.type === "content");
@@ -233,7 +233,7 @@ function TurnMessages({ turn, runId }: { turn: ConversationTurn; runId: string }
               )}
             </div>
             <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{turn.judgeFeedback}</ReactMarkdown>
+              <MarkdownRenderer>{turn.judgeFeedback}</MarkdownRenderer>
             </div>
 
             {/* Criteria results inline */}
@@ -275,7 +275,7 @@ function SegmentBlock({ segment, turn }: { segment: ConversationSegment; turn: C
               <Card className="bg-violet-500/5 border-violet-200 dark:border-violet-800">
                 <CardContent className="p-3">
                   <div className="prose prose-sm dark:prose-invert max-w-none max-h-64 overflow-y-auto text-muted-foreground italic text-xs">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{segment.content}</ReactMarkdown>
+                    <MarkdownRenderer>{segment.content}</MarkdownRenderer>
                   </div>
                 </CardContent>
               </Card>
@@ -312,7 +312,8 @@ function SegmentBlock({ segment, turn }: { segment: ConversationSegment; turn: C
 }
 
 /** Agent response card — right aligned */
-function AgentResponseBlock({ content, turn }: { content: string; turn: ConversationTurn }) {
+function AgentResponseBlock({ content, turn }: { content: string | undefined; turn: ConversationTurn }) {
+  const hasContent = typeof content === "string" && content.length > 0;
   return (
     <div className="flex justify-end">
       <Card className={cn(
@@ -329,9 +330,15 @@ function AgentResponseBlock({ content, turn }: { content: string; turn: Conversa
               {new Date(turn.timestamp).toLocaleTimeString()}
             </span>
           </div>
-          <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{content}</ReactMarkdown>
-          </div>
+          {hasContent ? (
+            <div className="prose prose-sm dark:prose-invert max-w-none max-h-96 overflow-y-auto">
+              <MarkdownRenderer>{content}</MarkdownRenderer>
+            </div>
+          ) : (
+            <p className="text-xs italic text-muted-foreground">
+              No assistant response captured — see raw chat / HAR for the full transcript.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -9,26 +9,22 @@
  */
 
 /**
- * The kind of credential stored (token format).
+ * The kind of credential stored (key format).
  */
-export type TokenType =
-  | "github-pat-classic"
-  | "github-pat-fine-grained"
-  | "github-oauth"
-  | "github-oauth-cookie-state"
-  | "anthropic-api-key";
+export type KeyType =
+  "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth";
 
 /**
- * What a token can do — derived from (type + detected scopes/permissions).
- * Workers acquire tokens by capability, not by type.
+ * What a key can do — derived from (type + detected scopes/permissions).
+ * Workers acquire keys by capability, not by type.
  */
-export type TokenCapability =
-  "github-models" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli";
+export type KeyCapability =
+  "github-models" | "github-public-api" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
 
 /**
- * Validation status of a token.
+ * Validation status of a key.
  */
-export type TokenValidationStatus =
+export type KeyValidationStatus =
   | "valid"
   | "invalid"
   | "expired"
@@ -36,24 +32,24 @@ export type TokenValidationStatus =
   | "unknown";
 
 /**
- * Token metadata stored in MongoDB. Secret values are never stored here —
+ * Key metadata stored in MongoDB. Secret values are never stored here —
  * they live in Azure KeyVault (or in-memory store for local dev).
  */
-export interface TokenDocument {
+export interface KeyDocument {
   _id: string;
-  type: TokenType;
-  /** Auto-detected capabilities based on token type and validated scopes/permissions. */
-  capabilities: TokenCapability[];
+  type: KeyType;
+  /** Auto-detected capabilities based on key type and validated scopes/permissions. */
+  capabilities: KeyCapability[];
   /** Auto-derived: token-{type}-{_id.substring(0,8)} */
   secretName: string;
   expiresAt?: Date;
   lastValidatedAt?: Date;
-  lastValidationStatus: TokenValidationStatus;
+  lastValidationStatus: KeyValidationStatus;
   lastValidationError?: string;
   enabled: boolean;
-  /** Optional free-text annotation (e.g. "John's CI token"). */
+  /** Optional free-text annotation (e.g. "John's CI key"). */
   comment?: string;
-  /** Number of times this token has been acquired via /acquire. */
+  /** Number of times this key has been acquired via /acquire. */
   acquireCount: number;
   /** Timestamp of the last acquisition. */
   lastAcquiredAt?: Date;
@@ -63,23 +59,24 @@ export interface TokenDocument {
 }
 
 /**
- * Response from POST /api/v1/tokens/acquire.
+ * Response from POST /api/v1/keys/acquire.
  * Only returned to internal callers (workers inside the cluster).
  */
-export interface AcquireTokenResponse {
+export interface AcquireKeyResponse {
   value: string;
-  tokenId: string;
-  capability: TokenCapability;
+  keyId: string;
+  keyType: KeyType;
+  capability: KeyCapability;
   expiresAt?: Date;
 }
 
 /**
- * Result of validating a token against its provider's API.
+ * Result of validating a key against its provider's API.
  */
-export interface TokenValidationResult {
-  status: TokenValidationStatus;
+export interface KeyValidationResult {
+  status: KeyValidationStatus;
   scopes?: string[];
-  capabilities?: TokenCapability[];
+  capabilities?: KeyCapability[];
   expiresAt?: Date;
   error?: string;
   rateLimit?: {
@@ -90,11 +87,11 @@ export interface TokenValidationResult {
 }
 
 /**
- * Request body for POST /api/v1/tokens.
+ * Request body for POST /api/v1/keys.
  * Capabilities are auto-detected during validation — not user-specified.
  */
-export interface CreateTokenRequest {
-  type: TokenType;
+export interface CreateKeyRequest {
+  type: KeyType;
   value: string;
   expiresAt?: string;
   enabled?: boolean;
@@ -102,38 +99,42 @@ export interface CreateTokenRequest {
 }
 
 /**
- * Request body for PUT /api/v1/tokens/:id.
+ * Request body for PUT /api/v1/keys/:id.
  * Only metadata — secret value is immutable.
  */
-export interface UpdateTokenRequest {
+export interface UpdateKeyRequest {
   enabled?: boolean;
   expiresAt?: string | null;
   comment?: string | null;
 }
 
 /**
- * Request body for POST /api/v1/tokens/acquire.
+ * Request body for POST /api/v1/keys/acquire.
  */
-export interface AcquireTokenRequest {
-  capability: TokenCapability;
+export interface AcquireKeyRequest {
+  capability: KeyCapability;
+  /** Optional: prefer keys of this type. Falls back to any type if none available. */
+  keyType?: KeyType;
 }
 
 /**
- * Maps each TokenCapability to the environment variable that workers check
+ * Maps each KeyCapability to the environment variable that workers check
  * for a local fallback (e.g., Docker Compose with env vars).
  */
-export const TOKEN_CAPABILITY_ENV_VARS: Record<TokenCapability, string> = {
+export const KEY_CAPABILITY_ENV_VARS: Record<KeyCapability, string> = {
   "copilot-sdk": "GITHUB_TOKEN",
   "copilot-cli": "GITHUB_TOKEN",
   "copilot-models": "GITHUB_TOKEN",
   "github-models": "GITHUB_TOKEN",
+  "github-public-api": "GITHUB_TOKEN",
   "claude-code-cli": "ANTHROPIC_API_KEY",
+  "anthropic-api": "ANTHROPIC_API_KEY",
 };
 
 /**
- * Derive the KeyVault secret name from a token's type and ID.
+ * Derive the KeyVault secret name from a key's type and ID.
  */
-export function deriveSecretName(type: TokenType, id: string): string {
+export function deriveSecretName(type: KeyType, id: string): string {
   return `token-${type}-${id.substring(0, 8)}`;
 }
 

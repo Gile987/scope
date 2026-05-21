@@ -29,6 +29,8 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   }
 
   const run = await response.json();
+  // Per-attempt state is nested under run.run (RunState).
+  const rs = run.run;
 
   // Machine-readable output
   if (isMachineReadable(format)) {
@@ -36,24 +38,26 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
       { key: 'id', label: 'ID' },
       { key: 'workerType', label: 'Worker' },
       { key: 'model', label: 'Model' },
+      { key: 'profileId', label: 'Profile', formatter: (r: any) => r.profileId ?? '' },
       { key: 'status', label: 'Status' },
       { key: 'maxIterations', label: 'Max Iterations' },
       { key: 'turnsCount', label: 'Turns' },
       { key: 'passed', label: 'Passed' },
       { key: 'task', label: 'Task' },
       { key: 'criteriaCount', label: 'Criteria' },
-      { key: 'logsCount', label: 'Logs' },
       { key: 'createdAt', label: 'Created' },
       { key: 'updatedAt', label: 'Updated' },
       { key: 'error', label: 'Error' },
     ];
     const row = {
       ...run,
-      turnsCount: run.turns?.length ?? 0,
-      passed: run.status === 'completed' ? 'yes' : run.status === 'failed' || run.status === 'exhausted' ? 'no' : '-',
+      status: rs?.status,
+      outcome: rs?.outcome,
+      error: rs?.error,
+      turnsCount: rs?.turns?.length ?? 0,
+      passed: rs?.outcome === 'succeeded' ? 'yes' : rs?.outcome === 'failed' || rs?.outcome === 'finished' ? 'no' : '-',
       task: run.scenario?.task ?? '',
       criteriaCount: run.scenario?.criteria?.length ?? 0,
-      logsCount: run.logs?.length ?? 0,
     };
     console.log(formatData([row], fields, format));
     return;
@@ -63,11 +67,14 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   console.log(`${label('ID:')}             ${value(run.id)}`);
   console.log(`${label('Worker:')}         ${value(run.workerType)}`);
   if (run.model) console.log(`${label('Model:')}          ${value(run.model)}`);
+  if (run.profileId) console.log(`${label('Profile:')}        ${value(run.profileId)}`);
+  if (run.profileVersionId) console.log(`${label('Profile Ver:')}    ${dimTimestamp(run.profileVersionId)}`);
 
-  const statusColor = run.status === 'completed' ? successText
-    : (run.status === 'failed' || run.status === 'exhausted') ? errorText
+  const statusColor = rs?.outcome === 'succeeded' ? successText
+    : (rs?.outcome === 'failed' || rs?.outcome === 'finished') ? errorText
     : value;
-  console.log(`${label('Status:')}         ${statusColor(run.status)}`);
+  console.log(`${label('Status:')}         ${statusColor(rs?.status ?? 'unknown')}`);
+  if (rs?.outcome) console.log(`${label('Outcome:')}        ${statusColor(rs.outcome)}`);
 
   if (run.maxIterations != null) console.log(`${label('Max Iterations:')} ${value(String(run.maxIterations))}`);
   if (run.createdAt) console.log(`${label('Created:')}        ${dimTimestamp(new Date(run.createdAt).toLocaleString())}`);
@@ -89,7 +96,7 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
     if (run.scenario.criteria?.length > 0) {
       console.log(`${label('Criteria:')}       ${value(String(run.scenario.criteria.length))} criterion/criteria`);
       // Build a lookup from the last turn's criteria results
-      const lastTurn = run.turns?.length ? run.turns[run.turns.length - 1] : null;
+      const lastTurn = rs?.turns?.length ? rs.turns[rs.turns.length - 1] : null;
       const resultsMap = new Map<string, { passed: boolean; evaluated: boolean }>();
       if (lastTurn?.criteriaResults) {
         for (const cr of lastTurn.criteriaResults) {
@@ -105,9 +112,9 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   }
 
   // Turns summary
-  if (run.turns?.length > 0) {
+  if (rs?.turns?.length && rs.turns.length > 0) {
     console.log(`\n${banner('─── Turns ───')}`);
-    for (const turn of run.turns) {
+    for (const turn of rs.turns) {
       const passIcon = criterionIcon(true, turn.passed);
       const criteriaStr = turn.criteriaResults?.length
         ? ` — ${turn.criteriaResults.filter((cr: { passed: boolean }) => cr.passed).length}/${turn.criteriaResults.length} criteria passed`
@@ -117,13 +124,8 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   }
 
   // Error
-  if (run.error) {
-    console.log(`${label('Error:')}          ${errorText(run.error)}`);
-  }
-
-  // Logs count
-  if (run.logs?.length != null) {
-    console.log(`${label('Logs:')}           ${value(String(run.logs.length))} entries`);
+  if (rs?.error) {
+    console.log(`${label('Error:')}          ${errorText(rs.error)}`);
   }
 
   // Prompt feature extraction

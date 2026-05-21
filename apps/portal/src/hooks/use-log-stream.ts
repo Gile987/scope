@@ -12,6 +12,8 @@ interface UseLogStreamOptions {
   enabled?: boolean;
   /** Start from the beginning (default: true) */
   fromStart?: boolean;
+  /** Attempt number — used to detect when a new attempt is created and reconnect (default: undefined) */
+  attemptNumber?: number;
   /** Custom URL builder (default: api.logsUrl). Use api.reportLogsUrl for reports. */
   urlBuilder?: (id: string, fromStart: boolean) => string;
 }
@@ -28,6 +30,7 @@ export function useLogStream({
   id,
   enabled = true,
   fromStart = true,
+  attemptNumber,
   urlBuilder = api.logsUrl,
 }: UseLogStreamOptions): UseLogStreamReturn {
   const [logs, setLogs] = useState<LogEvent[]>([]);
@@ -41,6 +44,17 @@ export function useLogStream({
   useEffect(() => {
     if (!enabled || !id) return;
 
+    // Close any existing connection when dependencies change (especially attemptNumber)
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    // Reset state for fresh connection
+    setLogs([]);
+    setIsDone(false);
+    setError(null);
+
     const url = urlBuilder(id, fromStart);
     const es = new EventSource(url);
     eventSourceRef.current = es;
@@ -52,8 +66,15 @@ export function useLogStream({
 
     es.onmessage = (event) => {
       try {
-        const logEvent = JSON.parse(event.data) as LogEvent;
-        setLogs((prev) => [...prev, logEvent]);
+        const parsed = JSON.parse(event.data);
+        // The SSE stream multiplexes log events with summary payloads
+        // (e.g. { type: "turns_summary", ... }). Only treat well-formed
+        // log events with a timestamp as logs — otherwise the LogViewer
+        // would render "Invalid Date" for the summary row.
+        if (!parsed || typeof parsed.timestamp !== "string" || typeof parsed.message !== "string") {
+          return;
+        }
+        setLogs((prev) => [...prev, parsed as LogEvent]);
       } catch {
         // Non-JSON messages (heartbeats, etc.)
       }
@@ -71,11 +92,24 @@ export function useLogStream({
       es.close();
     });
 
+    es.addEventListener("error", (event: MessageEvent) => {
+      try {
+        const { message } = JSON.parse(event.data) as { message: string };
+        setError(message);
+      } catch {
+        setError("Cannot connect to log storage");
+      }
+      setIsConnected(false);
+      es.close();
+    });
+
     es.onerror = () => {
       setIsConnected(false);
-      // EventSource auto-reconnects; only set error if CLOSED
+      // EventSource auto-reconnects; only set error if CLOSED.
+      // Use functional update to avoid overwriting a more specific error
+      // already set by the named "error" event listener.
       if (es.readyState === EventSource.CLOSED) {
-        setError("Connection lost");
+        setError((prev) => prev ?? "Connection lost");
       }
     };
 
@@ -84,7 +118,7 @@ export function useLogStream({
       eventSourceRef.current = null;
       setIsConnected(false);
     };
-  }, [id, enabled, fromStart, urlBuilder]);
+  }, [id, enabled, fromStart, attemptNumber, urlBuilder]);
 
   return { logs, isConnected, isDone, error, clear };
 }

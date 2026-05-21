@@ -65,6 +65,8 @@ export function AgentList() {
               <TableRow>
                 <TableHead>ID</TableHead>
                 <TableHead>Name</TableHead>
+                <TableHead>Availability</TableHead>
+                <TableHead>Model Provider</TableHead>
                 <TableHead>Supported Models</TableHead>
                 <TableHead>Default Model</TableHead>
                 <TableHead>Created</TableHead>
@@ -81,6 +83,20 @@ export function AgentList() {
                     </Link>
                   </TableCell>
                   <TableCell>{agent.name}</TableCell>
+                  <TableCell>
+                    {agent.available === false ? (
+                      <Badge variant="secondary" className="text-xs">Unavailable</Badge>
+                    ) : (
+                      <Badge variant="default" className="text-xs">Available</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {agent.modelProvider ? (
+                      <Badge variant="outline" className="text-xs font-mono">{agent.modelProvider}</Badge>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {agent.supportedModels.length > 0

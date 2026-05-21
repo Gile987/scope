@@ -20,7 +20,7 @@
 //       --username USER --password PASS --qr-code /path/to/qr.png [--output PATH] [--headed]
 //
 //   Or via env vars:
-//     GITHUB_USERNAME=... GITHUB_PASSWORD=... GITHUB_TOTP_SECRET=... npx tsx src/github-cookie-updater.ts
+//     GH_AUTH_USERNAME=... GH_AUTH_PASSWORD=... GH_AUTH_TOTP_SECRET=... npx tsx src/github-cookie-updater.ts
 //
 // Default output: .auth/github-storage.json
 // =============================================================================
@@ -53,8 +53,8 @@ export function resolveOptions(
     return i !== -1 && i + 1 < args.length ? args[i + 1] : undefined;
   };
 
-  const username = flagValue("--username") ?? env.GITHUB_USERNAME;
-  const password = flagValue("--password") ?? env.GITHUB_PASSWORD;
+  const username = flagValue("--username") ?? env.GH_AUTH_USERNAME;
+  const password = flagValue("--password") ?? env.GH_AUTH_PASSWORD;
   const qrCode = flagValue("--qr-code");
   const output = flagValue("--output") ?? DEFAULT_OUTPUT;
   const headed = args.includes("--headed");
@@ -67,15 +67,15 @@ export function resolveOptions(
     console.log(`📷 Decoded QR code: ${decoded}`);
     totpSecret = decoded;
   } else {
-    totpSecret = flagValue("--totp-secret") ?? env.GITHUB_TOTP_SECRET;
+    totpSecret = flagValue("--totp-secret") ?? env.GH_AUTH_TOTP_SECRET;
   }
 
   if (!totpSecret)
-    throw new Error("Missing --totp-secret, --qr-code, or GITHUB_TOTP_SECRET env var");
+    throw new Error("Missing --totp-secret, --qr-code, or GH_AUTH_TOTP_SECRET env var");
 
   if (!totpOnly) {
-    if (!username) throw new Error("Missing --username or GITHUB_USERNAME env var");
-    if (!password) throw new Error("Missing --password or GITHUB_PASSWORD env var");
+    if (!username) throw new Error("Missing --username or GH_AUTH_USERNAME env var");
+    if (!password) throw new Error("Missing --password or GH_AUTH_PASSWORD env var");
   }
 
   return { username: username ?? "", password: password ?? "", totpSecret, output, headed, totpOnly };

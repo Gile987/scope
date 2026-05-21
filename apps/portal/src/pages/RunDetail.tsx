@@ -1,16 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useParams, Link } from "react-router-dom";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { RetryConfirmDialog } from "@/components/RetryConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { StatusBadge } from "@/components/StatusBadge";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { LogViewer } from "@/components/LogViewer";
 import { TurnTimeline } from "@/components/TurnTimeline";
@@ -20,46 +25,103 @@ import { ConversationView } from "@/components/ConversationView";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { useLogStream } from "@/hooks/use-log-stream";
 import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video } from "lucide-react";
-import { formatDate, formatId } from "@/lib/utils";
-import { useState } from "react";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
+import { ReportThumbnail } from "@/components/ReportThumbnail";
+import { CriteriaBadge } from "@/components/CriteriaBadge";
+import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
+import { formatDate, formatId, formatDuration } from "@/lib/utils";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
+import type { RunState } from "@/types";
+import { useShiftModifier } from "@/hooks/useShiftModifier";
+import { getRetryButtonState } from "@/components/RetryButton";
 
 export function RunDetail() {
-  const { id } = useParams<{ id: string }>();
+  const { id, tab } = useParams<{ id: string; tab?: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const selectedRunId = searchParams.get("runId");
   const [copied, setCopied] = useState(false);
+  const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
+  const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
+  const [showAttempts, setShowAttempts] = useState(false);
+  const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
+  const isForceRetryModifierActive = useShiftModifier();
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ["run", id],
     queryFn: () => api.getRun(id!),
     enabled: !!id,
     refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      // Stop polling once terminal (completed, failed, or exhausted)
-      if (status === "completed" || status === "failed" || status === "exhausted") return false;
+      const status = query.state.data?.run?.status;
+      // Stop polling once terminal (done)
+      if (status === "done") return false;
       return 5_000;
     },
   });
 
-  const isActive = run?.status === "pending" || run?.status === "processing" || run?.status === "iterating";
-  // Note: "exhausted" is terminal — not active, no log streaming needed
+  const { data: profile } = useQuery({
+    queryKey: ["profile", run?.profileId],
+    queryFn: () => api.getProfile(run!.profileId!),
+    enabled: !!run?.profileId,
+  });
+
+  // Fetch all attempts when this request has been retried
+  const hasMultipleAttempts = (run?.run?.attemptNumber ?? 1) > 1;
+  const { data: rawAttempts } = useQuery({
+    queryKey: ["run-attempts", id],
+    queryFn: () => api.listRunAttempts(id!),
+    enabled: !!id && hasMultipleAttempts,
+  });
+
+  // Merge the live run.run into the attempts list so the latest attempt
+  // always reflects the freshest polled state (status, outcome, duration, etc.)
+  const attempts = useMemo(() => {
+    if (!rawAttempts) return rawAttempts;
+    const liveRun = run?.run;
+    if (!liveRun) return rawAttempts;
+    return rawAttempts.map((a) => (a._id === liveRun._id ? liveRun : a));
+  }, [rawAttempts, run?.run]);
+
+  // When viewing a historical attempt via ?runId=xxx, use that RunState
+  // instead of the current one. The selected attempt may come from the
+  // attempts list or fall back to the current run.
+  const activeRun: RunState | undefined = useMemo(() => {
+    if (!selectedRunId || selectedRunId === run?.run?._id) return run?.run;
+    return attempts?.find((a) => a._id === selectedRunId) ?? run?.run;
+  }, [selectedRunId, run?.run, attempts]);
+  const isViewingHistorical = !!selectedRunId && selectedRunId !== run?.run?._id;
+
+  const isActive = activeRun?.status === "pending" || activeRun?.status === "processing";
+  // Note: "done" is terminal — not active, no log streaming needed
 
   // Lift the log stream so it can be shared between LogViewer and CriteriaGraphView
   // Must be called unconditionally (before any early returns) per Rules of Hooks
+  // The SSE endpoint handles completed runs by replaying blob logs then closing.
+  // When viewing a historical run, use the per-run logs endpoint; otherwise use the
+  // default endpoint with attemptNumber for reconnection on retry.
+  const logStreamUrlBuilder = useMemo(() => {
+    if (isViewingHistorical && activeRun?._id && run?._id) {
+      const requestId = run._id;
+      const runId = activeRun._id;
+      return (_id: string, fromStart: boolean) => api.runLogsUrl(requestId, runId, fromStart);
+    }
+    return api.logsUrl;
+  }, [isViewingHistorical, activeRun?._id, run?._id]);
+
   const logStream = useLogStream({
     id: run?._id ?? "",
-    enabled: isActive && !!run,
+    enabled: !!run,
     fromStart: true,
+    attemptNumber: activeRun?.attemptNumber,
+    urlBuilder: logStreamUrlBuilder,
   });
 
-  // For completed/failed/exhausted runs, use REST-fetched logs instead of SSE
-  const effectiveLogs = isActive ? logStream.logs : (run?.logs ?? []);
+  const effectiveLogs = logStream.logs;
   const effectiveIsConnected = isActive ? logStream.isConnected : false;
-  const effectiveIsDone = isActive ? logStream.isDone : true;
-  const effectiveError = isActive ? logStream.error : null;
+  const effectiveIsDone = logStream.isDone;
+  const effectiveError = logStream.error;
 
   // Fetch linked task prompt (if present) — provides prompt features
   const taskPromptId = run?.taskPromptId;
@@ -77,6 +139,29 @@ export function RunDetail() {
     refetchInterval: 10_000,
   });
 
+  // Fetch report templates for name resolution
+  const { data: reportTemplates } = useQuery({
+    queryKey: ["report-templates"],
+    queryFn: () => api.listReportTemplates(),
+  });
+  const templateMap = new Map(reportTemplates?.map((t) => [t.id, t.name]));
+
+  // Filter reports: "latest" keeps only the most recent per templateId
+  const filteredReports = useMemo(() => {
+    if (!reports) return [];
+    if (reportsFilter === "all") return reports;
+    const seen = new Map<string, boolean>();
+    return reports
+      .slice()
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .filter((r) => {
+        const key = r.templateId ?? r._id; // manual reports always shown
+        if (seen.has(key)) return false;
+        seen.set(key, true);
+        return true;
+      });
+  }, [reports, reportsFilter]);
+
   const generateReport = useMutation({
     mutationFn: () => api.triggerReports(id!),
     onSuccess: (data) => {
@@ -88,11 +173,97 @@ export function RunDetail() {
     },
   });
 
+  const retryMutation = useMutation({
+    mutationFn: (options?: { force?: boolean }) => api.retryRun(id!, options),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success(`Retry started — attempt #${data.attemptNumber}`);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to retry");
+    },
+  });
+
+  const pauseMutation = useMutation({
+    mutationFn: () => api.pauseRun(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success("Run paused");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to pause");
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () => api.cancelRun(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success("Run cancelled");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to cancel");
+    },
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: () => api.resumeRun(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success("Run resumed");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to resume");
+    },
+  });
+
+  const setPriorityMutation = useMutation({
+    mutationFn: (priority: number) => api.setPriority(id!, priority),
+    onSuccess: (_data, priority) => {
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
+      toast.success(`Priority set to ${priority}`);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to set priority");
+    },
+  });
+
   const copyId = () => {
     navigator.clipboard.writeText(id ?? "");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // For completed runs, use the FINAL turn's criteriaResults to build a
+  // criterionId -> pass/fail/undefined lookup map.
+  // Using the final turn (not the latest turn with any results) avoids
+  // presenting stale pass/fail state from an earlier iteration when the
+  // last turn ended without evaluation (e.g. judge failure).
+  // "not evaluated" is preserved as undefined so skipped criteria are not
+  // collapsed into a failing `false` state.
+  const latestCriteriaResultsMap = useMemo(() => {
+    if (activeRun?.status !== "done") return undefined;
+    const turns = activeRun?.turns ?? [];
+    const lastTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
+    if (!lastTurn?.criteriaResults?.length) return new Map<string, boolean | undefined>();
+
+    return new Map<string, boolean | undefined>(
+      lastTurn.criteriaResults.map((r) => [
+        r.criterionId,
+        r.evaluated ? r.passed : undefined,
+      ])
+    );
+  }, [activeRun?.status, activeRun?.turns]);
+
+  // Prefer scenario criteria as the canonical list.
+  // If unavailable on a completed run, fall back to whatever the judge evaluated.
+  const displayedCriteria = useMemo(() => {
+    if ((run?.scenario?.criteria?.length ?? 0) > 0) return run?.scenario?.criteria ?? [];
+    if (activeRun?.status === "done" && latestCriteriaResultsMap) {
+      return Array.from(latestCriteriaResultsMap.keys());
+    }
+    return [] as string[];
+  }, [run?.scenario?.criteria, activeRun?.status, latestCriteriaResultsMap]);
 
   if (isLoading) {
     return (
@@ -119,12 +290,39 @@ export function RunDetail() {
     );
   }
 
-  const isV2 = run.scenario?.version === "v2";
-  const hasHarData = !!(run.harUrl || run.turns?.some(t => t.harUrl));
-  const hasVideoData = !!(run.videoUrls?.length || run.setupVideoUrls?.length || run.turns?.some(t => t.videoUrls?.length));
-  const videoCount = (run.setupVideoUrls?.length ?? 0)
-    + (run.videoUrls?.length ?? 0)
-    + (run.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
+  const hasHarData = !!(activeRun?.harUrl || activeRun?.turns?.some(t => t.harUrl));
+  const hasVideoData = !!(activeRun?.videoUrls?.length || activeRun?.setupVideoUrls?.length || activeRun?.turns?.some(t => t.videoUrls?.length));
+  const videoCount = (activeRun?.setupVideoUrls?.length ?? 0)
+    + (activeRun?.videoUrls?.length ?? 0)
+    + (activeRun?.turns?.reduce((n, t) => n + (t.videoUrls?.length ?? 0), 0) ?? 0);
+  const isSuccessfulCompletedRun = activeRun?.status === "done" && activeRun?.outcome === "succeeded";
+  const canShowRetry = !isViewingHistorical && activeRun?.status === "done";
+  const retryButtonState = getRetryButtonState(!!isSuccessfulCompletedRun, retryMutation.isPending, isForceRetryModifierActive);
+
+  // Compute aggregate token usage: for one-shot runs use activeRun?.tokenUsage,
+  // for multi-turn runs sum per-turn token usage
+  const totalTokenUsage = activeRun?.tokenUsage
+    ?? (activeRun?.turns?.some(t => t.tokenUsage)
+      ? activeRun?.turns!.reduce(
+          (acc, t) => {
+            if (!t.tokenUsage) return acc;
+            return {
+              promptTokens: acc.promptTokens + t.tokenUsage.promptTokens,
+              completionTokens: acc.completionTokens + t.tokenUsage.completionTokens,
+              totalTokens: acc.totalTokens + t.tokenUsage.totalTokens,
+            };
+          },
+          { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+        )
+      : undefined);
+
+   const skillIdsFromRevisions = Array.from(new Set((run.skillRevisions ?? []).map((ref) => {
+     const at = ref.lastIndexOf("@");
+     return at > 0 ? ref.substring(0, at) : ref;
+   })));
+   const skillIds = skillIdsFromRevisions.length > 0
+     ? skillIdsFromRevisions
+     : (run.skills ?? []);
 
   return (
     <div className="space-y-6">
@@ -149,7 +347,13 @@ export function RunDetail() {
               </button>
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <StatusBadge status={run.status} />
+              <StatusBadge
+                status={activeRun?.status ?? "pending"}
+                worker={activeRun?.worker}
+                lastHeartbeatAt={activeRun?.lastHeartbeatAt}
+                startedAt={activeRun?.startedAt}
+              />
+              {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
               <span className="font-mono">{run.workerType}</span>
               {run.model && (
                 <>
@@ -160,7 +364,7 @@ export function RunDetail() {
               {run.agentVersion && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs">{run.agentVersion}</span>
+                  <span className="font-mono text-xs cursor-default" title={activeRun?.workerVersion ? `Worker: ${activeRun?.workerVersion}` : undefined}>{run.agentVersion}</span>
                 </>
               )}
               <Separator orientation="vertical" className="h-4" />
@@ -169,6 +373,33 @@ export function RunDetail() {
                 <>
                   <Separator orientation="vertical" className="h-4" />
                   <span>Max {run.maxIterations} iterations</span>
+                </>
+              )}
+              {(() => {
+                const totalDuration = activeRun?.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+                return totalDuration ? (
+                  <>
+                    <Separator orientation="vertical" className="h-4" />
+                    <span className="font-mono text-xs" title={`${totalDuration.toLocaleString()}ms total`}>
+                      {formatDuration(totalDuration)}
+                    </span>
+                  </>
+                ) : null;
+              })()}
+              {totalTokenUsage && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <span className="font-mono text-xs">
+                    {totalTokenUsage.promptTokens.toLocaleString()}↑ · {totalTokenUsage.completionTokens.toLocaleString()}↓
+                  </span>
+                </>
+              )}
+              {activeRun?.aiCallCount !== undefined && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <span className="font-mono text-xs" title="LLM completion calls">
+                    {activeRun?.aiCallCount} LLM calls
+                  </span>
                 </>
               )}
               {run.mcpServers && run.mcpServers.length > 0 && (
@@ -193,29 +424,200 @@ export function RunDetail() {
                   ))}
                 </>
               )}
+              {run.extensions && run.extensions.length > 0 && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <span>Extensions:</span>
+                  {run.extensions.map((id) => (
+                    <Link key={id} to={`/extensions/${id}`} className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors">
+                      {id}
+                    </Link>
+                  ))}
+                </>
+              )}
             </div>
           </div>
-          {run.turns && run.turns.some(t => t.snapshotUrl) && (
+          <div className="flex items-center gap-2">
+          {hasMultipleAttempts && attempts && attempts.length > 0 && (
+            <div className="relative">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 font-mono"
+                onClick={() => setShowAttempts((v) => !v)}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                Attempt {activeRun?.attemptNumber}/{attempts.length}
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAttempts ? "rotate-180" : ""}`} />
+              </Button>
+              {showAttempts && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowAttempts(false)} />
+                  <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-md border bg-popover shadow-md">
+                    <div className="max-h-60 overflow-y-auto divide-y">
+                      {attempts.map((attempt) => {
+                        const isCurrent = attempt._id === run.run?._id;
+                        const isSelected = attempt._id === activeRun?._id;
+                        const duration = attempt.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+                        return (
+                          <button
+                            key={attempt._id}
+                            className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors ${isSelected ? "bg-accent" : ""}`}
+                            onClick={() => {
+                              setShowAttempts(false);
+                              if (isCurrent) {
+                                navigate(`/runs/${id}/${tab ?? ""}`, { replace: true });
+                              } else {
+                                navigate(`/runs/${id}/${tab ?? ""}?runId=${attempt._id}`, { replace: true });
+                              }
+                            }}
+                          >
+                            <span className="font-mono font-medium w-5 text-right">#{attempt.attemptNumber}</span>
+                            <StatusBadge
+                              status={attempt.status ?? "pending"}
+                              worker={attempt.worker}
+                              lastHeartbeatAt={attempt.lastHeartbeatAt}
+                              startedAt={attempt.startedAt}
+                            />
+                            {attempt.status === "done" && <OutcomeBadge outcome={attempt.outcome} />}
+                            {duration ? (
+                              <span className="font-mono text-muted-foreground">{formatDuration(duration)}</span>
+                            ) : null}
+                            {isCurrent && (
+                              <span className="text-muted-foreground font-medium ml-auto">(latest)</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {activeRun?.turns && activeRun?.turns.some(t => t.snapshotUrl) && (
             <Button
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => window.open(api.archiveUrl(run._id), "_blank")}
+              onClick={() => window.open(isViewingHistorical && activeRun?._id ? api.runArchiveUrl(run._id, activeRun._id) : api.archiveUrl(run._id), "_blank")}
             >
               <Archive className="h-4 w-4" />
               Download Archive
             </Button>
           )}
+          {canShowRetry && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => {
+                if (isSuccessfulCompletedRun) {
+                  setRetryConfirmOpen(true);
+                } else {
+                  retryMutation.mutate({ force: false });
+                }
+              }}
+              disabled={retryButtonState.disabled}
+              title={retryButtonState.title}
+            >
+              <RotateCcw className="h-4 w-4" />
+              {retryMutation.isPending ? "Retrying…" : "Retry"}
+            </Button>
+          )}
+          {(activeRun?.status === "pending" || activeRun?.status === "queued") && !isViewingHistorical && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => pauseMutation.mutate()}
+              disabled={pauseMutation.isPending}
+            >
+              <Pause className="h-4 w-4" />
+              {pauseMutation.isPending ? "Pausing…" : "Pause"}
+            </Button>
+          )}
+          {(activeRun?.status === "pending" || activeRun?.status === "queued" || activeRun?.status === "processing") && !isViewingHistorical && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-destructive border-destructive/50 hover:bg-destructive/10"
+              onClick={() => {
+                if (window.confirm("Are you sure you want to cancel this run? This will mark it as failed and kill any active worker.")) {
+                  cancelMutation.mutate();
+                }
+              }}
+              disabled={cancelMutation.isPending}
+            >
+              <X className="h-4 w-4" />
+              {cancelMutation.isPending ? "Cancelling…" : "Cancel"}
+            </Button>
+          )}
+          {activeRun?.status === "paused" && !isViewingHistorical && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => resumeMutation.mutate()}
+              disabled={resumeMutation.isPending}
+            >
+              <Play className="h-4 w-4" />
+              {resumeMutation.isPending ? "Resuming…" : "Resume"}
+            </Button>
+          )}
+          {(activeRun?.status === "pending" || activeRun?.status === "paused") && !isViewingHistorical && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <ArrowUpDown className="h-4 w-4" />
+                  Priority{run.priority ? ` (${run.priority > 0 ? "+" : ""}${run.priority})` : ""}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuLabel>Set Priority</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {[10, 5, 0, -5, -10].map((p) => (
+                  <DropdownMenuCheckboxItem
+                    key={p}
+                    checked={(run.priority ?? 0) === p}
+                    onCheckedChange={() => setPriorityMutation.mutate(p)}
+                  >
+                    {p > 0 ? `+${p}` : p} {p === 0 ? "(default)" : p > 0 ? "(higher)" : "(lower)"}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          </div>
         </div>
       </div>
 
+      {/* Historical attempt banner */}
+      {isViewingHistorical && (
+        <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-700 dark:text-amber-400">
+          <Clock className="h-4 w-4 shrink-0" />
+          <span>
+            Viewing attempt #{activeRun?.attemptNumber} (historical).{" "}
+            <button
+              className="underline hover:no-underline font-medium"
+              onClick={() => navigate(`/runs/${id}/${tab ?? ""}`, { replace: true })}
+            >
+              View latest attempt
+            </button>
+          </span>
+        </div>
+      )}
+
       {/* Tabs */}
-      <Tabs defaultValue={run.turns && run.turns.length > 0 ? "turns" : "logs"}>
+      <Tabs
+        value={tab || (activeRun?.turns && activeRun?.turns.length > 0 ? "turns" : "logs")}
+        onValueChange={(value) => navigate(`/runs/${id}/${value}${selectedRunId ? `?runId=${selectedRunId}` : ""}`)}
+      >
         <TabsList>
           <TabsTrigger value="turns">
-            Turns {run.turns ? `(${run.turns.length})` : ""}
+            Turns {activeRun?.turns ? `(${activeRun?.turns.length})` : ""}
           </TabsTrigger>
-          {run.turns && run.turns.length > 0 && (
+          {activeRun?.turns && activeRun?.turns.length > 0 && (
             <TabsTrigger value="conversation">Conversation</TabsTrigger>
           )}
           {hasHarData && <TabsTrigger value="network">Network</TabsTrigger>}
@@ -230,13 +632,13 @@ export function RunDetail() {
 
         {/* Turns tab */}
         <TabsContent value="turns" className="mt-4">
-          <TurnTimeline turns={run.turns ?? []} runId={run._id} />
+          <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
         </TabsContent>
 
         {/* Conversation tab — chat-style view of agent/judge exchanges */}
-        {run.turns && run.turns.length > 0 && (
+        {activeRun?.turns && activeRun?.turns.length > 0 && (
           <TabsContent value="conversation" className="mt-4">
-            <ConversationView turns={run.turns} task={run.scenario?.task} runId={run._id} />
+            <ConversationView turns={activeRun?.turns} task={run.scenario?.task} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
           </TabsContent>
         )}
 
@@ -244,10 +646,10 @@ export function RunDetail() {
         {hasHarData && (
           <TabsContent value="network" className="mt-4">
             {/* If multi-turn, show per-iteration selector; otherwise one viewer */}
-            {run.turns && run.turns.some(t => t.harUrl) ? (
-              <HarIterationTabs runId={run._id} turns={run.turns} />
+            {activeRun?.turns && activeRun?.turns.some(t => t.harUrl) ? (
+              <HarIterationTabs runId={run._id} turns={activeRun?.turns} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
             ) : (
-              <HarNetworkViewer runId={run._id} />
+              <HarNetworkViewer runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
             )}
           </TabsContent>
         )}
@@ -255,18 +657,18 @@ export function RunDetail() {
         {/* Video tab — session recording player */}
         {hasVideoData && (
           <TabsContent value="video" className="mt-4">
-            {run.turns && run.turns.some(t => t.videoUrls?.length) ? (
-              <VideoIterationTabs runId={run._id} turns={run.turns} setupVideoUrls={run.setupVideoUrls} />
+            {activeRun?.turns && activeRun?.turns.some(t => t.videoUrls?.length) ? (
+              <VideoIterationTabs runId={run._id} turns={activeRun?.turns} setupVideoUrls={activeRun?.setupVideoUrls} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
             ) : (
               <div className="space-y-4">
-                {run.setupVideoUrls && run.setupVideoUrls.length > 0 && (
-                  run.setupVideoUrls.map((_, i) => (
-                    <VideoPlayer key={`setup-${i}`} src={api.videoUrl(run._id, undefined, i, "setup")} label="Setup" />
+                {activeRun?.setupVideoUrls && activeRun?.setupVideoUrls.length > 0 && (
+                  activeRun?.setupVideoUrls.map((_, i) => (
+                    <VideoPlayer key={`setup-${i}`} src={isViewingHistorical && activeRun?._id ? api.runVideoUrl(run._id, activeRun._id, undefined, i, "setup") : api.videoUrl(run._id, undefined, i, "setup")} label="Setup" />
                   ))
                 )}
-                {run.videoUrls && run.videoUrls.length > 0 && (
-                  run.videoUrls.map((_, i) => (
-                    <VideoPlayer key={i} src={api.videoUrl(run._id, undefined, i)} label={run.videoUrls!.length > 1 ? `Video ${i + 1}` : undefined} />
+                {activeRun?.videoUrls && activeRun?.videoUrls.length > 0 && (
+                  activeRun?.videoUrls.map((_, i) => (
+                    <VideoPlayer key={i} src={isViewingHistorical && activeRun?._id ? api.runVideoUrl(run._id, activeRun._id, undefined, i) : api.videoUrl(run._id, undefined, i)} label={(activeRun?.videoUrls?.length ?? 0) > 1 ? `Video ${i + 1}` : undefined} />
                   ))
                 )}
               </div>
@@ -276,7 +678,7 @@ export function RunDetail() {
 
         {/* Logs tab */}
         <TabsContent value="logs" className="mt-4 space-y-4">
-          {isV2 && run.scenario?.criteria && run.scenario.criteria.length > 0 && (
+          {run.scenario?.criteria && run.scenario.criteria.length > 0 && (
             <CriteriaGraphView
               scenarioCriteria={run.scenario!.criteria}
               logs={effectiveLogs}
@@ -296,42 +698,119 @@ export function RunDetail() {
         <TabsContent value="reports" className="mt-4 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-medium">Reports</h3>
-            <Button
-              size="sm"
-              onClick={() => generateReport.mutate()}
-              disabled={generateReport.isPending}
-              className="gap-1.5"
-            >
-              <Plus className="h-4 w-4" />
-              Generate Report
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-md border">
+                <Button
+                  variant={reportsFilter === "latest" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 rounded-r-none text-xs"
+                  onClick={() => setReportsFilter("latest")}
+                >
+                  Latest
+                </Button>
+                <Button
+                  variant={reportsFilter === "all" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 rounded-l-none text-xs"
+                  onClick={() => setReportsFilter("all")}
+                >
+                  All{reports && reports.length > 0 ? ` (${reports.length})` : ""}
+                </Button>
+              </div>
+              <div className="flex items-center rounded-md border">
+                <Button
+                  variant={reportsView === "grid" ? "secondary" : "ghost"}
+                  size="icon"
+                  className="h-8 w-8 rounded-r-none"
+                  onClick={() => setReportsView("grid")}
+                  aria-label="Grid view"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={reportsView === "list" ? "secondary" : "ghost"}
+                  size="icon"
+                  className="h-8 w-8 rounded-l-none"
+                  onClick={() => setReportsView("list")}
+                  aria-label="List view"
+                >
+                  <List className="h-4 w-4" />
+                </Button>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => generateReport.mutate()}
+                disabled={generateReport.isPending}
+                className="gap-1.5"
+              >
+                <Plus className="h-4 w-4" />
+                Generate Report
+              </Button>
+            </div>
           </div>
 
-          {reports && reports.length > 0 ? (
-            <div className="space-y-3">
-              {reports.map((report) => (
-                <Card key={report._id}>
-                  <CardContent className="flex items-center justify-between py-4">
-                    <div className="flex items-center gap-4">
-                      <FileText className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <Link
-                          to={`/reports/${report._id}`}
-                          className="font-mono text-sm text-primary hover:underline"
-                        >
-                          {formatId(report._id)}
-                        </Link>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDate(report.createdAt)}
-                          {report.reporter?.model && ` · ${report.reporter.model}`}
+          {filteredReports.length > 0 ? (
+            reportsView === "grid" ? (
+              <div className="flex flex-wrap gap-4">
+                {filteredReports.map((report) => (
+                  <Link
+                    key={report._id}
+                    to={`/reports/${report._id}`}
+                    className="group block"
+                  >
+                    <div className="flex flex-col items-center gap-2 w-[280px]">
+                      {report.status === "completed" && report.content ? (
+                        <ReportThumbnail content={report.content} />
+                      ) : (
+                        <div className="flex items-center justify-center rounded border bg-muted/30 shadow-sm" style={{ width: 280, height: 360 }}>
+                          {report.status === "generating" ? (
+                            <Loader2 className="h-8 w-8 text-muted-foreground animate-spin" />
+                          ) : (
+                            <FileText className="h-8 w-8 text-muted-foreground opacity-50" />
+                          )}
+                        </div>
+                      )}
+                      <div className="text-center w-full">
+                        <p className="text-xs font-medium truncate group-hover:underline">
+                          {report.templateId ? (templateMap.get(report.templateId) ?? report.templateId) : "Manual report"}
                         </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{formatDate(report.createdAt)}</p>
+                        <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                          <ReportStatusBadge status={report.status} />
+                        </div>
                       </div>
                     </div>
-                    <ReportStatusBadge status={report.status} />
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredReports.map((report) => (
+                  <Card key={report._id}>
+                    <CardContent className="flex items-center justify-between py-4">
+                      <div className="flex items-center gap-4">
+                        <FileText className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <Link
+                            to={`/reports/${report._id}`}
+                            className="text-sm font-medium text-primary hover:underline"
+                          >
+                            {report.templateId ? (templateMap.get(report.templateId) ?? report.templateId) : "Manual report"}
+                          </Link>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDate(report.createdAt)}
+                            {report.reporter?.model && ` · ${report.reporter.model}`}
+                            {" · "}
+                            <span className="font-mono">{formatId(report._id)}</span>
+                          </p>
+                        </div>
+                      </div>
+                      <ReportStatusBadge status={report.status} />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -359,15 +838,22 @@ export function RunDetail() {
                     <Badge variant="outline">{run.scenario!.version}</Badge>
                   </div>
                 )}
-                {(run.scenario?.criteria?.length ?? 0) > 0 && (
+                {displayedCriteria.length > 0 && (
                   <div>
-                    <h4 className="text-sm font-medium mb-1">Criteria ({run.scenario?.criteria?.length})</h4>
+                    <h4 className="text-sm font-medium mb-1">Criteria ({displayedCriteria.length})</h4>
                     <div className="flex flex-wrap gap-1.5">
-                      {run.scenario?.criteria?.map((c, i) => (
-                        <Badge key={i} variant="secondary" className="font-mono text-xs">
-                          {c}
-                        </Badge>
-                      ))}
+                      {displayedCriteria.map((c) => {
+                        return (
+                          <CriteriaBadge
+                            key={c}
+                            criterionId={c}
+                            result={latestCriteriaResultsMap?.get(c)}
+                            evaluated={activeRun?.status === "done"}
+                            showStateLabel={activeRun?.status === "done"}
+                            link={false}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -412,6 +898,130 @@ export function RunDetail() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Profile card */}
+            {run.profileId && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Profile</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-1 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Name:</span>{" "}
+                    <Link to={`/profiles/${run.profileId}`} className="font-medium text-primary hover:underline">
+                      {profile?.name ?? <Skeleton className="inline-block h-4 w-32 align-middle" />}
+                    </Link>
+                  </div>
+                  {run.profileVersionId && (
+                    <div>
+                      <span className="text-muted-foreground">Version:</span>{" "}
+                      <span className="font-medium">
+                        {(() => { const v = run.profileVersionId.split("@")[1]; return v ? `v${v}` : run.profileVersionId; })()}
+                      </span>
+                    </div>
+                  )}
+                  {profile?.description && (
+                    <div>
+                      <span className="text-muted-foreground">Description:</span>{" "}
+                      <span>{profile.description}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Version Info card */}
+            {(run.agentVersion || activeRun?.workerVersion || activeRun?.os) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Version Info</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  {run.agentVersion && (
+                    <div>
+                      <span className="text-muted-foreground">Agent Version:</span>{" "}
+                      <span className="font-mono font-medium">{run.agentVersion}</span>
+                    </div>
+                  )}
+                  {activeRun?.workerVersion && (
+                    <div>
+                      <span className="text-muted-foreground">Worker Version:</span>{" "}
+                      <span className="font-mono font-medium">{activeRun?.workerVersion}</span>
+                    </div>
+                  )}
+                  {activeRun?.os && (
+                    <div>
+                      <span className="text-muted-foreground">OS:</span>{" "}
+                      <span className="font-mono font-medium">
+                        {activeRun?.os.platform}
+                        <span className="text-muted-foreground ml-1">(release </span>
+                        {activeRun?.os.release}
+                        <span className="text-muted-foreground"> arch </span>
+                        {activeRun?.os.arch}
+                        <span className="text-muted-foreground">)</span>
+                      </span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-muted-foreground">Worker Type:</span>{" "}
+                    <span className="font-mono font-medium">{run.workerType}</span>
+                  </div>
+                  {run.model && (
+                    <div>
+                      <span className="text-muted-foreground">Model:</span>{" "}
+                      <span className="font-mono font-medium">{run.model}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Extensions card */}
+            {run.extensions && run.extensions.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Puzzle className="h-4 w-4" /> Extensions ({run.extensions.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-1.5">
+                    {run.extensions.map((ext) => {
+                      const at = ext.lastIndexOf("@");
+                      const id = at > 0 ? ext.substring(0, at) : ext;
+                      const version = at > 0 ? ext.substring(at + 1) : undefined;
+                      return (
+                        <Badge key={ext} variant="secondary" className="font-mono text-xs">
+                          {id}{version && <span className="text-muted-foreground ml-1">@{version}</span>}
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Skills card */}
+            {skillIds.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    Skills ({skillIds.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-1.5">
+                    {skillIds.map((skillId) => (
+                      <Link key={skillId} to={`/skills/${skillId}`}>
+                        <Badge variant="secondary" className="font-mono text-xs hover:bg-accent transition-colors">
+                          {skillId}
+                        </Badge>
+                      </Link>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Prompt Features card (if task prompt has features) */}
             {taskPrompt?.features && taskPrompt.features.length > 0 && (
@@ -481,27 +1091,27 @@ export function RunDetail() {
             )}
 
             {/* Error card (if failed) */}
-            {run.error && (
+            {activeRun?.error && (
               <Card className="md:col-span-2 border-destructive">
                 <CardHeader>
                   <CardTitle className="text-lg text-destructive">Error</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <pre className="text-sm text-destructive whitespace-pre-wrap font-mono bg-destructive/10 rounded-md p-3">
-                    {run.error}
+                    {activeRun?.error}
                   </pre>
                 </CardContent>
               </Card>
             )}
 
             {/* Result card */}
-            {run.result && (
+            {activeRun?.result && (
               <Card className="md:col-span-2">
                 <CardHeader>
                   <CardTitle className="text-lg">Result</CardTitle>
                 </CardHeader>
                 <CardContent className="prose prose-sm dark:prose-invert max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{run.result}</ReactMarkdown>
+                  <MarkdownRenderer>{activeRun?.result}</MarkdownRenderer>
                 </CardContent>
               </Card>
             )}
@@ -511,10 +1121,17 @@ export function RunDetail() {
         {/* Tool Calls tab — HAR captures & tool calls summary */}
         {hasHarData && (
           <TabsContent value="tool-calls" className="mt-4 space-y-4">
-            <ToolCallsTab runId={run._id} turns={run.turns} harUrl={run.harUrl} />
+            <ToolCallsTab runId={run._id} turns={activeRun?.turns} harUrl={activeRun?.harUrl} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
           </TabsContent>
         )}
       </Tabs>
+
+      <RetryConfirmDialog
+        open={retryConfirmOpen}
+        onOpenChange={setRetryConfirmOpen}
+        onConfirm={() => retryMutation.mutate({ force: true })}
+        isPending={retryMutation.isPending}
+      />
     </div>
   );
 }
@@ -523,7 +1140,7 @@ export function RunDetail() {
 // Helper: per-iteration HAR viewer tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration: number; harUrl?: string }[] }) {
+function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns: { iteration: number; harUrl?: string }[]; attemptRunId?: string }) {
   const turnsWithHar = turns.filter(t => t.harUrl);
   const [activeIteration, setActiveIteration] = useState(turnsWithHar[0]?.iteration);
 
@@ -531,7 +1148,7 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
 
   // Single iteration — no sub-tabs needed
   if (turnsWithHar.length === 1) {
-    return <HarNetworkViewer runId={runId} iteration={turnsWithHar[0].iteration} />;
+    return <HarNetworkViewer runId={runId} iteration={turnsWithHar[0].iteration} attemptRunId={attemptRunId} />;
   }
 
   return (
@@ -550,7 +1167,7 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
         ))}
       </div>
       {activeIteration !== undefined && (
-        <HarNetworkViewer runId={runId} iteration={activeIteration} />
+        <HarNetworkViewer runId={runId} iteration={activeIteration} attemptRunId={attemptRunId} />
       )}
     </div>
   );
@@ -560,7 +1177,7 @@ function HarIterationTabs({ runId, turns }: { runId: string; turns: { iteration:
 // Helper: per-iteration video player tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[]; setupVideoUrls?: string[] }) {
+function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[]; setupVideoUrls?: string[]; attemptRunId?: string }) {
   const turnsWithVideo = turns.filter(t => t.videoUrls && t.videoUrls.length > 0);
   const hasSetupVideo = setupVideoUrls && setupVideoUrls.length > 0;
   const [activeTab, setActiveTab] = useState<string>(hasSetupVideo ? "setup" : String(turnsWithVideo[0]?.iteration));
@@ -568,6 +1185,9 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
   if (turnsWithVideo.length === 0 && !hasSetupVideo) return null;
 
   const activeTurn = turnsWithVideo.find(t => String(t.iteration) === activeTab);
+  const videoUrlFn = attemptRunId
+    ? (iteration?: number, index?: number, phase?: string) => api.runVideoUrl(runId, attemptRunId, iteration, index, phase)
+    : (iteration?: number, index?: number, phase?: string) => api.videoUrl(runId, iteration, index, phase);
 
   return (
     <div className="space-y-3">
@@ -601,7 +1221,7 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
           {setupVideoUrls.map((_, i) => (
             <VideoPlayer
               key={`setup-${i}`}
-              src={api.videoUrl(runId, undefined, i, "setup")}
+              src={videoUrlFn(undefined, i, "setup")}
               label={setupVideoUrls.length > 1 ? `Setup Video ${i + 1}` : "Setup"}
             />
           ))}
@@ -612,7 +1232,7 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
           {activeTurn.videoUrls!.map((_, i) => (
             <VideoPlayer
               key={`${activeTab}-${i}`}
-              src={api.videoUrl(runId, Number(activeTab), i)}
+              src={videoUrlFn(Number(activeTab), i)}
               label={activeTurn.videoUrls!.length > 1 ? `Video ${i + 1}` : undefined}
             />
           ))}
@@ -628,14 +1248,31 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls }: { runId: string; t
 
 import type { ConversationTurn } from "@/types";
 
-function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: ConversationTurn[]; harUrl?: string }) {
-  const { allToolCalls, isLoading } = useAllTurnsToolCalls(runId, turns, harUrl);
+/** Truncated text cell that expands on click when content overflows. */
+function ExpandableCell({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      className={`cursor-pointer ${expanded ? "whitespace-pre-wrap break-all" : "truncate max-w-sm"} ${className}`}
+      onClick={() => setExpanded(!expanded)}
+      title={expanded ? "Click to collapse" : "Click to expand"}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; turns?: ConversationTurn[]; harUrl?: string; attemptRunId?: string }) {
+  const { allToolCalls, isLoading } = useAllTurnsToolCalls(runId, turns, harUrl, attemptRunId);
 
   // Group by tool name for summary
   const byName = new Map<string, number>();
   for (const tc of allToolCalls) {
     byName.set(tc.name, (byName.get(tc.name) ?? 0) + 1);
   }
+
+  const harDownloadUrl = attemptRunId ? api.runHarUrl(runId, attemptRunId) : api.harUrl(runId);
+  const harIterationUrl = (iteration: number) => attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration);
 
   return (
     <>
@@ -646,7 +1283,7 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
             variant="outline"
             size="sm"
             className="gap-1.5"
-            onClick={() => window.open(api.harUrl(runId), "_blank")}
+            onClick={() => window.open(harDownloadUrl, "_blank")}
           >
             <Download className="h-4 w-4" />
             Download HAR
@@ -690,6 +1327,7 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
                       <th className="text-left p-3 font-medium">Iteration</th>
                       <th className="text-left p-3 font-medium">Tool</th>
                       <th className="text-left p-3 font-medium">Arguments</th>
+                      <th className="text-left p-3 font-medium">Response</th>
                       <th className="text-left p-3 font-medium">Time</th>
                     </tr>
                   </thead>
@@ -705,9 +1343,32 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
                           </span>
                         </td>
                         <td className="p-3">
-                          <pre className="text-xs text-muted-foreground max-w-md truncate">
-                            {JSON.stringify(tc.arguments)}
-                          </pre>
+                          <table className="text-xs border-collapse">
+                            <tbody>
+                              {Object.entries(tc.arguments).map(([key, val]) => (
+                                <tr key={key} className="border-b border-border/50 last:border-0">
+                                  <td className="pr-2 py-1 text-foreground/70 font-medium whitespace-nowrap align-top border-r border-border/50">{key}</td>
+                                  <td className="pl-2 py-1 font-mono text-muted-foreground"><ExpandableCell>{typeof val === "string" ? val : JSON.stringify(val)}</ExpandableCell></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                        <td className="p-3 text-xs font-mono text-muted-foreground">
+                          {tc.response ? (
+                            <ExpandableCell className="max-w-md">{tc.response}</ExpandableCell>
+                          ) : (
+                            <span>–</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {tc.response ? (
+                            <pre className="text-xs text-muted-foreground max-w-md truncate">
+                              {tc.response}
+                            </pre>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">–</span>
+                          )}
                         </td>
                         <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
                           {tc.timestamp ? new Date(tc.timestamp).toLocaleTimeString() : "–"}
@@ -731,7 +1392,7 @@ function ToolCallsTab({ runId, turns, harUrl }: { runId: string; turns?: Convers
                     variant="outline"
                     size="sm"
                     className="gap-1 font-mono text-xs"
-                    onClick={() => window.open(api.harUrl(runId, t.iteration), "_blank")}
+                    onClick={() => window.open(harIterationUrl(t.iteration), "_blank")}
                   >
                     <Download className="h-3 w-3" />
                     Iteration {t.iteration}

@@ -4,7 +4,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { McpTransportType, McpServerHeader } from "@/types";
+import type { McpTransportType, McpServerHeader, McpSessionMode } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Trash2, Loader2, Save, Plus } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { unmaskSecretValue } from "@/lib/mcp-secrets";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
 
@@ -39,21 +40,33 @@ export function McpServerDetail() {
   const [name, setName] = useState("");
   const [type, setType] = useState<McpTransportType>("http");
   const [url, setUrl] = useState("");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
+  const [envPairs, setEnvPairs] = useState<McpServerHeader[]>([]);
+  const [sessionMode, setSessionMode] = useState<McpSessionMode>("stateless");
+  const [version, setVersion] = useState("");
   const [description, setDescription] = useState("");
   const [headers, setHeaders] = useState<McpServerHeader[]>([]);
+
+  const isStdio = type === "stdio";
 
   useEffect(() => {
     if (server) {
       setName(server.name);
       setType(server.type);
-      setUrl(server.url);
+      setUrl(server.url ?? "");
+      setCommand(server.command ?? "");
+      setArgs(server.args ? server.args.join(" ") : "");
+      setEnvPairs(server.env ? Object.entries(server.env).map(([k, v]) => ({ name: k, value: unmaskSecretValue(v) })) : []);
+      setSessionMode(server.sessionMode ?? "stateless");
+      setVersion(server.version ?? "");
       setDescription(server.description ?? "");
-      setHeaders(server.headers ? [...server.headers] : []);
+      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: unmaskSecretValue(h.value) })) : []);
     }
   }, [server]);
 
   const updateMutation = useMutation({
-    mutationFn: (body: { name?: string; type?: McpTransportType; url?: string; description?: string; headers?: McpServerHeader[] }) =>
+    mutationFn: (body: { name?: string; type?: McpTransportType; url?: string; command?: string; args?: string[]; env?: Record<string,string>; sessionMode?: McpSessionMode; version?: string; description?: string; headers?: McpServerHeader[] }) =>
       api.updateMcpServer(slug!, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["mcp-server", slug] });
@@ -75,14 +88,60 @@ export function McpServerDetail() {
   });
 
   const handleSave = () => {
-    const filteredHeaders = headers.filter(h => h.name && h.value);
-    updateMutation.mutate({
-      name,
-      type,
-      url,
-      description: description.trim() || undefined,
-      headers: filteredHeaders.length > 0 ? filteredHeaders : undefined,
-    });
+    if (isStdio) {
+      const envPayload = Object.fromEntries(
+        envPairs
+          .filter((p) => p.name)
+          .map((p) => [p.name, p.value]),
+      );
+
+      // Guard: if a key is new (not in the originally-fetched env) and has no value,
+      // the API would delete the old secret but not create one for the new key.
+      const originalEnvKeys = new Set(server?.env ? Object.keys(server.env) : []);
+      const renamedWithoutValue = Object.entries(envPayload).find(
+        ([key, value]) => !value && !originalEnvKeys.has(key),
+      );
+      if (renamedWithoutValue) {
+        toast.error(`Enter a value for "${renamedWithoutValue[0]}" or remove the row`);
+        return;
+      }
+
+      updateMutation.mutate({
+        name,
+        type,
+        command,
+        args: args.trim() ? args.trim().split(/\s+/) : undefined,
+        // Always send env object so the API can reconcile removals.
+        // Sending `{}` explicitly clears all env secrets (user removed all pairs).
+        env: envPayload,
+        sessionMode,
+        version: version.trim() || undefined,
+        description: description.trim() || undefined,
+      });
+    } else {
+      const filteredHeaders = headers.filter(h => h.name);
+
+      // Guard: if a header name is new (not in the originally-fetched headers) and has no
+      // value, the API would delete the old secret but not create one for the new name.
+      const originalHeaderNames = new Set(server?.headers?.map(h => h.name) ?? []);
+      const renamedWithoutValue = filteredHeaders.find(
+        h => !h.value && !originalHeaderNames.has(h.name),
+      );
+      if (renamedWithoutValue) {
+        toast.error(`Enter a value for "${renamedWithoutValue.name}" or remove the row`);
+        return;
+      }
+
+      updateMutation.mutate({
+        name,
+        type,
+        url,
+        description: description.trim() || undefined,
+        // Always send headers array so the API can reconcile removals.
+        // Sending `[]` explicitly clears all header secrets (user removed all headers).
+        headers: filteredHeaders,
+      });
+    }
   };
 
   const handleCancel = () => {
@@ -90,9 +149,14 @@ export function McpServerDetail() {
     if (server) {
       setName(server.name);
       setType(server.type);
-      setUrl(server.url);
+      setUrl(server.url ?? "");
+      setCommand(server.command ?? "");
+      setArgs(server.args ? server.args.join(" ") : "");
+      setEnvPairs(server.env ? Object.entries(server.env).map(([k, v]) => ({ name: k, value: unmaskSecretValue(v) })) : []);
+      setSessionMode(server.sessionMode ?? "stateless");
+      setVersion(server.version ?? "");
       setDescription(server.description ?? "");
-      setHeaders(server.headers ? [...server.headers] : []);
+      setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: unmaskSecretValue(h.value) })) : []);
     }
   };
 
@@ -109,6 +173,14 @@ export function McpServerDetail() {
   const removeHeader = (index: number) => {
     setHeaders(headers.filter((_, i) => i !== index));
   };
+
+  const addEnvPair = () => setEnvPairs([...envPairs, { name: "", value: "" }]);
+  const updateEnvPair = (index: number, field: "name" | "value", val: string) => {
+    const updated = [...envPairs];
+    updated[index] = { ...updated[index], [field]: val };
+    setEnvPairs(updated);
+  };
+  const removeEnvPair = (index: number) => setEnvPairs(envPairs.filter((_, i) => i !== index));
 
   if (isLoading) {
     return (
@@ -214,20 +286,71 @@ export function McpServerDetail() {
                     <SelectContent>
                       <SelectItem value="http">HTTP (Streamable)</SelectItem>
                       <SelectItem value="sse">SSE</SelectItem>
+                      <SelectItem value="stdio">stdio</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="url">URL</Label>
-                  <Input
-                    id="url"
-                    type="url"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    className="font-mono text-sm"
-                  />
-                </div>
+                {!isStdio ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="url">URL</Label>
+                    <Input
+                      id="url"
+                      type="url"
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="command">Command</Label>
+                    <Input
+                      id="command"
+                      value={command}
+                      onChange={(e) => setCommand(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                )}
               </div>
+              {isStdio && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="args">Arguments</Label>
+                    <Input
+                      id="args"
+                      placeholder="Space-separated arguments"
+                      value={args}
+                      onChange={(e) => setArgs(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="version">Version pin</Label>
+                      <Input
+                        id="version"
+                        placeholder="e.g., 2026.1.14"
+                        value={version}
+                        onChange={(e) => setVersion(e.target.value)}
+                        className="font-mono text-sm"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="sessionMode">Session Mode</Label>
+                      <Select value={sessionMode} onValueChange={(v) => setSessionMode(v as McpSessionMode)}>
+                        <SelectTrigger id="sessionMode">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="stateful">Stateful (stdio default)</SelectItem>
+                          <SelectItem value="stateless">Stateless</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
                 <Textarea
@@ -244,8 +367,36 @@ export function McpServerDetail() {
               <span>{server.name}</span>
               <span className="text-muted-foreground">Type</span>
               <Badge variant="outline" className="w-fit uppercase text-xs">{server.type}</Badge>
-              <span className="text-muted-foreground">URL</span>
-              <span className="font-mono text-xs break-all">{server.url}</span>
+              {server.url && (
+                <>
+                  <span className="text-muted-foreground">URL</span>
+                  <span className="font-mono text-xs break-all">{server.url}</span>
+                </>
+              )}
+              {server.command && (
+                <>
+                  <span className="text-muted-foreground">Command</span>
+                  <span className="font-mono text-xs">{server.command}</span>
+                </>
+              )}
+              {server.args && server.args.length > 0 && (
+                <>
+                  <span className="text-muted-foreground">Args</span>
+                  <span className="font-mono text-xs break-all">{server.args.join(" ")}</span>
+                </>
+              )}
+              {server.version && (
+                <>
+                  <span className="text-muted-foreground">Version</span>
+                  <span className="font-mono text-xs">{server.version}</span>
+                </>
+              )}
+              {server.sessionMode && (
+                <>
+                  <span className="text-muted-foreground">Session</span>
+                  <span>{server.sessionMode}</span>
+                </>
+              )}
               {server.description && (
                 <>
                   <span className="text-muted-foreground">Description</span>
@@ -265,7 +416,8 @@ export function McpServerDetail() {
         </CardContent>
       </Card>
 
-      {/* Headers card */}
+      {/* Headers card (http/sse only) */}
+      {!isStdio && (
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
@@ -294,6 +446,7 @@ export function McpServerDetail() {
                     />
                     <Input
                       placeholder="Header value"
+                      type="password"
                       value={header.value}
                       onChange={(e) => updateHeader(idx, "value", e.target.value)}
                       className="font-mono text-sm"
@@ -323,6 +476,67 @@ export function McpServerDetail() {
           )}
         </CardContent>
       </Card>
+      )}
+
+      {/* Environment Variables card (stdio only) */}
+      {isStdio && (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Environment Variables</CardTitle>
+            <CardDescription>Env vars passed to the stdio subprocess</CardDescription>
+          </div>
+          {editing && (
+            <Button type="button" variant="outline" size="sm" onClick={addEnvPair} className="gap-1">
+              <Plus className="h-3.5 w-3.5" /> Add
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent>
+          {editing ? (
+            envPairs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No environment variables configured.</p>
+            ) : (
+              <div className="space-y-2">
+                {envPairs.map((pair, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <Input
+                      placeholder="KEY"
+                      value={pair.name}
+                      onChange={(e) => updateEnvPair(idx, "name", e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                    <Input
+                      placeholder={pair.value === "" && server?.env?.[pair.name] === "<secret>" ? "" : "value"}
+                      type="password"
+                      value={pair.value}
+                      onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => removeEnvPair(idx)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            (server.env && Object.keys(server.env).length > 0) ? (
+              <div className="space-y-2">
+                {Object.entries(server.env).map(([k, v]) => (
+                  <div key={k} className="flex items-center gap-2 text-sm">
+                    <Badge variant="secondary" className="font-mono text-xs">{k}</Badge>
+                    <span className="text-muted-foreground font-mono text-xs">{v === "<secret>" ? "••••••••" : v}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No environment variables configured.</p>
+            )
+          )}
+        </CardContent>
+      </Card>
+      )}
     </div>
   );
 }

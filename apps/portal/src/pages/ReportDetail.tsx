@@ -15,10 +15,7 @@ import { useLogStream } from "@/hooks/use-log-stream";
 import { ArrowLeft, Copy, Check, ExternalLink, ClipboardCopy, Lightbulb } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import rehypeRaw from "rehype-raw";
-import remarkGfm from "remark-gfm";
-import remarkGithubAlerts from "remark-github-markdown-alerts";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 
 export function ReportDetail() {
   const { id } = useParams<{ id: string }>();
@@ -46,18 +43,18 @@ export function ReportDetail() {
 
   const isActive = report?.status === "pending" || report?.status === "generating";
 
+  // The SSE endpoint handles completed reports by replaying blob logs then closing.
   const logStream = useLogStream({
     id: report?._id ?? "",
-    enabled: isActive && !!report,
+    enabled: !!report,
     fromStart: true,
     urlBuilder: api.reportLogsUrl,
   });
 
-  // For completed/failed reports, use REST-fetched logs instead of SSE
-  const effectiveLogs = isActive ? logStream.logs : (report?.logs ?? []);
+  const effectiveLogs = logStream.logs;
   const effectiveIsConnected = isActive ? logStream.isConnected : false;
-  const effectiveIsDone = isActive ? logStream.isDone : true;
-  const effectiveError = isActive ? logStream.error : null;
+  const effectiveIsDone = logStream.isDone;
+  const effectiveError = logStream.error;
 
   const copyId = () => {
     navigator.clipboard.writeText(id ?? "");
@@ -135,7 +132,7 @@ export function ReportDetail() {
               <ReportStatusBadge status={report.status} />
               {report.templateId && (
                 <Link
-                  to={`/report-templates/${report.templateId}`}
+                  to={`/reports/templates/${report.templateId}`}
                   className="hover:text-foreground transition-colors"
                 >
                   <Badge variant="outline" className="text-xs font-mono hover:bg-accent">
@@ -199,7 +196,7 @@ export function ReportDetail() {
                 </Button>
               </div>
               <CardContent className="prose dark:prose-invert max-w-none pt-2">
-                <ReactMarkdown remarkPlugins={[remarkGfm, remarkGithubAlerts]} rehypePlugins={[rehypeRaw]}>{report.content}</ReactMarkdown>
+                <MarkdownRenderer githubAlerts>{report.content}</MarkdownRenderer>
               </CardContent>
             </Card>
           ) : report.status === "pending" || report.status === "generating" ? (
@@ -261,12 +258,9 @@ export function ReportDetail() {
                   </CardHeader>
                   <CardContent>
                     <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkGithubAlerts]}
-                        rehypePlugins={[rehypeRaw]}
-                      >
+                      <MarkdownRenderer githubAlerts>
                         {insight.description}
-                      </ReactMarkdown>
+                      </MarkdownRenderer>
                     </div>
                     {insight.tags && insight.tags.length > 0 && (
                       <div className="flex gap-1 mt-3">

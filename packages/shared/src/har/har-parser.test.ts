@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent } from "./har-parser.js";
+import { parseHarFile, extractToolCalls, sanitizeHar, extractThinkingContent, extractTokenUsage, extractAiCallCount } from "./har-parser.js";
 import type { HarFile, ToolCall } from "./types.js";
 
 // Mock fs/promises for parseHarFile tests
@@ -429,8 +429,195 @@ describe("extractToolCalls", () => {
 });
 
 // ---------------------------------------------------------------------------
-// sanitizeHar
+// extractToolCalls — Anthropic Messages API
 // ---------------------------------------------------------------------------
+
+describe("extractToolCalls (Anthropic)", () => {
+  describe("non-streaming responses", () => {
+    it("extracts tool_use blocks from Anthropic response", () => {
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: {
+            id: "msg_123",
+            type: "message",
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_01A",
+                name: "read_file",
+                input: { path: "/src/index.ts" },
+              },
+            ],
+            stop_reason: "tool_use",
+          },
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({
+        id: "toolu_01A",
+        name: "read_file",
+        arguments: { path: "/src/index.ts" },
+      });
+    });
+
+    it("extracts multiple tool_use blocks from a single response", () => {
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: {
+            type: "message",
+            content: [
+              { type: "text", text: "I'll read and write files." },
+              { type: "tool_use", id: "toolu_01", name: "read_file", input: { path: "a.ts" } },
+              { type: "tool_use", id: "toolu_02", name: "write_file", input: { path: "b.ts", content: "x" } },
+            ],
+          },
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(2);
+      expect(calls.map((c) => c.name)).toEqual(["read_file", "write_file"]);
+    });
+
+    it("ignores non-tool_use content blocks", () => {
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: {
+            type: "message",
+            content: [
+              { type: "text", text: "Hello!" },
+              { type: "thinking", thinking: "Let me think..." },
+            ],
+          },
+        }),
+      ]);
+
+      expect(extractToolCalls(har)).toHaveLength(0);
+    });
+  });
+
+  describe("streaming responses (SSE)", () => {
+    it("accumulates tool calls from content_block_start and input_json_delta", () => {
+      const sseBody = [
+        'data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[]}}',
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_stream_01","name":"bash"}}',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"command\\""}}',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":": \\"ls -la\\"}"}}',
+        'data: {"type":"content_block_stop","index":0}',
+        'data: {"type":"message_stop"}',
+      ].join("\n");
+
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: sseBody,
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({
+        id: "toolu_stream_01",
+        name: "bash",
+        arguments: { command: "ls -la" },
+      });
+    });
+
+    it("handles multiple parallel streaming tool calls", () => {
+      const sseBody = [
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_a","name":"read"}}',
+        'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_b","name":"write"}}',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\": \\"x.ts\\"}"}}',
+        'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\": \\"y.ts\\"}"}}',
+      ].join("\n");
+
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: sseBody,
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(2);
+      expect(calls.map((c) => c.id)).toContain("toolu_a");
+      expect(calls.map((c) => c.id)).toContain("toolu_b");
+    });
+  });
+
+  describe("tool responses (tool_result)", () => {
+    it("matches tool_result blocks to tool_use calls by tool_use_id", () => {
+      const har = makeHar([
+        // Response with tool_use
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: {
+            type: "message",
+            content: [
+              { type: "tool_use", id: "toolu_match", name: "bash", input: { command: "pwd" } },
+            ],
+          },
+        }),
+        // Follow-up request with tool_result
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          requestBody: {
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "tool_result", tool_use_id: "toolu_match", content: "/workspace" },
+                ],
+              },
+            ],
+          },
+          responseBody: { type: "message", content: [{ type: "text", text: "Got it." }] },
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].response).toBe("/workspace");
+    });
+
+    it("handles tool_result with object content", () => {
+      const har = makeHar([
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          responseBody: {
+            type: "message",
+            content: [
+              { type: "tool_use", id: "toolu_obj", name: "search", input: { query: "test" } },
+            ],
+          },
+        }),
+        makeEntry({
+          url: "https://api.anthropic.com/v1/messages",
+          requestBody: {
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "tool_result", tool_use_id: "toolu_obj", content: [{ type: "text", text: "found 3 results" }] },
+                ],
+              },
+            ],
+          },
+          responseBody: { type: "message", content: [] },
+        }),
+      ]);
+
+      const calls = extractToolCalls(har);
+      expect(calls[0].response).toBe(JSON.stringify([{ type: "text", text: "found 3 results" }]));
+    });
+  });
+});
 
 /** Helper to build a HAR entry with explicit headers. */
 function makeEntryWithHeaders(opts: {
@@ -680,5 +867,223 @@ describe("extractThinkingContent", () => {
     ]);
     const thinking = extractThinkingContent(har);
     expect(thinking).toBe("");
+  });
+
+  it("extracts thinking from non-streaming Anthropic response", () => {
+    const har = makeHar([
+      makeEntry({
+        url: "https://api.anthropic.com/v1/messages",
+        responseBody: {
+          type: "message",
+          content: [
+            { type: "thinking", thinking: "Let me analyze this step by step." },
+            { type: "text", text: "Here's my answer." },
+          ],
+        },
+      }),
+    ]);
+    const thinking = extractThinkingContent(har);
+    expect(thinking).toBe("Let me analyze this step by step.");
+  });
+
+  it("extracts thinking from Anthropic streaming thinking_delta", () => {
+    const sseBody = [
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Step 1: "}}',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"analyze input."}}',
+      'data: {"type":"content_block_stop","index":0}',
+    ].join("\n");
+
+    const har = makeHar([
+      makeEntry({
+        url: "https://api.anthropic.com/v1/messages",
+        responseBody: sseBody,
+      }),
+    ]);
+    const thinking = extractThinkingContent(har);
+    expect(thinking).toBe("Step 1: analyze input.");
+  });
+});
+
+describe("extractTokenUsage", () => {
+  it("returns undefined when no usage data is present", () => {
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          choices: [{ message: { role: "assistant", content: "hello" } }],
+        },
+      }),
+    ]);
+    expect(extractTokenUsage(har)).toBeUndefined();
+  });
+
+  it("extracts OpenAI-format token usage from non-streaming response", () => {
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          choices: [{ message: { role: "assistant", content: "done" } }],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+          },
+        },
+      }),
+    ]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+    });
+  });
+
+  it("sums token usage across multiple HAR entries", () => {
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          choices: [{ message: { role: "assistant", content: "first" } }],
+          usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+        },
+      }),
+      makeEntry({
+        responseBody: {
+          choices: [{ message: { role: "assistant", content: "second" } }],
+          usage: { prompt_tokens: 200, completion_tokens: 80, total_tokens: 280 },
+        },
+      }),
+    ]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 300,
+      completionTokens: 130,
+      totalTokens: 430,
+    });
+  });
+
+  it("extracts Anthropic-format token usage (input_tokens / output_tokens)", () => {
+    const har = makeHar([
+      makeEntry({
+        responseBody: {
+          content: [{ type: "text", text: "hello" }],
+          usage: {
+            input_tokens: 200,
+            output_tokens: 75,
+          },
+        },
+      }),
+    ]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 200,
+      completionTokens: 75,
+      totalTokens: 275,
+    });
+  });
+
+  it("extracts token usage from SSE streaming response (final chunk)", () => {
+    const sseBody = [
+      'data: {"choices":[{"delta":{"content":"hi"}}]}',
+      'data: {"choices":[{"delta":{"content":" there"}}],"usage":{"prompt_tokens":50,"completion_tokens":20,"total_tokens":70}}',
+      "data: [DONE]",
+    ].join("\n");
+
+    const har = makeHar([
+      makeEntry({ responseBody: sseBody }),
+    ]);
+    const usage = extractTokenUsage(har);
+    expect(usage).toEqual({
+      promptTokens: 50,
+      completionTokens: 20,
+      totalTokens: 70,
+    });
+  });
+
+  it("returns undefined for empty HAR", () => {
+    const har = makeHar([]);
+    expect(extractTokenUsage(har)).toBeUndefined();
+  });
+
+  it("ignores entries without response bodies", () => {
+    const har = makeHar([
+      makeEntry({}),
+    ]);
+    expect(extractTokenUsage(har)).toBeUndefined();
+  });
+});
+
+describe("extractAiCallCount", () => {
+  it("counts GitHub Copilot completion entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(2);
+  });
+
+  it("counts GitHub Models completion entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://models.inference.ai.azure.com/chat/completions" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("counts Anthropic messages entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(3);
+  });
+
+  it("counts mixed providers", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(2);
+  });
+
+  it("ignores non-completion entries", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://api.githubcopilot.com/chat/completions" }),
+      makeEntry({ url: "https://api.githubcopilot.com/models" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/tokenize" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("counts completion URLs with query parameters (e.g. Azure OpenAI api-version)", () => {
+    const har = makeHar([
+      makeEntry({ url: "https://my-resource.openai.azure.com/chat/completions?api-version=2024-02-01" }),
+      makeEntry({ url: "https://api.anthropic.com/v1/messages?beta=true" }),
+    ]);
+    expect(extractAiCallCount(har)).toBe(2);
+  });
+
+  it("ignores non-POST requests (e.g. OPTIONS preflights)", () => {
+    const baseEntry = makeEntry({ url: "https://api.githubcopilot.com/chat/completions" });
+    const har = makeHar([
+      baseEntry,
+      { ...baseEntry, request: { ...baseEntry.request, method: "OPTIONS" } },
+      { ...baseEntry, request: { ...baseEntry.request, method: "GET" } },
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("ignores non-2xx responses (e.g. 429 rate limits, 5xx errors)", () => {
+    const baseEntry = makeEntry({ url: "https://api.githubcopilot.com/chat/completions" });
+    const har = makeHar([
+      baseEntry,
+      { ...baseEntry, response: { ...baseEntry.response, status: 429, statusText: "Too Many Requests" } },
+      { ...baseEntry, response: { ...baseEntry.response, status: 500, statusText: "Internal Server Error" } },
+    ]);
+    expect(extractAiCallCount(har)).toBe(1);
+  });
+
+  it("returns 0 for empty HAR", () => {
+    const har = makeHar([]);
+    expect(extractAiCallCount(har)).toBe(0);
   });
 });

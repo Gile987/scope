@@ -10,11 +10,12 @@
 //
 // Usage:
 //   npx tsx scripts/clean-worktrees.ts
-//   pnpm clean:worktrees
+//   pnpm worktrees:clean:worktrees
 // =============================================================================
 
 import { execSync } from "child_process";
 import { createInterface } from "readline";
+import { fileURLToPath } from "node:url";
 
 export interface Worktree {
   path: string;
@@ -174,7 +175,9 @@ async function main() {
   console.log(`\nDone: ${removed} removed, ${failed} failed.`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

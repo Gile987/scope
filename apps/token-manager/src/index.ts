@@ -5,10 +5,11 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, Collection, Db } from "mongodb";
-import { TokenDocument, AccountDocument } from "shared";
-import { createTokenStore, TokenSecretStore } from "./keyvault-store.js";
-import { createTokenRouter } from "./routes.js";
+import { KeyDocument, AccountDocument, McpSecretDocument, McpServerDocument } from "shared";
+import { createSecretStore, SecretStore } from "./keyvault-store.js";
+import { createKeyRouter } from "./routes.js";
 import { createAccountRouter } from "./account-routes.js";
+import { createMcpSecretRouter } from "./mcp-secret-routes.js";
 import { startTokenScheduler } from "./token-scheduler.js";
 import { validateToken } from "./token-validators.js";
 
@@ -24,9 +25,11 @@ const validationIntervalMs = parseInt(
 );
 
 let db: Db;
-let tokensCollection: Collection<TokenDocument>;
+let keysCollection: Collection<KeyDocument>;
 let accountsCollection: Collection<AccountDocument>;
-let tokenStore: TokenSecretStore;
+let mcpSecretsCollection: Collection<McpSecretDocument>;
+let mcpServerCollection: Collection<McpServerDocument>;
+let secretStore: SecretStore;
 
 const app = express();
 app.use(cors());
@@ -41,12 +44,14 @@ async function initializeClients(): Promise<void> {
   const client = new MongoClient(mongoUri);
   await client.connect();
   db = client.db(dbName);
-  tokensCollection = db.collection<TokenDocument>("tokens");
+  keysCollection = db.collection<KeyDocument>("tokens");
   accountsCollection = db.collection<AccountDocument>("accounts");
+  mcpSecretsCollection = db.collection<McpSecretDocument>("mcp-secrets");
+  mcpServerCollection = db.collection<McpServerDocument>("mcp-servers");
 
   // Create indexes
   try {
-    await tokensCollection.createIndex(
+    await keysCollection.createIndex(
       { usage: 1, enabled: 1, deletedAt: 1 },
     );
   } catch (err) {
@@ -62,21 +67,31 @@ async function initializeClients(): Promise<void> {
       "or use Docker Compose which provides Lowkey Vault automatically."
     );
   }
-  tokenStore = createTokenStore(keyvaultUri);
+  secretStore = createSecretStore(keyvaultUri);
   console.log(`[token-manager] Secret store: ${keyvaultUri}`);
 
-  // Mount token routes
-  const router = createTokenRouter(tokensCollection, tokenStore);
+  // Mount key routes
+  const router = createKeyRouter(keysCollection, secretStore);
   app.use(router);
 
   // Mount account routes
-  const accountRouter = createAccountRouter(accountsCollection, tokenStore);
+  const accountRouter = createAccountRouter(accountsCollection, secretStore);
   app.use(accountRouter);
+
+  // Mount MCP secret routes
+  // Create unique index on { mcpId, name } to enforce no duplicate secret names per server
+  try {
+    await mcpSecretsCollection.createIndex({ mcpId: 1, name: 1 }, { unique: true });
+  } catch (err) {
+    console.log("[token-manager] Index mcp-secrets mcpId/name may already exist");
+  }
+  const mcpSecretRouter = createMcpSecretRouter(mcpSecretsCollection, mcpServerCollection, secretStore);
+  app.use(mcpSecretRouter);
 
   // Start validation scheduler
   const scheduler = startTokenScheduler({
-    collection: tokensCollection,
-    getSecretValue: (name) => tokenStore.getSecret(name),
+    collection: keysCollection,
+    getSecretValue: (name) => secretStore.getSecret(name),
     validateToken,
     intervalMs: validationIntervalMs,
   });

@@ -13,16 +13,22 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen } from "lucide-react";
-import { WORKER_TYPES, type CodingAgent, type McpServerDocument } from "@/types";
+import { Send, Loader2, ArrowLeft, ArrowRight, Server, Info, BookOpen, Sparkles, Puzzle, SlidersHorizontal, X, Save } from "lucide-react";
+import { WORKER_TYPES, type CodingAgent, type McpServerDocument, type ProfileWithVersion, type ProfileVersionDocument } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
-import { SkillPicker } from "@/components/SkillPicker";
+import { SkillPicker, parseSkillSpec } from "@/components/SkillPicker";
+import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { Stepper } from "@/components/Stepper";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
+import { toast } from "sonner";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
 
 const STEPS = ["Configure", "Review & Submit"];
 
@@ -32,19 +38,29 @@ export function SubmitRun() {
 
   // Form state
   const [task, setTask] = useState("");
-  const [criteriaText, setCriteriaText] = useState("");
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
-  const [version, setVersion] = useState<"v1" | "v2">("v2");
   const [worker, setWorker] = useState<string>("coder-acp-copilot");
   const [model, setModel] = useState<string>("");
-  const [maxIterations, setMaxIterations] = useState<string>("10");
-  const [occurrences, setOccurrences] = useState<number>(1);
+  const [maxIterations, setMaxIterations] = useState<number>(10);
+  const [occurrences, setOccurrences] = useState<number>(5);
+  const [priority, setPriority] = useState<number>(0);
 
   // MCP servers
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
 
   // Skills
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+
+  // Extensions
+  const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+
+  // Profile
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [selectedProfileVersion, setSelectedProfileVersion] = useState<number | null>(null);
+  const profileLocked = !!selectedProfileId;
+
+  // Agent version
+  const [selectedAgentVersion, setSelectedAgentVersion] = useState<string>("");
 
   // Fetch agents from the API
   const { data: agents = [] } = useQuery({
@@ -58,25 +74,147 @@ export function SubmitRun() {
     queryFn: () => api.listMcpServers(),
   });
 
+  // Fetch profiles
+  const { data: profiles = [] } = useQuery({
+    queryKey: ["profiles"],
+    queryFn: () => api.listProfiles(),
+  });
+
+  // Fetch versions for the selected profile
+  const { data: profileVersions = [] } = useQuery({
+    queryKey: ["profile-versions", selectedProfileId],
+    queryFn: () => api.listProfileVersions(selectedProfileId!),
+    enabled: !!selectedProfileId,
+  });
+
+  const applyVersionConfig = (v: ProfileVersionDocument) => {
+    setWorker(v.workerType);
+    setModel(v.model);
+    setSelectedAgentVersion(v.agentVersion ?? "");
+    setSelectedMcpServers(v.mcpServers ?? []);
+    setSelectedSkills(v.skillRevisions ?? []);
+    setSelectedExtensions(v.extensions ?? []);
+  };
+
+  // When profile is selected, apply its latest version configuration
+  const applyProfile = (profileId: string | null) => {
+    setSelectedProfileId(profileId);
+    if (!profileId) return;
+    const p = (profiles as ProfileWithVersion[]).find((p) => p._id === profileId);
+    if (!p?.version) return;
+    setSelectedProfileVersion(p.version.version);
+    applyVersionConfig(p.version);
+  };
+
+  // When profile version changes, fetch and apply that version
+  const changeProfileVersion = (version: number) => {
+    setSelectedProfileVersion(version);
+    const v = profileVersions.find((pv: ProfileVersionDocument) => pv.version === version);
+    if (v) applyVersionConfig(v);
+  };
+
+  const clearProfile = () => {
+    setSelectedProfileId(null);
+    setSelectedProfileVersion(null);
+  };
+
+  // Save as Profile
+  const [saveProfileName, setSaveProfileName] = useState("");
+  const [saveProfileOpen, setSaveProfileOpen] = useState(false);
+
+  const saveProfileMutation = useMutation({
+    mutationFn: () =>
+      api.createProfile({
+        name: saveProfileName.trim(),
+        workerType: worker,
+        model,
+        ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
+        ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
+        ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
+        ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
+      }),
+    onSuccess: (data) => {
+      toast.success(`Profile "${saveProfileName}" saved`);
+      setSaveProfileOpen(false);
+      setSaveProfileName("");
+      setSelectedProfileId(data._id);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to save profile");
+    },
+  });
+
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
 
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
+  // available defaults to true when undefined (backward compat with agents registered before this field existed)
+  const availableAgents = activeAgents.filter((a: CodingAgent) => a.available !== false);
   const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
+  const isVscodeWorker = worker.includes("vscode");
 
-  // When agent changes, reset model to the agent's default
+  // When agent changes, reset model to the agent's default and clear extensions for non-vscode workers
   useEffect(() => {
+    if (selectedProfileId) return; // profile controls these values
     if (selectedAgent) {
       setModel(selectedAgent.defaultModel ?? "");
     } else {
       setModel("");
     }
+    if (!worker.includes("vscode")) {
+      setSelectedExtensions([]);
+    }
   }, [worker, selectedAgent?.defaultModel]);
 
-  // Optional persona
-  const [personality, setPersonality] = useState<string>("");
-  const [experience, setExperience] = useState<string>("");
-  const [verbosity, setVerbosity] = useState<string>("");
-  const [userType, setUserType] = useState<string>("");
+  // Fetch active versions for selected agent
+  const { data: agentVersions = [] } = useQuery({
+    queryKey: ["agent-versions", worker],
+    queryFn: () => api.listAgentVersions(worker, "active"),
+    enabled: !!worker,
+  });
+
+  // Sort versions by createdAt descending (latest first)
+  const sortedVersions = [...agentVersions].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  // When agent changes or versions load, auto-select latest version
+  useEffect(() => {
+    if (selectedProfileId) return; // profile controls agent version
+    if (sortedVersions.length > 0) {
+      setSelectedAgentVersion(sortedVersions[0].agentVersion);
+    } else {
+      setSelectedAgentVersion("");
+    }
+  }, [worker, agentVersions.length]);
+
+  // AI generation state
+  const [showGenerate, setShowGenerate] = useState(false);
+  const [generateDescription, setGenerateDescription] = useState("");
+
+  const generateMutation = useMutation({
+    mutationFn: (opts: { description?: string; existingPrompt?: string }) =>
+      api.generateTaskPrompt(opts),
+    onSuccess: (data) => {
+      setTask(data.taskPrompt);
+      setShowGenerate(false);
+      setGenerateDescription("");
+    },
+  });
+
+  const handleGenerate = () => {
+    if (task.trim()) {
+      // Variation mode: use existing task, optional guidance from description
+      generateMutation.mutate({
+        existingPrompt: task.trim(),
+        ...(generateDescription.trim() && { description: generateDescription.trim() }),
+      });
+    } else {
+      // From-scratch mode: generate from description (or surprise me if empty)
+      generateMutation.mutate({
+        ...(generateDescription.trim() && { description: generateDescription.trim() }),
+      });
+    }
+  };
 
   // Task prompt entity state (created on "Continue" to step 2)
   const [taskPromptId, setTaskPromptId] = useState<string | null>(null);
@@ -111,38 +249,27 @@ export function SubmitRun() {
   const doSubmit = () => {
     if (!task.trim()) return;
 
-    const criteria =
-      version === "v2"
-        ? pickedCriteria
-        : criteriaText
-            .split("\n")
-            .map((c) => c.trim())
-            .filter(Boolean);
-
-    const hasPersona = personality || experience || verbosity || userType;
+    const criteria = pickedCriteria;
 
     submitMutation.mutate({
       scenario: {
         task: task.trim(),
         criteria,
-        version,
       },
       worker,
       ...(model ? { model } : {}),
-      maxIterations: parseInt(maxIterations, 10) || undefined,
+      maxIterations,
+      ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
-      ...(hasPersona
-        ? {
-            persona: {
-              personality: personality || "friendly",
-              experience: experience || "senior",
-              verbosity: verbosity || "moderate",
-              type: userType || "traditional",
-            },
-          }
-        : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
+      ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
+      ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
+      ...(selectedProfileId ? { profileId: selectedProfileId } : {}),
+      ...(selectedProfileId && selectedProfileVersion ? {
+        profileVersionId: profileVersions.find((pv: ProfileVersionDocument) => pv.version === selectedProfileVersion)?._id
+          ?? (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.version?._id,
+      } : {}),
     });
   };
 
@@ -187,25 +314,72 @@ export function SubmitRun() {
                   rows={3}
                   required
                 />
-                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Info className="h-3.5 w-3.5 shrink-0" />
-                  New task prompts are automatically added to the task prompt library.
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Info className="h-3.5 w-3.5 shrink-0" />
+                    New task prompts are automatically added to the task prompt library.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    onClick={() => setShowGenerate(!showGenerate)}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {task.trim() ? "Generate Variation" : "Generate with AI"}
+                  </Button>
+                </div>
+
+                {showGenerate && (
+                  <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+                    <Label className="text-xs">
+                      {task.trim()
+                        ? "How should the variation differ? (optional)"
+                        : "Describe what you want, or leave empty for a surprise (optional)"}
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder={
+                          task.trim()
+                            ? "e.g., use Python instead, add database support…"
+                            : "e.g., A REST API with database and tests"
+                        }
+                        value={generateDescription}
+                        onChange={(e) => setGenerateDescription(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleGenerate();
+                          }
+                        }}
+                        disabled={generateMutation.isPending}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleGenerate}
+                        disabled={generateMutation.isPending}
+                      >
+                        {generateMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                    {generateMutation.isError && (
+                      <p className="text-xs text-destructive">
+                        {generateMutation.error instanceof Error
+                          ? generateMutation.error.message
+                          : "Generation failed"}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="version">Criteria Version</Label>
-                  <Select value={version} onValueChange={(v) => setVersion(v as "v1" | "v2")}>
-                    <SelectTrigger id="version">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="v1">v1 — free-text prompts</SelectItem>
-                      <SelectItem value="v2">v2 — criteria IDs</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="maxIterations">Max Iterations</Label>
                   <Input
@@ -214,82 +388,44 @@ export function SubmitRun() {
                     min={1}
                     max={50}
                     value={maxIterations}
-                    onChange={(e) => setMaxIterations(e.target.value)}
+                    onChange={(e) => setMaxIterations(Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
                   />
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Info className="h-3.5 w-3.5 shrink-0" />
+                    Maximum number of back and forth turns between the coding agent and simulated user.
+                  </p>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="criteria">
-                  Criteria{" "}
-                  {version === "v2" ? (
-                    <span className="text-muted-foreground font-normal">(select from registry)</span>
-                  ) : (
-                    <span className="text-muted-foreground font-normal">(one per line)</span>
-                  )}
+                  Criteria {maxIterations !== 1 && "* "}
+                  <span className="text-muted-foreground font-normal">(select from registry)</span>
                 </Label>
-                {version === "v2" ? (
-                  <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
-                ) : (
-                  <Textarea
-                    id="criteria"
-                    placeholder="The code must include unit tests&#10;The API should return JSON responses"
-                    value={criteriaText}
-                    onChange={(e) => setCriteriaText(e.target.value)}
-                    rows={4}
-                    className="font-mono text-sm"
-                  />
-                )}
+                <CriteriaPicker selected={pickedCriteria} onChange={setPickedCriteria} />
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  Required when max iterations &gt; 1. Optional for single-iteration runs (no judge evaluation).
+                </p>
               </div>
-            </CardContent>
-          </Card>
 
-          {/* Worker */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Worker</CardTitle>
-              <CardDescription>Select which coding agent to run</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="worker">Worker Type *</Label>
-                <Select value={worker} onValueChange={setWorker}>
-                  <SelectTrigger id="worker">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeAgents.length > 0
-                      ? activeAgents.map((a: CodingAgent) => (
-                          <SelectItem key={a._id} value={a._id}>
-                            {a.name}
-                          </SelectItem>
-                        ))
-                      : WORKER_TYPES.map((w) => (
-                          <SelectItem key={w} value={w}>
-                            {w}
-                          </SelectItem>
-                        ))
-                    }
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="priority">Priority</Label>
+                <Input
+                  id="priority"
+                  type="number"
+                  min={-100}
+                  max={100}
+                  value={priority}
+                  onChange={(e) => setPriority(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
+                  className="w-24"
+                />
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  Higher priority runs are dispatched first. Default is 0.
+                </p>
               </div>
-              {selectedAgent && selectedAgent.supportedModels.length > 0 && (
-                <div className="space-y-2">
-                  <Label htmlFor="model">Model</Label>
-                  <Select value={model} onValueChange={setModel}>
-                    <SelectTrigger id="model">
-                      <SelectValue placeholder="Select model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {selectedAgent.supportedModels.map((m) => (
-                        <SelectItem key={m} value={m}>
-                          {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+
               <div className="space-y-2">
                 <Label htmlFor="occurrences">Number of occurrences</Label>
                 <Input
@@ -308,6 +444,139 @@ export function SubmitRun() {
             </CardContent>
           </Card>
 
+          {/* Profile Selector */}
+          {(profiles as ProfileWithVersion[]).length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <SlidersHorizontal className="h-5 w-5" />
+                  Profile <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+                </CardTitle>
+                <CardDescription>Select a profile to pre-fill agent configuration</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {selectedProfileId ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary" className="text-sm">
+                        {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
+                      </Badge>
+                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={clearProfile}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                      <span className="text-xs text-muted-foreground">Agent config locked by profile</span>
+                    </div>
+                    {profileVersions.length > 1 && selectedProfileVersion && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Version</Label>
+                        <Select
+                          value={String(selectedProfileVersion)}
+                          onValueChange={(v) => changeProfileVersion(Number(v))}
+                        >
+                          <SelectTrigger className="w-48">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {profileVersions
+                              .slice()
+                              .sort((a: ProfileVersionDocument, b: ProfileVersionDocument) => b.version - a.version)
+                              .map((v: ProfileVersionDocument) => (
+                                <SelectItem key={v.version} value={String(v.version)}>
+                                  v{v.version}
+                                  {v.version === (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.latestVersion
+                                    ? " (latest)"
+                                    : ""}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <Select onValueChange={applyProfile}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="No profile — configure manually" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(profiles as ProfileWithVersion[]).map((p) => (
+                        <SelectItem key={p._id} value={p._id}>
+                          {p.name} <span className="text-muted-foreground ml-1">v{p.latestVersion}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Worker */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Worker</CardTitle>
+              <CardDescription>Select which coding agent to run</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="worker">Worker Type *</Label>
+                <Select value={worker} onValueChange={setWorker} disabled={profileLocked}>
+                  <SelectTrigger id="worker">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableAgents.length > 0
+                      ? availableAgents.map((a: CodingAgent) => (
+                          <SelectItem key={a._id} value={a._id}>
+                            {a.name}
+                          </SelectItem>
+                        ))
+                      : WORKER_TYPES.map((w) => (
+                          <SelectItem key={w} value={w}>
+                            {w}
+                          </SelectItem>
+                        ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+              {selectedAgent && selectedAgent.supportedModels.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="model">Model *</Label>
+                  <Select value={model} onValueChange={setModel} disabled={profileLocked}>
+                    <SelectTrigger id="model">
+                      <SelectValue placeholder="Select model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedAgent.supportedModels.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {sortedVersions.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="agentVersion">Agent Version *</Label>
+                  <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
+                    <SelectTrigger id="agentVersion">
+                      <SelectValue placeholder="Select version" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sortedVersions.map((v, i) => (
+                        <SelectItem key={v.agentVersion} value={v.agentVersion}>
+                          {v.agentVersion}{i === 0 ? " (latest)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* MCP Servers (optional) */}
           {activeMcpServers.length > 0 && (
             <Card>
@@ -323,10 +592,11 @@ export function SubmitRun() {
                   {activeMcpServers.map((s: McpServerDocument) => (
                     <label
                       key={s._id}
-                      className="flex items-center gap-3 rounded-md border p-3 cursor-pointer hover:bg-accent/50 transition-colors"
+                      className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${profileLocked ? "opacity-60" : "cursor-pointer hover:bg-accent/50"}`}
                     >
                       <Checkbox
                         checked={selectedMcpServers.includes(s._id)}
+                        disabled={profileLocked}
                         onCheckedChange={(checked) => {
                           setSelectedMcpServers(prev =>
                             checked
@@ -364,78 +634,78 @@ export function SubmitRun() {
               <CardDescription>Search and select agent skills to inject into the coding agent prompt</CardDescription>
             </CardHeader>
             <CardContent>
-              <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} />
+              <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
             </CardContent>
           </Card>
 
-          {/* Persona (optional) */}
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                Persona <span className="text-muted-foreground font-normal text-sm">(optional)</span>
-              </CardTitle>
-              <CardDescription>Configure the judge persona for evaluation style</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Personality</Label>
-                  <Select value={personality} onValueChange={setPersonality}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="friendly">Friendly</SelectItem>
-                      <SelectItem value="demanding">Demanding</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Experience</Label>
-                  <Select value={experience} onValueChange={setExperience}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="junior">Junior</SelectItem>
-                      <SelectItem value="senior">Senior</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Verbosity</Label>
-                  <Select value={verbosity} onValueChange={setVerbosity}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="brief">Brief</SelectItem>
-                      <SelectItem value="moderate">Moderate</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>User Type</Label>
-                  <Select value={userType} onValueChange={setUserType}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="traditional">Traditional</SelectItem>
-                      <SelectItem value="ai_assisted">AI Assisted</SelectItem>
-                      <SelectItem value="vibe">Vibe Coder</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Extensions (optional — only for VS Code workers) */}
+          {isVscodeWorker && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Puzzle className="h-5 w-5" />
+                  Extensions <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+                </CardTitle>
+                <CardDescription>Search and select VS Code extensions to install for this run</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} disabled={profileLocked} />
+              </CardContent>
+            </Card>
+          )}
 
           <Separator />
 
           {/* Continue */}
-          <div className="flex justify-end">
-            <Button type="button" onClick={handleContinue} disabled={!task.trim()} className="gap-1.5">
+          <div className="flex justify-between">
+            {!profileLocked && worker && model ? (
+              <Dialog open={saveProfileOpen} onOpenChange={setSaveProfileOpen}>
+                <DialogTrigger asChild>
+                  <Button type="button" variant="outline" className="gap-1.5">
+                    <Save className="h-4 w-4" /> Save as Profile
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Save as Profile</DialogTitle>
+                    <DialogDescription>
+                      Save the current agent configuration as a reusable profile.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-2 py-2">
+                    <Label htmlFor="profileName">Profile Name *</Label>
+                    <Input
+                      id="profileName"
+                      value={saveProfileName}
+                      onChange={(e) => setSaveProfileName(e.target.value)}
+                      placeholder="e.g. My Benchmark Profile"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && saveProfileName.trim()) {
+                          e.preventDefault();
+                          saveProfileMutation.mutate();
+                        }
+                      }}
+                    />
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      onClick={() => saveProfileMutation.mutate()}
+                      disabled={!saveProfileName.trim() || saveProfileMutation.isPending}
+                    >
+                      {saveProfileMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="mr-2 h-4 w-4" />
+                      )}
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            ) : (
+              <div />
+            )}
+            <Button type="button" onClick={handleContinue} disabled={!task.trim() || (selectedAgent && selectedAgent.supportedModels.length > 0 && !model) || (maxIterations !== 1 && pickedCriteria.length === 0)} className="gap-1.5">
               Continue <ArrowRight className="h-4 w-4" /> <KbdBadge />
             </Button>
           </div>
@@ -452,15 +722,32 @@ export function SubmitRun() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="grid grid-cols-[8rem_1fr] gap-y-2">
+                {selectedProfileId && (
+                  <>
+                    <span className="text-muted-foreground">Profile</span>
+                    <Badge variant="secondary" className="font-mono text-xs w-fit">
+                      {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
+                      {selectedProfileVersion ? ` v${selectedProfileVersion}` : ""}
+                    </Badge>
+                  </>
+                )}
                 <span className="text-muted-foreground">Task</span>
                 <span className="whitespace-pre-wrap">{task.trim()}</span>
                 <span className="text-muted-foreground">Worker</span>
                 <span className="font-mono">{worker}</span>
+                {selectedAgentVersion && (
+                  <>
+                    <span className="text-muted-foreground">Agent Version</span>
+                    <span className="font-mono">{selectedAgentVersion}</span>
+                  </>
+                )}
                 <span className="text-muted-foreground">Max iterations</span>
                 <span>{maxIterations}</span>
+                <span className="text-muted-foreground">Priority</span>
+                <span>{priority}</span>
                 <span className="text-muted-foreground">Occurrences</span>
                 <span>{occurrences}</span>
-                {version === "v2" && pickedCriteria.length > 0 && (
+                {pickedCriteria.length > 0 && (
                   <>
                     <span className="text-muted-foreground">Criteria</span>
                     <div className="flex flex-wrap gap-1">
@@ -488,9 +775,27 @@ export function SubmitRun() {
                   <>
                     <span className="text-muted-foreground">Skills</span>
                     <div className="flex flex-wrap gap-1">
-                      {selectedSkills.map((s) => (
-                        <Badge key={s} variant="secondary" className="font-mono text-xs">
-                          {s}
+                      {selectedSkills.map((s) => {
+                        const { slug, commitHash } = parseSkillSpec(s);
+                        return (
+                          <Badge key={s} variant="secondary" className="font-mono text-xs gap-1">
+                            {slug}
+                            {commitHash && (
+                              <span className="text-muted-foreground">@{commitHash.substring(0, 7)}</span>
+                            )}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+                {selectedExtensions.length > 0 && (
+                  <>
+                    <span className="text-muted-foreground">Extensions</span>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedExtensions.map((e) => (
+                        <Badge key={e} variant="secondary" className="font-mono text-xs">
+                          {e}
                         </Badge>
                       ))}
                     </div>

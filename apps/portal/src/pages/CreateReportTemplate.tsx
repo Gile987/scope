@@ -3,7 +3,8 @@
 
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { api } from "@/lib/api";
 
 import { Button } from "@/components/ui/button";
@@ -15,10 +16,38 @@ import { Separator } from "@/components/ui/separator";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { TaskPromptIdPicker } from "@/components/TaskPromptIdPicker";
+
+function DefaultSystemPromptViewer() {
+  const [open, setOpen] = useState(false);
+  const { data } = useQuery({
+    queryKey: ["default-system-prompt"],
+    queryFn: () => api.getDefaultSystemPrompt(),
+    enabled: open,
+    staleTime: Infinity,
+  });
+
+  return (
+    <div>
+      <button
+        type="button"
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen(!open)}
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        View default system prompt
+      </button>
+      {open && data && (
+        <div className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted p-3 prose prose-sm dark:prose-invert max-w-none">
+          <MarkdownRenderer>{data.content}</MarkdownRenderer>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Convert a name to a slug */
 function slugify(text: string): string {
@@ -45,6 +74,14 @@ export function CreateReportTemplate() {
   const [triggerCriteriaIds, setTriggerCriteriaIds] = useState<string[]>([]);
   const [triggerTaskPromptIds, setTriggerTaskPromptIds] = useState<string[]>([]);
   const [triggerMatch, setTriggerMatch] = useState<"any" | "all">("all");
+  const [model, setModel] = useState<string>("");
+  const [timeoutSeconds, setTimeoutSeconds] = useState<string>("");
+
+  const { data: availableModels } = useQuery({
+    queryKey: ["available-report-models"],
+    queryFn: () => api.listAvailableReportModels(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const idValid = useMemo(() => /^[a-z][a-z0-9-]*$/.test(id), [id]);
   const canSubmit = name.trim().length > 0 && id.trim().length > 0 && idValid && userPrompt.trim().length > 0;
@@ -61,7 +98,7 @@ export function CreateReportTemplate() {
       api.createReportTemplate(body),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["report-templates"] });
-      navigate(`/report-templates/${data.id}`);
+      navigate(`/reports/templates/${data.id}`);
     },
   });
 
@@ -73,6 +110,12 @@ export function CreateReportTemplate() {
     };
 
     if (description.trim()) body.description = description.trim();
+
+    if (model) body.model = model;
+
+    if (timeoutSeconds && Number(timeoutSeconds) > 0) {
+      body.timeoutMs = Number(timeoutSeconds) * 1000;
+    }
 
     // System prompt
     if (sysMode !== "none" && sysContent.trim()) {
@@ -98,7 +141,7 @@ export function CreateReportTemplate() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link to="/report-templates" className="text-muted-foreground hover:text-foreground">
+        <Link to="/reports/templates" className="text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-5 w-5" />
         </Link>
         <div>
@@ -160,11 +203,45 @@ export function CreateReportTemplate() {
               onChange={(e) => setUserPrompt(e.target.value)}
               rows={8}
               className="font-mono text-sm"
-              placeholder="Generate a report for run {{requestId}}..."
             />
-            <p className="text-xs text-muted-foreground">
-              Use {"{{requestId}}"} as a placeholder for the run ID. The user prompt takes precedence over the default report structure.
+          </div>
+
+          <Separator />
+
+          {/* Model */}
+          <div className="space-y-2">
+            <Label>Model (optional)</Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Override the model used for report generation. The default is <code className="text-xs bg-muted px-1 py-0.5 rounded">gpt-4.1</code> (configurable via <code className="text-xs bg-muted px-1 py-0.5 rounded">REPORT_MODEL</code> env var).
             </p>
+            <Select value={model || "__default__"} onValueChange={(v) => setModel(v === "__default__" ? "" : v)}>
+              <SelectTrigger className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">Default (gpt-4.1)</SelectItem>
+                {availableModels?.map((m) => (
+                  <SelectItem key={m.modelId} value={m.modelId}>{m.modelId}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Timeout */}
+          <div className="space-y-2">
+            <Label htmlFor="timeout">Timeout (optional)</Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Maximum time for report generation in seconds. Default is <code className="text-xs bg-muted px-1 py-0.5 rounded">300</code> (5 minutes).
+            </p>
+            <Input
+              id="timeout"
+              type="number"
+              min={1}
+              value={timeoutSeconds}
+              onChange={(e) => setTimeoutSeconds(e.target.value)}
+              placeholder="300"
+              className="w-32"
+            />
           </div>
 
           <Separator />
@@ -191,6 +268,7 @@ export function CreateReportTemplate() {
                 placeholder={sysMode === "append" ? "Additional system instructions..." : "Complete system prompt..."}
               />
             )}
+            <DefaultSystemPromptViewer />
           </div>
 
           <Separator />
@@ -250,7 +328,7 @@ export function CreateReportTemplate() {
               {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Create Template
             </Button>
-            <Link to="/report-templates">
+            <Link to="/reports/templates">
               <Button variant="ghost">Cancel</Button>
             </Link>
           </div>

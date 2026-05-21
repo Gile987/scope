@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/dev-proxy/main/schemas/v2.1.0/rc.schema.json",
+  "urlsToWatch": [
+    "https://api.anthropic.com/*"
+  ],
+  "port": 18000,
+  "apiPort": 18897,
+  "asSystemProxy": false,
+  "plugins": [
+    {
+      "name": "HarGeneratorPlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "harGeneratorPlugin"
+    }
+  ],
+  "harGeneratorPlugin": {
+    "includeSensitiveInformation": false,
+    "includeResponse": true
+  }
+}

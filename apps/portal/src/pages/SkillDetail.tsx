@@ -14,9 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Trash2, RefreshCw, Loader2, BookOpen, GitCommit, ExternalLink } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -50,9 +48,16 @@ export function SkillDetail() {
 
   const resolveMutation = useMutation({
     mutationFn: () => api.resolveSkill(slug!),
-    onSuccess: () => {
+    onSuccess: (revision) => {
       queryClient.invalidateQueries({ queryKey: ["skill-revisions", slug] });
-      toast.success("Skill resolved — new revision created");
+      if (revision.validationWarnings?.length) {
+        for (const warning of revision.validationWarnings) {
+          toast.warning(warning);
+        }
+        toast.success("Skill resolved with warnings — new revision created");
+      } else {
+        toast.success("Skill resolved — new revision created");
+      }
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to resolve skill");
@@ -169,9 +174,9 @@ export function SkillDetail() {
               </div>
             ) : latestRevision ? (
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                <MarkdownRenderer>
                   {latestRevision.content.replace(/^---\n[\s\S]*?\n---\n*/, "")}
-                </ReactMarkdown>
+                </MarkdownRenderer>
               </div>
             ) : (
               <div className="text-center py-12 text-muted-foreground text-sm">
@@ -232,6 +237,14 @@ export function SkillDetail() {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+              {latestRevision?.validationWarnings && latestRevision.validationWarnings.length > 0 && (
+                <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-2.5 space-y-1">
+                  <span className="text-xs font-medium text-yellow-600 dark:text-yellow-400">⚠ Validation Warnings</span>
+                  {latestRevision.validationWarnings.map((w, i) => (
+                    <div key={i} className="text-xs text-yellow-700 dark:text-yellow-300">{w}</div>
+                  ))}
                 </div>
               )}
               <div>

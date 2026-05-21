@@ -16,7 +16,7 @@ import { scanAnthropicModels } from "./scan.js";
 const AGENT_ID = "coder-acp-claude-code";
 const AGENT_DEFINITION = {
   _id: AGENT_ID,
-  name: "Claude Code (ACP)",
+  name: "Claude Code CLI",
   description: "Anthropic Claude Code coding agent via ACP protocol",
   supportedModels: [] as string[],  // Will be populated by scan
 };
@@ -28,9 +28,9 @@ async function main(): Promise<void> {
   console.log(`Model scanner: anthropic (agent: ${AGENT_ID})`);
   console.log(`Mode: ${dryRun ? "dry-run" : "live"}`);
 
-  // Acquire token
-  console.log("Acquiring token for claude-code-cli capability...");
-  const token = await tokenClient.acquireToken("claude-code-cli");
+  // Acquire token — scanner needs anthropic-api capability (API key only, not OAuth)
+  console.log("Acquiring token for anthropic-api capability...");
+  const token = await tokenClient.acquireToken("anthropic-api");
   console.log("Token acquired.");
 
   // Scan models

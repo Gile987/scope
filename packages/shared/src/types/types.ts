@@ -3,15 +3,28 @@
 
 import type { McpServerConfig } from './mcp.js';
 import type { SkillConfig } from './skill.js';
+import type { ExtensionConfig } from './extension.js';
 import type { ToolCall } from '../har/types.js';
 
 // Re-export ToolCall so consumers can import from types
 export type { ToolCall } from '../har/types.js';
 
+/** LLM token usage counters for a single interaction */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 // Multi-turn conversation turn (one coding + judge iteration)
 export interface ConversationTurn {
   iteration: number;
-  codingAgentResponse: string;
+  /** The coding agent's final assistant message for this iteration.
+   *  Optional: workers may omit it when no response text could be extracted
+   *  from the agent (e.g. the chat result envelope contained no recognizable
+   *  assistant text). The full transcript is still available via rawChatUrl /
+   *  harUrl. */
+  codingAgentResponse?: string;
   judgeFeedback: string;
   snapshotUrl: string;
   passed: boolean;
@@ -19,13 +32,37 @@ export interface ConversationTurn {
   criteriaResults?: CriterionResult[];  // Per-criterion breakdown from DAG evaluation
   harUrl?: string;         // Blob storage URL to the HAR file for this turn
   videoUrls?: string[];    // Blob storage URLs to session recording videos for this turn
+  tokenUsage?: TokenUsage;  // LLM token usage for this iteration
+  startedAt?: Date;        // When this iteration began
+  durationMs?: number;     // Wall-clock duration of this iteration in milliseconds
+  toolCalls?: ToolCall[];   // @deprecated — legacy inline tool calls. New writes use `toolCallsUrl` + `toolCallCount`. Kept for backwards-compatible reads.
+  /** Blob storage URL to the per-iteration tool-calls JSONL append blob
+   *  (`{requestId}/runs/{runId}/iteration-{n}/tool-calls.jsonl`). Replaces
+   *  the inline `toolCalls` array so unbounded tool-call lists no longer
+   *  contribute to the CosmosDB 2 MB document-size limit. */
+  toolCallsUrl?: string;
+  /** Number of tool calls in `toolCallsUrl` — kept on the turn so consumers
+   *  can render counts/aggregates without fetching the JSONL blob. */
+  toolCallCount?: number;
+  aiCallCount?: number;    // Number of AI completion API calls made during this iteration
+  rawChatUrl?: string;     // Blob storage URL to the raw chat transcript export
+  rawChatFormat?: string;  // Format identifier for the raw chat export
+  /** Blob storage URL to the JSON-serialized chat result envelope returned
+   *  by the chat command (VS Code's `IChatAgentResult2` shape for the
+   *  electron worker). Carries internal metadata — timings, tool-call
+   *  rounds/results, summaries, resolved model, response id — that is NOT
+   *  the assistant's prose (see `codingAgentResponse` for that). Useful for
+   *  post-hoc diagnostics; not meant for end-user display. */
+  chatResultUrl?: string;
+  /** Format identifier for the chat result envelope
+   *  (e.g. 'IChatAgentResult2' for the electron worker). */
+  chatResultFormat?: string;
 }
 
 // Multi-turn configuration constants
 export const MULTI_TURN_DEFAULTS = {
   MAX_ITERATIONS: 10,
   ITERATION_TIMEOUT_MS: 30 * 60 * 1000, // 30 minutes
-  VISIBILITY_TIMEOUT_SECONDS: 35 * 60,   // 35 minutes (must exceed max iteration time)
 } as const;
 
 // --- Persona & Scenario types (mirrors prototype config schema) ---
@@ -43,9 +80,8 @@ export interface Persona {
 }
 
 export interface Scenario {
-  version?: 'v1' | 'v2';  // v1 = simple strings (default), v2 = criteria IDs
   task: string;
-  criteria: string[];  // v1: prompts, v2: criteria IDs
+  criteria: string[];  // criteria IDs
 }
 
 export interface TraitDescriptions {
@@ -55,13 +91,29 @@ export interface TraitDescriptions {
   type: Record<UserType, string>;
 }
 
+// Agent version entry — embedded in CodingAgentDocument.versions[]
+export interface AgentVersion {
+  agentVersion: string;                  // PK — version prefix from versions.env (e.g. "copilot-0.0.415")
+  workerVersion: string;                 // Latest deployed build = image tag (e.g. "copilot-0.0.415-20260318T163740Z-44d16d6")
+  components: Record<string, string>;    // Component env vars (e.g. { COPILOT_CLI_VERSION: "0.0.415" })
+  gitCommit: string;                     // Short SHA of the build
+  buildTime: string;                     // Build timestamp (e.g. "20260318T163740Z")
+  imageTag: string;                      // Full image tag (same as workerVersion)
+  queueName: string;                     // Queue this version listens on
+  status: "active" | "retired";
+  createdAt: Date;
+}
+
 // Coding agent definition stored in MongoDB
 export interface CodingAgentDocument {
   _id: string;               // Agent ID (e.g. "coder-acp-copilot")
   name: string;              // Display name
   description?: string;
+  modelProvider?: string;     // Model provider (e.g. "github-copilot", "anthropic") — used by scanners to discover agents
   supportedModels: string[];  // Empty array = model selection disabled
   defaultModel?: string;
+  available?: boolean;        // Whether this agent is available for new submissions (default: true)
+  versions?: AgentVersion[];  // Registered agent versions (embedded array)
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;           // Soft-delete timestamp
@@ -81,21 +133,22 @@ export interface ModelDocument {
   metadata?: Record<string, unknown>; // Additional provider-specific metadata
 }
 
+export interface OsInfo {
+  platform: string;   // os.platform() → "linux", "darwin", "win32"
+  release: string;    // os.release() → kernel/OS version string
+  arch: string;       // os.arch() → "x64", "arm64"
+}
+
 // Request document stored in MongoDB
 export interface RequestDocument {
   _id: string;  // UUID as _id (for CosmosDB sharding compatibility)
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
   model?: string;              // Model selected for this run
-  status: "pending" | "processing" | "iterating" | "completed" | "failed" | "exhausted";
-  result?: string;
-  error?: string;
-  logs: LogEvent[];
   createdAt: Date;
   updatedAt?: Date;
   // Multi-turn fields
   maxIterations?: number;
-  turns?: ConversationTurn[];
   personaInstructions?: string;  // Resolved persona prose (from traits.yaml)
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
@@ -103,10 +156,18 @@ export interface RequestDocument {
   promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
-  agentVersion?: string;          // Coding agent binary version (e.g. "@github/copilot@0.0.415")
-  harUrl?: string;                 // Blob storage URL to the HAR file (one-shot)
-  videoUrls?: string[];            // Blob storage URLs to session recording videos (one-shot)
-  setupVideoUrls?: string[];       // Blob storage URLs to setup-phase videos (e.g. TOTP login recording)
+  extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
+  agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
+  profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
+  profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
+  submissionId?: string;           // FK → SubmissionDocument._id
+  /** Scheduling priority. Higher = processed first. Default: 0. */
+  priority: number;
+  /**
+   * Per-attempt mutable state. Migration 014 nests per-attempt fields
+   * under this object; new submissions populate it on insert.
+   */
+  run?: RunState;
 }
 
 // Log event for real-time streaming and persistence
@@ -121,23 +182,157 @@ export interface LogEvent {
 // Queue message payload
 export interface QueueMessagePayload {
   requestId: string;
+  /**
+   * Optional run ID that identifies a specific attempt within the request.
+   *
+   * When set (post run-retry-attempts rollout), workers should verify that
+   * the message's `runId` matches `request.run._id` before processing — if
+   * it doesn't, the message is stale (a retry has since started a new
+   * attempt) and should be acked and discarded.
+   *
+   * When omitted, treat as targeting the current `request.run`.
+   */
+  runId?: string;
 }
+
+/**
+ * RunState — represents one execution attempt of a request.
+ *
+ * Per-attempt mutable state is split out from RequestDocument so retries can
+ * preserve a history of previous attempts (in the `runs` collection) while the
+ * request itself keeps its stable identity and immutable configuration.
+ *
+ * The current (latest) attempt is embedded in the request document as
+ * `RequestDocument.run`. When a request is retried, the previous `run` is
+ * snapshotted to the `runs` collection (as a RunHistoryDocument) and a fresh
+ * RunState is created for the new attempt.
+ *
+ * `_id` is unique per attempt — when demoted to history it becomes the
+ * `runs` collection's document `_id`. Reusing the request's `_id` for the
+ * first attempt's `RunState._id` keeps existing artifact blob paths
+ * (`{runId}/iteration-N/...`) valid without rewriting blob storage.
+ */
+export interface RunState {
+  _id: string;                              // Unique per attempt
+  attemptNumber: number;                    // 1, 2, 3…
+  status: "pending" | "queued" | "processing" | "paused" | "done";
+  outcome?: "succeeded" | "failed" | "finished";
+  result?: string;
+  error?: string;
+  /** Full blob URL pointing to this attempt's JSONL log blob in the `logs`
+   *  container, e.g. `https://<account>.blob.core.windows.net/logs/{requestId}/runs/{runId}/run.jsonl`.
+   *  Set at submit time so the SSE replay endpoint can read it directly from
+   *  the document without recomputing storage paths — matching the pattern
+   *  used by `harUrl`, `videoUrls`, and `snapshotUrl`. */
+  logsUrl?: string;
+  updatedAt?: Date;
+  startedAt?: Date;                         // When worker picked up this attempt
+  finishedAt?: Date;                        // When this attempt reached "done"
+  /** When this run was paused (if status = "paused") */
+  pausedAt?: Date;
+  /** When this run was last resumed from paused state */
+  resumedAt?: Date;
+  turns?: ConversationTurn[];
+  workerVersion?: string;
+  os?: OsInfo;
+  /** Wall-clock time of the last heartbeat written by the worker actively
+   *  processing this attempt. **Stored in Redis, not Mongo** — the API
+   *  enriches this field on response from a Redis MGET so the portal can
+   *  show "Last heartbeat: Xs ago". The redelivery handler reads it
+   *  directly from Redis to distinguish a real worker crash (stale or
+   *  missing) from a spurious Azure Storage Queue redelivery while the
+   *  original worker is still alive (fresh). Never persisted to Mongo. */
+  lastHeartbeatAt?: Date;
+  /** Identity of the worker process currently (or last) handling this
+   *  attempt. Stamped at message pickup. `instanceId` is a per-process UUID
+   *  generated at worker startup; `podName` comes from `process.env.HOSTNAME`
+   *  when running under Kubernetes. Useful for troubleshooting ("which pod
+   *  ran this?") and for the redelivery handler's log lines. */
+  worker?: {
+    instanceId: string;
+    podName?: string;
+  };
+  harUrl?: string;
+  videoUrls?: string[];
+  setupVideoUrls?: string[];
+  tokenUsage?: TokenUsage;
+  aiCallCount?: number;
+  rawChatUrl?: string;
+  rawChatFormat?: string;
+}
+
+/**
+ * RunHistoryDocument — a previously-completed attempt stored in the `runs`
+ * collection. Same shape as RunState plus a back-reference to its request.
+ */
+export interface RunHistoryDocument extends RunState {
+  requestId: string;                        // FK → RequestDocument._id
+}
+
+/**
+ * Field names whose values move from `RequestDocument` (top-level, legacy
+ * shape) into `RequestDocument.run: RunState` (new shape introduced for
+ * the run-retry-attempts feature). Useful for migration scripts and
+ * compat code paths.
+ */
+export const RUN_STATE_FIELD_NAMES = [
+  "status",
+  "outcome",
+  "result",
+  "error",
+  "updatedAt",
+  "turns",
+  "workerVersion",
+  "os",
+  "lastHeartbeatAt",
+  "worker",
+  "harUrl",
+  "videoUrls",
+  "setupVideoUrls",
+  "tokenUsage",
+  "aiCallCount",
+  "rawChatUrl",
+  "rawChatFormat",
+] as const;
 
 // Options passed to worker processor
 export interface WorkerProcessorOptions {
   model?: string;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
+  extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation
+  /** Current iteration number (1-based) for multi-turn runs. Used by the
+   *  proxy HAR rotation logic so each iteration gets its own HAR file. */
+  iteration?: number;
 }
 
 // Result returned by a worker processor
 export interface WorkerResult {
-  /** The coding agent's text response */
-  response: string;
+  /** The coding agent's text response. Optional: workers omit this when no
+   *  final assistant message could be extracted from the chat envelope.
+   *  See growth-ecosystems/scope-core#811. */
+  response?: string;
   /** Path to the HAR file on disk (for upload to blob storage) */
   harFilePath?: string;
   /** Paths to session recording video files on disk (for upload to blob storage) */
   videoFilePaths?: string[];
+  /** LLM token usage extracted from HAR or reported by the agent */
+  tokenUsage?: TokenUsage;
+  /** Number of AI completion API calls made during this iteration (extracted from HAR) */
+  aiCallCount?: number;
+  /** Tool calls extracted from the chat transcript export */
+  toolCalls?: ToolCall[];
+  /** Path to the raw chat transcript export file on disk (for upload to blob storage) */
+  rawChatFilePath?: string;
+  /** Format identifier for the raw chat export */
+  rawChatFormat?: string;
+  /** Path on disk to the JSON-serialized chat result envelope (for upload to
+   *  blob storage as `chatResultUrl`). The electron worker writes VS Code's
+   *  `IChatAgentResult2` here — see growth-ecosystems/scope-core#811 for
+   *  why we keep it as a separate blob rather than inlining it. */
+  chatResultFilePath?: string;
+  /** Format identifier for the chat result envelope (e.g. 'IChatAgentResult2'). */
+  chatResultFormat?: string;
 }
 
 /** Log function signature used by worker processors. */
@@ -151,9 +346,14 @@ export interface SetupResult {
 // Worker processor interface - each worker implements this
 export interface WorkerProcessor {
   readonly workerName: string;
+  /** The workspace directory used by this worker for the current run. When set,
+   *  the queue processor uses this instead of the WORKSPACE_PATH env var. */
+  readonly workspacePath?: string;
   processMessage(message: string, log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<WorkerResult>;
-  /** Return the coding agent binary version string (e.g. "@github/copilot@0.0.415"). */
+  /** Return the agent version prefix from versions.env components (e.g. "copilot-0.0.415"). */
   getAgentVersion?(): string;
+  /** Return component versions from versions.env (e.g. { COPILOT_CLI_VERSION: "0.0.415" }). */
+  getComponentVersions?(): Record<string, string>;
   /** Called once before the first processMessage in a run. Use to acquire expensive resources (e.g. start a long-lived process). */
   setup?(log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<SetupResult | void>;
   /** Called once after the last processMessage in a run. Always called if setup() was called, even on error. */
@@ -178,9 +378,53 @@ export interface BaseQueueProcessorConfig {
 // Configuration for the coding agent queue processor
 export interface QueueProcessorConfig extends BaseQueueProcessorConfig {
   apiBaseUrl?: string; // For auto-triggering report generation via REST API
+  tokenManagerUrl?: string; // For resolving MCP server secrets at job dispatch time
 }
 
 // --- Enhanced Criteria System types ---
+
+// --- Runs grouping types (shared between API and portal) ---
+
+export type GroupByKey = "none" | "task" | "submissionId" | "profile";
+
+export interface AggregateStats {
+  min: number;
+  max: number;
+  mean: number;
+  stdDev: number;
+}
+
+export interface GroupUniformValues {
+  workerType?: string;
+  model?: string;
+  agentVersion?: string;
+  platform?: string;
+  mcpServers?: string[];
+  skillRevisions?: string[];
+  extensions?: string[];
+  status?: "pending" | "processing" | "done";
+  submissionId?: string;
+  task?: string;
+}
+
+export interface GroupAggregates {
+  count: number;
+  turns: AggregateStats | null;
+  duration: AggregateStats | null;
+  promptTokens: AggregateStats | null;
+  completionTokens: AggregateStats | null;
+  llmCalls: AggregateStats | null;
+  statusCounts: Record<string, number>;
+  outcomeCounts: Record<string, number>;
+}
+
+export interface RunGroup {
+  key: string;
+  label: string;
+  runIds: string[];
+  aggregates: GroupAggregates;
+  uniform: GroupUniformValues;
+}
 
 // Criteria definition (loaded from config/criteria/*.yaml for v2 scenarios)
 export interface CriteriaConfig {
@@ -247,7 +491,6 @@ export interface ReportDocument {
   content?: string;      // Generated markdown report
   status: ReportStatus;
   error?: string;
-  logs: LogEvent[];
   insightReferences?: InsightReference[];  // Insights discovered/referenced by this report
   createdAt: Date;
   updatedAt?: Date;
@@ -307,6 +550,8 @@ export interface ReportTemplateDocument {
   userPrompt: string;                    // REQUIRED — the instruction sent to the agent
   systemPrompt?: ReportTemplateSystemPrompt;  // OPTIONAL — customize base system prompt
   trigger?: ReportTrigger;               // OPTIONAL — omit = always trigger
+  model?: string;                        // OPTIONAL — LLM model override (falls back to REPORT_MODEL env var)
+  timeoutMs?: number;                    // OPTIONAL — session timeout override in ms (falls back to SESSION_TIMEOUT_MS env var)
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;                      // Soft-delete timestamp
@@ -362,7 +607,6 @@ export interface TaskPromptDocument {
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
-  dependsOn?: string[];  // Optional parent prompt feature IDs
 }
 
 /** Prompt feature document stored in MongoDB (extends PromptFeatureConfig with DB metadata) */

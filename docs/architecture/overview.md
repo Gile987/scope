@@ -1,6 +1,6 @@
 # System Overview
 
-Scope MT is a platform for benchmarking AI coding agents. It orchestrates multiple coding agents (Claude Code, GitHub Copilot, VS Code Web), sends them tasks through configurable scenarios and personas, judges the quality of their output, and tracks everything with real-time logging.
+Scope is a platform for benchmarking AI coding agents. It orchestrates multiple coding agents (Claude Code, GitHub Copilot, VS Code Web), sends them tasks through configurable scenarios and personas, judges the quality of their output, and tracks everything with real-time logging.
 
 The entire stack — application code, Azure infrastructure, and Kubernetes GitOps manifests — lives in a single monorepo.
 
@@ -13,9 +13,11 @@ flowchart TB
         Portal["Portal (Vue.js)"]
         API["API (Express)"]
         Judge["Judge"]
+        GW["AI Gateway<br/><i>Rust TLS proxy</i>"]
         subgraph Workers["Coding Agent Workers"]
             Claude["coder-acp-claude-code"]
             Copilot["coder-acp-copilot"]
+            VSCodeElectron["coder-vscode-electron"]
         end
     end
 
@@ -34,6 +36,11 @@ flowchart TB
         KEDA["KEDA (Autoscaler)"]
     end
 
+    subgraph AI["AI Providers"]
+        CopilotAPI["GitHub Copilot API"]
+        AnthropicAPI["Anthropic API"]
+    end
+
     CLI -->|submit tasks| API
     Portal -->|manage runs| API
     API -->|enqueue| Queues
@@ -42,6 +49,8 @@ flowchart TB
     Workers -->|snapshots| Blob
     Workers -->|real-time logs| Redis
     Workers -->|invoke| Judge
+    VSCodeElectron -->|"TLS intercept<br/>HAR capture"| GW
+    GW --> AI
     Redis -->|SSE stream| API
     API -->|stream logs| CLI
     API -->|stream logs| Portal
@@ -70,11 +79,12 @@ flowchart TB
 | `shared` | Shared types and utilities |
 | `workers/coder-acp-claude-code` | Claude Code agent via Agent Client Protocol (ACP) |
 | `workers/coder-acp-copilot` | GitHub Copilot agent via Agent Client Protocol (ACP) |
+| `gateway` | AI Gateway — shared Rust TLS-intercepting proxy with plugin architecture (HAR capture, future: token refresh, rate limiting) |
 
 ## Data Flow
 
-1. **Submit** — A user submits a task via CLI or Portal. The API creates a run record in CosmosDB and enqueues a message to the appropriate Storage Queue.
-2. **Execute** — KEDA scales the target worker pod from 0→N. The worker dequeues the message, spins up the coding agent, and executes the task.
+1. **Submit** — A user submits a task via CLI or Portal, selecting a worker, model, criteria, and optionally an agent version. The API validates the selection (model must be in `supportedModels`, version must be active, at least one criterion required), resolves the agent version's queue, creates a run record in CosmosDB, and enqueues a message.
+2. **Execute** — KEDA scales the target worker pod from 0→N. The worker dequeues the message, spins up the coding agent, and executes the task. The worker stamps `workerVersion` (exact build identity) on the run.
 3. **Stream** — Workers publish real-time log events to Redis Pub/Sub. The API relays these as SSE streams to the CLI/Portal.
 4. **Judge** — After the agent completes, the worker invokes the Judge to evaluate output against criteria. Results (pass/fail per criterion, scores) are persisted to CosmosDB.
 5. **Snapshot** — Each iteration's workspace is snapshotted to Blob Storage for later inspection.

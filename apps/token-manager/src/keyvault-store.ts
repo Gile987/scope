@@ -6,10 +6,10 @@ import { DefaultAzureCredential } from "@azure/identity";
 
 /**
  * Abstraction over secret storage.
- * Implemented by KeyVaultTokenStore — backed by Azure Key Vault in production
+ * Implemented by KeyVaultSecretStore — backed by Azure Key Vault in production
  * and Lowkey Vault (emulator) in local Docker Compose.
  */
-export interface TokenSecretStore {
+export interface SecretStore {
   getSecret(name: string): Promise<string>;
   setSecret(name: string, value: string): Promise<void>;
   deleteSecret(name: string): Promise<void>;
@@ -26,7 +26,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
  * Azure KeyVault-backed secret store with in-process caching.
  * Works with both Azure Key Vault (production) and Lowkey Vault (local dev).
  */
-export class KeyVaultTokenStore implements TokenSecretStore {
+export class KeyVaultSecretStore implements SecretStore {
   private client: SecretClient;
   private cache: Map<string, CacheEntry> = new Map();
   private cacheTtlMs: number;
@@ -65,10 +65,10 @@ export class KeyVaultTokenStore implements TokenSecretStore {
 }
 
 /**
- * Creates a KeyVaultTokenStore for the given vault URI.
+ * Creates a KeyVaultSecretStore for the given vault URI.
  * In production, this points to Azure Key Vault.
  * In local Docker Compose, this points to Lowkey Vault (emulator).
  */
-export function createTokenStore(keyvaultUri: string): TokenSecretStore {
-  return new KeyVaultTokenStore(keyvaultUri);
+export function createSecretStore(keyvaultUri: string): SecretStore {
+  return new KeyVaultSecretStore(keyvaultUri);
 }

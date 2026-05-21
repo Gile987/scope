@@ -10,7 +10,9 @@ import { Command } from 'commander';
 const minimalRun = {
   id: 'run-001',
   workerType: 'coder-acp-copilot',
-  status: 'pending',
+  run: {
+    status: 'pending',
+  },
   scenario: { task: 'Add a button', criteria: ['has_button'] },
   logs: [],
   createdAt: '2025-06-01T10:00:00Z',
@@ -21,7 +23,39 @@ const fullRun = {
   id: 'run-002',
   workerType: 'coder-acp-claude-code',
   model: 'claude-sonnet-4-20250514',
-  status: 'completed',
+  run: {
+    status: 'completed',
+    outcome: 'succeeded',
+    turns: [
+      {
+        iteration: 1,
+        codingAgentResponse: 'code v1',
+        judgeFeedback: 'needs tests',
+        snapshotUrl: 'https://snap/1',
+        passed: false,
+        timestamp: '2025-06-01T10:05:00Z',
+        criteriaResults: [
+          { criterionId: 'has_form', passed: true, evaluated: true },
+          { criterionId: 'has_validation', passed: true, evaluated: true },
+          { criterionId: 'has_tests', passed: false, evaluated: true },
+        ],
+      },
+      {
+        iteration: 2,
+        codingAgentResponse: 'code v2',
+        judgeFeedback: 'all good',
+        snapshotUrl: 'https://snap/2',
+        passed: true,
+        timestamp: '2025-06-01T10:10:00Z',
+        criteriaResults: [
+          { criterionId: 'has_form', passed: true, evaluated: true },
+          { criterionId: 'has_validation', passed: true, evaluated: true },
+          { criterionId: 'has_tests', passed: true, evaluated: true },
+        ],
+      },
+    ],
+    error: undefined,
+  },
   scenario: {
     version: 'v2' as const,
     task: 'Implement login form\nwith validation',
@@ -34,38 +68,6 @@ const fullRun = {
     verbosity: 'brief' as const,
     type: 'traditional' as const,
   },
-  turns: [
-    {
-      iteration: 1,
-      codingAgentResponse: 'code v1',
-      judgeFeedback: 'needs tests',
-      snapshotUrl: 'https://snap/1',
-      passed: false,
-      timestamp: '2025-06-01T10:05:00Z',
-      criteriaResults: [
-        { criterionId: 'has_form', passed: true, evaluated: true },
-        { criterionId: 'has_validation', passed: true, evaluated: true },
-        { criterionId: 'has_tests', passed: false, evaluated: true },
-      ],
-    },
-    {
-      iteration: 2,
-      codingAgentResponse: 'code v2',
-      judgeFeedback: 'all good',
-      snapshotUrl: 'https://snap/2',
-      passed: true,
-      timestamp: '2025-06-01T10:10:00Z',
-      criteriaResults: [
-        { criterionId: 'has_form', passed: true, evaluated: true },
-        { criterionId: 'has_validation', passed: true, evaluated: true },
-        { criterionId: 'has_tests', passed: true, evaluated: true },
-      ],
-    },
-  ],
-  logs: [
-    { timestamp: '2025-06-01T10:00:00Z', level: 'info', message: 'started' },
-    { timestamp: '2025-06-01T10:10:00Z', level: 'info', message: 'done' },
-  ],
   createdAt: '2025-06-01T10:00:00Z',
   updatedAt: '2025-06-01T10:10:00Z',
   promptFeatureExtractionId: 'pfe-abc',
@@ -171,10 +173,6 @@ describe('run get', () => {
       expect(output).toContain('Turn 1');
       expect(output).toContain('Turn 2');
       expect(output).toContain('3/3 criteria passed');
-
-      // Logs count
-      expect(output).toContain('2');
-      expect(output).toContain('entries');
 
       // Prompt feature extraction
       expect(output).toContain('pfe-abc');

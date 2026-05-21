@@ -1,0 +1,19 @@
+urlsToWatch:
+  - "https://api.enterprise.githubcopilot.com/*"
+  - "https://api.github.com/*"
+  - "https://api.githubcopilot.com/*"
+  - "https://*.githubcopilot.com/*"
+  - "https://api.anthropic.com/*"
+port: 18000
+certDir: /tmp/scope-gateway/certs
+logLevel: info
+plugins:
+  har:
+    outputDir: /tmp/scope-gateway/har-output
+    appendTimeoutSecs: 120
+  copilotToken: {}
+defaultSessionPluginSettings:
+  har:
+    redactCredentials: true
+harBlob:
+  containerName: "har"

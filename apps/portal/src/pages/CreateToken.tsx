@@ -5,8 +5,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { TokenType, TokenValidationResult, CreateTokenRequest } from "@/types";
-import { TOKEN_TYPE_LABELS, TOKEN_CAPABILITY_LABELS, TOKEN_TYPE_EXPECTED_CAPABILITIES } from "@/types";
+import type { KeyType, KeyValidationResult, CreateKeyRequest } from "@/types";
+import { KEY_TYPE_LABELS, KEY_CAPABILITY_LABELS, KEY_TYPE_EXPECTED_CAPABILITIES } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
 
-const TOKEN_INSTRUCTIONS: Record<TokenType, { steps: string[]; link?: { label: string; url: string }; note?: string }> = {
+const KEY_INSTRUCTIONS: Record<KeyType, { steps: string[]; link?: { label: string; url: string }; note?: string }> = {
   "github-pat-classic": {
     steps: [
       "Go to GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)",
@@ -75,36 +75,51 @@ const TOKEN_INSTRUCTIONS: Record<TokenType, { steps: string[]; link?: { label: s
     ],
     link: { label: "Open Anthropic Console", url: "https://console.anthropic.com/settings/keys" },
   },
+  "anthropic-oauth": {
+    steps: [
+      "Set up a Claude Code subscription (Max or Team plan)",
+      "Authenticate via 'claude login' in the CLI",
+      "Copy the OAuth token from ~/.claude/credentials.json",
+    ],
+    note: "OAuth tokens from Claude Code subscriptions use Bearer authentication. The token format varies (not sk-ant-).",
+  },
 };
 
-const TOKEN_TYPES: TokenType[] = [
+const KEY_TYPES: KeyType[] = [
   "github-pat-classic",
   "github-pat-fine-grained",
   "github-oauth",
   "github-oauth-cookie-state",
   "anthropic-api-key",
+  "anthropic-oauth",
 ];
 
 /** Expected prefix per token type for surface-level validation. */
-const TOKEN_PREFIXES: Record<TokenType, { prefix: string; description: string }> = {
+const KEY_PREFIXES: Record<KeyType, { prefix: string; description: string }> = {
   "github-pat-classic": { prefix: "ghp_", description: "ghp_" },
   "github-pat-fine-grained": { prefix: "github_pat_", description: "github_pat_" },
   "github-oauth": { prefix: "gho_", description: "gho_ or ghu_" }, // also ghu_ for user tokens
   "github-oauth-cookie-state": { prefix: "{", description: "JSON object" },
   "anthropic-api-key": { prefix: "sk-ant-", description: "sk-ant-" },
+  "anthropic-oauth": { prefix: "", description: "(any format — OAuth token)" },
 };
 
 /** Check if the token value matches the expected prefix for the selected type. */
-function validateTokenPrefix(tokenType: TokenType, tokenValue: string): string | null {
+function validateKeyPrefix(tokenType: KeyType, tokenValue: string): string | null {
   const trimmed = tokenValue.trim();
   if (!trimmed) return null; // Don't warn on empty input
 
-  const expected = TOKEN_PREFIXES[tokenType];
+  const expected = KEY_PREFIXES[tokenType];
 
   // Special case: github-oauth can start with gho_ or ghu_
   if (tokenType === "github-oauth") {
     if (trimmed.startsWith("gho_") || trimmed.startsWith("ghu_")) return null;
     return `Expected prefix: ${expected.description}`;
+  }
+
+  // Special case: anthropic-oauth has no fixed prefix
+  if (tokenType === "anthropic-oauth") {
+    return null;
   }
 
   if (!trimmed.startsWith(expected.prefix)) {
@@ -132,14 +147,14 @@ export function CreateToken() {
   const navigate = useNavigate();
 
   const [step, setStep] = useState<Step>("input");
-  const [type, setType] = useState<TokenType>("github-pat-classic");
+  const [type, setType] = useState<KeyType>("github-pat-classic");
   const [value, setValue] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [comment, setComment] = useState("");
-  const [previewResult, setPreviewResult] = useState<TokenValidationResult | null>(null);
+  const [previewResult, setPreviewResult] = useState<KeyValidationResult | null>(null);
 
   const previewMutation = useMutation({
-    mutationFn: () => api.previewToken({ type, value: value.trim() }),
+    mutationFn: () => api.previewKey({ type, value: value.trim() }),
     onSuccess: (result) => {
       setPreviewResult(result);
       setStep("review");
@@ -150,7 +165,7 @@ export function CreateToken() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (body: CreateTokenRequest) => api.createToken(body),
+    mutationFn: (body: CreateKeyRequest) => api.createKey(body),
     onSuccess: (data) => {
       toast.success("Key registered successfully");
       navigate(`/secrets/keys/${data._id}`);
@@ -165,7 +180,7 @@ export function CreateToken() {
       toast.error("Key value is required");
       return;
     }
-    const prefixError = validateTokenPrefix(type, value);
+    const prefixError = validateKeyPrefix(type, value);
     if (prefixError) {
       toast.error(`Invalid key format: ${prefixError}`);
       return;
@@ -196,7 +211,7 @@ export function CreateToken() {
   useCommandEnter(
     step === "input" ? doValidate : handleRegister,
     step === "input"
-      ? !previewMutation.isPending && !!value.trim() && !validateTokenPrefix(type, value)
+      ? !previewMutation.isPending && !!value.trim() && !validateKeyPrefix(type, value)
       : !createMutation.isPending,
   );
 
@@ -227,19 +242,19 @@ export function CreateToken() {
               {/* Type */}
               <div className="space-y-2">
                 <Label htmlFor="type">Key Type</Label>
-                <Select value={type} onValueChange={(v) => setType(v as TokenType)}>
+                <Select value={type} onValueChange={(v) => setType(v as KeyType)}>
                   <SelectTrigger>
-                    <SelectValue>{TOKEN_TYPE_LABELS[type]}</SelectValue>
+                    <SelectValue>{KEY_TYPE_LABELS[type]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {TOKEN_TYPES.map((t) => (
+                    {KEY_TYPES.map((t) => (
                       <SelectItem key={t} value={t}>
                         <div className="flex items-center gap-2">
-                          <span className="shrink-0">{TOKEN_TYPE_LABELS[t]}</span>
+                          <span className="shrink-0">{KEY_TYPE_LABELS[t]}</span>
                           <div className="flex flex-wrap gap-1">
-                            {TOKEN_TYPE_EXPECTED_CAPABILITIES[t].map((c) => (
+                            {KEY_TYPE_EXPECTED_CAPABILITIES[t].map((c) => (
                               <Badge key={c} variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
-                                {TOKEN_CAPABILITY_LABELS[c]}
+                                {KEY_CAPABILITY_LABELS[c]}
                               </Badge>
                             ))}
                           </div>
@@ -255,7 +270,7 @@ export function CreateToken() {
 
               {/* Instructions */}
               {(() => {
-                const info = TOKEN_INSTRUCTIONS[type];
+                const info = KEY_INSTRUCTIONS[type];
                 return (
                   <div className="rounded-md border bg-muted/50 p-4 space-y-3">
                     <p className="text-sm font-medium">How to create this key</p>
@@ -308,7 +323,7 @@ export function CreateToken() {
                 </p>
                 {/* Prefix validation warning */}
                 {(() => {
-                  const warning = validateTokenPrefix(type, value);
+                  const warning = validateKeyPrefix(type, value);
                   if (!warning) return null;
                   return (
                     <p className="flex items-center gap-1.5 text-xs text-amber-600">
@@ -348,7 +363,7 @@ export function CreateToken() {
               {/* Validate */}
               <Button
                 type="submit"
-                disabled={previewMutation.isPending || !value.trim() || !!validateTokenPrefix(type, value)}
+                disabled={previewMutation.isPending || !value.trim() || !!validateKeyPrefix(type, value)}
                 className="gap-1.5"
               >
                 {previewMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -398,7 +413,7 @@ export function CreateToken() {
             {/* Token type */}
             <div className="space-y-1">
               <p className="text-sm font-medium text-muted-foreground">Key Type</p>
-              <p>{TOKEN_TYPE_LABELS[type]}</p>
+              <p>{KEY_TYPE_LABELS[type]}</p>
             </div>
 
             {/* Capabilities */}
@@ -408,7 +423,7 @@ export function CreateToken() {
                 <div className="flex flex-wrap gap-1.5">
                   {previewResult.capabilities!.map((c) => (
                     <Badge key={c} variant="secondary" className="text-sm">
-                      {TOKEN_CAPABILITY_LABELS[c] ?? c}
+                      {KEY_CAPABILITY_LABELS[c] ?? c}
                     </Badge>
                   ))}
                 </div>

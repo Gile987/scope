@@ -4,7 +4,7 @@
 import {
   ConversationTurn,
   CriterionResult,
-  SetupResult,
+  TokenUsage,
   WorkerProcessor,
   WorkerProcessorOptions,
   LogEvent,
@@ -12,8 +12,9 @@ import {
 } from "../types/types.js";
 import type { McpServerConfig } from "../types/mcp.js";
 import type { SkillConfig } from "../types/skill.js";
+import type { ExtensionConfig } from "../types/extension.js";
 import { BlobStorage, BlobStorageConfig } from "../storage/blob-storage.js";
-import { sanitizeHarFile } from "../har/har-parser.js";
+import { sanitizeHarFile, extractToolCalls } from "../har/har-parser.js";
 import { JudgeClient } from "./judge-client.js";
 
 export interface MultiTurnConfig {
@@ -21,20 +22,22 @@ export interface MultiTurnConfig {
   processor: WorkerProcessor;
   /** The task to perform */
   task: string;
-  /** Judge evaluation criteria */
-  criteria: string[];
-  /** Scenario version (v1 = inline prompts, v2 = criteria IDs) */
-  scenarioVersion?: 'v1' | 'v2';
+  /** Judge evaluation criteria (optional when maxIterations is 1) */
+  criteria?: string[];
   /** Maximum number of iterations before giving up */
   maxIterations: number;
-  /** Path to the workspace directory to snapshot */
+  /** Workspace directory to snapshot (must be resolved by caller after setup) */
   workspacePath: string;
-  /** Judge REST API client */
-  judgeClient: JudgeClient;
+  /** Judge REST API client (required when criteria are provided) */
+  judgeClient?: JudgeClient;
   /** Blob storage client for workspace snapshots */
   blobStorage: BlobStorage;
-  /** Request ID (for snapshot naming) */
+  /** Request ID (top-level prefix for blob paths) */
   requestId: string;
+  /** Run ID for the current attempt. Blobs are stored under
+   *  `{requestId}/runs/{runId}/...` so each retry attempt gets its own
+   *  isolated path and never overwrites a previous attempt's artifacts. */
+  runId: string;
   /** Logging function */
   log: (
     level: LogEvent["level"],
@@ -43,8 +46,6 @@ export interface MultiTurnConfig {
   ) => Promise<void>;
   /** Called after each iteration to persist the turn to MongoDB */
   onTurnComplete?: (turn: ConversationTurn) => Promise<void>;
-  /** Called after setup-phase videos are uploaded, to persist URLs to MongoDB */
-  onSetupVideosUploaded?: (setupVideoUrls: string[]) => Promise<void>;
   /** Persona instructions for the judge (resolved prose from traits) */
   personaInstructions?: string;
   /** Model to pass to the coding agent */
@@ -53,12 +54,16 @@ export interface MultiTurnConfig {
   mcpServerConfigs?: McpServerConfig[];
   /** Resolved skill configurations to inject into the agent prompt */
   skillConfigs?: SkillConfig[];
+  /** Resolved VS Code extension configurations for runtime installation */
+  extensionConfigs?: ExtensionConfig[];
 }
 
 export interface MultiTurnResult {
   turns: ConversationTurn[];
   passed: boolean;
   finalResult: string;
+  /** True when the loop exited because of an unrecoverable error (agent crash, snapshot failure, judge failure), not because iterations were exhausted. */
+  hadError: boolean;
 }
 
 /**
@@ -80,24 +85,29 @@ export async function runMultiTurnLoop(
     processor,
     task,
     criteria,
-    scenarioVersion,
     maxIterations,
-    workspacePath,
     judgeClient,
     blobStorage,
     requestId,
+    runId,
     log,
     onTurnComplete,
-    onSetupVideosUploaded,
     personaInstructions,
     model,
     mcpServerConfigs,
     skillConfigs,
+    extensionConfigs,
+    workspacePath,
   } = config;
+
+  // Defensive: criteria is required when maxIterations > 1
+  const hasCriteria = criteria && criteria.length > 0;
+  if (!hasCriteria && maxIterations > 1) {
+    throw new Error("Criteria is required when maxIterations > 1");
+  }
 
   const turns: ConversationTurn[] = [];
   let nextPrompt = task;
-  const startTime = Date.now();
 
   await log("info", `Starting multi-turn loop (max ${maxIterations} iterations)`, {
     criteria,
@@ -106,58 +116,9 @@ export async function runMultiTurnLoop(
     mcpServers: mcpServerConfigs?.map((s) => s.name) ?? [],
     skillCount: skillConfigs?.length ?? 0,
     skills: skillConfigs?.map((s) => s.name) ?? [],
+    extensionCount: extensionConfigs?.length ?? 0,
+    extensions: extensionConfigs?.map((e) => e.id) ?? [],
   });
-
-  // Lifecycle: call setup() once before all iterations so workers can acquire expensive resources
-  let setupVideoUrls: string[] | undefined;
-
-  const uploadSetupVideos = async (result: SetupResult, label: string) => {
-    if (!result.videoFilePaths || result.videoFilePaths.length === 0) return;
-    try {
-      setupVideoUrls = [];
-      for (let i = 0; i < result.videoFilePaths.length; i++) {
-        const videoBlobName = `${requestId}/setup/video-${i}.webm`;
-        const videoUrl = await blobStorage.uploadFile(
-          result.videoFilePaths[i],
-          videoBlobName,
-          "video/webm"
-        );
-        setupVideoUrls.push(videoUrl);
-      }
-      await log("info", `Setup video files uploaded (${label})`, { videoCount: result.videoFilePaths.length });
-      if (onSetupVideosUploaded && setupVideoUrls.length > 0) {
-        await onSetupVideosUploaded(setupVideoUrls);
-      }
-    } catch (uploadError) {
-      const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-      await log("warn", `Failed to upload setup video files: ${msg}`);
-    }
-  };
-
-  if (processor.setup) {
-    await log("info", "Calling processor setup...", { phase: "setup" });
-    let setupResult: SetupResult | void;
-    try {
-      setupResult = await processor.setup(log, { model, mcpServerConfigs, skillConfigs });
-    } catch (setupError) {
-      // Even on setup failure, try to upload setup videos (e.g. TOTP login recording)
-      const errorResult = (setupError as any)?.setupResult as SetupResult | undefined;
-      if (errorResult) {
-        await uploadSetupVideos(errorResult, "from failed setup");
-      }
-      // Call teardown to clean up any resources setup() partially acquired (e.g. port, browser)
-      if (processor.teardown) {
-        await processor.teardown(log).catch(() => {});
-      }
-      throw setupError;
-    }
-
-    if (setupResult) {
-      await uploadSetupVideos(setupResult, "success");
-    }
-  }
-
-  try {
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     // Create a per-iteration logger that automatically injects the iteration number
@@ -166,16 +127,7 @@ export async function runMultiTurnLoop(
     const iterLog: typeof log = async (level, message, data) =>
       log(level, message, { ...data, iteration });
 
-    // Check timeout
-    const elapsed = Date.now() - startTime;
-    if (elapsed > MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS) {
-      await iterLog("warn", `Multi-turn loop timed out after ${Math.round(elapsed / 1000)}s`, { elapsedMs: elapsed });
-      return {
-        turns,
-        passed: false,
-        finalResult: `Timed out after ${iteration - 1} iterations (${Math.round(elapsed / 1000)}s)`,
-      };
-    }
+    const iterationStartedAt = new Date();
 
     await iterLog("info", `--- Iteration ${iteration}/${maxIterations} ---`, {
       promptLength: nextPrompt.length,
@@ -184,24 +136,54 @@ export async function runMultiTurnLoop(
 
     // Step 1: Call the coding agent
     await iterLog("info", "Calling coding agent...");
-    let codingResponse: string;
+    let codingResponse: string | undefined;
     let turnHarUrl: string | undefined;
+    let turnTokenUsage: TokenUsage | undefined;
+    let turnAiCallCount: number | undefined;
+    let turnToolCallsUrl: string | undefined;
+    let turnToolCallCount: number | undefined;
+    let turnRawChatUrl: string | undefined;
+    let turnRawChatFormat: string | undefined;
+    let turnChatResultUrl: string | undefined;
+    let turnChatResultFormat: string | undefined;
     const turnVideoUrls: string[] = [];
     try {
-      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs });
+      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
       codingResponse = workerResult.response;
+      turnTokenUsage = workerResult.tokenUsage;
+      turnAiCallCount = workerResult.aiCallCount;
 
       // Upload HAR file to blob storage if available (sanitized to strip credentials)
       if (workerResult.harFilePath) {
         try {
-          await sanitizeHarFile(workerResult.harFilePath, workerResult.harFilePath);
-          const harBlobName = `${requestId}/iteration-${iteration}/devproxy.har`;
+          const sanitizedHar = await sanitizeHarFile(workerResult.harFilePath, workerResult.harFilePath);
+          const harBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/devproxy.har`;
           turnHarUrl = await blobStorage.uploadFile(
             workerResult.harFilePath,
             harBlobName,
             "application/json"
           );
           await iterLog("info", "HAR file uploaded", { harUrl: turnHarUrl });
+
+          // Extract tool calls from the sanitized HAR and write them to a
+          // per-iteration JSONL blob alongside the HAR. Storing tool calls
+          // out-of-band keeps unbounded lists out of the request document
+          // (which is bounded to 2 MB on CosmosDB).
+          try {
+            const extracted = extractToolCalls(sanitizedHar);
+            if (extracted.length > 0) {
+              await blobStorage.writeToolCalls(requestId, runId, iteration, extracted);
+              turnToolCallsUrl = blobStorage.getToolCallsBlobUrl(requestId, runId, iteration);
+              turnToolCallCount = extracted.length;
+              await iterLog("info", `Extracted ${extracted.length} tool call(s) from HAR`, {
+                toolCallsUrl: turnToolCallsUrl,
+                toolCallCount: turnToolCallCount,
+              });
+            }
+          } catch (extractError) {
+            const msg = extractError instanceof Error ? extractError.message : String(extractError);
+            await iterLog("warn", `Failed to extract or persist tool calls from HAR: ${msg}`);
+          }
         } catch (uploadError) {
           const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
           await iterLog("warn", `Failed to upload HAR file: ${msg}`);
@@ -212,7 +194,7 @@ export async function runMultiTurnLoop(
       if (workerResult.videoFilePaths && workerResult.videoFilePaths.length > 0) {
         try {
           for (let i = 0; i < workerResult.videoFilePaths.length; i++) {
-            const videoBlobName = `${requestId}/iteration-${iteration}/video-${i}.webm`;
+            const videoBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/video-${i}.webm`;
             const videoUrl = await blobStorage.uploadFile(
               workerResult.videoFilePaths[i],
               videoBlobName,
@@ -226,9 +208,67 @@ export async function runMultiTurnLoop(
           await iterLog("warn", `Failed to upload video files: ${msg}`);
         }
       }
+
+      // Upload raw chat transcript to blob storage if available
+      if (workerResult.rawChatFilePath) {
+        try {
+          const chatBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/chat-export.json`;
+          turnRawChatUrl = await blobStorage.uploadFile(
+            workerResult.rawChatFilePath,
+            chatBlobName,
+            "application/json"
+          );
+          turnRawChatFormat = workerResult.rawChatFormat;
+          await iterLog("info", "Raw chat transcript uploaded", { rawChatUrl: turnRawChatUrl });
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await iterLog("warn", `Failed to upload raw chat transcript: ${msg}`);
+        }
+      }
+
+      // Upload chat result envelope (e.g. VS Code's IChatAgentResult2) for
+      // post-hoc diagnostics. Stored as a separate blob so it never bloats
+      // the request document — see growth-ecosystems/scope-core#811.
+      if (workerResult.chatResultFilePath) {
+        try {
+          const blobName = `${requestId}/runs/${runId}/iteration-${iteration}/chat-result.json`;
+          turnChatResultUrl = await blobStorage.uploadFile(
+            workerResult.chatResultFilePath,
+            blobName,
+            "application/json"
+          );
+          turnChatResultFormat = workerResult.chatResultFormat;
+          await iterLog("info", "Chat result envelope uploaded", { chatResultUrl: turnChatResultUrl });
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await iterLog("warn", `Failed to upload chat result envelope: ${msg}`);
+        }
+      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       await iterLog("error", `Coding agent failed: ${errorMsg}`, { error: errorMsg });
+
+      // Extract HAR file path from the error if the worker attached it
+      const errorHarFilePath: string | undefined = (error as any)?.harFilePath;
+      let errorHarUrl: string | undefined;
+      if (errorHarFilePath) {
+        try {
+          await sanitizeHarFile(errorHarFilePath, errorHarFilePath);
+          const harBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/devproxy.har`;
+          errorHarUrl = await blobStorage.uploadFile(
+            errorHarFilePath,
+            harBlobName,
+            "application/json"
+          );
+          await iterLog("info", "HAR file uploaded from failed iteration", { harUrl: errorHarUrl });
+        } catch (uploadError) {
+          const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          await iterLog("warn", `Failed to upload HAR file from failed iteration: ${msg}`);
+        }
+      }
+
+      // Extract aiCallCount from the error if the worker attached it
+      const errorAiCallCount: number | undefined = (error as any)?.aiCallCount;
 
       // Extract video paths from the error if the worker attached them
       const errorVideoPaths: string[] = (error as any)?.videoFilePaths ?? [];
@@ -236,7 +276,7 @@ export async function runMultiTurnLoop(
       if (errorVideoPaths.length > 0) {
         try {
           for (let i = 0; i < errorVideoPaths.length; i++) {
-            const videoBlobName = `${requestId}/iteration-${iteration}/video-${i}.webm`;
+            const videoBlobName = `${requestId}/runs/${runId}/iteration-${iteration}/video-${i}.webm`;
             const videoUrl = await blobStorage.uploadFile(
               errorVideoPaths[i],
               videoBlobName,
@@ -251,7 +291,7 @@ export async function runMultiTurnLoop(
         }
       }
 
-      // Persist a partial turn so video URLs are not lost
+      // Persist a partial turn so HAR/video URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
         codingAgentResponse: `Coding agent failed: ${errorMsg}`,
@@ -259,7 +299,11 @@ export async function runMultiTurnLoop(
         snapshotUrl: "",
         passed: false,
         timestamp: new Date(),
+        startedAt: iterationStartedAt,
+        durationMs: Date.now() - iterationStartedAt.getTime(),
+        ...(errorHarUrl && { harUrl: errorHarUrl }),
         ...(errorVideoUrls.length > 0 && { videoUrls: errorVideoUrls }),
+        ...(errorAiCallCount !== undefined && { aiCallCount: errorAiCallCount }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -269,12 +313,13 @@ export async function runMultiTurnLoop(
       return {
         turns,
         passed: false,
+        hadError: true,
         finalResult: `Coding agent failed on iteration ${iteration}: ${errorMsg}`,
       };
     }
 
     await iterLog("info", "Coding agent completed", {
-      responseLength: codingResponse.length,
+      responseLength: codingResponse?.length ?? 0,
     });
 
     // Step 2: Snapshot workspace to blob storage
@@ -284,6 +329,7 @@ export async function runMultiTurnLoop(
       snapshotUrl = await blobStorage.uploadWorkspaceSnapshot(
         workspacePath,
         requestId,
+        runId,
         iteration
       );
     } catch (error) {
@@ -293,13 +339,19 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so video/HAR URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
-        codingAgentResponse: codingResponse,
+        ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: `Snapshot upload failed: ${errorMsg}`,
         snapshotUrl: "",
         passed: false,
         timestamp: new Date(),
+        startedAt: iterationStartedAt,
+        durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(turnHarUrl && { harUrl: turnHarUrl }),
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+        ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
+        ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+        ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -309,11 +361,50 @@ export async function runMultiTurnLoop(
       return {
         turns,
         passed: false,
+        hadError: true,
         finalResult: `Snapshot upload failed on iteration ${iteration}: ${errorMsg}`,
       };
     }
 
     await iterLog("info", "Snapshot uploaded", { snapshotUrl });
+
+    // Skip judge evaluation when no criteria are provided and maxIterations is 1
+    // (single-iteration pass-through mode: run the agent, snapshot, done)
+    if (!hasCriteria && maxIterations === 1) {
+      await iterLog("info", "No criteria provided with maxIterations=1 — skipping judge evaluation");
+
+      const turn: ConversationTurn = {
+        iteration,
+        ...(codingResponse && { codingAgentResponse: codingResponse }),
+        judgeFeedback: "No criteria — judge evaluation skipped",
+        snapshotUrl,
+        passed: true,
+        timestamp: new Date(),
+        startedAt: iterationStartedAt,
+        durationMs: Date.now() - iterationStartedAt.getTime(),
+        ...(turnHarUrl && { harUrl: turnHarUrl }),
+        ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+        ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
+        ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
+        ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+        ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
+        ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
+        ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+        ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
+      };
+      turns.push(turn);
+      if (onTurnComplete) {
+        await onTurnComplete(turn);
+      }
+
+      return {
+        turns,
+        passed: true,
+        hadError: false,
+        finalResult: codingResponse ?? "",
+      };
+    }
 
     // Step 3: Call the judge
     await iterLog("info", "Calling judge for evaluation...");
@@ -321,12 +412,11 @@ export async function runMultiTurnLoop(
     let judgeFeedback: string;
     let criteriaResults: CriterionResult[] | undefined;
     try {
-      const judgeResult = await judgeClient.evaluate({
+      const judgeResult = await judgeClient!.evaluate({
         snapshotUrl,
-        criteria,
+        criteria: criteria!,
         conversationHistory: turns,
         personaInstructions,
-        scenarioVersion,
         requestId,
       });
       judgePassed = judgeResult.passed;
@@ -339,13 +429,23 @@ export async function runMultiTurnLoop(
       // Persist a partial turn so video/snapshot URLs are not lost
       const partialTurn: ConversationTurn = {
         iteration,
-        codingAgentResponse: codingResponse,
+        ...(codingResponse && { codingAgentResponse: codingResponse }),
         judgeFeedback: `Judge evaluation failed: ${errorMsg}`,
         snapshotUrl,
         passed: false,
         timestamp: new Date(),
+        startedAt: iterationStartedAt,
+        durationMs: Date.now() - iterationStartedAt.getTime(),
         ...(turnHarUrl && { harUrl: turnHarUrl }),
         ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+        ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
+        ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
+        ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+        ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
+        ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
+        ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+        ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+        ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
       };
       turns.push(partialTurn);
       if (onTurnComplete) {
@@ -355,6 +455,7 @@ export async function runMultiTurnLoop(
       return {
         turns,
         passed: false,
+        hadError: true,
         finalResult: `Judge evaluation failed on iteration ${iteration}: ${errorMsg}`,
       };
     }
@@ -379,14 +480,24 @@ export async function runMultiTurnLoop(
     // Step 4: Record the turn
     const turn: ConversationTurn = {
       iteration,
-      codingAgentResponse: codingResponse,
+      ...(codingResponse && { codingAgentResponse: codingResponse }),
       judgeFeedback,
       snapshotUrl,
       passed: judgePassed,
       timestamp: new Date(),
+      startedAt: iterationStartedAt,
+      durationMs: Date.now() - iterationStartedAt.getTime(),
       criteriaResults,
       ...(turnHarUrl && { harUrl: turnHarUrl }),
       ...(turnVideoUrls.length > 0 && { videoUrls: turnVideoUrls }),
+      ...(turnTokenUsage && { tokenUsage: turnTokenUsage }),
+      ...(turnAiCallCount !== undefined && { aiCallCount: turnAiCallCount }),
+      ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+      ...(turnToolCallCount !== undefined && { toolCallCount: turnToolCallCount }),
+      ...(turnRawChatUrl && { rawChatUrl: turnRawChatUrl }),
+      ...(turnRawChatFormat && { rawChatFormat: turnRawChatFormat }),
+      ...(turnChatResultUrl && { chatResultUrl: turnChatResultUrl }),
+      ...(turnChatResultFormat && { chatResultFormat: turnChatResultFormat }),
     };
     turns.push(turn);
 
@@ -403,7 +514,8 @@ export async function runMultiTurnLoop(
       return {
         turns,
         passed: true,
-        finalResult: codingResponse,
+        hadError: false,
+        finalResult: codingResponse ?? "",
       } as MultiTurnResult;
     }
 
@@ -413,6 +525,26 @@ export async function runMultiTurnLoop(
       feedback: judgeFeedback.substring(0, 500),
     });
     nextPrompt = judgeFeedback;
+
+    // Per-iteration timeout: if this iteration alone exceeded the budget,
+    // abort the loop rather than starting another iteration that is likely
+    // to overrun as well. The completed iteration's turn is preserved.
+    const iterationElapsedMs = Date.now() - iterationStartedAt.getTime();
+    if (iterationElapsedMs > MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS) {
+      const elapsedSec = Math.round(iterationElapsedMs / 1000);
+      const budgetSec = Math.round(MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS / 1000);
+      await iterLog(
+        "warn",
+        `Iteration ${iteration} exceeded timeout (${elapsedSec}s > ${budgetSec}s)`,
+        { elapsedMs: iterationElapsedMs, budgetMs: MULTI_TURN_DEFAULTS.ITERATION_TIMEOUT_MS },
+      );
+      return {
+        turns,
+        passed: false,
+        hadError: true,
+        finalResult: `Iteration ${iteration} exceeded timeout (${elapsedSec}s > ${budgetSec}s)`,
+      };
+    }
   }
 
   // Max iterations exhausted
@@ -423,16 +555,9 @@ export async function runMultiTurnLoop(
   return {
     turns,
     passed: false,
+    hadError: false,
     finalResult: `Max iterations (${maxIterations}) reached. Last coding response: ${
       turns[turns.length - 1]?.codingAgentResponse?.substring(0, 200) || "none"
     }`,
   };
-
-  } finally {
-    // Lifecycle: always call teardown() if setup() was called, even on error
-    if (processor.teardown) {
-      await log("info", "Calling processor teardown...");
-      await processor.teardown(log);
-    }
-  }
 }

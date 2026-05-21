@@ -1,0 +1,39 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+import { describe, it, expect, vi } from "vitest";
+
+// Stub checkMigrations before index.ts can import it
+vi.mock("db-migrations/check-migrations", () => ({
+  checkMigrations: vi.fn().mockResolvedValue({
+    ready: true,
+    applied: ["001", "002"],
+    pending: [],
+  }),
+}));
+
+vi.mock("./llm.js", () => ({
+  isLlmAvailable: vi.fn().mockReturnValue(false),
+  generateCriteriaPrompt: vi.fn(),
+}));
+vi.mock("./prompt-feature-llm.js", () => ({
+  isLlmAvailable: vi.fn().mockReturnValue(false),
+  generatePromptFeaturePrompt: vi.fn(),
+  extractPromptFeatures: vi.fn(),
+}));
+vi.mock("./task-prompt-llm.js", () => ({
+  isTaskPromptLlmAvailable: vi.fn().mockReturnValue(false),
+  generateTaskPrompt: vi.fn(),
+}));
+
+describe("OpenAPI spec snapshot", () => {
+  it("matches the committed snapshot", async () => {
+    // Import index.ts to trigger all route registrations (register*Routes calls)
+    await import("./index.js");
+    const { generateOpenAPIDocument } = await import("./openapi/index.js");
+    const doc = generateOpenAPIDocument();
+
+    // Snapshot the full spec — catches dropped routes, changed schemas, etc.
+    expect(doc).toMatchSnapshot();
+  }, 30_000); // index.ts pulls in the entire route surface; 5s default is too tight under full-suite load.
+});

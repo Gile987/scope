@@ -44,32 +44,45 @@ function layoutGraph(graph: CriteriaGraphData) {
     queue = next;
   }
 
-  // Assign positions
-  const NODE_W = 180;
+  // Assign positions with dynamic node widths
   const NODE_H = 60;
   const H_GAP = 40;
   const V_GAP = 80;
+  const CHAR_WIDTH_PX = 7.5; // slightly wider for SVG text rendering
+  const NODE_PADDING_PX = 40;
+  const NODE_MIN_W = 180;
+
+  const nodeWidths = new Map<string, number>();
+  for (const n of nodes) {
+    const w = Math.max(NODE_MIN_W, Math.ceil(n.id.length * CHAR_WIDTH_PX + NODE_PADDING_PX));
+    nodeWidths.set(n.id, w);
+  }
 
   const positions = new Map<string, { x: number; y: number }>();
   for (let layer = 0; layer < layers.length; layer++) {
     const row = layers[layer];
-    const totalWidth = row.length * NODE_W + (row.length - 1) * H_GAP;
-    const startX = -totalWidth / 2 + NODE_W / 2;
+    const totalWidth = row.reduce((sum, id) => sum + (nodeWidths.get(id) ?? NODE_MIN_W), 0) + (row.length - 1) * H_GAP;
+    let curX = -totalWidth / 2;
     for (let i = 0; i < row.length; i++) {
+      const w = nodeWidths.get(row[i]) ?? NODE_MIN_W;
       positions.set(row[i], {
-        x: startX + i * (NODE_W + H_GAP),
+        x: curX + w / 2,
         y: layer * (NODE_H + V_GAP),
       });
+      curX += w + H_GAP;
     }
   }
 
   const totalH = layers.length * (NODE_H + V_GAP) - V_GAP;
-  const allX = [...positions.values()].map((p) => p.x);
-  const minX = Math.min(...allX) - NODE_W / 2;
-  const maxX = Math.max(...allX) + NODE_W / 2;
+  const allX = [...positions.entries()].map(([id, p]) => {
+    const w = nodeWidths.get(id) ?? NODE_MIN_W;
+    return [p.x - w / 2, p.x + w / 2];
+  }).flat();
+  const minX = Math.min(...allX);
+  const maxX = Math.max(...allX);
   const totalW = maxX - minX;
 
-  return { nodeMap, positions, NODE_W, NODE_H, totalW, totalH, minX, edges };
+  return { nodeMap, positions, nodeWidths, NODE_MIN_W, NODE_H, totalW, totalH, minX, edges };
 }
 
 export function CriteriaGraphView() {
@@ -100,7 +113,7 @@ export function CriteriaGraphView() {
     );
   }
 
-  const { nodeMap, positions, NODE_W, NODE_H, totalW, totalH, minX, edges } = layout;
+  const { nodeMap, positions, nodeWidths, NODE_MIN_W, NODE_H, totalW, totalH, minX, edges } = layout;
   const PADDING = 60;
   const viewBox = `${minX - PADDING} ${-PADDING} ${totalW + PADDING * 2} ${totalH + PADDING * 2 + NODE_H}`;
 
@@ -200,17 +213,18 @@ export function CriteriaGraphView() {
                 if (!node) return null;
                 const deps = node.dependsOn?.length ?? 0;
                 const isActive = hoveredNode ? hoveredNodes.has(id) : true;
+                const nodeW = nodeWidths.get(id) ?? NODE_MIN_W;
                 return (
                   <g
                     key={id}
-                    transform={`translate(${pos.x - NODE_W / 2}, ${pos.y})`}
+                    transform={`translate(${pos.x - nodeW / 2}, ${pos.y})`}
                     onMouseEnter={() => setHoveredNode(id)}
                     onMouseLeave={() => setHoveredNode(null)}
                     className="cursor-pointer"
                   >
                     <Link to={`/criteria/${id}`}>
                       <rect
-                        width={NODE_W}
+                        width={nodeW}
                         height={NODE_H}
                         rx={8}
                         className={
@@ -220,7 +234,7 @@ export function CriteriaGraphView() {
                         }
                       />
                       <text
-                        x={NODE_W / 2}
+                        x={nodeW / 2}
                         y={NODE_H / 2 - 4}
                         textAnchor="middle"
                         className={`text-xs font-mono font-medium ${isActive ? "fill-foreground" : "fill-muted-foreground/50"}`}
@@ -228,7 +242,7 @@ export function CriteriaGraphView() {
                         {id}
                       </text>
                       <text
-                        x={NODE_W / 2}
+                        x={nodeW / 2}
                         y={NODE_H / 2 + 12}
                         textAnchor="middle"
                         className={`text-[10px] ${isActive ? "fill-muted-foreground" : "fill-muted-foreground/30"}`}

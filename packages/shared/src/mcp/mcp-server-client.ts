@@ -4,7 +4,7 @@
 import type { McpServerConfig, McpServerDocument } from '../types/mcp.js';
 
 /**
- * Client for resolving MCP server slugs via the Scope MT REST API.
+ * Client for resolving MCP server slugs via the Scope REST API.
  *
  * Used by queue processors at message-processing time to resolve
  * MCP server slugs stored on RequestDocuments into full McpServerConfig
@@ -49,13 +49,20 @@ export class McpServerClient {
 
 /**
  * Map an API response (McpServerDocument) to a McpServerConfig,
- * stripping DB metadata (createdAt, updatedAt, deletedAt, _id).
+ * stripping DB metadata (createdAt, updatedAt, deletedAt).
+ * _id (slug) is preserved as the gateway-safe identifier.
  */
 function mapToMcpServerConfig(data: McpServerDocument): McpServerConfig {
   return {
     type: data.type,
+    slug: data._id,
     name: data.name,
-    url: data.url,
+    ...(data.url ? { url: data.url } : {}),
+    ...(data.command ? { command: data.command } : {}),
+    ...(data.args && data.args.length > 0 ? { args: data.args } : {}),
+    ...(data.env && Object.keys(data.env).length > 0 ? { env: data.env } : {}),
     ...(data.headers && data.headers.length > 0 ? { headers: data.headers } : {}),
+    ...(data.sessionMode ? { sessionMode: data.sessionMode } : {}),
+    ...(data.version ? { version: data.version } : {}),
   };
 }

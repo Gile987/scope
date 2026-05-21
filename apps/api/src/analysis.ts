@@ -25,6 +25,12 @@ export interface TaskWorkerGroup {
     min: number;
     max: number;
   } | null;  // null if no passed runs
+  durationStats: {
+    mean: number;
+    stdDev: number;
+    min: number;
+    max: number;
+  } | null;  // Total run duration in ms (null if no timing data)
 }
 
 export interface AnalysisResponse {
@@ -60,10 +66,12 @@ export interface AnalyzableRun {
   taskPromptId?: string;
   workerType: string;
   status: string;
+  outcome?: string;
   turns?: Array<{
     iteration: number;
     passed: boolean;
     criteriaResults?: CriterionResult[];
+    durationMs?: number;
   }>;
 }
 
@@ -212,8 +220,8 @@ export function computeAnalysis(
     const [taskPromptId, workerType] = key.split('|||');
     const task = groupRuns[0].scenario.task;  // Use task text from first run in group
     
-    const completed = groupRuns.filter(r => r.status === 'completed');
-    const passedRuns = completed.filter(r => isPassedRun(r, selectedCriteria));
+    const completed = groupRuns.filter(r => r.status === 'done');
+    const passedRuns = completed.filter(r => r.outcome === 'succeeded' && isPassedRun(r, selectedCriteria));
     const passedIterations = passedRuns
       .map(r => getPassedIteration(r, selectedCriteria))
       .filter((iter): iter is number => iter !== null);
@@ -247,6 +255,25 @@ export function computeAnalysis(
       };
     }
 
+    // Duration stats: total run duration (sum of iteration durations) across passed runs
+    let durationStats: TaskWorkerGroup['durationStats'] = null;
+    const runDurations = passedRuns
+      .map(r => {
+        const turns = r.turns || [];
+        const turnDurations = turns.map(t => t.durationMs).filter((d): d is number => d != null);
+        return turnDurations.length > 0 ? turnDurations.reduce((a, b) => a + b, 0) : null;
+      })
+      .filter((d): d is number => d != null);
+    if (runDurations.length > 0) {
+      const mean = runDurations.reduce((a, b) => a + b, 0) / runDurations.length;
+      durationStats = {
+        mean,
+        stdDev: stdDev(runDurations),
+        min: Math.min(...runDurations),
+        max: Math.max(...runDurations),
+      };
+    }
+
     groups.push({
       task,
       taskPromptId,
@@ -258,6 +285,7 @@ export function computeAnalysis(
       passAtK,
       successAtT,
       iterationStats,
+      durationStats,
     });
   }
 
@@ -265,7 +293,7 @@ export function computeAnalysis(
   for (const group of groups) {
     const tpId = group.taskPromptId;
     const groupRuns = groupMap.get(`${tpId}|||${group.workerType}`)!;
-    const passedRuns = groupRuns.filter(r => r.status === 'completed').filter(r => isPassedRun(r, selectedCriteria));
+    const passedRuns = groupRuns.filter(r => r.status === 'done' && r.outcome === 'succeeded').filter(r => isPassedRun(r, selectedCriteria));
     const passedIterations = passedRuns
       .map(r => getPassedIteration(r, selectedCriteria))
       .filter((iter): iter is number => iter !== null);
@@ -276,8 +304,8 @@ export function computeAnalysis(
   }
 
   // Compute summary
-  const allCompleted = validRuns.filter(r => r.status === 'completed');
-  const allPassed = allCompleted.filter(r => isPassedRun(r, selectedCriteria));
+  const allCompleted = validRuns.filter(r => r.status === 'done');
+  const allPassed = allCompleted.filter(r => r.outcome === 'succeeded' && isPassedRun(r, selectedCriteria));
   const allPassedIterations = allPassed
     .map(r => getPassedIteration(r, selectedCriteria))
     .filter((iter): iter is number => iter !== null);

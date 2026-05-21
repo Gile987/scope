@@ -2,11 +2,11 @@
 
 > **Status:** Seed document — expand as the application evolves.
 
-This document describes the internal design of the Scope MT application layer (`scope-mt-app/`).
+This document describes the internal design of the Scope application layer (`scope-mt-app/`).
 
 ## Package Architecture
 
-Scope MT uses a **pnpm workspaces** monorepo. Packages share types and utilities via the `shared` package.
+Scope uses a **pnpm workspaces** monorepo. Packages share types and utilities via the `shared` package.
 
 ```mermaid
 flowchart LR
@@ -75,12 +75,21 @@ flowchart TD
 
 ## Queue Pattern
 
-Each worker type has a dedicated Azure Storage Queue. The API enqueues messages to the correct queue based on the target worker. KEDA monitors queue depth and scales workers from 0 to N.
+Each worker type has a dedicated Azure Storage Queue. The API resolves the target queue via **version-aware routing**: when a run is submitted, the API looks up the selected (or latest active) agent version and uses its registered `queueName` to route the message.
 
 ```
-queue-coder-acp-claude-code  →  coder-acp-claude-code pods (0→N)
-queue-coder-acp-copilot      →  coder-acp-copilot pods (0→N)
+AgentVersion.queueName  →  Azure Storage Queue  →  Worker pods (0→N via KEDA)
 ```
+
+Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-copilot`). When multi-version deployments are introduced, each version will have its own queue, and KEDA will scale each version independently.
+
+### Run submission flow
+
+1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**
+2. API resolves `agentVersion`: explicit selection → validate active; omitted → latest active by `createdAt`
+3. API resolves `model`: explicit → validate against `supportedModels`; omitted → `defaultModel`
+4. API looks up `AgentVersion.queueName` and routes message to that queue
+5. `agentVersion` and `model` are persisted on the `RequestDocument`
 
 ## Real-Time Log Streaming
 
@@ -95,3 +104,18 @@ Criteria are reusable evaluation rules stored in the database and optionally def
 - **Traits** — reusable labels for filtering and composition (e.g., `has_azure`, `has_node`)
 
 See [`ENV_VARIABLES.md`](../../scope-mt-app/ENV_VARIABLES.md) for related configuration options.
+
+## OpenAPI Documentation
+
+The REST API exposes an auto-generated **OpenAPI 3.1** spec built with [Zod](https://zod.dev/) schemas and [`@asteasolutions/zod-to-openapi`](https://github.com/asteasolutions/zod-to-openapi).
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /openapi.json` | Raw OpenAPI 3.1 specification (JSON) |
+| `GET /api-docs` | Interactive Swagger UI |
+
+### Schema organization
+
+Zod schemas live in `packages/shared/src/schemas/` (16 files, ~78 schemas) so they can be reused by the API, CLI, and workers. Each entity has separate **input** (what the client sends) and **response** (what the API returns) schemas.
+
+OpenAPI route registrations live in `apps/api/src/openapi/routes/` — one file per resource group. The registry and generator are in `apps/api/src/openapi/registry.ts`.

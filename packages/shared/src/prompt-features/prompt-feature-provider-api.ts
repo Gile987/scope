@@ -17,7 +17,7 @@ interface AllCacheEntry {
 }
 
 /**
- * PromptFeatureProvider backed by the Scope MT REST API with LRU caching.
+ * PromptFeatureProvider backed by the Scope REST API with LRU caching.
  *
  * Uses native fetch() (Node 22 built-in). Prompt features are fetched from the API
  * on demand and cached with a configurable TTL and max-size LRU policy.
@@ -80,41 +80,6 @@ export class RestApiPromptFeatureProvider implements PromptFeatureProvider {
     return configs;
   }
 
-  async resolveWithAncestors(ids: string[]): Promise<PromptFeatureConfig[]> {
-    const all = await this.getAll();
-    const index = new Map<string, PromptFeatureConfig>();
-    for (const c of all) {
-      index.set(c.id, c);
-    }
-
-    const collected = new Map<string, PromptFeatureConfig>();
-    const queue = [...ids];
-
-    while (queue.length > 0) {
-      const id = queue.shift()!;
-      if (collected.has(id)) continue;
-
-      const feature = index.get(id);
-      if (!feature) {
-        const availableIds = Array.from(index.keys()).join(', ');
-        throw new Error(
-          `Prompt feature '${id}' not found via API. Available: ${availableIds || 'none'}`
-        );
-      }
-      collected.set(id, feature);
-
-      if (feature.dependsOn) {
-        for (const parentId of feature.dependsOn) {
-          if (!collected.has(parentId)) {
-            queue.push(parentId);
-          }
-        }
-      }
-    }
-
-    return Array.from(collected.values());
-  }
-
   async has(id: string): Promise<boolean> {
     return (await this.get(id)) !== undefined;
   }
@@ -163,10 +128,8 @@ export class RestApiPromptFeatureProvider implements PromptFeatureProvider {
 }
 
 function mapToPromptFeatureConfig(data: Record<string, unknown>): PromptFeatureConfig {
-  const dependsOn = (data.dependsOn as string[] | undefined) ?? [];
   return {
     id: String(data.id),
     prompt: String(data.prompt),
-    dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
   };
 }

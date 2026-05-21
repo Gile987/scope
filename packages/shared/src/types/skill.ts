@@ -58,15 +58,17 @@ export interface SkillRevisionDocument {
   archiveUrl: string;             // Blob storage URL to the skill directory tar.gz
 
   // Housekeeping
+  validationWarnings?: string[];    // Non-blocking validation warnings (e.g. name-dir mismatch)
   resolvedAt: Date;               // When the skill was fetched/resolved
   createdAt: Date;
 }
 
 /**
  * Resolved skill configuration passed to workers at runtime.
- * Contains the minimal information needed for prompt injection.
+ * Contains the minimal information needed to download and install the skill.
  */
 export interface SkillConfig {
+  ref: string;                    // Revision ref (e.g. "owner/repo/skill@commitHash")
   name: string;
   description: string;
   content: string;                // SKILL.md markdown body
@@ -83,4 +85,21 @@ export interface SkillSearchResult {
   description?: string;
   internal: boolean;              // true if already in our DB
   installs?: number;              // Install count from skills.sh (external only)
+}
+
+/**
+ * A skill discovered by enumerating the well-known directories of a GitHub repo.
+ * Returned by the skill discovery endpoint to power the multi-skill import wizard.
+ */
+export interface SkillDiscoveryResult {
+  skillName: string;              // Directory name (last path segment)
+  skillPath: string;              // Full path within the repo
+  name?: string;                  // Display name from SKILL.md frontmatter (best-effort)
+  description?: string;           // Description from SKILL.md frontmatter (best-effort)
+  // Library-status enrichment (set by the API route, not the resolver):
+  existsInLibrary?: boolean;      // True if a SkillDocument with this source+skillName exists
+  currentRevisionCommitSha?: string; // commitHash of the most recently stored SkillRevisionDocument
+  latestUpstreamCommitSha?: string;  // commitSha of the latest commit touching skillPath upstream
+  updateAvailable?: boolean;      // existsInLibrary && currentRevisionCommitSha !== latestUpstreamCommitSha
+  lastImportedAt?: string;        // ISO timestamp of the most recent revision (if existsInLibrary)
 }

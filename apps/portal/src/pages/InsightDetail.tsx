@@ -16,10 +16,7 @@ import {
 } from "lucide-react";
 import { formatDate, formatId } from "@/lib/utils";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
-import ReactMarkdown from "react-markdown";
-import rehypeRaw from "rehype-raw";
-import remarkGfm from "remark-gfm";
-import remarkGithubAlerts from "remark-github-markdown-alerts";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 
 export function InsightDetail() {
   const { id } = useParams<{ id: string }>();
@@ -179,12 +176,9 @@ export function InsightDetail() {
         </CardHeader>
         <CardContent>
           <div className="prose prose-sm dark:prose-invert max-w-none">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkGithubAlerts]}
-              rehypePlugins={[rehypeRaw]}
-            >
+            <MarkdownRenderer githubAlerts>
               {insight.description}
-            </ReactMarkdown>
+            </MarkdownRenderer>
           </div>
         </CardContent>
       </Card>

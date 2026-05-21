@@ -2,6 +2,14 @@
 
 The sophisticated criteria system can be configured via environment variables in docker-compose or .env files.
 
+## CLI Configuration
+
+### SCOPE_API_URL
+**Default:** `http://localhost:3100`
+**Type:** URL string
+
+Base URL of the Scope API used by all CLI commands. Override this to point the CLI at a remote or Docker-hosted API instance.
+
 ## LLM Configuration (Criteria Prompt Generation)
 
 ### GITHUB_MODELS_API_KEY
@@ -127,7 +135,7 @@ The LLM model used by the report-generator worker (via the Copilot SDK) to gener
 **Default:** `http://localhost:3001` (local), `http://api:80` (Docker)
 **Type:** URL string
 
-Base URL of the Scope MT API. The report-generator worker calls this to fetch run data (summary, turns, criteria trajectory) via REST tools during report generation.
+Base URL of the Scope API. The report-generator worker calls this to fetch run data (summary, turns, criteria trajectory) via REST tools during report generation.
 
 ### SESSION_TIMEOUT_MS
 **Default:** `300000` (5 minutes)
@@ -141,15 +149,35 @@ Timeout for the Copilot SDK session used by the report-generator worker. If the 
 
 Git commit hash embedded in reporter metadata. Automatically set during CI/CD builds. Used to track which version of the report-generator produced a given report.
 
+## Worker Configuration
+
+### SCOPE_RUN_HEARTBEAT_STALE_MS
+**Default:** `120000` (2 × `HEARTBEAT_VISIBILITY_SECONDS`)
+**Type:** integer (milliseconds)
+
+Threshold used by the queue-processor redelivery handler to decide whether an in-flight `processing` run is still alive. When a worker dequeues a duplicate message for a run already in `processing`, it reads the per-run liveness heartbeat from Redis (`run-heartbeat:<runId>`) and compares `Date.now() - lastBeat`:
+
+- **≤ threshold** → original worker is alive; drop the duplicate, leave the run untouched.
+- **> threshold** → worker presumed dead; mark the run failed atomically.
+- **missing key** → fall back to `run.startedAt`. If picked up ≤ threshold ago, drop (transient race / Redis blip); otherwise mark failed.
+
+Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+
+### SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS
+**Default:** `300000` (5 × `HEARTBEAT_VISIBILITY_SECONDS`)
+**Type:** integer (milliseconds)
+
+TTL applied to per-run liveness heartbeat keys in Redis (`run-heartbeat:<runId>`). The TTL is refreshed on every beat (every 15s), so the key only expires when the worker stops beating. Set comfortably above `SCOPE_RUN_HEARTBEAT_STALE_MS` so a brief beat delay never causes premature TTL expiry; the default gives 2.5× the staleness threshold.
+
 ## Token Manager Configuration
 
 ### TOKEN_MANAGER_URL
 **Default:** (not set)
 **Type:** URL string
 
-Base URL of the Token Manager service. Workers, judge, and report-generator use the `TokenManagerClient` to dynamically acquire tokens via `POST /api/v1/tokens/acquire` (round-robin across enabled tokens).
+Base URL of the Token Manager service. Workers, judge, and report-generator use the `TokenManagerClient` to dynamically acquire keys via `POST /api/v1/keys/acquire` (round-robin across enabled keys).
 
-In Kubernetes, no static token secrets (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`) are injected into pods — all tokens are acquired from the Token Manager at runtime. In local dev / Docker Compose, env vars can still be set as a fallback (the `TokenManagerClient` checks env vars first before calling the Token Manager HTTP API).
+In Kubernetes, no static token secrets (`GITHUB_TOKEN`, `ANTHROPIC_API_KEY`) are injected into pods — all keys are acquired from the Token Manager at runtime. In local dev / Docker Compose, env vars can still be set as a fallback (the `TokenManagerClient` checks env vars first before calling the Token Manager HTTP API).
 
 - **Docker Compose:** `http://token-manager:80`
 - **Kubernetes:** `http://token-manager-service.scoped.svc.cluster.local:80`
@@ -188,13 +216,14 @@ Enables DevProxy integration for capturing HTTP traffic as HAR files. When `true
 - **Kubernetes:** Set in the deployment manifest env vars (auto-set when sidecar is present)
 
 ### DEV_PROXY_API_URL
-**Default:** `http://localhost:18897`
+**Default:** `http://localhost:18000`
 **Type:** URL string
 
-URL of the DevProxy REST API. The `DevProxyClient` uses this to start/stop recording, check status, and download the CA certificate.
+URL of the gateway/DevProxy REST API. Used to start/stop recording, check status, and download the CA certificate.
 
-- **Docker Compose:** `http://devproxy-copilot:18897` (separate service)
-- **Kubernetes:** `http://localhost:18897` (sidecar in same pod)
+- **Docker Compose (gateway):** `http://gateway:18000` (shared service)
+- **Docker Compose (devproxy-copilot):** `http://devproxy-copilot:18897` (separate legacy service)
+- **Kubernetes:** `http://gateway-service:18000` (shared service)
 
 ### DEV_PROXY_HAR_DIR
 **Default:** `/har-output`
@@ -202,8 +231,8 @@ URL of the DevProxy REST API. The `DevProxyClient` uses this to start/stop recor
 
 Directory where DevProxy writes HAR files. Shared between the DevProxy process and the worker via a volume mount.
 
-### DEVPROXY_API_PORT
-**Default:** `18897`
+### DEVPROXY_COPILOT_API_PORT
+**Default:** `18800`
 **Type:** integer (Docker Compose only)
 
-Host port mapping for the DevProxy REST API in Docker Compose.
+Host port mapping for the Copilot DevProxy REST API in Docker Compose.

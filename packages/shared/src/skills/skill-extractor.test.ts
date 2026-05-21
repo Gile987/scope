@@ -69,7 +69,7 @@ describe('extractSkillsToWorkspace', () => {
     vi.spyOn(mockClient, 'downloadSkillArchive').mockResolvedValueOnce(archive);
 
     const configs: SkillConfig[] = [
-      { name: 'my-skill', description: 'Test', content: 'full content' },
+      { ref: 'owner/repo/my-skill@abc1234', name: 'my-skill', description: 'Test', content: 'full content' },
     ];
 
     const result = await extractSkillsToWorkspace({
@@ -92,7 +92,7 @@ describe('extractSkillsToWorkspace', () => {
     vi.spyOn(mockClient, 'downloadSkillArchive').mockResolvedValueOnce(archive);
 
     const configs: SkillConfig[] = [
-      { name: 'copilot-skill', description: 'Test', content: 'c' },
+      { ref: 'ref@abc', name: 'copilot-skill', description: 'Test', content: 'c' },
     ];
 
     const result = await extractSkillsToWorkspace({
@@ -116,7 +116,7 @@ describe('extractSkillsToWorkspace', () => {
     vi.spyOn(mockClient, 'downloadSkillArchive').mockResolvedValueOnce(archive);
 
     const configs: SkillConfig[] = [
-      { name: 'claude-skill', description: 'Test', content: 'c' },
+      { ref: 'ref@abc', name: 'claude-skill', description: 'Test', content: 'c' },
     ];
 
     const result = await extractSkillsToWorkspace({
@@ -142,8 +142,8 @@ describe('extractSkillsToWorkspace', () => {
     spy.mockResolvedValueOnce(archive);
 
     const configs: SkillConfig[] = [
-      { name: 'bad-skill', description: 'Will fail', content: 'c' },
-      { name: 'good-skill', description: 'Will succeed', content: 'c' },
+      { ref: 'ref-bad@abc', name: 'bad-skill', description: 'Will fail', content: 'c' },
+      { ref: 'ref-good@abc', name: 'good-skill', description: 'Will succeed', content: 'c' },
     ];
 
     const logMessages: string[] = [];
@@ -170,7 +170,7 @@ describe('extractSkillsToWorkspace', () => {
     vi.spyOn(mockClient, 'downloadSkillArchive').mockResolvedValueOnce(archive);
 
     const configs: SkillConfig[] = [
-      { name: 'clean-skill', description: 'Test', content: 'c' },
+      { ref: 'ref@abc', name: 'clean-skill', description: 'Test', content: 'c' },
     ];
 
     await extractSkillsToWorkspace({

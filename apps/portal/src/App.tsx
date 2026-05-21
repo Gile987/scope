@@ -14,7 +14,6 @@ import { Statistics } from "@/pages/Statistics";
 import { PromptFeatureList } from "@/pages/PromptFeatureList";
 import { PromptFeatureDetail } from "@/pages/PromptFeatureDetail";
 import { CreatePromptFeature } from "@/pages/CreatePromptFeature";
-import { PromptFeatureGraphView } from "@/pages/PromptFeatureGraphView";
 import { ReportsList } from "@/pages/ReportsList";
 import { ReportDetail } from "@/pages/ReportDetail";
 import { ReportTemplateList } from "@/pages/ReportTemplateList";
@@ -27,6 +26,7 @@ import { AccountList } from "@/pages/AccountList";
 import { CreateAccount } from "@/pages/CreateAccount";
 import { AccountDetail } from "@/pages/AccountDetail";
 import { SecretsLayout } from "@/components/SecretsLayout";
+import { ReportsLayout } from "@/components/ReportsLayout";
 import { AgentList } from "@/pages/AgentList";
 import { AgentDetail } from "@/pages/AgentDetail";
 import { McpServerList } from "@/pages/McpServerList";
@@ -34,6 +34,12 @@ import { CreateMcpServer } from "@/pages/CreateMcpServer";
 import { McpServerDetail } from "@/pages/McpServerDetail";
 import { SkillList } from "@/pages/SkillList";
 import { SkillDetail } from "@/pages/SkillDetail";
+import { ExtensionList } from "@/pages/ExtensionList";
+import { ExtensionDetail } from "@/pages/ExtensionDetail";
+import { ProfileList } from "@/pages/ProfileList";
+import { ProfileDetail } from "@/pages/ProfileDetail";
+import { CreateProfile } from "@/pages/CreateProfile";
+import { NewProfileVersion } from "@/pages/NewProfileVersion";
 import { InsightsList } from "@/pages/InsightsList";
 import { InsightDetail } from "@/pages/InsightDetail";
 import { CriteriaMdpView } from "@/pages/CriteriaMdpView";
@@ -43,20 +49,28 @@ import { TaskPromptList } from "@/pages/TaskPromptList";
 import { TaskPromptDetail } from "@/pages/TaskPromptDetail";
 import { Admin } from "@/pages/Admin";
 import { FeatureRoute } from "@/components/FeatureRoute";
+import { useFavicon } from "@/hooks/useFavicon";
 
 export function App() {
+  useFavicon();
+
   return (
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Navigate to="/statistics" replace />} />
         <Route path="/runs" element={<RunsList />} />
         <Route path="/runs/new" element={<SubmitRun />} />
-        <Route path="/runs/:id" element={<RunDetail />} />
-        <Route path="/reports" element={<ReportsList />} />
-        <Route path="/reports/:id" element={<ReportDetail />} />
-        <Route path="/report-templates" element={<ReportTemplateList />} />
-        <Route path="/report-templates/new" element={<CreateReportTemplate />} />
-        <Route path="/report-templates/:id" element={<ReportTemplateDetail />} />
+        <Route path="/runs/:id/:tab?" element={<RunDetail />} />
+        <Route path="/reports" element={<ReportsLayout />}>
+          <Route index element={<ReportsList />} />
+          <Route path=":id" element={<ReportDetail />} />
+          <Route path="templates" element={<ReportTemplateList />} />
+          <Route path="templates/new" element={<CreateReportTemplate />} />
+          <Route path="templates/:id" element={<ReportTemplateDetail />} />
+        </Route>
+        {/* Redirect old /report-templates URLs */}
+        <Route path="/report-templates" element={<Navigate to="/reports/templates" replace />} />
+        <Route path="/report-templates/:id" element={<Navigate to="/reports/templates" replace />} />
         <Route path="/insights" element={<InsightsList />} />
         <Route path="/insights/:id" element={<InsightDetail />} />
         <Route path="/criteria" element={<CriteriaList />} />
@@ -66,7 +80,6 @@ export function App() {
         <Route path="/criteria/:id" element={<CriterionDetail />} />
         <Route path="/prompt-features" element={<PromptFeatureList />} />
         <Route path="/prompt-features/new" element={<CreatePromptFeature />} />
-        <Route path="/prompt-features/graph" element={<PromptFeatureGraphView />} />
         <Route path="/prompt-features/:id" element={<PromptFeatureDetail />} />
         <Route path="/task-prompts" element={<TaskPromptList />} />
         <Route path="/task-prompts/:id" element={<TaskPromptDetail />} />
@@ -89,6 +102,13 @@ export function App() {
         <Route path="/mcp-servers/:slug" element={<FeatureRoute featureKey="mcp"><McpServerDetail /></FeatureRoute>} />
         <Route path="/skills" element={<FeatureRoute featureKey="skills"><SkillList /></FeatureRoute>} />
         <Route path="/skills/*" element={<FeatureRoute featureKey="skills"><SkillDetail /></FeatureRoute>} />
+        <Route path="/extensions" element={<FeatureRoute featureKey="extensions"><ExtensionList /></FeatureRoute>} />
+        <Route path="/extensions/:id" element={<FeatureRoute featureKey="extensions"><ExtensionDetail /></FeatureRoute>} />
+        <Route path="/profiles" element={<FeatureRoute featureKey="profiles"><ProfileList /></FeatureRoute>} />
+        <Route path="/profiles/new" element={<FeatureRoute featureKey="profiles"><CreateProfile /></FeatureRoute>} />
+        <Route path="/profiles/:profileId" element={<FeatureRoute featureKey="profiles"><ProfileDetail /></FeatureRoute>} />
+        <Route path="/profiles/:profileId/v/:version" element={<FeatureRoute featureKey="profiles"><ProfileDetail /></FeatureRoute>} />
+        <Route path="/profiles/:profileId/new-version" element={<FeatureRoute featureKey="profiles"><NewProfileVersion /></FeatureRoute>} />
         <Route path="/admin" element={<Admin />} />
       </Route>
     </Routes>

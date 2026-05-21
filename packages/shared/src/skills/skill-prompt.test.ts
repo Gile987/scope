@@ -12,7 +12,7 @@ describe('formatSkillsPrompt (legacy full-content)', () => {
 
   it('formats a single skill', () => {
     const skills: SkillConfig[] = [
-      { name: 'my-skill', description: 'A test skill', content: 'Do the thing.\n\nWith details.' },
+      { ref: 'test@abc', name: 'my-skill', description: 'A test skill', content: 'Do the thing.\n\nWith details.' },
     ];
     const result = formatSkillsPrompt(skills);
     expect(result).toBe(
@@ -22,8 +22,8 @@ describe('formatSkillsPrompt (legacy full-content)', () => {
 
   it('formats multiple skills', () => {
     const skills: SkillConfig[] = [
-      { name: 'skill-a', description: 'First', content: 'Content A' },
-      { name: 'skill-b', description: 'Second', content: 'Content B' },
+      { ref: 'test@abc', name: 'skill-a', description: 'First', content: 'Content A' },
+      { ref: 'test@abc', name: 'skill-b', description: 'Second', content: 'Content B' },
     ];
     const result = formatSkillsPrompt(skills);
     expect(result).toContain('<skill name="skill-a">');
@@ -36,7 +36,7 @@ describe('formatSkillsPrompt (legacy full-content)', () => {
 
   it('escapes XML special characters in skill name', () => {
     const skills: SkillConfig[] = [
-      { name: 'skill<"test">', description: 'test', content: 'Body' },
+      { ref: 'test@abc', name: 'skill<"test">', description: 'test', content: 'Body' },
     ];
     const result = formatSkillsPrompt(skills);
     expect(result).toContain('name="skill&lt;&quot;test&quot;&gt;"');
@@ -44,7 +44,7 @@ describe('formatSkillsPrompt (legacy full-content)', () => {
 
   it('trims content whitespace', () => {
     const skills: SkillConfig[] = [
-      { name: 'trimmed', description: 'test', content: '  \n  Content here  \n  ' },
+      { ref: 'test@abc', name: 'trimmed', description: 'test', content: '  \n  Content here  \n  ' },
     ];
     const result = formatSkillsPrompt(skills);
     expect(result).toContain('Content here');
@@ -63,7 +63,7 @@ describe('formatSkillsDiscoveryPrompt', () => {
 
   it('formats a single skill with name, description, and location', () => {
     const skills: SkillConfig[] = [
-      { name: 'azure-functions', description: 'Deploy Azure Functions', content: 'Full content here' },
+      { ref: 'test@abc', name: 'azure-functions', description: 'Deploy Azure Functions', content: 'Full content here' },
     ];
     const result = formatSkillsDiscoveryPrompt(skills);
     expect(result).toBe(
@@ -77,7 +77,7 @@ describe('formatSkillsDiscoveryPrompt', () => {
 
   it('does NOT include full content in output', () => {
     const skills: SkillConfig[] = [
-      { name: 'test', description: 'Short desc', content: 'This is a very long SKILL.md body that should not appear' },
+      { ref: 'test@abc', name: 'test', description: 'Short desc', content: 'This is a very long SKILL.md body that should not appear' },
     ];
     const result = formatSkillsDiscoveryPrompt(skills);
     expect(result).not.toContain('very long SKILL.md body');
@@ -86,7 +86,7 @@ describe('formatSkillsDiscoveryPrompt', () => {
 
   it('uses custom basePath', () => {
     const skills: SkillConfig[] = [
-      { name: 'my-skill', description: 'desc', content: 'c' },
+      { ref: 'test@abc', name: 'my-skill', description: 'desc', content: 'c' },
     ];
     const result = formatSkillsDiscoveryPrompt(skills, '.claude/skills');
     expect(result).toContain('location=".claude/skills/my-skill"');
@@ -94,8 +94,8 @@ describe('formatSkillsDiscoveryPrompt', () => {
 
   it('formats multiple skills', () => {
     const skills: SkillConfig[] = [
-      { name: 'skill-a', description: 'First skill', content: 'c' },
-      { name: 'skill-b', description: 'Second skill', content: 'c' },
+      { ref: 'test@abc', name: 'skill-a', description: 'First skill', content: 'c' },
+      { ref: 'test@abc', name: 'skill-b', description: 'Second skill', content: 'c' },
     ];
     const result = formatSkillsDiscoveryPrompt(skills);
     expect(result).toContain('name="skill-a"');
@@ -108,7 +108,7 @@ describe('formatSkillsDiscoveryPrompt', () => {
 
   it('escapes special characters in name and location', () => {
     const skills: SkillConfig[] = [
-      { name: 'skill<"x">', description: 'desc', content: 'c' },
+      { ref: 'test@abc', name: 'skill<"x">', description: 'desc', content: 'c' },
     ];
     const result = formatSkillsDiscoveryPrompt(skills);
     expect(result).toContain('name="skill&lt;&quot;x&quot;&gt;"');
@@ -124,7 +124,7 @@ describe('prependSkillsToMessage', () => {
 
   it('prepends discovery prompt to message', () => {
     const skills: SkillConfig[] = [
-      { name: 'react-best-practices', description: 'React tips', content: 'Use hooks.' },
+      { ref: 'test@abc', name: 'react-best-practices', description: 'React tips', content: 'Use hooks.' },
     ];
     const result = prependSkillsToMessage('Build a todo app', skills);
     expect(result).toMatch(/^<available_skills>/);
@@ -139,7 +139,7 @@ describe('prependSkillsToMessage', () => {
 
   it('separates discovery preamble from message with double newline', () => {
     const skills: SkillConfig[] = [
-      { name: 'test', description: 'desc', content: 'Content' },
+      { ref: 'test@abc', name: 'test', description: 'desc', content: 'Content' },
     ];
     const result = prependSkillsToMessage('Task', skills);
     expect(result).toContain('</available_skills>\n\nTask');
@@ -147,7 +147,7 @@ describe('prependSkillsToMessage', () => {
 
   it('accepts custom basePath', () => {
     const skills: SkillConfig[] = [
-      { name: 'test', description: 'desc', content: 'c' },
+      { ref: 'test@abc', name: 'test', description: 'desc', content: 'c' },
     ];
     const result = prependSkillsToMessage('Task', skills, '.copilot/skills');
     expect(result).toContain('location=".copilot/skills/test"');

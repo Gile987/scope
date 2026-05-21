@@ -1,0 +1,11 @@
+# Ignore everything
+*
+!.gitignore
+!scope-cli/
+!scope-cli/**
+!rust-best-practices/
+!rust-best-practices/**
+!storybook/
+!storybook/**
+!scope-api/
+!scope-api/**

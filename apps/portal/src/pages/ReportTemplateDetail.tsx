@@ -4,9 +4,7 @@
 import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { api } from "@/lib/api";
 import type { ReportTrigger } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -24,10 +22,38 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Save, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Save, Trash2, Loader2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { TaskPromptIdPicker } from "@/components/TaskPromptIdPicker";
+
+function DefaultSystemPromptViewer() {
+  const [open, setOpen] = useState(false);
+  const { data } = useQuery({
+    queryKey: ["default-system-prompt"],
+    queryFn: () => api.getDefaultSystemPrompt(),
+    enabled: open,
+    staleTime: Infinity,
+  });
+
+  return (
+    <div>
+      <button
+        type="button"
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen(!open)}
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        View default system prompt
+      </button>
+      {open && data && (
+        <div className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted p-3 prose prose-sm dark:prose-invert max-w-none">
+          <MarkdownRenderer>{data.content}</MarkdownRenderer>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function triggerSummary(trigger?: ReportTrigger): string {
   if (!trigger) return "always (no trigger configured)";
@@ -67,6 +93,14 @@ export function ReportTemplateDetail() {
   const [editTriggerCriteriaIds, setEditTriggerCriteriaIds] = useState<string[]>([]);
   const [editTriggerTaskPromptIds, setEditTriggerTaskPromptIds] = useState<string[]>([]);
   const [editTriggerMatch, setEditTriggerMatch] = useState<"any" | "all">("all");
+  const [editModel, setEditModel] = useState<string>("");
+  const [editTimeoutSeconds, setEditTimeoutSeconds] = useState<string>("");
+
+  const { data: availableModels } = useQuery({
+    queryKey: ["available-report-models"],
+    queryFn: () => api.listAvailableReportModels(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const startEditing = () => {
     if (!template) return;
@@ -88,6 +122,8 @@ export function ReportTemplateDetail() {
         ? (template.trigger as any).match ?? "all"
         : "all"
     );
+    setEditModel(template.model ?? "");
+    setEditTimeoutSeconds(template.timeoutMs ? String(template.timeoutMs / 1000) : "");
     setEditing(true);
   };
 
@@ -105,7 +141,7 @@ export function ReportTemplateDetail() {
     mutationFn: api.deleteReportTemplate,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["report-templates"] });
-      navigate("/report-templates");
+      navigate("/reports/templates");
     },
   });
 
@@ -114,6 +150,14 @@ export function ReportTemplateDetail() {
     if (editName.trim()) body.name = editName.trim();
     body.description = editDescription.trim() || undefined;
     if (editUserPrompt.trim()) body.userPrompt = editUserPrompt.trim();
+
+    // Model
+    body.model = editModel || null;
+
+    // Timeout
+    body.timeoutMs = editTimeoutSeconds && Number(editTimeoutSeconds) > 0
+      ? Number(editTimeoutSeconds) * 1000
+      : null;
 
     // System prompt
     if (editSysMode !== "none" && editSysContent.trim()) {
@@ -151,7 +195,7 @@ export function ReportTemplateDetail() {
   if (error || !template) {
     return (
       <div className="space-y-4">
-        <Link to="/report-templates" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <Link to="/reports/templates" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back to templates
         </Link>
         <div className="text-center py-12 text-muted-foreground">
@@ -166,7 +210,7 @@ export function ReportTemplateDetail() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/report-templates" className="text-muted-foreground hover:text-foreground">
+          <Link to="/reports/templates" className="text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-5 w-5" />
           </Link>
           <div>
@@ -224,7 +268,34 @@ export function ReportTemplateDetail() {
             <div className="space-y-2">
               <Label htmlFor="userPrompt">User Prompt</Label>
               <Textarea id="userPrompt" value={editUserPrompt} onChange={(e) => setEditUserPrompt(e.target.value)} rows={12} className="font-mono text-sm" />
-              <p className="text-xs text-muted-foreground">Use {"{{requestId}}"} as a placeholder for the run ID. The user prompt takes precedence over the default report structure.</p>
+            </div>
+            <Separator />
+            <div className="space-y-2">
+              <Label>Model (optional)</Label>
+              <Select value={editModel || "__default__"} onValueChange={(v) => setEditModel(v === "__default__" ? "" : v)}>
+                <SelectTrigger className="w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">Default (gpt-4.1)</SelectItem>
+                  {availableModels?.map((m) => (
+                    <SelectItem key={m.modelId} value={m.modelId}>{m.modelId}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="editTimeout">Timeout (seconds)</Label>
+              <Input
+                id="editTimeout"
+                type="number"
+                min={1}
+                value={editTimeoutSeconds}
+                onChange={(e) => setEditTimeoutSeconds(e.target.value)}
+                placeholder="300"
+                className="w-32"
+              />
+              <p className="text-xs text-muted-foreground">Default: 300 (5 minutes)</p>
             </div>
             <Separator />
             <div className="space-y-2">
@@ -242,6 +313,7 @@ export function ReportTemplateDetail() {
               {editSysMode !== "none" && (
                 <Textarea value={editSysContent} onChange={(e) => setEditSysContent(e.target.value)} rows={4} className="font-mono text-sm" placeholder="System prompt content..." />
               )}
+              <DefaultSystemPromptViewer />
             </div>
             <Separator />
             <div className="space-y-2">
@@ -327,6 +399,14 @@ export function ReportTemplateDetail() {
                   </Badge>
                 </div>
               </div>
+              <div>
+                <Label className="text-muted-foreground text-xs">Model</Label>
+                <p className="text-sm font-mono">{template.model ?? "default (gpt-4.1)"}</p>
+              </div>
+              <div>
+                <Label className="text-muted-foreground text-xs">Timeout</Label>
+                <p className="text-sm font-mono">{template.timeoutMs ? `${template.timeoutMs / 1000}s` : "default (300s)"}</p>
+              </div>
               <Separator />
               <div className="flex gap-6 text-xs text-muted-foreground">
                 <span>Created: {formatDate(template.createdAt)}</span>
@@ -341,7 +421,7 @@ export function ReportTemplateDetail() {
             </CardHeader>
             <CardContent>
               <div className="prose prose-sm dark:prose-invert max-w-none bg-muted p-3 rounded-md">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{template.userPrompt}</ReactMarkdown>
+                <MarkdownRenderer>{template.userPrompt}</MarkdownRenderer>
               </div>
             </CardContent>
           </Card>
@@ -358,7 +438,7 @@ export function ReportTemplateDetail() {
               </CardHeader>
               <CardContent>
                 <div className="prose prose-sm dark:prose-invert max-w-none bg-muted p-3 rounded-md">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{template.systemPrompt.content}</ReactMarkdown>
+                  <MarkdownRenderer>{template.systemPrompt.content}</MarkdownRenderer>
                 </div>
               </CardContent>
             </Card>

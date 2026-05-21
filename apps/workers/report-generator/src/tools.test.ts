@@ -236,3 +236,97 @@ describe("createReportTools - insight tools", () => {
     });
   });
 });
+
+describe("createReportTools - duration fields", () => {
+  let tools: any[];
+  let fetchMock: Mock;
+
+  const RUN_WITH_DURATIONS = {
+    _id: REQUEST_ID,
+    scenario: { task: "build app", criteria: ["c1", "c2"] },
+    turns: [
+      {
+        iteration: 1,
+        passed: false,
+        timestamp: "2026-03-25T10:00:00Z",
+        startedAt: "2026-03-25T09:55:00Z",
+        durationMs: 300000,
+        codingAgentResponse: "response 1",
+        judgeFeedback: "needs fix",
+        snapshotUrl: "https://blob/snap1",
+        criteriaResults: [
+          { criterionId: "c1", passed: true, evaluated: true, feedback: "ok" },
+          { criterionId: "c2", passed: false, evaluated: true, feedback: "missing" },
+        ],
+      },
+      {
+        iteration: 2,
+        passed: true,
+        timestamp: "2026-03-25T10:05:00Z",
+        startedAt: "2026-03-25T10:00:00Z",
+        durationMs: 300000,
+        codingAgentResponse: "response 2",
+        judgeFeedback: "all good",
+        snapshotUrl: "https://blob/snap2",
+        criteriaResults: [
+          { criterionId: "c1", passed: true, evaluated: true, feedback: "ok" },
+          { criterionId: "c2", passed: true, evaluated: true, feedback: "ok" },
+        ],
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    tools = createReportTools(API_BASE, REQUEST_ID, SNAPSHOTS_DIR, REPORT_ID);
+  });
+
+  it("list_turns includes startedAt and durationMs", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse(RUN_WITH_DURATIONS));
+
+    const tool = findTool(tools, "list_turns");
+    const result = await tool.handler({});
+
+    expect(result.turns).toHaveLength(2);
+    expect(result.turns[0].startedAt).toBe("2026-03-25T09:55:00Z");
+    expect(result.turns[0].durationMs).toBe(300000);
+    expect(result.turns[1].durationMs).toBe(300000);
+  });
+
+  it("get_turn_detail includes startedAt and durationMs", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse(RUN_WITH_DURATIONS));
+
+    const tool = findTool(tools, "get_turn_detail");
+    const result = await tool.handler({ iteration: 1 });
+
+    expect(result.startedAt).toBe("2026-03-25T09:55:00Z");
+    expect(result.durationMs).toBe(300000);
+  });
+
+  it("get_criteria_trajectory includes durationMs per iteration", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse(RUN_WITH_DURATIONS));
+
+    const tool = findTool(tools, "get_criteria_trajectory");
+    const result = await tool.handler({});
+
+    expect(result.criterionIds).toEqual(expect.arrayContaining(["c1", "c2"]));
+    const c1Trajectory = result.trajectory["c1"];
+    expect(c1Trajectory[0].durationMs).toBe(300000);
+    expect(c1Trajectory[1].durationMs).toBe(300000);
+  });
+
+  it("list_turns handles missing duration fields gracefully", async () => {
+    const runNoDurations = {
+      ...RUN_WITH_DURATIONS,
+      turns: RUN_WITH_DURATIONS.turns.map(({ startedAt, durationMs, ...rest }: any) => rest),
+    };
+    fetchMock.mockResolvedValueOnce(mockResponse(runNoDurations));
+
+    const tool = findTool(tools, "list_turns");
+    const result = await tool.handler({});
+
+    expect(result.turns[0].startedAt).toBeUndefined();
+    expect(result.turns[0].durationMs).toBeUndefined();
+  });
+});

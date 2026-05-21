@@ -22,6 +22,8 @@ export interface MigrationCheckResult {
   applied: string[];
   /** Migrations that are still pending. */
   pending: string[];
+  /** Total number of migrations applied in the database (independent of REQUIRED_MIGRATIONS). */
+  totalApplied: number;
 }
 
 const CACHE_TTL_MS = 30_000; // 30 seconds
@@ -67,6 +69,7 @@ export async function checkMigrations(db: Db): Promise<MigrationCheckResult> {
     ready: pending.length === 0,
     applied,
     pending,
+    totalApplied: appliedDocs.length,
   };
 
   cachedResult = result;

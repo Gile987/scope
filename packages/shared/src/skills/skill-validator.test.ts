@@ -22,12 +22,25 @@ describe('validateSkillFrontmatter', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('should fail when name does not match directory name', () => {
+  it('should pass with warning when name does not match directory name', () => {
     const result = validateSkillFrontmatter(validFrontmatter, 'wrong-name');
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContainEqual(
-      expect.objectContaining({ field: 'name', message: expect.stringContaining('must match parent directory name') })
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ field: 'name', message: expect.stringContaining('does not match parent directory name') })
     );
+  });
+
+  it('should have empty warnings when name matches directory name', () => {
+    const result = validateSkillFrontmatter(validFrontmatter, 'my-skill');
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it('should have empty warnings when no dirName is provided', () => {
+    const result = validateSkillFrontmatter(validFrontmatter);
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toHaveLength(0);
   });
 
   it('should fail for empty name', () => {

@@ -9,17 +9,31 @@ interface VersionInfo {
   buildTime: string;
 }
 
+interface ReadinessInfo {
+  status: string;
+  migrations: { ready: boolean; applied: string[]; pending: string[]; totalApplied: number };
+}
+
 export function VersionFooter() {
   const [apiVersion, setApiVersion] = useState<VersionInfo | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessInfo | null>(null);
+  const [apiReachable, setApiReachable] = useState(true);
 
   useEffect(() => {
     api.getVersion()
       .then(setApiVersion)
-      .catch(() => setApiVersion(null));
+      .catch(() => {
+        setApiVersion(null);
+        setApiReachable(false);
+      });
+    api.getReadiness()
+      .then(setReadiness)
+      .catch(() => setReadiness(null));
   }, []);
 
   const portalCommit = __GIT_COMMIT__;
   const portalBuildTime = __BUILD_TIME__;
+  const gitBranch = __GIT_BRANCH__;
 
   const formatDate = (iso: string) => {
     try {
@@ -37,14 +51,31 @@ export function VersionFooter() {
   return (
     <footer className="border-t bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
       <div className="flex flex-wrap justify-center gap-x-6 gap-y-1">
+        {gitBranch && (
+          <span>
+            Branch: <code className="font-mono">{gitBranch}</code>
+          </span>
+        )}
         <span>
           Portal: <code className="font-mono">{shortCommit(portalCommit)}</code>{" "}
           <span className="text-muted-foreground/70">({formatDate(portalBuildTime)})</span>
         </span>
-        {apiVersion && (
+        {apiVersion ? (
           <span>
             API: <code className="font-mono">{shortCommit(apiVersion.commit)}</code>{" "}
             <span className="text-muted-foreground/70">({formatDate(apiVersion.buildTime)})</span>
+          </span>
+        ) : !apiReachable ? (
+          <span className="text-destructive">API: unavailable</span>
+        ) : null}
+        {readiness && (
+          <span>
+            DB: <code className="font-mono">v{readiness.migrations.totalApplied ?? readiness.migrations.applied.length}</code>
+            {readiness.migrations.pending.length > 0 && (
+              <span className="ml-1 text-yellow-600 dark:text-yellow-400">
+                · {readiness.migrations.pending.length} pending
+              </span>
+            )}
           </span>
         )}
       </div>

@@ -2,7 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": "./src",
+    // mongo-migrate-ts v2 ships its own tsconfig with "moduleResolution": "node",
+    // which TypeScript 5.0+ deprecated in favour of "bundler"/"NodeNext".
+    // tsc surfaces this as an error when compiling against that package's types,
+    // so we suppress it here until mongo-migrate-ts ships an updated config.
+    "ignoreDeprecations": "5.0"
   },
   "include": ["src/**/*"]
 }

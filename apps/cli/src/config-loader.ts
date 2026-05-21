@@ -20,7 +20,6 @@ interface Persona {
 }
 
 interface Scenario {
-  version?: 'v1' | 'v2';  // v1 = inline prompts (default), v2 = criteria IDs
   task: string;
   criteria: string[];
 }
@@ -76,8 +75,6 @@ function loadScenario(filePath: string): Scenario {
   const raw = readFileSync(filePath, "utf-8");
   const data = parseYaml(raw);
 
-  const version = data.version || 'v1';  // Default to v1 for backward compatibility
-
   if (!data.task || typeof data.task !== "string") {
     throw new Error(`Scenario file ${filePath} must have a "task" string field`);
   }
@@ -92,20 +89,16 @@ function loadScenario(filePath: string): Scenario {
     );
   }
 
-  // Validate criteria format matches version
-  if (version === 'v2') {
-    // v2: criteria should be strings (IDs)
-    for (const criterion of data.criteria) {
-      if (typeof criterion !== 'string') {
-        throw new Error(
-          `v2 scenario ${filePath} criteria must be strings (IDs), got: ${typeof criterion}`
-        );
-      }
+  // Criteria must be strings (criteria IDs)
+  for (const criterion of data.criteria) {
+    if (typeof criterion !== 'string') {
+      throw new Error(
+        `Scenario ${filePath} criteria must be strings (criteria IDs), got: ${typeof criterion}`
+      );
     }
   }
 
   return {
-    version,
     task: data.task.trim(),
     criteria: data.criteria.map((c: unknown) => String(c).trim()),
   };
@@ -153,7 +146,6 @@ export function resolveScenarioAndPersona(
   personaPath?: string,
   traitsPath?: string
 ): {
-  version?: 'v1' | 'v2';
   task: string;
   criteria: string[];
   personaInstructions?: string;
@@ -181,7 +173,6 @@ export function resolveScenarioAndPersona(
   }
 
   return {
-    version: scenario.version || 'v1',
     task: scenario.task,
     criteria: scenario.criteria,
     ...(personaInstructions ? { personaInstructions } : {}),

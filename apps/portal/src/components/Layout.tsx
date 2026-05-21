@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, FileCode, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch } from "lucide-react";
+import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch, Plug, Puzzle, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet, SheetContent, SheetTrigger, SheetTitle,
@@ -27,15 +27,16 @@ const navItems: NavItem[] = [
   { to: "/runs", label: "Runs", icon: List },
   { to: "/runs/new", label: "New Run", icon: Plus },
   { to: "/reports", label: "Reports", icon: FileText },
-  { to: "/report-templates", label: "Templates", icon: FileCode },
   { to: "/insights", label: "Insights", icon: Lightbulb },
   { to: "/criteria", label: "Criteria", icon: FlaskConical },
   { to: "/prompt-features", label: "Features", icon: Tags },
-  { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
+  { to: "/profiles", label: "Profiles", icon: SlidersHorizontal, featureKey: "profiles" },
   { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
   { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
   { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
   { to: "/skills", label: "Skills", icon: BookOpen, featureKey: "skills" },
+  { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions" },
+  { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
 ];
 
 /** Width reserved for the "More" overflow button (icon + padding) */
@@ -163,7 +164,7 @@ export function Layout() {
         <div className="container flex h-14 items-center">
           <Link to="/" className="mr-4 flex items-center space-x-2 shrink-0">
             <Activity className="h-6 w-6" />
-            <span className="hidden font-bold sm:inline-block">Scope MT</span>
+            <span className="hidden font-bold sm:inline-block">Scope</span>
           </Link>
 
           {/* Priority+ nav: measured container (overflow-hidden) + separate More button */}
@@ -240,6 +241,18 @@ export function Layout() {
 
           {/* Spacer on very small screens */}
           <div className="flex-1 sm:hidden" />
+
+          {/* API Documentation link (served by API server, not React Router) */}
+          <a
+            href="/api-docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 ml-4 p-2 flex items-center gap-1.5 text-sm font-medium transition-colors hover:text-foreground/80 text-foreground/60"
+            title="API Documentation"
+          >
+            <Plug className="h-4 w-4" />
+            <span className="hidden sm:inline">API</span>
+          </a>
 
           {/* Admin gear icon */}
           <Link
