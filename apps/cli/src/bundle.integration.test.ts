@@ -5,10 +5,18 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFile } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { promisify } from "node:util";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { existsSync, copyFileSync, chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const execFileAsync = promisify(execFile);
 const BUNDLE_PATH = resolve(import.meta.dirname, "../dist/scope.mjs");
+
+if (!existsSync(BUNDLE_PATH)) {
+  throw new Error(
+    `Bundle not found at ${BUNDLE_PATH}. Run "pnpm build:bundle" first.`
+  );
+}
 
 /** Canned API responses for the mock server */
 const MOCK_RESPONSES: Record<string, unknown> = {
@@ -102,5 +110,21 @@ describe("Bundle integration tests", () => {
     const parsed = JSON.parse(stdout);
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed[0].id).toBe("req-test-001");
+  });
+
+  it("works when installed as 'scope' (no .mjs extension)", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "scope-test-"));
+    const scopeBin = join(tempDir, "scope");
+    try {
+      copyFileSync(BUNDLE_PATH, scopeBin);
+      chmodSync(scopeBin, 0o755);
+      const { stdout } = await execFileAsync("node", [scopeBin, "--version"], {
+        env: { ...process.env, SCOPE_NO_UPDATE_CHECK: "1" },
+        timeout: 10000,
+      });
+      expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

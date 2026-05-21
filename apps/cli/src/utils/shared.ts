@@ -10,12 +10,13 @@ export const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
 
 /**
  * Detect how the CLI was invoked and return the appropriate command prefix.
- * - Bundled binary (scope.mjs): "scope"
- * - Development via tsx/pnpm: "pnpm cli"
+ * - Bundled binary (SCOPE_CLI_VERSION injected at build time): "scope"
+ * - Development via tsx/pnpm (no build-time injection): "pnpm cli"
  */
 export function getCliName(): string {
-  const argv1 = process.argv[1] ?? "";
-  if (argv1.endsWith("/scope.mjs") || argv1.endsWith("/dist/scope.mjs")) {
+  // In bundled mode, esbuild replaces process.env.SCOPE_CLI_VERSION with a literal string.
+  // In dev mode, it remains undefined (read from actual env which is unset).
+  if (process.env.SCOPE_CLI_VERSION !== undefined) {
     return "scope";
   }
   return "pnpm cli";
@@ -38,11 +39,17 @@ export const DEFAULT_WORKERS = [
 ];
 
 /**
- * Default API URL. In dev mode this is localhost; the esbuild bundle replaces
- * this with the production URL at build time via the SCOPE_DEFAULT_API_URL define.
+ * Default API URL. Computed lazily so that dotenv and applyApiPortFallback()
+ * have a chance to populate process.env before this is read.
+ * In dev mode this is localhost; the esbuild bundle replaces
+ * SCOPE_DEFAULT_API_URL with the production URL at build time.
  */
-export const DEFAULT_API_URL: string =
-  process.env.SCOPE_API_URL || process.env.SCOPE_DEFAULT_API_URL || "http://localhost:3100";
+export function getDefaultApiUrl(): string {
+  return process.env.SCOPE_API_URL || process.env.SCOPE_DEFAULT_API_URL || "http://localhost:3100";
+}
+
+// For backward compatibility — used in help text generation at setup time
+export const DEFAULT_API_URL: string = process.env.SCOPE_DEFAULT_API_URL || "http://localhost:3100";
 
 // Environment variable definitions surfaced in `--help`
 export const ENV_VARS = {

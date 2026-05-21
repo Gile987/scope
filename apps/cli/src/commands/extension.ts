@@ -6,7 +6,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, DEFAULT_API_URL } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 
 export function registerExtensionCommands(program: Command): void {
 // ─── Extension management ────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ withOutputOption(
 extension
   .command("list")
   .description("List all imported extensions")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -63,7 +63,7 @@ extension
   .description("Search extensions (internal + VS Code marketplace)")
   .requiredOption("-q, --query <query>", "Search query")
   .option("--limit <number>", "Maximum results", parseInt)
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -103,7 +103,7 @@ extension
   .command("get")
   .description("Get details of an extension")
   .requiredOption("-i, --id <id>", "Extension ID (e.g. ms-python.python)")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -151,7 +151,7 @@ extension
   .option("--publisher <publisher>", "Publisher name (auto-extracted from ID if omitted)")
   .option("--description <desc>", "Description")
   .option("--origin <origin>", "Origin: marketplace or manual", "manual")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const publisher = options.publisher || options.id.split('.')[0];
@@ -185,7 +185,7 @@ extension
   .command("delete")
   .description("Delete an extension (soft-delete)")
   .requiredOption("-i, --id <id>", "Extension ID")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/extensions/${options.id}`, {

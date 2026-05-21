@@ -7,7 +7,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { banner, colorLevel, dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getCliName, DEFAULT_API_URL } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getCliName, getDefaultApiUrl } from "../utils/shared.js";
 
 export function registerReportCommands(program: Command): void {
 // ─── Report management ──────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ report
   .command("generate")
   .description("Generate a report for a benchmark run")
   .requiredOption("-i, --id <requestId>", "Run ID to generate a report for")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .option("--stream", "Stream report generation logs in real time", true)
   .option("--no-stream", "Do not stream logs after submission")
   .action(async (options) => {
@@ -104,7 +104,7 @@ report
   .command("get")
   .description("Get a report by ID")
   .requiredOption("-i, --id <reportId>", "Report ID")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 , ['markdown'])
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -181,7 +181,7 @@ report
   .command("list")
   .description("List all reports (optionally filter by run)")
   .option("-r, --run <requestId>", "Filter by run ID")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -247,7 +247,7 @@ report
   .command("logs")
   .description("Stream report generation logs")
   .requiredOption("-i, --id <reportId>", "Report ID")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .option("--from-start", "Include historical logs from the beginning", false)
   .action(async (options) => {
     try {

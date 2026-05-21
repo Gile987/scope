@@ -100,6 +100,7 @@ chmod +x "$INSTALL_DIR/$BINARY_NAME"
 # --- Verify ---
 
 INSTALLED_VERSION=$("$INSTALL_DIR/$BINARY_NAME" --version 2>/dev/null) || error "Installation verification failed"
+[ -n "$INSTALLED_VERSION" ] || error "Installation verification failed: --version returned empty output"
 
 success "Installed scope $INSTALLED_VERSION to $INSTALL_DIR/$BINARY_NAME"
 

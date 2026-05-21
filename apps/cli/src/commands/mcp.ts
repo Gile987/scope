@@ -6,7 +6,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, DEFAULT_API_URL } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 import { parseEnvPairs, parseHeaderPairs } from "../utils/parsers.js";
 
 export function registerMcpCommands(program: Command): void {
@@ -34,7 +34,7 @@ withOutputOption(
 mcpServer
   .command("list")
   .description("List all MCP servers")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -72,7 +72,7 @@ mcpServer
   .command("get")
   .description("Get details of an MCP server")
   .requiredOption("-i, --id <id>", "MCP server slug")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -143,7 +143,7 @@ mcpServer
   .option("--env <env...>", "Environment variables in KEY=VALUE format (repeatable)")
   .option("--description <desc>", "Description")
   .option("--header <header...>", "Headers in name:value format (repeatable)")
-  .option("-u, --api-url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --api-url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const isStdio = options.type === "stdio";
@@ -205,7 +205,7 @@ mcpServer
   .option("--env <env...>", "Environment variables in KEY=VALUE format (replaces all env vars)")
   .option("--description <desc>", "Description")
   .option("--header <header...>", "Headers in name:value format (replaces all headers)")
-  .option("-u, --api-url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --api-url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -243,7 +243,7 @@ mcpServer
   .command("delete")
   .description("Delete an MCP server (soft-delete)")
   .requiredOption("-i, --id <id>", "MCP server slug")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/mcp/servers/${encodeURIComponent(options.id)}`, {

@@ -9,7 +9,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner, styleText } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, DEFAULT_API_URL } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 import { mapYamlCriterion } from "../utils/yaml-mappers.js";
 
 export function registerCriteriaCommands(program: Command): void {
@@ -29,7 +29,7 @@ criteria
   .command("list")
   .description("List all criteria")
   .option("-q, --query <search>", "Filter by ID or prompt text")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -82,7 +82,7 @@ criteria
   .command("get")
   .description("Get details of a single criterion")
   .requiredOption("-i, --id <id>", "Criterion ID")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -140,7 +140,7 @@ criteria
   .requiredOption("--id <id>", "Criterion ID (lowercase snake_case)")
   .requiredOption("--prompt <prompt>", "Evaluation prompt for the judge")
   .option("-d, --depends-on <ids...>", "IDs of parent criteria")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -177,7 +177,7 @@ criteria
   .requiredOption("-i, --id <id>", "Criterion ID")
   .option("--prompt <prompt>", "New evaluation prompt")
   .option("-d, --depends-on <ids...>", "New parent criteria IDs (replaces all)")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -212,7 +212,7 @@ criteria
   .command("delete")
   .description("Delete a criterion (soft-delete; fails if other criteria depend on it)")
   .requiredOption("-i, --id <id>", "Criterion ID")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`, {
@@ -240,7 +240,7 @@ withOutputOption(
 criteria
   .command("graph")
   .description("Display the criteria dependency graph as ASCII")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -322,7 +322,7 @@ criteria
   .description("Import criteria from YAML file(s) into the database (upsert — won't overwrite existing)")
   .argument("<path>", "Path to a .yaml file or a directory of .yaml files")
   .option("--dry-run", "Preview what would be imported without sending to API")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (inputPath: string, options) => {
     try {
       const absPath = resolve(inputPath);

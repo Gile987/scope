@@ -9,7 +9,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { criterionIcon, dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, DEFAULT_API_URL } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 import { mapYamlCriterion } from "../utils/yaml-mappers.js";
 
 export function registerPromptFeatureCommands(program: Command): void {
@@ -29,7 +29,7 @@ promptFeature
   .command("list")
   .description("List all prompt features")
   .option("-q, --query <search>", "Filter by ID or prompt text")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -81,7 +81,7 @@ promptFeature
   .command("get")
   .description("Get details of a single prompt feature")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -128,7 +128,7 @@ promptFeature
   .description("Create a new prompt feature")
   .requiredOption("--id <id>", "Prompt feature ID (lowercase snake_case)")
   .requiredOption("--prompt <prompt>", "Detection prompt for the feature")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -161,7 +161,7 @@ promptFeature
   .description("Update an existing prompt feature")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
   .option("--prompt <prompt>", "New detection prompt")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -195,7 +195,7 @@ promptFeature
   .command("delete")
   .description("Delete a prompt feature (soft-delete)")
   .requiredOption("-i, --id <id>", "Prompt feature ID")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/prompt-features/${options.id}`, {
@@ -220,7 +220,7 @@ promptFeature
   .description("Import prompt features from YAML file(s) into the database (upsert)")
   .argument("<path>", "Path to a .yaml file or a directory of .yaml files")
   .option("--dry-run", "Preview what would be imported without sending to API")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (inputPath: string, options) => {
     try {
       const absPath = resolve(inputPath);
@@ -332,7 +332,7 @@ promptFeature
   .option("-s, --scenario <path>", "Path to scenario YAML file (uses its task text)")
   .option("--model <model>", "LLM model to use for extraction")
   .option("--force", "Force re-extraction even if already extracted")
-  .option("-u, --url <url>", "API base URL", DEFAULT_API_URL)
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;

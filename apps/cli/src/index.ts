@@ -3,17 +3,15 @@
 // Licensed under the MIT License.
 
 import dotenv from "dotenv";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { configureHelp, generateOutputFormatsHelp, generateEnvVarsHelp } from "./utils/helpFormatter.js";
 import { OUTPUT_FORMATS, ENV_VARS, applyApiPortFallback, getCliName } from "./utils/shared.js";
 import { registerRunCommands } from "./commands/run.js";
 import { registerCriteriaCommands } from "./commands/criteria.js";
 import { registerPromptFeatureCommands } from "./commands/prompt-feature.js";
-
-// Version is injected at build time by esbuild; falls back for dev mode
-const CLI_VERSION = process.env.SCOPE_CLI_VERSION ?? "0.1.0-dev";
 import { registerReportCommands } from "./commands/report.js";
 import { registerReportTemplateCommands } from "./commands/report-template.js";
 import { registerAgentCommands } from "./commands/agent.js";
@@ -25,6 +23,9 @@ import { registerTaskPromptCommands } from "./commands/task-prompt.js";
 import { registerProfileCommands } from "./commands/profile.js";
 import { registerUpdateCommand } from "./commands/update.js";
 import { checkForUpdates } from "./utils/update-check.js";
+
+// Version is injected at build time by esbuild; falls back for dev mode
+const CLI_VERSION = process.env.SCOPE_CLI_VERSION ?? "0.1.0-dev";
 
 /**
  * Walk up from `start` looking for a `.env` file, stopping at the first hit
@@ -83,13 +84,18 @@ registerProfileCommands(program);
 registerUpdateCommand(program);
 
 // Only parse when run directly (not when imported by tests)
-const isDirectRun = process.argv[1] && (
-  process.argv[1].endsWith('/cli/src/index.ts') ||
-  process.argv[1].endsWith('/cli/dist/index.js') ||
-  process.argv[1].endsWith('/scope.mjs') ||
-  process.argv[1].endsWith('/dist/scope.mjs')
-);
-if (isDirectRun) {
+function isMainModule(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    const thisFile = realpathSync(fileURLToPath(import.meta.url));
+    const runFile = realpathSync(process.argv[1]);
+    return thisFile === runFile;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   checkForUpdates(CLI_VERSION);
   program.parse();
 }
