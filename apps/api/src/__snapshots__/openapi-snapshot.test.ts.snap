@@ -654,7 +654,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "array",
           },
           "maxIterations": {
-            "type": "number",
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer",
           },
           "mcpServers": {
             "items": {
@@ -6714,26 +6716,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                         "maximum": 10,
                         "minimum": 1,
                         "type": "number",
-                      },
-                      "profileVariations": {
-                        "items": {
-                          "properties": {
-                            "label": {
-                              "type": "string",
-                            },
-                            "profileId": {
-                              "type": "string",
-                            },
-                            "profileVersion": {
-                              "type": "integer",
-                            },
-                          },
-                          "required": [
-                            "profileId",
-                          ],
-                          "type": "object",
-                        },
-                        "type": "array",
                       },
                       "promptFeatureExtractionId": {
                         "type": "string",

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect } from "react";
+import { Fragment, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -1118,7 +1118,7 @@ export function SubmitRun() {
                   </div>
 
                   {summaryVariations.map((variation, index) => (
-                    <>
+                    <Fragment key={`${variation.profileId}-${index}`}>
                       <span className="text-muted-foreground">Variation {index + 1}</span>
                       <div className="flex flex-wrap items-center gap-2">
                         <Tooltip>
@@ -1131,7 +1131,7 @@ export function SubmitRun() {
                         </Tooltip>
                         {variation.profileVersion && <span className="text-muted-foreground">v{variation.profileVersion}</span>}
                       </div>
-                    </>
+                    </Fragment>
                   ))}
                 </div>
               </CardContent>

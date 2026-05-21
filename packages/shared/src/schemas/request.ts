@@ -107,7 +107,7 @@ export const CreateRequestInputSchema = z
   .object({
     scenario: ScenarioSchema,
     model: z.string().optional(),
-    maxIterations: z.number().optional(),
+    maxIterations: z.number().int().min(1).max(50).optional(),
     personaInstructions: z.string().optional(),
     persona: PersonaSchema.optional(),
     mcpServers: z.array(z.string()).optional(),
