@@ -101,4 +101,16 @@ describe("deriveCapabilities", () => {
       expect(deriveCapabilities("anthropic-oauth", invalidResult)).toEqual([]);
     });
   });
+
+  describe("azure-ai-foundry", () => {
+    it("returns azure-ai-inference when valid", () => {
+      expect(deriveCapabilities("azure-ai-foundry", validResult)).toEqual([
+        "azure-ai-inference",
+      ]);
+    });
+
+    it("returns empty array for non-valid status", () => {
+      expect(deriveCapabilities("azure-ai-foundry", invalidResult)).toEqual([]);
+    });
+  });
 });

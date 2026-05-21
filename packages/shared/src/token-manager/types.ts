@@ -12,14 +12,14 @@
  * The kind of credential stored (key format).
  */
 export type KeyType =
-  "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth";
+  "github-pat-classic" | "github-pat-fine-grained" | "github-oauth" | "github-oauth-cookie-state" | "anthropic-api-key" | "anthropic-oauth" | "azure-ai-foundry";
 
 /**
  * What a key can do — derived from (type + detected scopes/permissions).
  * Workers acquire keys by capability, not by type.
  */
 export type KeyCapability =
-  "github-models" | "github-public-api" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api";
+  "github-models" | "github-public-api" | "copilot-models" | "copilot-sdk" | "copilot-cli" | "claude-code-cli" | "anthropic-api" | "azure-ai-inference";
 
 /**
  * Validation status of a key.
@@ -129,7 +129,52 @@ export const KEY_CAPABILITY_ENV_VARS: Record<KeyCapability, string> = {
   "github-public-api": "GITHUB_TOKEN",
   "claude-code-cli": "ANTHROPIC_API_KEY",
   "anthropic-api": "ANTHROPIC_API_KEY",
+  // The API does its own resolution for azure-ai-inference (it needs the
+  // endpoint AND the key, not just one env var). This entry keeps the
+  // capability matrix exhaustive; the env-var path is intentionally not
+  // wired up to a single string because the credential is a JSON blob.
+  "azure-ai-inference": "AZURE_AI_INFERENCE_API_KEY",
 };
+
+/**
+ * Shape of the secret stored for `azure-ai-foundry` key types.
+ * The value field in CreateKeyRequest is a JSON-stringified version of this.
+ */
+export interface AzureAiFoundrySecretValue {
+  /** Base endpoint URL (e.g. https://<resource>.services.ai.azure.com/models). */
+  endpoint: string;
+  /** Resource API key. */
+  apiKey: string;
+  /** Optional deployment / model name override (e.g. gpt-4.1-mini). */
+  model?: string;
+}
+
+/**
+ * Parse a JSON-encoded Foundry secret value. Returns null when the input
+ * is not a well-formed AzureAiFoundrySecretValue.
+ */
+export function parseAzureAiFoundrySecret(raw: string): AzureAiFoundrySecretValue | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.endpoint === "string" &&
+      typeof parsed.apiKey === "string" &&
+      parsed.endpoint.trim() !== "" &&
+      parsed.apiKey.trim() !== ""
+    ) {
+      return {
+        endpoint: parsed.endpoint.trim().replace(/\/+$/, ""),
+        apiKey: parsed.apiKey.trim(),
+        model: typeof parsed.model === "string" && parsed.model.trim() ? parsed.model.trim() : undefined,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Derive the KeyVault secret name from a key's type and ID.
