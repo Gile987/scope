@@ -1,0 +1,160 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { CriteriaPicker } from "@/components/CriteriaPicker";
+import { Loader2, Check, RefreshCw } from "lucide-react";
+import type { CriteriaWizardState } from "@/hooks/useCriteriaWizard";
+
+interface CriteriaWizardStep2Props {
+  wizard: CriteriaWizardState;
+}
+
+export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
+  const {
+    behavior,
+    id,
+    dependsOn,
+    setDependsOn,
+    prompt,
+    setPrompt,
+    aiGenerated,
+    setAiGenerated,
+    suggestedParents,
+    suggestedChildren,
+    acceptedChildren,
+    setAcceptedChildren,
+    handleRegenerate,
+    generateMutation,
+    createMutation,
+  } = wizard;
+
+  return (
+    <div className="space-y-5">
+      {/* Summary */}
+      <div className="space-y-3">
+        <div>
+          <p className="text-sm font-semibold">
+            Criteria for: {behavior}
+          </p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">
+            Behavior to track
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+            Criteria ID
+          </p>
+          <Badge variant="secondary" className="font-mono">
+            {id}
+          </Badge>
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Parents */}
+      <div className="space-y-2">
+        <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+          Parents
+        </Label>
+        <CriteriaPicker selected={dependsOn} onChange={setDependsOn} aiSuggested={suggestedParents} />
+        <p className="text-xs text-muted-foreground">
+          Criteria that must pass before this one is evaluated
+        </p>
+      </div>
+
+      <Separator />
+
+      {/* Children */}
+      <div className="space-y-2">
+        <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+          Children
+        </Label>
+        <CriteriaPicker selected={acceptedChildren} onChange={setAcceptedChildren} aiSuggested={suggestedChildren} />
+        <p className="text-xs text-muted-foreground">
+          These criteria will be updated to depend on <span className="font-mono">{id || "this criterion"}</span> after creation
+        </p>
+      </div>
+
+      <Separator />
+
+      {/* Criteria Prompt */}
+      <div className="space-y-2">
+        <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+          {generateMutation.isPending
+            ? "Generating criteria prompt…"
+            : aiGenerated
+              ? "Criteria Prompt (AI Generated)"
+              : "Criteria Prompt"}
+        </Label>
+
+        {generateMutation.isPending ? (
+          <div className="flex items-center justify-center py-12 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin mr-2" />
+            <span className="text-sm">Generating evaluation prompt…</span>
+          </div>
+        ) : (
+          <Textarea
+            value={prompt}
+            onChange={(e) => {
+              setPrompt(e.target.value);
+              if (aiGenerated) setAiGenerated(false);
+            }}
+            rows={6}
+            placeholder="Write your evaluation prompt here. Describe what the judge should check for in the codebase…"
+            className="font-mono text-sm"
+          />
+        )}
+
+        {generateMutation.isError && (
+          <p className="text-xs text-amber-600">
+            AI generation unavailable — register a GitHub Models token or write your prompt manually
+          </p>
+        )}
+
+        {/* Prompt action buttons */}
+        {!generateMutation.isPending && (
+          <div className="flex items-center gap-2">
+            {prompt && aiGenerated && (
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setAiGenerated(false)}
+              >
+                <Check className="h-3.5 w-3.5" />
+                Accept Prompt
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleRegenerate}
+              disabled={generateMutation.isPending}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Regenerate
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Error display */}
+      {createMutation.isError && (
+        <p className="text-sm text-destructive">
+          {createMutation.error instanceof Error
+            ? createMutation.error.message
+            : "Creation failed"}
+        </p>
+      )}
+    </div>
+  );
+}

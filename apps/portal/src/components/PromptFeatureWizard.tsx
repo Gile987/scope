@@ -24,20 +24,9 @@ import {
 } from "lucide-react";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
+import { slugify } from "@/lib/utils";
 
 const STEPS = ["Define Feature", "Review & Create"];
-
-/** Convert a behavior description to a snake_case ID suggestion */
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/['']/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^[^a-z]+/, "")
-    .replace(/_+/g, "_")
-    .replace(/_$/, "")
-    .slice(0, 40);
-}
 
 export interface PromptFeatureWizardProps {
   /** Pre-fill behavior description */
