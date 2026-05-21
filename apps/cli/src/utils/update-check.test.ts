@@ -176,4 +176,28 @@ describe("update-check (via bundle)", () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("checks again after cooldown period expires", async () => {
+    releaseResponse = { status: 200, body: { tag_name: "v99.0.0" } };
+    await startServers();
+    const tempDir = mkdtempSync(join(tmpdir(), "scope-uc-"));
+    try {
+      // Write a state file with lastCheck > 1 hour ago
+      const configDir = join(tempDir, ".config", "scope");
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      mkdirSync(configDir, { recursive: true });
+      const expiredTimestamp = Date.now() - 61 * 60 * 1000; // 61 minutes ago
+      writeFileSync(
+        join(configDir, "update-check.json"),
+        JSON.stringify({ lastCheck: expiredTimestamp }) + "\n",
+      );
+
+      // Should check again since cooldown expired
+      const { stderr } = await runBundle(["run", "list"], tempDir);
+      expect(stderr).toContain("newer version");
+      expect(stderr).toContain("99.0.0");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
