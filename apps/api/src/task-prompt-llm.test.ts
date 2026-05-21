@@ -3,13 +3,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock llm-token module
-vi.mock("./llm-token.js", () => ({
-  isGitHubModelsTokenAvailable: vi.fn(() => true),
-  acquireGitHubModelsToken: vi.fn(async () => "fake-token"),
-}));
-
-// Mock @azure-rest/ai-inference
+// Mock @azure-rest/ai-inference (must come before llm-token mock because
+// llm-token imports ModelClient from this package).
 const mockPost = vi.fn();
 vi.mock("@azure-rest/ai-inference", () => ({
   default: () => ({
@@ -20,6 +15,21 @@ vi.mock("@azure-rest/ai-inference", () => ({
 
 vi.mock("@azure/core-auth", () => ({
   AzureKeyCredential: vi.fn(),
+}));
+
+// Mock llm-token module — provides both the legacy GitHub Models helpers
+// and the new shared acquireInferenceClient(). The task-prompt module now
+// only calls acquireInferenceClient, but we keep the legacy exports so
+// the rest of the module surface stays compatible.
+vi.mock("./llm-token.js", () => ({
+  isLlmAvailable: vi.fn(() => true),
+  isGitHubModelsTokenAvailable: vi.fn(() => true),
+  acquireGitHubModelsToken: vi.fn(async () => "fake-token"),
+  acquireInferenceClient: vi.fn(async () => ({
+    client: { path: () => ({ post: mockPost }) },
+    endpoint: "https://test.example.com",
+    source: "azure-ai-foundry",
+  })),
 }));
 
 import { generateTaskPrompt, isTaskPromptLlmAvailable } from "./task-prompt-llm.js";

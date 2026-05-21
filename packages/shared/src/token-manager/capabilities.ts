@@ -23,6 +23,7 @@ import type { KeyCapability, KeyType, KeyValidationResult } from "./types.js";
  * | github-oauth             | (always)               | github-models, github-public-api, copilot-models, copilot-sdk, copilot-cli|
  * | anthropic-api-key        | (always)               | claude-code-cli, anthropic-api                                            |
  * | anthropic-oauth          | (always)               | claude-code-cli                                                           |
+ * | azure-ai-foundry         | (always, if valid)     | azure-ai-inference                                                        |
  *
  * Note: `github-public-api` is granted to any valid GitHub bearer token —
  * read-only access to public repos requires no scopes.
@@ -66,6 +67,9 @@ export function deriveCapabilities(
 
     case "anthropic-oauth":
       return ["claude-code-cli"];
+
+    case "azure-ai-foundry":
+      return ["azure-ai-inference"];
 
     default:
       return [];
