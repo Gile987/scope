@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import semver from "semver";
 
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const CONFIG_DIR = join(homedir(), ".config", "scope");
@@ -80,7 +81,7 @@ async function checkLatestVersion(currentVersion: string): Promise<void> {
     if (!data.tag_name) return;
 
     const latest = data.tag_name.replace(/^v/, "");
-    if (isNewerVersion(latest, currentVersion)) {
+    if (semver.valid(latest) && semver.gt(latest, currentVersion)) {
       process.stderr.write(
         `\n  A newer version of scope is available: ${latest} (current: ${currentVersion})\n` +
           `  Run: scope update\n\n`,
@@ -92,14 +93,4 @@ async function checkLatestVersion(currentVersion: string): Promise<void> {
     clearTimeout(timeout);
     recordCheck();
   }
-}
-
-/** Returns true if `latest` is semantically newer than `current` */
-function isNewerVersion(latest: string, current: string): boolean {
-  const parse = (v: string) => v.split(".").map((n) => parseInt(n, 10) || 0);
-  const [la, lb, lc] = parse(latest);
-  const [ca, cb, cc] = parse(current);
-  if (la !== ca) return la > ca;
-  if (lb !== cb) return lb > cb;
-  return lc > cc;
 }
