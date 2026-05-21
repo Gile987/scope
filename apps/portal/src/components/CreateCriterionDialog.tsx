@@ -66,6 +66,7 @@ export function CreateCriterionDialog({ open, onOpenChange, onCreated }: CreateC
 
             <DialogFooter>
               <Button
+                data-command-enter
                 onClick={wizard.handleContinue}
                 disabled={!wizard.canContinue}
                 className="gap-1.5"
@@ -98,6 +99,7 @@ export function CreateCriterionDialog({ open, onOpenChange, onCreated }: CreateC
                 Back
               </Button>
               <Button
+                data-command-enter
                 onClick={wizard.handleCreate}
                 disabled={!wizard.prompt.trim() || wizard.createMutation.isPending}
                 className="gap-1.5"
