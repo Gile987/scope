@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useRef, useEffect, useCallback } from "react";
-import { Link, useLocation, Outlet } from "react-router-dom";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Link, useLocation, Outlet, matchPath } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch, Plug, Puzzle, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,19 @@ const navItems: NavItem[] = [
 const MORE_BUTTON_WIDTH = 44;
 /** Gap between nav items (matches space-x-5 = 1.25rem = 20px) */
 const ITEM_GAP = 20;
+
+/**
+ * Routes that opt-in to the full-bleed list/detail layout (no `container`
+ * max-width or vertical padding). The list page must render `<ListLayout>`.
+ */
+const FULL_BLEED_ROUTE_PATTERNS = [
+  "/prompt-features",
+  "/prompt-features/:id",
+  "/agents",
+  "/agents/:id",
+  "/models",
+  "/models/:id",
+];
 
 export function Layout() {
   const location = useLocation();
@@ -157,8 +170,21 @@ export function Layout() {
   const shownItems = visibleNavItems.slice(0, effectiveVisible);
   const overflowItems = visibleNavItems.slice(effectiveVisible);
 
+  const isFullBleed = useMemo(
+    () =>
+      FULL_BLEED_ROUTE_PATTERNS.some((pattern) =>
+        matchPath({ path: pattern, end: true }, location.pathname),
+      ),
+    [location.pathname],
+  );
+
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div
+      className={cn(
+        "flex flex-col bg-background",
+        isFullBleed ? "h-screen overflow-hidden" : "min-h-screen",
+      )}
+    >
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center">
@@ -303,12 +329,17 @@ export function Layout() {
       </header>
 
       {/* Main content */}
-      <main className="container flex-1 py-6">
+      <main
+        className={cn(
+          "flex-1 min-h-0",
+          isFullBleed ? "flex flex-col" : "container py-6",
+        )}
+      >
         <Outlet />
       </main>
 
-      {/* Version footer */}
-      <VersionFooter />
+      {/* Version footer — hidden in full-bleed mode so list layout owns the whole area */}
+      {!isFullBleed && <VersionFooter />}
     </div>
   );
 }

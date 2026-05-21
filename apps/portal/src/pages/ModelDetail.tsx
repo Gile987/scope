@@ -4,12 +4,12 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Cpu } from "lucide-react";
+import { Cpu } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { DetailPanel } from "@/components/list-layout";
 
 export function ModelDetail() {
   const { id } = useParams<{ id: string }>();
@@ -21,138 +21,129 @@ export function ModelDetail() {
     enabled: !!id,
   });
 
+  const closePanel = () => navigate("/models");
+
   if (isLoading) {
     return (
-      <div className="space-y-4 max-w-2xl">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-64 w-full" />
-      </div>
+      <DetailPanel title="Loading…" onClose={closePanel}>
+        <div className="space-y-3">
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </DetailPanel>
     );
   }
 
   if (error || !model) {
     return (
-      <div className="space-y-4 max-w-2xl">
-        <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/models")}>
-          <ArrowLeft className="h-4 w-4" /> Back to Models
-        </Button>
-        <div className="text-center py-12 text-muted-foreground">
-          Model not found
-        </div>
-      </div>
+      <DetailPanel title="Not found" onClose={closePanel}>
+        <p className="text-sm text-muted-foreground">Model not found.</p>
+      </DetailPanel>
     );
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      {/* Back link */}
-      <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/models")}>
-        <ArrowLeft className="h-4 w-4" /> Back to Models
-      </Button>
-
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-2">
-          <Cpu className="h-5 w-5" />
-          <h1 className="text-2xl font-bold tracking-tight">{model.modelId}</h1>
-        </div>
-        <p className="text-sm text-muted-foreground font-mono mt-1">{model._id}</p>
-      </div>
-
-      {/* Overview card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Overview</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-muted-foreground">Provider</span>
-              <div className="mt-1">
-                <Badge variant="outline">{model.provider}</Badge>
-              </div>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Agent</span>
-              <div className="mt-1">
-                <Link to={`/agents/${model.agentId}`} className="hover:underline font-mono text-xs">
-                  {model.agentId}
-                </Link>
-              </div>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Status</span>
-              <div className="mt-1">
-                {model.disappearedAt ? (
-                  <Badge variant="secondary">Disappeared</Badge>
-                ) : (
-                  <Badge variant="default">Active</Badge>
-                )}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Lifecycle card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Lifecycle</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-muted-foreground">First Seen</span>
-              <div className="mt-1 font-mono text-xs">{formatDate(model.firstSeenAt)}</div>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Last Seen</span>
-              <div className="mt-1 font-mono text-xs">{formatDate(model.lastSeenAt)}</div>
-            </div>
-            {model.disappearedAt && (
-              <div>
-                <span className="text-muted-foreground">Disappeared At</span>
-                <div className="mt-1 font-mono text-xs">{formatDate(model.disappearedAt)}</div>
-              </div>
-            )}
-            {model.providerAvailableFrom && (
-              <div>
-                <span className="text-muted-foreground">Provider Available From</span>
-                <div className="mt-1 font-mono text-xs">{formatDate(model.providerAvailableFrom)}</div>
-              </div>
-            )}
-            {model.providerEndOfLife && (
-              <div>
-                <span className="text-muted-foreground">Provider End of Life</span>
-                <div className="mt-1 font-mono text-xs text-destructive">{formatDate(model.providerEndOfLife)}</div>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Metadata card */}
-      {model.metadata && Object.keys(model.metadata).length > 0 && (
+    <DetailPanel
+      title={
+        <span className="flex items-center gap-1.5">
+          <Cpu className="h-4 w-4" />
+          <span className="truncate">{model.modelId}</span>
+        </span>
+      }
+      subtitle={<span className="font-mono">{model._id}</span>}
+      onClose={closePanel}
+    >
+      <div className="space-y-4">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Metadata</CardTitle>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Overview</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              {Object.entries(model.metadata).map(([key, value]) => (
-                <div key={key}>
-                  <span className="text-muted-foreground">{key}</span>
-                  <div className="mt-1 font-mono text-xs">
-                    {typeof value === "string" || typeof value === "number"
-                      ? String(value)
-                      : JSON.stringify(value)}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <dt className="text-xs text-muted-foreground">Provider</dt>
+                <dd className="mt-0.5"><Badge variant="outline">{model.provider}</Badge></dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Agent</dt>
+                <dd className="mt-0.5">
+                  <Link to={`/agents/${model.agentId}`} className="font-mono text-xs hover:underline">
+                    {model.agentId}
+                  </Link>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Status</dt>
+                <dd className="mt-0.5">
+                  {model.disappearedAt ? (
+                    <Badge variant="secondary">Disappeared</Badge>
+                  ) : (
+                    <Badge variant="default">Active</Badge>
+                  )}
+                </dd>
+              </div>
+            </dl>
           </CardContent>
         </Card>
-      )}
-    </div>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Lifecycle</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <dt className="text-xs text-muted-foreground">First Seen</dt>
+                <dd className="mt-0.5 font-mono text-xs">{formatDate(model.firstSeenAt)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Last Seen</dt>
+                <dd className="mt-0.5 font-mono text-xs">{formatDate(model.lastSeenAt)}</dd>
+              </div>
+              {model.disappearedAt && (
+                <div>
+                  <dt className="text-xs text-muted-foreground">Disappeared At</dt>
+                  <dd className="mt-0.5 font-mono text-xs">{formatDate(model.disappearedAt)}</dd>
+                </div>
+              )}
+              {model.providerAvailableFrom && (
+                <div>
+                  <dt className="text-xs text-muted-foreground">Provider Available From</dt>
+                  <dd className="mt-0.5 font-mono text-xs">{formatDate(model.providerAvailableFrom)}</dd>
+                </div>
+              )}
+              {model.providerEndOfLife && (
+                <div>
+                  <dt className="text-xs text-muted-foreground">Provider End of Life</dt>
+                  <dd className="mt-0.5 font-mono text-xs text-destructive">{formatDate(model.providerEndOfLife)}</dd>
+                </div>
+              )}
+            </dl>
+          </CardContent>
+        </Card>
+
+        {model.metadata && Object.keys(model.metadata).length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Metadata</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                {Object.entries(model.metadata).map(([key, value]) => (
+                  <div key={key}>
+                    <dt className="text-xs text-muted-foreground">{key}</dt>
+                    <dd className="mt-0.5 font-mono text-xs break-all">
+                      {typeof value === "string" || typeof value === "number"
+                        ? String(value)
+                        : JSON.stringify(value)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </DetailPanel>
   );
 }

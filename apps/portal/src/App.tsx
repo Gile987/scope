@@ -78,9 +78,10 @@ export function App() {
         <Route path="/criteria/graph" element={<CriteriaGraphView />} />
         <Route path="/criteria/mdp" element={<CriteriaMdpView />} />
         <Route path="/criteria/:id" element={<CriterionDetail />} />
-        <Route path="/prompt-features" element={<PromptFeatureList />} />
+        <Route path="/prompt-features" element={<PromptFeatureList />}>
+          <Route path=":id" element={<PromptFeatureDetail />} />
+        </Route>
         <Route path="/prompt-features/new" element={<CreatePromptFeature />} />
-        <Route path="/prompt-features/:id" element={<PromptFeatureDetail />} />
         <Route path="/task-prompts" element={<TaskPromptList />} />
         <Route path="/task-prompts/:id" element={<TaskPromptDetail />} />
         <Route path="/statistics" element={<Statistics />} />
@@ -93,10 +94,12 @@ export function App() {
           <Route path="accounts/new" element={<CreateAccount />} />
           <Route path="accounts/:id" element={<AccountDetail />} />
         </Route>
-        <Route path="/agents" element={<FeatureRoute featureKey="agents"><AgentList /></FeatureRoute>} />
-        <Route path="/agents/:id" element={<FeatureRoute featureKey="agents"><AgentDetail /></FeatureRoute>} />
-        <Route path="/models" element={<FeatureRoute featureKey="models"><ModelList /></FeatureRoute>} />
-        <Route path="/models/:id" element={<FeatureRoute featureKey="models"><ModelDetail /></FeatureRoute>} />
+        <Route path="/agents" element={<FeatureRoute featureKey="agents"><AgentList /></FeatureRoute>}>
+          <Route path=":id" element={<FeatureRoute featureKey="agents"><AgentDetail /></FeatureRoute>} />
+        </Route>
+        <Route path="/models" element={<FeatureRoute featureKey="models"><ModelList /></FeatureRoute>}>
+          <Route path=":id" element={<FeatureRoute featureKey="models"><ModelDetail /></FeatureRoute>} />
+        </Route>
         <Route path="/mcp-servers" element={<FeatureRoute featureKey="mcp"><McpServerList /></FeatureRoute>} />
         <Route path="/mcp-servers/new" element={<FeatureRoute featureKey="mcp"><CreateMcpServer /></FeatureRoute>} />
         <Route path="/mcp-servers/:slug" element={<FeatureRoute featureKey="mcp"><McpServerDetail /></FeatureRoute>} />

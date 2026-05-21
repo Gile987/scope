@@ -1,30 +1,39 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useOutlet, useParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, Eye, Search, RefreshCw } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { truncate } from "@/lib/utils";
+import {
+  ListLayout,
+  FilterRail,
+  ClearFiltersLink,
+  DataTable,
+  Pagination,
+  useListUrlState,
+  type DataTableColumn,
+} from "@/components/list-layout";
+import type { PromptFeatureDocument } from "@/types";
 
 export function PromptFeatureList() {
-  const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const detailOutlet = useOutlet();
+  const { id: activeId } = useParams<{ id?: string }>();
 
-  const { data: features = [], isLoading, isRefetching } = useQuery({
-    queryKey: ["prompt-features", search],
-    queryFn: () => api.listPromptFeatures(search || undefined),
+  const state = useListUrlState({ defaultPageSize: 25, filterKeys: [] });
+
+  const { data: allFeatures = [], isLoading, isRefetching } = useQuery({
+    queryKey: ["prompt-features", state.search],
+    queryFn: () => api.listPromptFeatures(state.search || undefined),
   });
 
   const deleteMutation = useMutation({
@@ -32,115 +41,141 @@ export function PromptFeatureList() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["prompt-features"] }),
   });
 
-  return (
-    <div className="space-y-6">
-      {/* Page header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Prompt Features</h1>
-          <p className="text-muted-foreground">Manage prompt feature detection</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link to="/prompt-features/new">
-            <Button className="gap-1.5">
-              <Plus className="h-4 w-4" /> New Feature
+  // Sort + paginate client-side (server returns all matches).
+  const sortedFeatures = useMemo(() => {
+    const sorted = [...allFeatures];
+    if (state.sort === "id") {
+      sorted.sort((a, b) => a.id.localeCompare(b.id));
+    } else if (state.sort === "prompt") {
+      sorted.sort((a, b) => a.prompt.localeCompare(b.prompt));
+    }
+    if (state.sortDir === "desc") sorted.reverse();
+    return sorted;
+  }, [allFeatures, state.sort, state.sortDir]);
+
+  const total = sortedFeatures.length;
+  const pageStart = (state.page - 1) * state.pageSize;
+  const pageItems = sortedFeatures.slice(pageStart, pageStart + state.pageSize);
+
+  const columns: DataTableColumn<PromptFeatureDocument>[] = [
+    {
+      id: "id",
+      header: "ID",
+      sortable: true,
+      width: "240px",
+      cell: (f) => (
+        <Link
+          to={`/prompt-features/${f.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="font-mono text-sm font-medium hover:underline"
+        >
+          {f.id}
+        </Link>
+      ),
+    },
+    {
+      id: "prompt",
+      header: "Prompt",
+      sortable: true,
+      cell: (f) => (
+        <span className="text-sm text-muted-foreground">{truncate(f.prompt, 120)}</span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "",
+      width: "60px",
+      align: "right",
+      cell: (f) => (
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Trash2 className="h-4 w-4" />
             </Button>
-          </Link>
-        </div>
-      </div>
+          </AlertDialogTrigger>
+          <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete prompt feature?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will delete <strong>{f.id}</strong>. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => deleteMutation.mutate(f.id)}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ),
+    },
+  ];
 
-      {/* Search */}
-      <div className="flex items-center gap-2 max-w-sm">
-        <Search className="h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search prompt features…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="h-9"
+  return (
+    <ListLayout
+      title="Prompt Features"
+      description="Manage prompt feature detection"
+      railStorageKey="prompt-features"
+      actions={
+        <Link to="/prompt-features/new">
+          <Button className="gap-1.5" size="sm">
+            <Plus className="h-4 w-4" /> New Feature
+          </Button>
+        </Link>
+      }
+      filterRail={
+        <FilterRail
+          search={state.search}
+          onSearchChange={state.setSearch}
+          searchPlaceholder="Search prompt features…"
+          refreshing={isRefetching}
+          footer={
+            <ClearFiltersLink
+              onClick={state.clearFilters}
+              disabled={!state.hasActiveFilters}
+            />
+          }
+        >
+          <div className="p-3 text-xs text-muted-foreground">
+            Use the search above to filter by ID or prompt text.
+          </div>
+        </FilterRail>
+      }
+      detail={detailOutlet}
+    >
+      <div className="flex flex-col gap-3">
+        <DataTable
+          items={pageItems}
+          columns={columns}
+          getRowId={(f) => f.id}
+          activeId={activeId}
+          onRowClick={(f) => navigate(`/prompt-features/${f.id}`)}
+          sort={state.sort}
+          sortDir={state.sortDir}
+          onSortChange={state.toggleSort}
+          loading={isLoading}
+          emptyState={
+            state.search ? "No prompt features match your search" : "No prompt features defined yet"
+          }
         />
-        {isRefetching && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
+        <Pagination
+          page={state.page}
+          pageSize={state.pageSize}
+          total={total}
+          onPageChange={state.setPage}
+          onPageSizeChange={state.setPageSize}
+          itemLabel="features"
+        />
       </div>
-
-      {/* Table */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
-      ) : features.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          {search ? "No prompt features match your search" : "No prompt features defined yet"}
-        </div>
-      ) : (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[200px]">ID</TableHead>
-                <TableHead>Prompt</TableHead>
-                <TableHead className="w-[100px]" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {features.map((f) => (
-                <TableRow key={f.id}>
-                  <TableCell>
-                    <Link
-                      to={`/prompt-features/${f.id}`}
-                      className="font-mono text-sm font-medium hover:underline"
-                    >
-                      {f.id}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {truncate(f.prompt, 100)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1 justify-end">
-                      <Link to={`/prompt-features/${f.id}`}>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </Link>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete prompt feature?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will delete <strong>{f.id}</strong>. This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => deleteMutation.mutate(f.id)}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            >
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-
-      {!isLoading && (
-        <p className="text-sm text-muted-foreground">
-          {features.length} {features.length === 1 ? "feature" : "features"} total
-        </p>
-      )}
-    </div>
+    </ListLayout>
   );
 }
