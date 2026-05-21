@@ -41,22 +41,39 @@ function recordCheck(): void {
 
 /**
  * Starts the update check in the background.
- * Returns a function that prints the update notification (if any) when called.
- * Call the returned function after the command finishes to ensure clean output ordering.
+ * Returns a function that resolves with the update message (if any).
+ * Also registers a process 'exit' handler to print the message even if
+ * Commander calls process.exit() before the caller can await.
  */
 export function checkForUpdates(currentVersion: string): () => Promise<void> {
   if (process.env.SCOPE_NO_UPDATE_CHECK === "1") return async () => {};
   if (!shouldCheck()) return async () => {};
 
-  const pending = checkLatestVersion(currentVersion);
-  return () => pending;
+  let message: string | undefined;
+  const pending = checkLatestVersion(currentVersion).then((msg) => {
+    message = msg;
+  });
+
+  // Print on exit even if process.exit() is called (e.g., --help, --version)
+  process.on("exit", () => {
+    if (message) process.stderr.write(message);
+  });
+
+  return async () => {
+    await pending;
+    // Print and clear so the exit handler doesn't double-print
+    if (message) {
+      process.stderr.write(message);
+      message = undefined;
+    }
+  };
 }
 
 const RELEASES_URL =
   process.env.SCOPE_RELEASES_URL ||
   "https://api.github.com/repos/growth-ecosystems/scope-doc/releases/latest";
 
-async function checkLatestVersion(currentVersion: string): Promise<void> {
+async function checkLatestVersion(currentVersion: string): Promise<string | undefined> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2000);
 
@@ -75,20 +92,22 @@ async function checkLatestVersion(currentVersion: string): Promise<void> {
       headers,
     });
 
-    if (!res.ok) return;
+    if (!res.ok) return undefined;
 
     const data = (await res.json()) as { tag_name?: string };
-    if (!data.tag_name) return;
+    if (!data.tag_name) return undefined;
 
     const latest = data.tag_name.replace(/^v/, "");
     if (semver.valid(latest) && semver.gt(latest, currentVersion)) {
-      process.stderr.write(
+      return (
         `\n  A newer version of scope is available: ${latest} (current: ${currentVersion})\n` +
-          `  Run: scope update\n\n`,
+        `  Run: scope update\n\n`
       );
     }
+    return undefined;
   } catch {
     // Silently ignore network errors
+    return undefined;
   } finally {
     clearTimeout(timeout);
     recordCheck();
