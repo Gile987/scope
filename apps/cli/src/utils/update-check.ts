@@ -72,8 +72,6 @@ async function checkLatestVersion(currentVersion: string): Promise<void> {
 
     if (!res.ok) return;
 
-    recordCheck();
-
     const data = (await res.json()) as { tag_name?: string };
     if (!data.tag_name) return;
 
@@ -86,6 +84,7 @@ async function checkLatestVersion(currentVersion: string): Promise<void> {
     }
   } finally {
     clearTimeout(timeout);
+    recordCheck();
   }
 }
 
