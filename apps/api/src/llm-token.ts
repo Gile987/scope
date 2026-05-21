@@ -68,6 +68,25 @@ function normalizeFoundryEndpoint(raw: string): string {
 }
 
 /**
+ * Returns true when an error thrown from a portal LLM call is one that
+ * should be surfaced to the client as a 503 (LLM-unavailable / config
+ * problem / inference-time failure) rather than bubbled to the generic
+ * error handler as a 500. The route handlers all share this set of
+ * patterns; consolidating the check here keeps them aligned as new
+ * inference errors get added.
+ */
+export function isInferenceError(err: unknown): err is Error {
+  if (!(err instanceof Error)) return false;
+  const lower = err.message.toLowerCase();
+  return (
+    err.message.includes("not configured") ||
+    lower.includes("llm request failed") ||
+    lower.includes("resource not found") ||
+    lower.includes("authentication failed")
+  );
+}
+
+/**
  * Returns true if a GitHub Models token is available from any source:
  * - GITHUB_MODELS_API_KEY env var
  * - TOKEN_MANAGER_URL (token manager with registered github-models tokens)
@@ -165,41 +184,27 @@ function logInferenceAcquired(handle: InferenceClientHandle): void {
 /**
  * Try to acquire a Foundry credential from the Token Manager.
  *
- * Bypasses TokenManagerClient.acquireToken's env-var shortcut on purpose:
- * the env-var fallback only carries the API key, not the endpoint+key+model
- * JSON blob this code path needs.
- *
  * Returns null when no token-manager is configured, when no key is
- * registered for the capability, or when the registered secret is malformed.
+ * registered for the capability, when the request fails, or when the
+ * registered secret is malformed.
+ *
+ * Note: when only AZURE_AI_INFERENCE_API_KEY is set (without the matching
+ * endpoint), TokenManagerClient's env-var shortcut returns the bare key,
+ * which parseAzureAiFoundrySecret rejects as malformed — so we fall
+ * through to the next backend. The both-vars-set case is already handled
+ * in acquireInferenceClient before this is called.
  */
 async function tryAcquireFoundryFromTokenManager(): Promise<{
   endpoint: string;
   apiKey: string;
   model?: string;
 } | null> {
-  const baseUrl = process.env.TOKEN_MANAGER_URL;
-  if (!baseUrl) return null;
+  const client = getTokenManagerClient();
+  if (!client) return null;
 
   try {
-    const response = await fetch(`${baseUrl}/api/v1/keys/acquire`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ capability: "azure-ai-inference" }),
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (response.status === 404) {
-      // No keys registered for this capability — fall through to next backend
-      return null;
-    }
-    if (!response.ok) {
-      return null;
-    }
-
-    const result = (await response.json()) as { value?: string };
-    if (!result.value) return null;
-
-    return parseAzureAiFoundrySecret(result.value);
+    const raw = await client.acquireToken("azure-ai-inference");
+    return parseAzureAiFoundrySecret(raw);
   } catch {
     return null;
   }

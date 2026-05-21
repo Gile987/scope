@@ -13,6 +13,7 @@ import type { CriteriaDocument, RouteContext } from "../route-context.js";
 import { computeMdp } from "../criteria-mdp.js";
 import type { MdpAnalyzableRun } from "../criteria-mdp.js";
 import { generateCriteriaPrompt, isLlmAvailable } from "../llm.js";
+import { isInferenceError } from "../llm-token.js";
 
 export function registerCriteriaRoutes(ctx: RouteContext): void {
 
@@ -62,12 +63,7 @@ apiRoute(ctx.app, ctx.registry, {
       console.log("[generate-prompt] LLM result:", JSON.stringify(result));
       res.json(result);
     } catch (err) {
-      if (err instanceof Error && (
-          err.message.includes("not configured") ||
-          err.message.toLowerCase().includes("llm request failed") ||
-          err.message.toLowerCase().includes("resource not found") ||
-          err.message.toLowerCase().includes("authentication failed")
-        )) {
+      if (isInferenceError(err)) {
         res.status(503).json({ error: err.message });
         return;
       }

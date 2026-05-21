@@ -12,6 +12,7 @@ import {
 import { apiRoute } from "../openapi/api-route.js";
 import type { PromptFeatureDocument, RouteContext } from "../route-context.js";
 import { extractPromptFeatures, generatePromptFeaturePrompt, isLlmAvailable as isPromptFeatureLlmAvailable } from "../prompt-feature-llm.js";
+import { isInferenceError } from "../llm-token.js";
 
 export function registerPromptFeaturesRoutes(ctx: RouteContext): void {
 
@@ -61,19 +62,12 @@ apiRoute(ctx.app, ctx.registry, {
       console.log("[prompt-features/generate-prompt] LLM result:", JSON.stringify(result));
       res.json(result);
     } catch (err) {
-      if (err instanceof Error) {
-        // Surface inference-time failures (bad endpoint, missing deployment,
-        // auth failure, etc.) as a 503 with the underlying message so the
-        // Portal can show a useful, actionable error.
-        if (
-          err.message.includes("not configured") ||
-          err.message.toLowerCase().includes("llm request failed") ||
-          err.message.toLowerCase().includes("resource not found") ||
-          err.message.toLowerCase().includes("authentication failed")
-        ) {
-          res.status(503).json({ error: err.message });
-          return;
-        }
+      // Surface inference-time failures (bad endpoint, missing deployment,
+      // auth failure, etc.) as a 503 with the underlying message so the
+      // Portal can show a useful, actionable error.
+      if (isInferenceError(err)) {
+        res.status(503).json({ error: err.message });
+        return;
       }
       next(err);
     }
@@ -176,12 +170,7 @@ apiRoute(ctx.app, ctx.registry, {
         cached: false,
       });
     } catch (err) {
-      if (err instanceof Error && (
-          err.message.includes("not configured") ||
-          err.message.toLowerCase().includes("llm request failed") ||
-          err.message.toLowerCase().includes("resource not found") ||
-          err.message.toLowerCase().includes("authentication failed")
-        )) {
+      if (isInferenceError(err)) {
         res.status(503).json({ error: err.message });
         return;
       }

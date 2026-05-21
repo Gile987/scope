@@ -223,7 +223,6 @@ async function validateAzureAiFoundry(
       headers: {
         "Content-Type": "application/json",
         "api-key": parsed.apiKey,
-        Authorization: `Bearer ${parsed.apiKey}`,
       },
       body,
       signal: AbortSignal.timeout(15_000),

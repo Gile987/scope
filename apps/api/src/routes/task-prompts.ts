@@ -13,6 +13,7 @@ import { apiRoute } from "../openapi/api-route.js";
 import type { RouteContext } from "../route-context.js";
 import { extractPromptFeatures, isLlmAvailable as isPromptFeatureLlmAvailable } from "../prompt-feature-llm.js";
 import { generateTaskPrompt, isTaskPromptLlmAvailable } from "../task-prompt-llm.js";
+import { isInferenceError } from "../llm-token.js";
 
 export function registerTaskPromptsRoutes(ctx: RouteContext): void {
 
@@ -229,12 +230,7 @@ apiRoute(ctx.app, ctx.registry, {
         cached: false,
       });
     } catch (err) {
-      if (err instanceof Error && (
-          err.message.includes("not configured") ||
-          err.message.toLowerCase().includes("llm request failed") ||
-          err.message.toLowerCase().includes("resource not found") ||
-          err.message.toLowerCase().includes("authentication failed")
-        )) {
+      if (isInferenceError(err)) {
         res.status(503).json({ error: err.message });
         return;
       }
