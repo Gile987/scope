@@ -416,7 +416,7 @@ jobs:
         run: pnpm build:cli
 
       - name: Run integration tests
-        run: pnpm vitest run --config vitest.integration.config.ts apps/cli/src/bundle.integration.test.ts
+        run: pnpm vitest run --config vitest.integration.config.ts apps/cli/src/bundle.integration.test.ts apps/cli/src/utils/update-check.integration.test.ts
 
       - name: Upload CLI bundle
         uses: actions/upload-artifact@v4
