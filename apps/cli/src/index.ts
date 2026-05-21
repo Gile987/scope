@@ -96,6 +96,7 @@ function isMainModule(): boolean {
 }
 
 if (isMainModule()) {
-  checkForUpdates(CLI_VERSION);
-  program.parse();
+  const flushUpdateCheck = checkForUpdates(CLI_VERSION);
+  await program.parseAsync();
+  await flushUpdateCheck();
 }

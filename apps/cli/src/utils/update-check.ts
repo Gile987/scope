@@ -3,7 +3,8 @@
 
 /**
  * Non-blocking check for newer CLI versions on GitHub Releases.
- * Prints a warning to stderr if a newer version is available.
+ * Starts the check in the background and returns a flush function
+ * that should be awaited after the command completes to print the notification.
  * Suppressed by SCOPE_NO_UPDATE_CHECK=1 environment variable.
  * Checks at most once per hour (cooldown stored in ~/.config/scope/update-check.json).
  */
@@ -37,14 +38,17 @@ function recordCheck(): void {
   }
 }
 
-export function checkForUpdates(currentVersion: string): void {
-  if (process.env.SCOPE_NO_UPDATE_CHECK === "1") return;
-  if (!shouldCheck()) return;
+/**
+ * Starts the update check in the background.
+ * Returns a function that prints the update notification (if any) when called.
+ * Call the returned function after the command finishes to ensure clean output ordering.
+ */
+export function checkForUpdates(currentVersion: string): () => Promise<void> {
+  if (process.env.SCOPE_NO_UPDATE_CHECK === "1") return async () => {};
+  if (!shouldCheck()) return async () => {};
 
-  // Fire-and-forget — never blocks CLI startup
-  checkLatestVersion(currentVersion).catch(() => {
-    // Silently ignore network errors
-  });
+  const pending = checkLatestVersion(currentVersion);
+  return () => pending;
 }
 
 const RELEASES_URL =
@@ -82,6 +86,8 @@ async function checkLatestVersion(currentVersion: string): Promise<void> {
           `  Run: gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash\n\n`,
       );
     }
+  } catch {
+    // Silently ignore network errors
   } finally {
     clearTimeout(timeout);
     recordCheck();
