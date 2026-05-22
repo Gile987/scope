@@ -280,7 +280,7 @@ export function Layout() {
             <main
               className={cn(
                 "flex-1 min-h-0",
-                isFullBleed ? "flex flex-col" : "container py-6",
+                isFullBleed ? "flex flex-col" : "w-full px-6 py-6 lg:px-8",
               )}
             >
               <Outlet />

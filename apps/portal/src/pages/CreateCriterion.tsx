@@ -33,7 +33,7 @@ export function CreateCriterion() {
   );
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl">
       {wizard.step === 1 ? (
         /* ───────────────────── Step 1: Define Criteria ───────────────────── */
         <div className="space-y-6">

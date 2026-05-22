@@ -289,7 +289,7 @@ export function SubmitRun() {
   );
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-2xl space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">New Run</h1>
         <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
