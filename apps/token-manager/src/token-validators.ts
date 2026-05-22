@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { KeyType, KeyValidationResult, deriveCapabilities } from "shared";
+import { KeyType, KeyValidationResult, deriveCapabilities, parseAzureAiFoundrySecret } from "shared";
 
 /**
  * Validate a key by calling the provider's API and derive its capabilities.
@@ -31,6 +31,9 @@ export async function validateToken(
       break;
     case "github-oauth-cookie-state":
       result = await validateGitHubOAuthCookieState(value);
+      break;
+    case "azure-ai-foundry":
+      result = await validateAzureAiFoundry(value);
       break;
     default:
       return { status: "error", error: `Unknown token type: ${type}` };
@@ -177,6 +180,92 @@ async function validateGitHubOAuthCookieState(
     return {
       status: "invalid",
       error: `OAuth cookie state is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Validate an Azure AI Foundry credential.
+ *
+ * The secret is a JSON blob with `endpoint` + `apiKey` (+ optional `model`).
+ * We probe the inference endpoint with a minimal `chat/completions` POST
+ * (max_tokens=1) — this matches exactly how the portal actually uses the
+ * endpoint, so any 404/401 here also means production calls will fail.
+ *
+ * Foundry endpoints typically end in `/models` (e.g.
+ * `https://<resource>.services.ai.azure.com/models`); we detect a missing
+ * suffix on 404 and return a helpful hint.
+ */
+async function validateAzureAiFoundry(
+  value: string
+): Promise<KeyValidationResult> {
+  const parsed = parseAzureAiFoundrySecret(value);
+  if (!parsed) {
+    return {
+      status: "invalid",
+      error: "Foundry credential must be a JSON object with `endpoint` and `apiKey` string fields",
+    };
+  }
+
+  const url = `${parsed.endpoint}/chat/completions?api-version=2024-05-01-preview`;
+  // Validate with the same model name production will use so a missing
+  // deployment surfaces as an invalid key instead of a runtime 404.
+  const probeModel = parsed.model || "gpt-4.1";
+  const body = JSON.stringify({
+    messages: [{ role: "user", content: "ping" }],
+    max_tokens: 1,
+    model: probeModel,
+  });
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": parsed.apiKey,
+      },
+      body,
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (response.status === 200) {
+      return { status: "valid" };
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return { status: "invalid", error: `Authentication failed (HTTP ${response.status}) — check the API key` };
+    }
+
+    if (response.status === 404) {
+      // 404 here means either the endpoint URL is wrong OR the model
+      // deployment doesn't exist on the resource. Both are user errors that
+      // would also break production, so mark as invalid with both hints.
+      const hint = parsed.endpoint.endsWith("/models")
+        ? `model deployment '${probeModel}' may not exist on this resource — verify the deployment name in the Azure portal and set it in the "Deployment / Model name" field`
+        : "the endpoint URL usually ends with `/models` (e.g. `https://<resource>.services.ai.azure.com/models`)";
+      return {
+        status: "invalid",
+        error: `HTTP 404 from ${url} — ${hint}`,
+      };
+    }
+
+    if (response.status === 400) {
+      // 400 means the endpoint accepted us but rejected the request body.
+      // Auth is fine and the URL resolves; common causes are model mismatch
+      // on some Foundry shapes. Treat as valid; production will surface the
+      // exact error if it actually happens.
+      return { status: "valid" };
+    }
+
+    const errBody = await response.text().catch(() => "");
+    return {
+      status: "error",
+      error: `Foundry endpoint returned HTTP ${response.status} for ${url}${errBody ? ` — ${errBody.slice(0, 200)}` : ""}`,
+    };
+  } catch (err) {
+    return {
+      status: "error",
+      error: `Foundry validation failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }

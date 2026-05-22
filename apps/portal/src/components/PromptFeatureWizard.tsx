@@ -24,20 +24,9 @@ import {
 } from "lucide-react";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
+import { slugify } from "@/lib/utils";
 
 const STEPS = ["Define Feature", "Review & Create"];
-
-/** Convert a behavior description to a snake_case ID suggestion */
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/['']/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^[^a-z]+/, "")
-    .replace(/_+/g, "_")
-    .replace(/_$/, "")
-    .slice(0, 40);
-}
 
 export interface PromptFeatureWizardProps {
   /** Pre-fill behavior description */
@@ -351,7 +340,7 @@ export function PromptFeatureWizard({
 
                 {generateMutation.isError && (
                   <p className="text-xs text-amber-600">
-                    AI generation unavailable — register a GitHub Models token or write your prompt manually
+                    AI generation failed — {generateMutation.error instanceof Error ? generateMutation.error.message : "register an Azure AI Foundry or GitHub Models key at /secrets/keys/new, or write your prompt manually"}
                   </p>
                 )}
               </div>

@@ -14,6 +14,7 @@ import type { CriteriaDocument, RouteContext } from "../route-context.js";
 import { computeMdp } from "../criteria-mdp.js";
 import type { MdpAnalyzableRun } from "../criteria-mdp.js";
 import { generateCriteriaPrompt, isLlmAvailable } from "../llm.js";
+import { isInferenceError } from "../llm-token.js";
 
 type CriteriaGraphNode = Pick<CriteriaDocument, "id" | "dependsOn">;
 
@@ -84,7 +85,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     if (!isLlmAvailable()) {
-      res.status(503).json({ error: "LLM not configured: register a github-models token or set GITHUB_MODELS_API_KEY" });
+      res.status(503).json({ error: "LLM not configured: no inference backend available. Please register a new secret key for GitHub Model or Azure Foundry." });
       return;
     }
 
@@ -105,7 +106,7 @@ apiRoute(ctx.app, ctx.registry, {
       console.log("[generate-prompt] LLM result:", JSON.stringify(result));
       res.json(result);
     } catch (err) {
-      if (err instanceof Error && err.message.includes("not configured")) {
+      if (isInferenceError(err)) {
         res.status(503).json({ error: err.message });
         return;
       }
