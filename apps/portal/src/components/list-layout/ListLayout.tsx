@@ -74,10 +74,10 @@ export function ListLayout({
       {hasRail && (
         <aside
           className={cn(
-            "shrink-0 border-r border-border/60 transition-[width] duration-200 ease-out",
-            railCollapsed ? "w-0" : "",
+            "shrink-0 overflow-hidden transition-[width] duration-200 ease-out",
+            railCollapsed ? "w-0 border-r-0" : "border-r border-border/60",
           )}
-          style={!railCollapsed ? { width: railWidth } : undefined}
+          style={{ width: railCollapsed ? 0 : railWidth }}
           aria-hidden={railCollapsed}
         >
           <div
