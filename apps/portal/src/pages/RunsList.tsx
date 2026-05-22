@@ -23,8 +23,11 @@ import {
   DataTable,
   Pagination,
   BulkActionBar,
+  ColumnVisibilityMenu,
+  useHiddenColumns,
   useListUrlState,
   type DataTableColumn,
+  type ColumnVisibilityOption,
 } from "@/components/list-layout";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { formatDate, formatId, formatDuration, truncate } from "@/lib/utils";
@@ -42,6 +45,12 @@ export function RunsList() {
   const isForceRetryModifierActive = useShiftModifier();
 
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
+
+  // Column visibility — persisted under scope:hidden-columns:runs.
+  const columnVisibility = useHiddenColumns({
+    storageKey: "runs",
+    defaultHidden: ["model"],
+  });
 
   // Cursor pagination — keep a stack of cursors that map a virtual page number
   // to an `after` cursor (page 1 = no cursor, page 2 = stack[0], …).
@@ -325,6 +334,17 @@ export function RunsList() {
     [allRuns],
   );
 
+  const columnOptions: ColumnVisibilityOption[] = [
+    { id: "id", label: "ID", required: true },
+    { id: "task", label: "Task" },
+    { id: "worker", label: "Worker" },
+    { id: "model", label: "Model" },
+    { id: "status", label: "Status" },
+    { id: "outcome", label: "Outcome" },
+    { id: "duration", label: "Duration" },
+    { id: "created", label: "Created" },
+  ];
+
   const columns: DataTableColumn<Run>[] = [
     {
       id: "id",
@@ -336,6 +356,7 @@ export function RunsList() {
     {
       id: "task",
       header: "Task",
+      hidden: columnVisibility.isHidden("task"),
       cell: (r) =>
         r.scenario?.task ? (
           <span className="text-sm" title={r.scenario.task}>
@@ -350,12 +371,14 @@ export function RunsList() {
       header: "Worker",
       sortable: true,
       width: "160px",
+      hidden: columnVisibility.isHidden("worker"),
       cell: (r) => <Badge variant="outline" className="font-mono text-xs">{r.workerType}</Badge>,
     },
     {
       id: "model",
       header: "Model",
       width: "180px",
+      hidden: columnVisibility.isHidden("model"),
       cell: (r) =>
         r.model ? (
           <span className="font-mono text-xs">{r.model}</span>
@@ -368,12 +391,14 @@ export function RunsList() {
       header: "Status",
       sortable: true,
       width: "120px",
+      hidden: columnVisibility.isHidden("status"),
       cell: (r) => (r.run?.status ? <StatusBadge status={r.run.status} /> : <span className="text-xs text-muted-foreground">—</span>),
     },
     {
       id: "outcome",
       header: "Outcome",
       width: "120px",
+      hidden: columnVisibility.isHidden("outcome"),
       cell: (r) => (r.run?.outcome ? <OutcomeBadge outcome={r.run.outcome} /> : <span className="text-xs text-muted-foreground">—</span>),
     },
     {
@@ -381,6 +406,7 @@ export function RunsList() {
       header: "Duration",
       sortable: true,
       width: "100px",
+      hidden: columnVisibility.isHidden("duration"),
       cell: (r) => {
         const start = r.run?.startedAt;
         const end = r.run?.finishedAt;
@@ -397,6 +423,7 @@ export function RunsList() {
       header: "Created",
       sortable: true,
       width: "160px",
+      hidden: columnVisibility.isHidden("created"),
       cell: (r) => <span className="text-xs text-muted-foreground">{formatDate(r.createdAt)}</span>,
     },
   ];
@@ -411,11 +438,19 @@ export function RunsList() {
       }
       railStorageKey="runs"
       actions={
-        <Link to="/runs/new">
-          <Button size="sm" className="gap-1.5">
-            <Plus className="h-4 w-4" /> New Run
-          </Button>
-        </Link>
+        <>
+          <ColumnVisibilityMenu
+            columns={columnOptions}
+            hidden={columnVisibility.hidden}
+            onToggle={columnVisibility.toggle}
+            onReset={columnVisibility.reset}
+          />
+          <Link to="/runs/new">
+            <Button size="sm" className="gap-1.5">
+              <Plus className="h-4 w-4" /> New Run
+            </Button>
+          </Link>
+        </>
       }
       filterRail={
         <FilterRail

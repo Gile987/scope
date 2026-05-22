@@ -17,5 +17,12 @@ export { DetailPanel } from "./DetailPanel";
 export type { DetailPanelProps } from "./DetailPanel";
 export { BulkActionBar } from "./BulkActionBar";
 export type { BulkActionBarProps } from "./BulkActionBar";
+export { ColumnVisibilityMenu, useHiddenColumns } from "./ColumnVisibilityMenu";
+export type {
+  ColumnVisibilityMenuProps,
+  ColumnVisibilityOption,
+  UseHiddenColumnsOptions,
+  HiddenColumnsState,
+} from "./ColumnVisibilityMenu";
 export { useListUrlState } from "./useListUrlState";
 export type { ListUrlState, SortDir, UseListUrlStateOptions } from "./useListUrlState";
