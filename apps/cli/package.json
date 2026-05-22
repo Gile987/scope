@@ -1,14 +1,26 @@
 {
   "name": "cli",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "type": "module",
   "bin": {
-    "worker-cli": "./dist/index.js"
+    "scope": "./dist/scope.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/growth-ecosystems/scope-core.git",
+    "directory": "apps/cli"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsx build.ts",
+    "build:tsc": "tsc --noEmit",
     "dev": "tsx src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/scope.mjs",
+    "test": "vitest run",
+    "test:integration": "vitest run --config ../../vitest.integration.config.ts"
   },
   "dependencies": {
     "cli-table3": "^0.6.5",
@@ -18,12 +30,15 @@
     "eventsource": "^2.0.2",
     "ink": "^6.0.0",
     "react": "^19.0.0",
+    "semver": "^7.8.0",
     "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@types/eventsource": "^1.1.15",
     "@types/node": "^22.7.0",
     "@types/react": "^19.0.0",
+    "@types/semver": "^7.7.1",
+    "esbuild": "^0.25.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.2"
   }

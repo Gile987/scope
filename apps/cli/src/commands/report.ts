@@ -7,7 +7,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { banner, colorLevel, dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getCliName, getDefaultApiUrl } from "../utils/shared.js";
 
 export function registerReportCommands(program: Command): void {
 // ─── Report management ──────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ report
   .command("generate")
   .description("Generate a report for a benchmark run")
   .requiredOption("-i, --id <requestId>", "Run ID to generate a report for")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .option("--stream", "Stream report generation logs in real time", true)
   .option("--no-stream", "Do not stream logs after submission")
   .action(async (options) => {
@@ -73,7 +73,7 @@ report
         eventSource.addEventListener("done", () => {
           console.log(`\n${successText("Report generation complete")}`);
           console.log(`\n${label('Next steps:')}`);
-          console.log(`  ${dimTimestamp('View report:')} pnpm cli report get -i ${result.id}`);
+          console.log(`  ${dimTimestamp('View report:')} ${getCliName()} report get -i ${result.id}`);
           eventSource.close();
           process.exit(0);
         });
@@ -90,8 +90,8 @@ report
         };
       } else {
         console.log(`\n${label('Next steps:')}`);
-        console.log(`  ${dimTimestamp('Stream logs:')}  pnpm cli report logs -i ${result.id}`);
-        console.log(`  ${dimTimestamp('View report:')} pnpm cli report get -i ${result.id}`);
+        console.log(`  ${dimTimestamp('Stream logs:')}  ${getCliName()} report logs -i ${result.id}`);
+        console.log(`  ${dimTimestamp('View report:')} ${getCliName()} report get -i ${result.id}`);
       }
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
@@ -104,7 +104,7 @@ report
   .command("get")
   .description("Get a report by ID")
   .requiredOption("-i, --id <reportId>", "Report ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 , ['markdown'])
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -168,7 +168,7 @@ report
         console.log(report.content);
       } else if (report.status === "pending" || report.status === "generating") {
         console.log(`\n${dimTimestamp('Report is still being generated. Stream logs with:')}`);
-        console.log(`  pnpm cli report logs -i ${report.id}`);
+        console.log(`  ${getCliName()} report logs -i ${report.id}`);
       }
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
@@ -181,7 +181,7 @@ report
   .command("list")
   .description("List all reports (optionally filter by run)")
   .option("-r, --run <requestId>", "Filter by run ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -247,7 +247,7 @@ report
   .command("logs")
   .description("Stream report generation logs")
   .requiredOption("-i, --id <reportId>", "Report ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .option("--from-start", "Include historical logs from the beginning", false)
   .action(async (options) => {
     try {
