@@ -89,7 +89,6 @@ export const WorkerTypeSchema = z.enum(VALID_WORKERS);
 export const ProfileVariationInputSchema = z
   .object({
     profileId: z.string(),
-    profileVersion: z.number().int().optional(),
     label: z.string().optional(),
   })
   .openapi("ProfileVariationInput");
@@ -105,7 +104,6 @@ export const CreateRequestInputSchema = z
     skillRevisions: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
     profileId: z.string().optional(),
-    profileVersion: z.number().int().optional(),
     profileVariations: z.array(ProfileVariationInputSchema).optional(),
     priority: z.number().int().optional(),
   })
