@@ -76,9 +76,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cli-bundle
-          path: |
-            apps/cli/dist/scope.mjs
-            apps/cli/install.sh
+          path: apps/cli/dist/scope.mjs
 
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -129,12 +127,10 @@ jobs:
             --notes "## Installation
 
           \`\`\`bash
-          TAG=\$(gh release list --repo growth-ecosystems/scope-doc --json tagName -q '[.[].tagName | select(startswith(\"cli/v\"))][0]')
-          gh release download \"\$TAG\" --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+          gh api repos/growth-ecosystems/scope-doc/contents/cli-install.sh -H \"Accept: application/vnd.github.raw\" | bash
           \`\`\`
 
           Or download \`scope.mjs\` from this release and place it in your PATH.
 
           Requires Node.js >= 20." \
-            apps/cli/dist/scope.mjs \
-            apps/cli/install.sh
+            apps/cli/dist/scope.mjs

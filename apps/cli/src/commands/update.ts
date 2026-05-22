@@ -84,9 +84,8 @@ export function registerUpdateCommand(program: Command): void {
         // Clean up temp file on failure
         try { unlinkSync(tmpFile); } catch { /* ignore */ }
         console.error(
-          "\nUpdate failed. You can update manually:\n" +
-            "  TAG=$(gh release list --repo " + REPO + " --json tagName -q '[.[].tagName | select(startswith(\"cli/v\"))][0]')\n" +
-            "  gh release download \"$TAG\" --repo " + REPO + " --pattern install.sh -O - | bash",
+          "\nUpdate failed. You can reinstall manually:\n" +
+            "  gh api repos/" + REPO + "/contents/cli-install.sh -H \"Accept: application/vnd.github.raw\" | bash",
         );
         process.exit(1);
       }

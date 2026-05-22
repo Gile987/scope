@@ -5,8 +5,7 @@ Command-line interface for the Scope AI coding agent benchmarking platform.
 ## Installation
 
 ```bash
-TAG=$(gh release list --repo growth-ecosystems/scope-doc --json tagName -q '[.[].tagName | select(startswith("cli/v"))][0]')
-gh release download "$TAG" --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+gh api repos/growth-ecosystems/scope-doc/contents/cli-install.sh -H "Accept: application/vnd.github.raw" | bash
 ```
 
 **Prerequisites:**
