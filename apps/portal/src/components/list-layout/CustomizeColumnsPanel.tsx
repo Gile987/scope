@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -21,11 +20,16 @@ export interface CustomizeColumnsPanelProps {
   columns: readonly CustomizeColumnsOption[];
   /** Currently hidden column ids. */
   hidden: ReadonlySet<string>;
-  /** Commit a new set of hidden ids (called when the user presses Done). */
-  onApply: (hidden: ReadonlySet<string>) => void;
+  /** Toggle a single column's visibility — applied immediately. */
+  onToggle: (id: string) => void;
+  /**
+   * Commit a new hidden set in one shot (used by the top-level "All" checkbox
+   * which toggles many columns at once).
+   */
+  onSetHidden: (hidden: ReadonlySet<string>) => void;
   /** Reset to defaults handler — wired to the Restore link. */
   onReset: () => void;
-  /** Close the panel without applying. */
+  /** Close the panel. */
   onClose: () => void;
   /** Panel width (default 260px). */
   width?: string;
@@ -37,56 +41,34 @@ export interface CustomizeColumnsPanelProps {
  *
  * Designed to render as a third column inside `ListLayout` (between the filter
  * rail and the main listing) — the parent controls visibility by passing the
- * panel to `ListLayout.customizePanel`.
+ * panel to `ListLayout.secondaryPanel`.
  *
- * Changes are staged locally until the user presses **Done**, then committed
- * via `onApply`. Pressing **Restore** calls `onReset` (which typically resets
- * the persisted hidden set to its defaults).
+ * Toggles apply live: every checkbox change calls back to the parent so the
+ * underlying table updates immediately. **Restore** resets to defaults and
+ * **Done** simply closes the panel.
  */
 export function CustomizeColumnsPanel({
   columns,
   hidden,
-  onApply,
+  onToggle,
+  onSetHidden,
   onReset,
   onClose,
   width = "260px",
   className,
 }: CustomizeColumnsPanelProps) {
-  const [draft, setDraft] = useState<Set<string>>(() => new Set(hidden));
-
-  // Sync the draft whenever the panel is re-opened with a fresh hidden set.
-  useEffect(() => {
-    setDraft(new Set(hidden));
-  }, [hidden]);
-
   const toggleable = columns.filter((c) => !c.required);
-  const allVisible = toggleable.every((c) => !draft.has(c.id));
-  const someVisible = toggleable.some((c) => !draft.has(c.id)) && !allVisible;
+  const allVisible = toggleable.every((c) => !hidden.has(c.id));
+  const someVisible = toggleable.some((c) => !hidden.has(c.id)) && !allVisible;
 
   const handleToggleAll = () => {
-    setDraft((prev) => {
-      const next = new Set(prev);
-      if (allVisible) {
-        for (const c of toggleable) next.add(c.id);
-      } else {
-        for (const c of toggleable) next.delete(c.id);
-      }
-      return next;
-    });
-  };
-
-  const handleToggle = (id: string) => {
-    setDraft((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const handleDone = () => {
-    onApply(draft);
-    onClose();
+    const next = new Set(hidden);
+    if (allVisible) {
+      for (const c of toggleable) next.add(c.id);
+    } else {
+      for (const c of toggleable) next.delete(c.id);
+    }
+    onSetHidden(next);
   };
 
   return (
@@ -125,7 +107,7 @@ export function CustomizeColumnsPanel({
 
         <ul className="space-y-0.5">
           {columns.map((col) => {
-            const visible = !draft.has(col.id);
+            const visible = !hidden.has(col.id);
             return (
               <li key={col.id}>
                 <label
@@ -139,7 +121,7 @@ export function CustomizeColumnsPanel({
                   <Checkbox
                     checked={visible}
                     disabled={col.required}
-                    onCheckedChange={() => handleToggle(col.id)}
+                    onCheckedChange={() => onToggle(col.id)}
                     aria-label={visible ? `Hide ${col.label}` : `Show ${col.label}`}
                   />
                   <span>{col.label}</span>
@@ -158,7 +140,7 @@ export function CustomizeColumnsPanel({
         >
           Restore
         </button>
-        <Button size="sm" onClick={handleDone}>
+        <Button size="sm" onClick={onClose}>
           Done
         </Button>
       </footer>

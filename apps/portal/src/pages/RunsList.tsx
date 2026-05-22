@@ -488,7 +488,8 @@ export function RunsList() {
           <CustomizeColumnsPanel
             columns={columnOptions}
             hidden={columnVisibility.hidden}
-            onApply={columnVisibility.setHidden}
+            onToggle={columnVisibility.toggle}
+            onSetHidden={columnVisibility.setHidden}
             onReset={columnVisibility.reset}
             onClose={() => setCustomizeOpen(false)}
           />
