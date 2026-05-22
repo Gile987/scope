@@ -25,8 +25,6 @@ import { TokenDetail } from "@/pages/TokenDetail";
 import { AccountList } from "@/pages/AccountList";
 import { CreateAccount } from "@/pages/CreateAccount";
 import { AccountDetail } from "@/pages/AccountDetail";
-import { SecretsLayout } from "@/components/SecretsLayout";
-import { ReportsLayout } from "@/components/ReportsLayout";
 import { AgentList } from "@/pages/AgentList";
 import { AgentDetail } from "@/pages/AgentDetail";
 import { McpServerList } from "@/pages/McpServerList";
@@ -64,13 +62,11 @@ export function App() {
         </Route>
         <Route path="/runs/new" element={<SubmitRun />} />
         <Route path="/runs/:id/:tab?" element={<RunDetail />} />
-        <Route path="/reports" element={<ReportsLayout />}>
-          <Route index element={<ReportsList />} />
-          <Route path=":id" element={<ReportDetail />} />
-          <Route path="templates" element={<ReportTemplateList />} />
-          <Route path="templates/new" element={<CreateReportTemplate />} />
-          <Route path="templates/:id" element={<ReportTemplateDetail />} />
-        </Route>
+        <Route path="/reports" element={<ReportsList />} />
+        <Route path="/reports/templates" element={<ReportTemplateList />} />
+        <Route path="/reports/templates/new" element={<CreateReportTemplate />} />
+        <Route path="/reports/templates/:id" element={<ReportTemplateDetail />} />
+        <Route path="/reports/:id" element={<ReportDetail />} />
         {/* Redirect old /report-templates URLs */}
         <Route path="/report-templates" element={<Navigate to="/reports/templates" replace />} />
         <Route path="/report-templates/:id" element={<Navigate to="/reports/templates" replace />} />
@@ -88,15 +84,13 @@ export function App() {
         <Route path="/task-prompts" element={<TaskPromptList />} />
         <Route path="/task-prompts/:id" element={<TaskPromptDetail />} />
         <Route path="/statistics" element={<Statistics />} />
-        <Route path="/secrets" element={<FeatureRoute featureKey="tokens"><SecretsLayout /></FeatureRoute>}>
-          <Route index element={<Navigate to="/secrets/keys" replace />} />
-          <Route path="keys" element={<TokenList />} />
-          <Route path="keys/new" element={<CreateToken />} />
-          <Route path="keys/:id" element={<TokenDetail />} />
-          <Route path="accounts" element={<AccountList />} />
-          <Route path="accounts/new" element={<CreateAccount />} />
-          <Route path="accounts/:id" element={<AccountDetail />} />
-        </Route>
+        <Route path="/secrets" element={<Navigate to="/secrets/keys" replace />} />
+        <Route path="/secrets/keys" element={<FeatureRoute featureKey="tokens"><TokenList /></FeatureRoute>} />
+        <Route path="/secrets/keys/new" element={<FeatureRoute featureKey="tokens"><CreateToken /></FeatureRoute>} />
+        <Route path="/secrets/keys/:id" element={<FeatureRoute featureKey="tokens"><TokenDetail /></FeatureRoute>} />
+        <Route path="/secrets/accounts" element={<FeatureRoute featureKey="tokens"><AccountList /></FeatureRoute>} />
+        <Route path="/secrets/accounts/new" element={<FeatureRoute featureKey="tokens"><CreateAccount /></FeatureRoute>} />
+        <Route path="/secrets/accounts/:id" element={<FeatureRoute featureKey="tokens"><AccountDetail /></FeatureRoute>} />
         <Route path="/agents" element={<FeatureRoute featureKey="agents"><AgentList /></FeatureRoute>}>
           <Route path=":id" element={<FeatureRoute featureKey="agents"><AgentDetail /></FeatureRoute>} />
         </Route>

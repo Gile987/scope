@@ -83,6 +83,17 @@ const FULL_BLEED_ROUTE_PATTERNS = [
   "/models/:id",
   "/runs",
   "/runs/:id/preview",
+  "/task-prompts",
+  "/criteria",
+  "/insights",
+  "/mcp-servers",
+  "/skills",
+  "/extensions",
+  "/profiles",
+  "/secrets/keys",
+  "/secrets/accounts",
+  "/reports",
+  "/reports/templates",
 ];
 
 interface SidebarIconLinkProps {
