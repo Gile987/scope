@@ -93,7 +93,7 @@ Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-
 
 Profile fan-out mode is also supported for comparative runs:
 
-1. User selects a `baseProfileId` and optional `profileVariations[]`
+1. User selects a `profileId` (the base) and a `profileVariations[]` array of additional profiles to compare against
 2. API validates every variation upfront, then expands one submit call into multiple requests under one shared `submissionId`
 3. Each expanded request resolves configuration from its variation profile, optionally pinned to a specific variation `profileVersion`
 4. Expanded requests persist `profileId`, `profileVersionId`, and `profileVariation` lineage metadata for traceability

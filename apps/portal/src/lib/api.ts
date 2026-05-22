@@ -91,8 +91,6 @@ export const api = {
     agentVersion?: string;
     profileId?: string;
     profileVersion?: number;
-    baseProfileId?: string;
-    baseProfileVersion?: number;
     profileVariations?: Array<{
       profileId: string;
       profileVersion?: number;

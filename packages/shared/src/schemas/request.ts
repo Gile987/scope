@@ -115,8 +115,6 @@ export const CreateRequestInputSchema = z
     extensions: z.array(z.string()).optional(),
     profileId: z.string().optional(),
     profileVersion: z.number().int().optional(),
-    baseProfileId: z.string().optional(),
-    baseProfileVersion: z.number().int().optional(),
     profileVariations: z.array(ProfileVariationInputSchema).optional(),
     priority: z.number().int().optional(),
   })

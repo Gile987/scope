@@ -641,12 +641,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "CreateRequestInput": {
         "properties": {
-          "baseProfileId": {
-            "type": "string",
-          },
-          "baseProfileVersion": {
-            "type": "integer",
-          },
           "extensions": {
             "items": {
               "type": "string",
