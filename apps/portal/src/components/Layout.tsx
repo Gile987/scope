@@ -1,14 +1,44 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Link, useLocation, Outlet, matchPath } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Activity, Plus, List, FlaskConical, BarChart3, Tags, FileText, KeyRound, Bot, Server, Lightbulb, Cpu, MessageSquareText, Settings, MoreHorizontal, Menu, BookOpen, GitBranch, Plug, Puzzle, SlidersHorizontal } from "lucide-react";
+import {
+  Activity,
+  Plus,
+  List,
+  FlaskConical,
+  BarChart3,
+  Tags,
+  FileText,
+  KeyRound,
+  Bot,
+  Server,
+  Lightbulb,
+  Cpu,
+  MessageSquareText,
+  Settings,
+  Menu,
+  BookOpen,
+  GitBranch,
+  Plug,
+  Puzzle,
+  SlidersHorizontal,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Sheet, SheetContent, SheetTrigger, SheetTitle,
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+  SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { VersionFooter } from "./VersionFooter";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 
@@ -39,11 +69,6 @@ const navItems: NavItem[] = [
   { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
 ];
 
-/** Width reserved for the "More" overflow button (icon + padding) */
-const MORE_BUTTON_WIDTH = 44;
-/** Gap between nav items (matches space-x-5 = 1.25rem = 20px) */
-const ITEM_GAP = 20;
-
 /**
  * Routes that opt-in to the full-bleed list/detail layout (no `container`
  * max-width or vertical padding). The list page must render `<ListLayout>`.
@@ -59,118 +84,66 @@ const FULL_BLEED_ROUTE_PATTERNS = [
   "/runs/:id/preview",
 ];
 
+interface SidebarIconLinkProps {
+  to: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  active: boolean;
+  external?: boolean;
+}
+
+function SidebarIconLink({ to, label, icon: Icon, active, external }: SidebarIconLinkProps) {
+  const className = cn(
+    "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+    active
+      ? "bg-accent text-foreground"
+      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+  );
+  const content = (
+    <>
+      {active && (
+        <span
+          className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-primary"
+          aria-hidden
+        />
+      )}
+      <Icon className="h-5 w-5" />
+    </>
+  );
+  return (
+    <Tooltip delayDuration={150}>
+      <TooltipTrigger asChild>
+        {external ? (
+          <a
+            href={to}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={className}
+            aria-label={label}
+          >
+            {content}
+          </a>
+        ) : (
+          <Link to={to} className={className} aria-label={label}>
+            {content}
+          </Link>
+        )}
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={8}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function Layout() {
   const location = useLocation();
   const { isFeatureEnabled } = useFeatureFlags();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [overflowOpen, setOverflowOpen] = useState(false);
-
-  // Priority+ nav state
-  const navContainerRef = useRef<HTMLDivElement>(null);
-  const itemWidthsRef = useRef<number[]>([]);
-  const [visibleCount, setVisibleCount] = useState<number | null>(null); // null = not measured yet
 
   const visibleNavItems = navItems.filter(
-    (item) => !item.featureKey || isFeatureEnabled(item.featureKey)
+    (item) => !item.featureKey || isFeatureEnabled(item.featureKey),
   );
-
-  // Measure individual item widths once they're rendered
-  const measureItems = useCallback(() => {
-    const container = navContainerRef.current;
-    if (!container) return;
-    const items = container.querySelectorAll<HTMLElement>("[data-nav-item]");
-    itemWidthsRef.current = Array.from(items).map((el) => el.offsetWidth);
-  }, []);
-
-  // Recalculate how many items fit
-  const recalculate = useCallback(() => {
-    const container = navContainerRef.current;
-    if (!container || itemWidthsRef.current.length === 0) return;
-
-    const availableWidth = container.offsetWidth;
-    const widths = itemWidthsRef.current;
-    const total = widths.length;
-
-    // Try fitting all items without the More button
-    let usedWidth = 0;
-    let fits = 0;
-    for (let i = 0; i < total; i++) {
-      const needed = usedWidth + widths[i] + (i > 0 ? ITEM_GAP : 0);
-      if (needed <= availableWidth) {
-        usedWidth = needed;
-        fits++;
-      } else {
-        break;
-      }
-    }
-
-    if (fits === total) {
-      // Everything fits
-      setVisibleCount(total);
-      return;
-    }
-
-    // Not all fit — need More button, so recalculate with that reserved
-    const availableWithMore = availableWidth - MORE_BUTTON_WIDTH - ITEM_GAP;
-    usedWidth = 0;
-    fits = 0;
-    for (let i = 0; i < total; i++) {
-      const needed = usedWidth + widths[i] + (i > 0 ? ITEM_GAP : 0);
-      if (needed <= availableWithMore) {
-        usedWidth = needed;
-        fits++;
-      } else {
-        break;
-      }
-    }
-
-    // Show at least 0 items (full overflow)
-    setVisibleCount(Math.max(0, fits));
-  }, []);
-
-  // Measure on mount and when items change
-  useEffect(() => {
-    // Defer a frame to let items render at full width for measurement
-    const frame = requestAnimationFrame(() => {
-      measureItems();
-      recalculate();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [visibleNavItems.length, measureItems, recalculate]);
-
-  // ResizeObserver to react to container width changes
-  useEffect(() => {
-    const container = navContainerRef.current;
-    if (!container) return;
-
-    const observer = new ResizeObserver(() => {
-      recalculate();
-    });
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [recalculate]);
-
-  // Close overflow dropdown when clicking outside
-  useEffect(() => {
-    if (!overflowOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest("[data-overflow-menu]")) {
-        setOverflowOpen(false);
-      }
-    };
-    document.addEventListener("click", handleClick);
-    return () => document.removeEventListener("click", handleClick);
-  }, [overflowOpen]);
-
-  // Close overflow when route changes
-  useEffect(() => {
-    setOverflowOpen(false);
-  }, [location.pathname]);
-
-  const effectiveVisible = visibleCount ?? visibleNavItems.length;
-  const shownItems = visibleNavItems.slice(0, effectiveVisible);
-  const overflowItems = visibleNavItems.slice(effectiveVisible);
 
   const isFullBleed = useMemo(
     () =>
@@ -180,81 +153,90 @@ export function Layout() {
     [location.pathname],
   );
 
+  const adminActive = location.pathname === "/admin";
+
   return (
-    <div
-      className={cn(
-        "flex flex-col bg-background",
-        isFullBleed ? "h-screen overflow-hidden" : "min-h-screen",
-      )}
-    >
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-14 items-center">
-          <Link to="/" className="mr-4 flex items-center space-x-2 shrink-0">
+    <TooltipProvider delayDuration={150} skipDelayDuration={300}>
+      <div
+        className={cn(
+          "flex bg-background",
+          isFullBleed ? "h-screen overflow-hidden" : "min-h-screen",
+        )}
+      >
+        {/* Desktop sidebar — icon-only, full height */}
+        <aside
+          className="hidden w-14 shrink-0 flex-col items-center border-r border-border/60 bg-card/40 sm:flex"
+          aria-label="Primary navigation"
+        >
+          {/* Logo */}
+          <Link
+            to="/"
+            className="flex h-14 w-full items-center justify-center border-b border-border/60"
+            aria-label="Scope home"
+          >
             <Activity className="h-6 w-6" />
-            <span className="hidden font-bold sm:inline-block">Scope</span>
           </Link>
 
-          {/* Priority+ nav: measured container (overflow-hidden) + separate More button */}
-          <div ref={navContainerRef} className="hidden sm:flex flex-1 items-center min-w-0 overflow-hidden">
-            {visibleCount === null ? (
-              // Measurement pass — render all items at natural width (clipped by overflow-hidden)
-              <nav className="flex items-center space-x-5 text-sm font-medium whitespace-nowrap">
-                {visibleNavItems.map((item) => (
-                  <span key={item.to} data-nav-item className="flex items-center gap-1.5">
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
-                  </span>
-                ))}
-              </nav>
-            ) : (
-              // Normal render: only the items that fit
-              <nav className="flex items-center space-x-5 text-sm font-medium whitespace-nowrap">
-                {shownItems.map((item) => {
-                  const isActive = location.pathname.startsWith(item.to);
-                  return (
-                    <Link
-                      key={item.to}
-                      to={item.to}
-                      data-nav-item
-                      className={cn(
-                        "flex items-center gap-1.5 transition-colors hover:text-foreground/80",
-                        isActive ? "text-foreground" : "text-foreground/60"
-                      )}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </nav>
-            )}
-          </div>
+          {/* Primary nav (scrollable when overflowing) */}
+          <nav className="flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-3">
+            {visibleNavItems.map((item) => {
+              const isActive = location.pathname.startsWith(item.to);
+              return (
+                <SidebarIconLink
+                  key={item.to}
+                  to={item.to}
+                  label={item.label}
+                  icon={item.icon}
+                  active={isActive}
+                />
+              );
+            })}
+          </nav>
 
-          {/* "More" overflow button — sits OUTSIDE the overflow-hidden container so its dropdown is not clipped */}
-          {visibleCount !== null && overflowItems.length > 0 && (
-            <div className="relative hidden sm:block shrink-0 ml-5" data-overflow-menu>
-              <button
-                onClick={(e) => { e.stopPropagation(); setOverflowOpen((v) => !v); }}
-                className={cn(
-                  "flex items-center gap-1 text-sm font-medium transition-colors hover:text-foreground/80 text-foreground/60",
-                  overflowItems.some((item) => location.pathname.startsWith(item.to)) && "text-foreground"
-                )}
-                aria-label="More navigation items"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-              {overflowOpen && (
-                <div className="absolute top-full right-0 mt-2 w-48 rounded-md border bg-background shadow-lg py-1 z-50">
-                  {overflowItems.map((item) => {
+          {/* Footer: API docs + Admin */}
+          <div className="flex w-full flex-col items-center gap-1 border-t border-border/60 py-3">
+            <SidebarIconLink
+              to="/api-docs"
+              label="API Documentation"
+              icon={Plug}
+              active={false}
+              external
+            />
+            <SidebarIconLink
+              to="/admin"
+              label="Admin"
+              icon={Settings}
+              active={adminActive}
+            />
+          </div>
+        </aside>
+
+        {/* Main column (mobile header + content + version footer) */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Mobile top bar (logo + hamburger) — hidden on sm+ */}
+          <header className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border/60 bg-background/95 px-3 backdrop-blur sm:hidden">
+            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className="-ml-1">
+                  <Menu className="h-5 w-5" />
+                  <span className="sr-only">Toggle navigation</span>
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-64 pt-10">
+                <SheetTitle className="sr-only">Navigation</SheetTitle>
+                <nav className="flex flex-col space-y-1">
+                  {visibleNavItems.map((item) => {
                     const isActive = location.pathname.startsWith(item.to);
                     return (
                       <Link
                         key={item.to}
                         to={item.to}
+                        onClick={() => setMobileOpen(false)}
                         className={cn(
-                          "flex items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground",
-                          isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground"
+                          "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                          isActive
+                            ? "bg-accent text-accent-foreground"
+                            : "text-muted-foreground",
                         )}
                       >
                         <item.icon className="h-4 w-4" />
@@ -262,86 +244,52 @@ export function Layout() {
                       </Link>
                     );
                   })}
-                </div>
-              )}
-            </div>
-          )}
+                  <div className="my-2 h-px bg-border/60" />
+                  <a
+                    href="/api-docs"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <Plug className="h-4 w-4" />
+                    API Documentation
+                  </a>
+                  <Link
+                    to="/admin"
+                    onClick={() => setMobileOpen(false)}
+                    className={cn(
+                      "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                      adminActive
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    <Settings className="h-4 w-4" />
+                    Admin
+                  </Link>
+                </nav>
+              </SheetContent>
+            </Sheet>
+            <Link to="/" className="flex items-center gap-2 font-bold">
+              <Activity className="h-5 w-5" />
+              <span>Scope</span>
+            </Link>
+          </header>
 
-          {/* Spacer on very small screens */}
-          <div className="flex-1 sm:hidden" />
-
-          {/* API Documentation link (served by API server, not React Router) */}
-          <a
-            href="/api-docs"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 ml-4 p-2 flex items-center gap-1.5 text-sm font-medium transition-colors hover:text-foreground/80 text-foreground/60"
-            title="API Documentation"
-          >
-            <Plug className="h-4 w-4" />
-            <span className="hidden sm:inline">API</span>
-          </a>
-
-          {/* Admin gear icon */}
-          <Link
-            to="/admin"
+          {/* Main content */}
+          <main
             className={cn(
-              "shrink-0 ml-4 p-2 transition-colors hover:text-foreground/80",
-              location.pathname === "/admin" ? "text-foreground" : "text-foreground/60"
+              "flex-1 min-h-0",
+              isFullBleed ? "flex flex-col" : "container py-6",
             )}
-            title="Admin"
           >
-            <Settings className="h-5 w-5" />
-          </Link>
+            <Outlet />
+          </main>
 
-          {/* Mobile hamburger — visible on xs only (below sm) */}
-          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="sm:hidden ml-1 shrink-0">
-                <Menu className="h-5 w-5" />
-                <span className="sr-only">Toggle navigation</span>
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-64 pt-10">
-              <SheetTitle className="sr-only">Navigation</SheetTitle>
-              <nav className="flex flex-col space-y-1">
-                {visibleNavItems.map((item) => {
-                  const isActive = location.pathname.startsWith(item.to);
-                  return (
-                    <Link
-                      key={item.to}
-                      to={item.to}
-                      onClick={() => setMobileOpen(false)}
-                      className={cn(
-                        "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                        isActive
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground"
-                      )}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </nav>
-            </SheetContent>
-          </Sheet>
+          {/* Version footer — hidden in full-bleed mode */}
+          {!isFullBleed && <VersionFooter />}
         </div>
-      </header>
-
-      {/* Main content */}
-      <main
-        className={cn(
-          "flex-1 min-h-0",
-          isFullBleed ? "flex flex-col" : "container py-6",
-        )}
-      >
-        <Outlet />
-      </main>
-
-      {/* Version footer — hidden in full-bleed mode so list layout owns the whole area */}
-      {!isFullBleed && <VersionFooter />}
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }
