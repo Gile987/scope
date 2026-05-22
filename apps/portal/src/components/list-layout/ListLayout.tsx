@@ -9,6 +9,7 @@ import {
   SheetContent,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useIsCompactViewport } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 
 export interface ListLayoutProps {
@@ -89,7 +90,8 @@ export function ListLayout({
 
   const toggleRail = useCallback(() => setRailCollapsed((v) => !v), []);
 
-  // Compact (mobile/tablet) filter rail sheet state.
+  // Compact (mobile/tablet) state — sheets only mount when the viewport is < lg.
+  const isCompact = useIsCompactViewport();
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
 
   const detailVisible = detail !== null && detail !== undefined && detail !== false;
@@ -178,11 +180,11 @@ export function ListLayout({
       )}
 
       {/* Compact filter rail sheet (< lg) */}
-      {hasRail && (
+      {hasRail && isCompact && (
         <Sheet open={mobileRailOpen} onOpenChange={setMobileRailOpen}>
           <SheetContent
             side="left"
-            className="w-[85vw] max-w-sm overflow-y-auto p-0 lg:hidden"
+            className="w-[85vw] max-w-sm overflow-y-auto p-0"
           >
             <SheetTitle className="sr-only">Filters</SheetTitle>
             <div className="h-full">{filterRail}</div>
@@ -191,7 +193,7 @@ export function ListLayout({
       )}
 
       {/* Compact detail sheet (< lg) */}
-      {detailVisible && (
+      {detailVisible && isCompact && (
         <Sheet
           open
           onOpenChange={(open) => {
@@ -201,7 +203,7 @@ export function ListLayout({
           <SheetContent
             side="right"
             hideClose
-            className="w-[92vw] max-w-md overflow-y-auto p-0 lg:hidden"
+            className="w-[92vw] max-w-md overflow-y-auto p-0"
           >
             <SheetTitle className="sr-only">Details</SheetTitle>
             <div className="h-full">{detail}</div>
@@ -210,7 +212,7 @@ export function ListLayout({
       )}
 
       {/* Compact secondary-panel sheet (< lg) */}
-      {secondaryVisible && (
+      {secondaryVisible && isCompact && (
         <Sheet
           open
           onOpenChange={(open) => {
@@ -220,7 +222,7 @@ export function ListLayout({
           <SheetContent
             side="left"
             hideClose
-            className="w-[85vw] max-w-sm overflow-y-auto p-0 lg:hidden"
+            className="w-[85vw] max-w-sm overflow-y-auto p-0"
           >
             <SheetTitle className="sr-only">Customize</SheetTitle>
             <div className="h-full">{secondaryPanel}</div>
