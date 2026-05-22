@@ -200,6 +200,7 @@ export function ListLayout({
         >
           <SheetContent
             side="right"
+            hideClose
             className="w-[92vw] max-w-md overflow-y-auto p-0 lg:hidden"
           >
             <SheetTitle className="sr-only">Details</SheetTitle>
@@ -218,6 +219,7 @@ export function ListLayout({
         >
           <SheetContent
             side="left"
+            hideClose
             className="w-[85vw] max-w-sm overflow-y-auto p-0 lg:hidden"
           >
             <SheetTitle className="sr-only">Customize</SheetTitle>
