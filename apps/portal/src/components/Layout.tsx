@@ -40,6 +40,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { VersionFooter } from "./VersionFooter";
+import { ThemeToggle } from "./ThemeToggle";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 
 interface NavItem {
@@ -164,17 +165,20 @@ export function Layout() {
         )}
       >
         {/* Top header — full width, centered logo */}
-        <header className="sticky top-0 z-50 flex h-12 shrink-0 items-center justify-center border-b border-border/60 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <header className="sticky top-0 z-50 flex h-12 shrink-0 items-center justify-center border-b border-border/60 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <Link to="/" className="flex items-center gap-2 font-bold" aria-label="Scope home">
             <Activity className="h-5 w-5" />
             <span>Scope</span>
           </Link>
+          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+            <ThemeToggle />
+          </div>
         </header>
 
         <div className="flex min-h-0 flex-1">
-          {/* Desktop sidebar — icon-only */}
+          {/* Desktop sidebar — icon-only, sticks below the top header */}
           <aside
-            className="hidden w-14 shrink-0 flex-col items-center border-r border-border/60 bg-card/40 sm:flex"
+            className="sticky top-12 z-30 hidden h-[calc(100vh-3rem)] w-14 shrink-0 flex-col items-center self-start border-r border-border/60 bg-card/40 sm:flex"
             aria-label="Primary navigation"
           >
             {/* Primary nav (scrollable when overflowing) */}
