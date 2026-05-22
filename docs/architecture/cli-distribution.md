@@ -48,21 +48,23 @@ In dev mode (`pnpm cli` via tsx), these defines are not applied — the CLI fall
 
 ## Versioning
 
-The **source of truth** for the CLI version is the git tag on `scope-core` (e.g. `v0.2.0`). The `apps/cli/package.json` version is `0.0.0-dev` — a placeholder that CI bumps transiently via `pnpm version` during the publish workflow. It is never committed back to `main`.
+The **source of truth** for the CLI version is the git tag on `scope-core` using the `cli/v*` prefix (e.g. `cli/v0.2.0`). The `apps/cli/package.json` version is `0.0.0-dev` — a placeholder that CI resolves from the latest `cli/v*` tag and then bumps via `pnpm version` during the publish workflow. It is never committed back to `main`.
 
 - Local builds produce `0.0.0-dev` — clearly indicating a dev build.
 - Dev mode (`pnpm cli`) reports `0.1.0-dev`.
 - Only CI-built releases carry a real version number.
+- The `cli/v*` prefix allows other monorepo components to have their own tag namespaces.
 
 ## Publishing
 
 The publish workflow (`.github/workflows/publish-cli.yml`) is triggered manually:
 
 1. Select bump type: `patch` | `minor` | `major` (default: minor)
-2. Workflow bumps `apps/cli/package.json` via `pnpm version`
-3. Builds the bundle with prod API URL (`vars.SCOPE_API_URL`)
-4. Creates a git tag `v<version>` on scope-core
-5. Creates a GitHub Release on `scope-doc` with `scope.mjs` + `install.sh`
+2. Workflow resolves the current version from the latest `cli/v*` tag
+3. Bumps `apps/cli/package.json` via `pnpm version`
+4. Builds the bundle with prod API URL (`vars.SCOPE_API_URL`)
+5. Creates a git tag `cli/v<version>` on scope-core
+6. Creates a GitHub Release on `scope-doc` with `scope.mjs` + `install.sh`
 
 ### Required secrets/variables
 
