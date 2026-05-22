@@ -22,6 +22,11 @@ export interface ListLayoutProps {
    * and the main area expands to fill the remaining width.
    */
   detail?: ReactNode;
+  /**
+   * Optional secondary panel slotted between the filter rail and the main
+   * area (e.g. <CustomizeColumnsPanel>). Hidden when null/undefined.
+   */
+  secondaryPanel?: ReactNode;
   /** Persisted localStorage key for the rail collapsed state. */
   railStorageKey?: string;
   /** Width of the filter rail when expanded. */
@@ -41,6 +46,7 @@ export function ListLayout({
   filterRail,
   children,
   detail,
+  secondaryPanel,
   railStorageKey,
   railWidth = DEFAULT_RAIL_WIDTH,
   detailWidth = DEFAULT_DETAIL_WIDTH,
@@ -66,6 +72,7 @@ export function ListLayout({
   const toggleRail = useCallback(() => setRailCollapsed((v) => !v), []);
 
   const detailVisible = detail !== null && detail !== undefined && detail !== false;
+  const secondaryVisible = secondaryPanel !== null && secondaryPanel !== undefined && secondaryPanel !== false;
   const hasRail = filterRail !== null;
 
   return (
@@ -88,6 +95,9 @@ export function ListLayout({
           </div>
         </aside>
       )}
+
+      {/* Secondary panel (e.g. customize columns) */}
+      {secondaryVisible && secondaryPanel}
 
       {/* Main column: header + content */}
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">

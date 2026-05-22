@@ -23,11 +23,12 @@ import {
   DataTable,
   Pagination,
   BulkActionBar,
-  ColumnVisibilityMenu,
+  CustomizeColumnsPanel,
+  CustomizeColumnsLink,
   useHiddenColumns,
   useListUrlState,
   type DataTableColumn,
-  type ColumnVisibilityOption,
+  type CustomizeColumnsOption,
 } from "@/components/list-layout";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { formatDate, formatId, formatDuration, truncate } from "@/lib/utils";
@@ -51,6 +52,7 @@ export function RunsList() {
     storageKey: "runs",
     defaultHidden: ["model"],
   });
+  const [customizeOpen, setCustomizeOpen] = useState(false);
 
   // Cursor pagination — keep a stack of cursors that map a virtual page number
   // to an `after` cursor (page 1 = no cursor, page 2 = stack[0], …).
@@ -334,7 +336,7 @@ export function RunsList() {
     [allRuns],
   );
 
-  const columnOptions: ColumnVisibilityOption[] = [
+  const columnOptions: CustomizeColumnsOption[] = [
     { id: "id", label: "ID", required: true },
     { id: "task", label: "Task" },
     { id: "worker", label: "Worker" },
@@ -438,19 +440,11 @@ export function RunsList() {
       }
       railStorageKey="runs"
       actions={
-        <>
-          <ColumnVisibilityMenu
-            columns={columnOptions}
-            hidden={columnVisibility.hidden}
-            onToggle={columnVisibility.toggle}
-            onReset={columnVisibility.reset}
-          />
-          <Link to="/runs/new">
-            <Button size="sm" className="gap-1.5">
-              <Plus className="h-4 w-4" /> New Run
-            </Button>
-          </Link>
-        </>
+        <Link to="/runs/new">
+          <Button size="sm" className="gap-1.5">
+            <Plus className="h-4 w-4" /> New Run
+          </Button>
+        </Link>
       }
       filterRail={
         <FilterRail
@@ -459,7 +453,10 @@ export function RunsList() {
           searchPlaceholder="Search runs…"
           refreshing={isRefetching}
           footer={
-            <ClearFiltersLink onClick={state.clearFilters} disabled={!state.hasActiveFilters} />
+            <>
+              <ClearFiltersLink onClick={state.clearFilters} disabled={!state.hasActiveFilters} />
+              <CustomizeColumnsLink onClick={() => setCustomizeOpen(true)} />
+            </>
           }
         >
           <FilterSection title="Worker" storageKey="runs-worker">
@@ -486,6 +483,17 @@ export function RunsList() {
         </FilterRail>
       }
       detail={detailOutlet}
+      secondaryPanel={
+        customizeOpen ? (
+          <CustomizeColumnsPanel
+            columns={columnOptions}
+            hidden={columnVisibility.hidden}
+            onApply={columnVisibility.setHidden}
+            onReset={columnVisibility.reset}
+            onClose={() => setCustomizeOpen(false)}
+          />
+        ) : null
+      }
     >
       <div className="flex flex-col gap-3">
         <BulkActionBar

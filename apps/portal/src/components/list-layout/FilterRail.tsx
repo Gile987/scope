@@ -63,7 +63,9 @@ export function FilterRail({
       <div className="flex-1 overflow-y-auto">{children}</div>
 
       {footer && (
-        <div className="border-t border-border/60 px-3 py-2.5 text-sm">{footer}</div>
+        <div className="flex items-center justify-between gap-3 border-t border-border/60 px-3 py-2.5 text-sm">
+          {footer}
+        </div>
       )}
     </aside>
   );

@@ -17,12 +17,19 @@ export { DetailPanel } from "./DetailPanel";
 export type { DetailPanelProps } from "./DetailPanel";
 export { BulkActionBar } from "./BulkActionBar";
 export type { BulkActionBarProps } from "./BulkActionBar";
-export { ColumnVisibilityMenu, useHiddenColumns } from "./ColumnVisibilityMenu";
+export {
+  CustomizeColumnsPanel,
+  CustomizeColumnsLink,
+} from "./CustomizeColumnsPanel";
 export type {
-  ColumnVisibilityMenuProps,
-  ColumnVisibilityOption,
+  CustomizeColumnsPanelProps,
+  CustomizeColumnsOption,
+  CustomizeColumnsLinkProps,
+} from "./CustomizeColumnsPanel";
+export { useHiddenColumns } from "./useHiddenColumns";
+export type {
   UseHiddenColumnsOptions,
   HiddenColumnsState,
-} from "./ColumnVisibilityMenu";
+} from "./useHiddenColumns";
 export { useListUrlState } from "./useListUrlState";
 export type { ListUrlState, SortDir, UseListUrlStateOptions } from "./useListUrlState";
