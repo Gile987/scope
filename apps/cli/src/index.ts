@@ -58,7 +58,7 @@ export const program = new Command();
 
 program
   .name(getCliName())
-  .description("Scope — AI coding agent benchmarking CLI")
+  .description("Scope — The AI Agentic Experience Evaluation Platform")
   .version(CLI_VERSION)
   .action(() => {
     program.help();

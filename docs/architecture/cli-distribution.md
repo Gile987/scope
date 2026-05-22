@@ -9,8 +9,8 @@ The CLI is bundled into a single `.mjs` file using [esbuild](https://esbuild.git
 ```mermaid
 flowchart LR
     A[scope-core<br/>apps/cli/] -->|publish-cli.yml| B[GitHub Actions]
-    B -->|gh release create| C[scope-doc releases<br/>scope.mjs + install.sh]
-    C -->|gh release download| D[User workstation<br/>~/.local/bin/scope]
+    B -->|gh release create| C[scope-doc releases<br/>scope.mjs]
+    C -->|install-cli.sh| D[User workstation<br/>~/.local/bin/scope]
 ```
 
 ## Building
@@ -46,15 +46,25 @@ In dev mode (`pnpm cli` via tsx), these defines are not applied — the CLI fall
 - **All dependencies bundled** — no `node_modules` needed at runtime
 - **Node.js >= 20 required** at runtime
 
+## Versioning
+
+The **source of truth** for the CLI version is the git tag on `scope-core` using the `cli/v*` prefix (e.g. `cli/v0.2.0`). The `apps/cli/package.json` version is `0.0.0-dev` — a placeholder that CI resolves from the latest `cli/v*` tag and then bumps via `pnpm version` during the publish workflow. It is never committed back to `main`.
+
+- Local builds produce `0.0.0-dev` — clearly indicating a dev build.
+- Dev mode (`pnpm cli`) reports `0.1.0-dev`.
+- Only CI-built releases carry a real version number.
+- The `cli/v*` prefix allows other monorepo components to have their own tag namespaces.
+
 ## Publishing
 
 The publish workflow (`.github/workflows/publish-cli.yml`) is triggered manually:
 
 1. Select bump type: `patch` | `minor` | `major` (default: minor)
-2. Workflow bumps `apps/cli/package.json` via `pnpm version`
-3. Builds the bundle with prod API URL (`vars.SCOPE_API_URL`)
-4. Creates a git tag `v<version>` on scope-core
-5. Creates a GitHub Release on `scope-doc` with `scope.mjs` + `install.sh`
+2. Workflow resolves the current version from the latest `cli/v*` tag
+3. Bumps `apps/cli/package.json` via `pnpm version`
+4. Builds the bundle with prod API URL (`vars.SCOPE_API_URL`)
+5. Creates a git tag `cli/v<version>` on scope-core
+6. Creates a GitHub Release on `scope-doc` with `scope.mjs`
 
 ### Required secrets/variables
 
@@ -68,11 +78,11 @@ The publish workflow (`.github/workflows/publish-cli.yml`) is triggered manually
 Users install via the `gh` CLI (required since the repo is EMU-protected):
 
 ```bash
-gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H "Accept: application/vnd.github.raw" | bash
 ```
 
-The installer (`apps/cli/install.sh`):
-1. Downloads `scope.mjs` from the latest release
+The installer (`install-cli.sh` in scope-doc):
+1. Downloads `scope.mjs` from the latest `cli/v*` release
 2. Places it at `~/.local/bin/scope`
 3. Makes it executable
 
@@ -96,6 +106,6 @@ Source: `apps/cli/src/utils/update-check.ts`
 |--------|-------------------|-------------------|
 | Runner | tsx (TypeScript direct) | Node.js (single .mjs) |
 | API default | `http://localhost:3100` | `http://scope.eastus2.cloudapp.azure.com` |
-| Version | `0.1.0-dev` | Actual semver from package.json |
+| Version | `0.1.0-dev` | Actual semver from CI bump |
 | Command name | `pnpm cli` | `scope` |
 | Update check | Disabled | Enabled |

@@ -42,6 +42,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Resolve current CLI version from git tag
+        working-directory: apps/cli
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CURRENT=$(gh api repos/${{ github.repository }}/git/matching-refs/tags/cli/v \
+            --jq '[.[].ref | sub("refs/tags/cli/v"; "")] | sort_by(split(".") | map(tonumber)) | last')
+          if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then
+            echo "::error::No cli/v* tag found. Create an initial tag (e.g. cli/v0.0.0) before publishing."
+            exit 1
+          fi
+          echo "Resolved current CLI version from tag: ${CURRENT}"
+          pnpm version "${CURRENT}" --no-git-tag-version --allow-same-version
+
       - name: Bump version
         id: version
         working-directory: apps/cli
@@ -62,9 +76,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cli-bundle
-          path: |
-            apps/cli/dist/scope.mjs
-            apps/cli/install.sh
+          path: apps/cli/dist/scope.mjs
 
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -93,7 +105,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cli-bundle
-          path: apps/cli
+          path: apps/cli/dist
 
       - name: Create tag
         env:
@@ -101,25 +113,24 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${VERSION}" -m "Release v${VERSION}"
-          git push origin "v${VERSION}"
+          git tag -a "cli/v${VERSION}" -m "CLI release v${VERSION}"
+          git push origin "cli/v${VERSION}"
 
       - name: Create release on scope-doc
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION: ${{ needs.test.outputs.version }}
         run: |
-          gh release create "v${VERSION}" \
+          gh release create "cli/v${VERSION}" \
             --repo "$SCOPE_DOC_REPO" \
             --title "Scope CLI v${VERSION}" \
             --notes "## Installation
 
           \`\`\`bash
-          gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+          gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H \"Accept: application/vnd.github.raw\" | bash
           \`\`\`
 
           Or download \`scope.mjs\` from this release and place it in your PATH.
 
           Requires Node.js >= 20." \
-            apps/cli/dist/scope.mjs \
-            apps/cli/install.sh
+            apps/cli/dist/scope.mjs

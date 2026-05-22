@@ -732,6 +732,10 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
     },
   },
-  "update": {},
+  "update": {
+    "options": [
+      "--force",
+    ],
+  },
 }
 `;

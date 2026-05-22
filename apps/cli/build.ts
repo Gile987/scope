@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { build, type Plugin } from "esbuild";
-import { readFileSync } from "node:fs";
+import { chmodSync, readFileSync } from "node:fs";
 
 const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
 
@@ -65,3 +65,5 @@ await build({
 });
 
 console.log(`✓ Built dist/scope.mjs (v${pkg.version})`);
+
+chmodSync("dist/scope.mjs", 0o755);
