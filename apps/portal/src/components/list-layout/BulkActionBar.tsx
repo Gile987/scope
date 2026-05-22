@@ -21,6 +21,10 @@ export interface BulkActionBarProps {
 /**
  * Sticky action bar displayed above the list when one or more rows are
  * selected. Renders nothing when `count === 0`.
+ *
+ * On smaller screens (`< lg`) the bar floats fixed at the bottom of the
+ * viewport so it's reachable with the thumb; on `lg+` it sits inline above
+ * the list.
  */
 export function BulkActionBar({
   count,
@@ -34,13 +38,17 @@ export function BulkActionBar({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm",
+        // Compact: fixed bottom-of-screen toolbar with shadow + safe-area padding.
+        "fixed inset-x-2 bottom-2 z-40 flex flex-wrap items-center gap-2 rounded-md border bg-background/95 px-3 py-2 text-sm shadow-lg backdrop-blur",
+        "pb-[max(0.5rem,env(safe-area-inset-bottom))]",
+        // Wide: inline toolbar above the list.
+        "lg:static lg:inset-auto lg:bg-muted/50 lg:pb-2 lg:shadow-none lg:backdrop-blur-none",
         className,
       )}
       role="toolbar"
       aria-label="Bulk actions"
     >
-      <span className="font-medium whitespace-nowrap">
+      <span className="whitespace-nowrap font-medium">
         {count} {itemLabel}
         {count !== 1 ? "s" : ""} selected
       </span>

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { type ReactNode, type Key } from "react";
-import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { ArrowUp, ArrowDown, ArrowUpDown, ChevronRight } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -33,6 +33,17 @@ export interface DataTableColumn<T> {
   hidden?: boolean;
   /** Extra class for cells in this column. */
   className?: string;
+  /**
+   * When the table renders as cards (mobile/tablet), this column is hidden
+   * from the metadata grid. Useful for primary-key columns whose value is
+   * already shown as the card title.
+   */
+  hiddenOnCard?: boolean;
+  /**
+   * Override the label shown in card view. Defaults to `header` if it's a
+   * string, otherwise the column id.
+   */
+  cardLabel?: ReactNode;
 }
 
 export interface DataTableSelection<T> {
@@ -103,8 +114,15 @@ export function DataTable<T>({
 
   const colSpan = visibleColumns.length + (selection ? 1 : 0);
 
+  // First non-hidden, non-hiddenOnCard column is the card title.
+  const cardColumns = visibleColumns.filter((c) => !c.hiddenOnCard);
+  const primaryColumn = cardColumns[0];
+  const metaColumns = cardColumns.slice(1);
+
   return (
-    <div className={cn("rounded-md border", className)}>
+    <div className={cn(className)}>
+      {/* Desktop / wide tablet: classic table */}
+      <div className="hidden rounded-md border lg:block">
       <Table>
         <TableHeader>
           <TableRow>
@@ -237,6 +255,103 @@ export function DataTable<T>({
           )}
         </TableBody>
       </Table>
+      </div>
+
+      {/* Compact (mobile + small tablet): card list */}
+      <div className="flex flex-col gap-2 lg:hidden">
+        {loading ? (
+          Array.from({ length: loadingRows }).map((_, i) => (
+            <div
+              key={`card-skeleton-${i}`}
+              className="rounded-md border bg-card p-3"
+            >
+              <Skeleton className="mb-2 h-4 w-1/2" />
+              <Skeleton className="mb-1 h-3 w-3/4" />
+              <Skeleton className="h-3 w-2/3" />
+            </div>
+          ))
+        ) : items.length === 0 ? (
+          <div className="rounded-md border bg-card p-6 text-center text-sm text-muted-foreground">
+            {emptyState ?? "No results"}
+          </div>
+        ) : (
+          items.map((item) => {
+            const rowId = getRowId(item);
+            const isActive = activeId !== undefined && activeId !== null && rowId === activeId;
+            const isSelected = selection?.selectedIds.has(rowId) ?? false;
+            const isSelectionDisabled = selection?.isDisabled?.(item) ?? false;
+            return (
+              <div
+                key={rowId}
+                role={onRowClick ? "button" : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
+                onClick={onRowClick ? () => onRowClick(item) : undefined}
+                onKeyDown={
+                  onRowClick
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onRowClick(item);
+                        }
+                      }
+                    : undefined
+                }
+                data-active={isActive ? "true" : undefined}
+                data-selected={isSelected ? "true" : undefined}
+                className={cn(
+                  "group rounded-md border bg-card p-3 transition-colors",
+                  onRowClick && "cursor-pointer hover:bg-accent/40",
+                  isActive && "border-primary/60 bg-accent/60",
+                  isSelected && !isActive && "border-primary/40 bg-primary/5",
+                )}
+              >
+                <div className="flex items-start gap-2">
+                  {selection && (
+                    <div
+                      className="pt-0.5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={isSelected}
+                        disabled={isSelectionDisabled}
+                        onCheckedChange={() => selection.onToggle(rowId, item)}
+                        aria-label={isSelected ? "Deselect item" : "Select item"}
+                      />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    {primaryColumn && (
+                      <div className="text-sm font-medium leading-tight">
+                        {primaryColumn.cell(item)}
+                      </div>
+                    )}
+                    {metaColumns.length > 0 && (
+                      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                        {metaColumns.map((col) => {
+                          const label =
+                            col.cardLabel ??
+                            (typeof col.header === "string" ? col.header : col.id);
+                          return (
+                            <div key={col.id} className="contents">
+                              <dt className="truncate text-muted-foreground">{label}</dt>
+                              <dd className="min-w-0 break-words text-foreground">
+                                {col.cell(item)}
+                              </dd>
+                            </div>
+                          );
+                        })}
+                      </dl>
+                    )}
+                  </div>
+                  {onRowClick && (
+                    <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

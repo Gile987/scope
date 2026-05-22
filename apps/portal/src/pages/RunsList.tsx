@@ -483,6 +483,9 @@ export function RunsList() {
         </FilterRail>
       }
       detail={detailOutlet}
+      onDetailClose={() =>
+        navigate({ pathname: "/runs", search: window.location.search })
+      }
       secondaryPanel={
         customizeOpen ? (
           <CustomizeColumnsPanel
@@ -495,6 +498,7 @@ export function RunsList() {
           />
         ) : null
       }
+      onSecondaryClose={() => setCustomizeOpen(false)}
     >
       <div className="flex flex-col gap-3">
         <BulkActionBar

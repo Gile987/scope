@@ -244,6 +244,7 @@ export function AgentList() {
         </FilterRail>
       }
       detail={detailOutlet}
+      onDetailClose={() => navigate("/agents")}
     >
       <div className="flex flex-col gap-3">
         <DataTable

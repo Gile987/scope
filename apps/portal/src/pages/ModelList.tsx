@@ -208,6 +208,7 @@ export function ModelList() {
         </FilterRail>
       }
       detail={detailOutlet}
+      onDetailClose={() => navigate("/models")}
     >
       <div className="flex flex-col gap-3">
         <DataTable

@@ -151,6 +151,7 @@ export function PromptFeatureList() {
         </FilterRail>
       }
       detail={detailOutlet}
+      onDetailClose={() => navigate("/prompt-features")}
     >
       <div className="flex flex-col gap-3">
         <DataTable
