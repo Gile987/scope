@@ -47,6 +47,7 @@ import { ModelList } from "@/pages/ModelList";
 import { ModelDetail } from "@/pages/ModelDetail";
 import { TaskPromptList } from "@/pages/TaskPromptList";
 import { TaskPromptDetail } from "@/pages/TaskPromptDetail";
+import { RunPreviewPanel } from "@/pages/RunPreviewPanel";
 import { Admin } from "@/pages/Admin";
 import { FeatureRoute } from "@/components/FeatureRoute";
 import { useFavicon } from "@/hooks/useFavicon";
@@ -58,7 +59,9 @@ export function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Navigate to="/statistics" replace />} />
-        <Route path="/runs" element={<RunsList />} />
+        <Route path="/runs" element={<RunsList />}>
+          <Route path=":id/preview" element={<RunPreviewPanel />} />
+        </Route>
         <Route path="/runs/new" element={<SubmitRun />} />
         <Route path="/runs/:id/:tab?" element={<RunDetail />} />
         <Route path="/reports" element={<ReportsLayout />}>

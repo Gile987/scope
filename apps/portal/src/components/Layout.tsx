@@ -55,6 +55,8 @@ const FULL_BLEED_ROUTE_PATTERNS = [
   "/agents/:id",
   "/models",
   "/models/:id",
+  "/runs",
+  "/runs/:id/preview",
 ];
 
 export function Layout() {
