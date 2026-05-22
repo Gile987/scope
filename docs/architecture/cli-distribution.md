@@ -9,8 +9,8 @@ The CLI is bundled into a single `.mjs` file using [esbuild](https://esbuild.git
 ```mermaid
 flowchart LR
     A[scope-core<br/>apps/cli/] -->|publish-cli.yml| B[GitHub Actions]
-    B -->|gh release create| C[scope-doc releases<br/>scope.mjs + install.sh]
-    C -->|gh release download| D[User workstation<br/>~/.local/bin/scope]
+    B -->|gh release create| C[scope-doc releases<br/>scope.mjs]
+    C -->|install-cli.sh| D[User workstation<br/>~/.local/bin/scope]
 ```
 
 ## Building
@@ -64,7 +64,7 @@ The publish workflow (`.github/workflows/publish-cli.yml`) is triggered manually
 3. Bumps `apps/cli/package.json` via `pnpm version`
 4. Builds the bundle with prod API URL (`vars.SCOPE_API_URL`)
 5. Creates a git tag `cli/v<version>` on scope-core
-6. Creates a GitHub Release on `scope-doc` with `scope.mjs` + `install.sh`
+6. Creates a GitHub Release on `scope-doc` with `scope.mjs`
 
 ### Required secrets/variables
 
@@ -78,11 +78,11 @@ The publish workflow (`.github/workflows/publish-cli.yml`) is triggered manually
 Users install via the `gh` CLI (required since the repo is EMU-protected):
 
 ```bash
-gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H "Accept: application/vnd.github.raw" | bash
 ```
 
-The installer (`apps/cli/install.sh`):
-1. Downloads `scope.mjs` from the latest release
+The installer (`install-cli.sh` in scope-doc):
+1. Downloads `scope.mjs` from the latest `cli/v*` release
 2. Places it at `~/.local/bin/scope`
 3. Makes it executable
 

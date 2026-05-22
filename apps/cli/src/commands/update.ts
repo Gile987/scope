@@ -33,8 +33,10 @@ export function registerUpdateCommand(program: Command): void {
       console.log("Checking for updates...");
 
       const currentVersion = getCliVersion();
+      let targetTag: string | undefined;
+
+      const latest = await fetchLatestVersion();
       if (!opts.force) {
-        const latest = await fetchLatestVersion();
         if (latest && semver.valid(currentVersion)) {
           if (!semver.gt(latest, currentVersion)) {
             console.log(`✓ Already up to date (v${currentVersion})`);
@@ -42,6 +44,22 @@ export function registerUpdateCommand(program: Command): void {
           }
           console.log(`→ New version available: ${latest} (current: ${currentVersion})`);
         }
+      }
+      targetTag = latest ? `cli/v${latest}` : undefined;
+
+      if (!targetTag) {
+        // Resolve tag via gh release list
+        try {
+          targetTag = execSync(
+            `gh release list --repo ${REPO} --json tagName -q '[.[].tagName | select(startswith("cli/v"))][0]'`,
+            { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+          ).trim();
+        } catch { /* ignore */ }
+      }
+
+      if (!targetTag) {
+        console.error("Could not determine the latest CLI release tag.");
+        process.exit(1);
       }
 
       // Determine where the currently running binary lives
@@ -53,7 +71,7 @@ export function registerUpdateCommand(program: Command): void {
       try {
         // Download scope.mjs to a temp file, then atomically replace
         execSync(
-          `gh release download --repo ${REPO} --pattern scope.mjs -O "${tmpFile}" --clobber`,
+          `gh release download "${targetTag}" --repo ${REPO} --pattern scope.mjs -O "${tmpFile}" --clobber`,
           { stdio: "inherit" },
         );
         chmodSync(tmpFile, 0o755);
@@ -66,8 +84,8 @@ export function registerUpdateCommand(program: Command): void {
         // Clean up temp file on failure
         try { unlinkSync(tmpFile); } catch { /* ignore */ }
         console.error(
-          "\nUpdate failed. You can update manually:\n" +
-            `  gh release download --repo ${REPO} --pattern install.sh -O - | bash`,
+          "\nUpdate failed. You can reinstall manually:\n" +
+            "  gh api repos/" + REPO + "/contents/install-cli.sh -H \"Accept: application/vnd.github.raw\" | bash",
         );
         process.exit(1);
       }
