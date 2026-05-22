@@ -26,6 +26,8 @@ export interface ACPClientOptions {
   sessionTimeoutMs?: number;
   /** Model to select after the session is created (e.g. "gpt-5.4"). */
   model?: string;
+  /** Use shell to spawn the process (required on Windows for .cmd shim resolution). */
+  shell?: boolean;
 }
 
 export interface ACPSessionResult {
@@ -186,7 +188,7 @@ export async function runACPSession(
   prompt: string,
   options: ACPClientOptions
 ): Promise<ACPSessionResult> {
-  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [], model } = options;
+  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [], model, shell = false } = options;
   const sessionTimeoutMs = options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
 
   onLog(`Starting ACP agent: ${command} ${args.join(" ")}`);
@@ -196,6 +198,7 @@ export async function runACPSession(
     cwd,
     env: { ...process.env, ...env },
     stdio: ["pipe", "pipe", "pipe"],
+    shell,
   });
 
   if (!agentProcess.stdin || !agentProcess.stdout) {

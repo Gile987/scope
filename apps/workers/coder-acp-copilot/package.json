@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./acp-client": "./dist/acp-client.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
