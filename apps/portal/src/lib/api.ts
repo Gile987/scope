@@ -90,9 +90,7 @@ export const api = {
     skills?: string[];
     agentVersion?: string;
     profileId?: string;
-    profileVariations?: Array<{
-      profileId: string;
-    }>;
+    profileVariations?: string[];
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     const url = worker ? `/requests?worker=${encodeURIComponent(worker)}` : `/requests`;
