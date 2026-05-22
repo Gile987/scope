@@ -75,8 +75,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.FLUX_APP_ID }}
+          private-key: ${{ secrets.FLUX_APP_PRIVATE_KEY }}
+          owner: growth-ecosystems
+          repositories: scope-core,scope-doc
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Download bundle
         uses: actions/download-artifact@v4
@@ -95,7 +106,7 @@ jobs:
 
       - name: Create release on scope-doc
         env:
-          GH_TOKEN: ${{ secrets.SCOPE_DOC_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION: ${{ needs.test.outputs.version }}
         run: |
           gh release create "v${VERSION}" \
