@@ -94,15 +94,6 @@ export const ProfileVariationInputSchema = z
   })
   .openapi("ProfileVariationInput");
 
-export const RequestVariationSchema = z
-  .object({
-    baseProfileId: z.string(),
-    profileId: z.string(),
-    profileVersionId: z.string(),
-    label: z.string().optional(),
-  })
-  .openapi("RequestVariation");
-
 export const CreateRequestInputSchema = z
   .object({
     scenario: ScenarioSchema,
@@ -140,7 +131,6 @@ export const RequestResponseSchema = z
     profileId: z.string().optional(),
     profileVersionId: z.string().optional(),
     submissionId: z.string().optional(),
-    profileVariation: RequestVariationSchema.optional(),
     priority: z.number().int().default(0),
     // Per-attempt state lives in the run sub-document.
     run: z

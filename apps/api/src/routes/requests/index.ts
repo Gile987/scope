@@ -357,12 +357,6 @@ apiRoute(ctx.app, ctx.registry, {
             ...(r.agentVersion ? { agentVersion: r.agentVersion } : {}),
             profileId: r.profile._id,
             profileVersionId: r.profileVersion._id,
-            profileVariation: {
-              baseProfileId,
-              profileId: r.profile._id,
-              profileVersionId: r.profileVersion._id,
-              ...(r.entry.label ? { label: r.entry.label } : {}),
-            },
             submissionId,
             run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
           };

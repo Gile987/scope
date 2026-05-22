@@ -2094,9 +2094,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "profileId": {
             "type": "string",
           },
-          "profileVariation": {
-            "$ref": "#/components/schemas/RequestVariation",
-          },
           "profileVersionId": {
             "type": "string",
           },
@@ -2134,28 +2131,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "scenario",
           "workerType",
           "createdAt",
-        ],
-        "type": "object",
-      },
-      "RequestVariation": {
-        "properties": {
-          "baseProfileId": {
-            "type": "string",
-          },
-          "label": {
-            "type": "string",
-          },
-          "profileId": {
-            "type": "string",
-          },
-          "profileVersionId": {
-            "type": "string",
-          },
-        },
-        "required": [
-          "baseProfileId",
-          "profileId",
-          "profileVersionId",
         ],
         "type": "object",
       },
