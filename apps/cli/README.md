@@ -57,11 +57,16 @@ scope run --help
 
 ## Updating
 
-Re-run the install script to update to the latest version:
+Update to the latest version:
 
 ```bash
-TAG=$(gh release list --repo growth-ecosystems/scope-doc --json tagName -q '[.[].tagName | select(startswith("cli/v"))][0]')
-gh release download "$TAG" --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+scope update
+```
+
+Or re-run the install script:
+
+```bash
+gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H "Accept: application/vnd.github.raw" | bash
 ```
 
 The CLI will also notify you when a newer version is available. Suppress this with:
