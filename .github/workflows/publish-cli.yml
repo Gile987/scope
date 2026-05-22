@@ -1,0 +1,114 @@
+name: Publish CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: "minor"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+env:
+  SCOPE_DOC_REPO: growth-ecosystems/scope-doc
+
+jobs:
+  test:
+    name: Build & Test CLI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.1 --activate
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Bump version
+        id: version
+        working-directory: apps/cli
+        run: |
+          NEW_VERSION=$(pnpm version ${{ inputs.bump }} --no-git-tag-version | tr -d 'v')
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build CLI bundle
+        working-directory: apps/cli
+        env:
+          SCOPE_DEFAULT_API_URL: ${{ vars.SCOPE_API_URL }}
+        run: pnpm build
+
+      - name: Run integration tests
+        run: pnpm vitest run --config vitest.integration.config.ts apps/cli/src/bundle.integration.test.ts
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-bundle
+          path: |
+            apps/cli/dist/scope.mjs
+            apps/cli/install.sh
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  publish:
+    name: Publish Release
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-bundle
+          path: apps/cli
+
+      - name: Create tag
+        env:
+          VERSION: ${{ needs.test.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Create release on scope-doc
+        env:
+          GH_TOKEN: ${{ secrets.SCOPE_DOC_TOKEN }}
+          VERSION: ${{ needs.test.outputs.version }}
+        run: |
+          gh release create "v${VERSION}" \
+            --repo "$SCOPE_DOC_REPO" \
+            --title "Scope CLI v${VERSION}" \
+            --notes "## Installation
+
+          \`\`\`bash
+          gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+          \`\`\`
+
+          Or download \`scope.mjs\` from this release and place it in your PATH.
+
+          Requires Node.js >= 20." \
+            apps/cli/dist/scope.mjs \
+            apps/cli/install.sh

@@ -732,5 +732,6 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
     },
   },
+  "update": {},
 }
 `;

@@ -6,7 +6,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 
 export function registerInsightCommands(program: Command): void {
 // ─── Insight management ──────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ insight
   .description("List all insights")
   .option("-q, --query <query>", "Search by keyword")
   .option("--blocked", "Show only blocked insights")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -67,7 +67,7 @@ insight
   .command("get")
   .description("Get details of an insight (renders markdown description)")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 , ['markdown'])
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -128,7 +128,7 @@ insight
   .requiredOption("--description <description>", "Markdown description")
   .option("--category <category>", "Category tag")
   .option("--tags <tags>", "Comma-separated tags")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {
@@ -165,7 +165,7 @@ insight
   .option("--description <description>", "New markdown description")
   .option("--category <category>", "New category")
   .option("--tags <tags>", "New comma-separated tags")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -198,7 +198,7 @@ insight
   .command("delete")
   .description("Delete an insight (soft-delete)")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}`, {
@@ -220,7 +220,7 @@ insight
   .command("upvote")
   .description("Upvote an insight")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/upvote`, {
@@ -243,7 +243,7 @@ insight
   .command("downvote")
   .description("Downvote an insight")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/downvote`, {
@@ -266,7 +266,7 @@ insight
   .command("block")
   .description("Block an insight")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/block`, {
@@ -288,7 +288,7 @@ insight
   .command("unblock")
   .description("Unblock an insight")
   .requiredOption("-i, --id <id>", "Insight ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/insights/${encodeURIComponent(options.id)}/unblock`, {
