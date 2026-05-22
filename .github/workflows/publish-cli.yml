@@ -105,7 +105,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cli-bundle
-          path: apps/cli
+          path: apps/cli/dist
 
       - name: Create tag
         env:
