@@ -46,6 +46,14 @@ In dev mode (`pnpm cli` via tsx), these defines are not applied — the CLI fall
 - **All dependencies bundled** — no `node_modules` needed at runtime
 - **Node.js >= 20 required** at runtime
 
+## Versioning
+
+The **source of truth** for the CLI version is the git tag on `scope-core` (e.g. `v0.2.0`). The `apps/cli/package.json` version is `0.0.0-dev` — a placeholder that CI bumps transiently via `pnpm version` during the publish workflow. It is never committed back to `main`.
+
+- Local builds produce `0.0.0-dev` — clearly indicating a dev build.
+- Dev mode (`pnpm cli`) reports `0.1.0-dev`.
+- Only CI-built releases carry a real version number.
+
 ## Publishing
 
 The publish workflow (`.github/workflows/publish-cli.yml`) is triggered manually:
@@ -96,6 +104,6 @@ Source: `apps/cli/src/utils/update-check.ts`
 |--------|-------------------|-------------------|
 | Runner | tsx (TypeScript direct) | Node.js (single .mjs) |
 | API default | `http://localhost:3100` | `http://scope.eastus2.cloudapp.azure.com` |
-| Version | `0.1.0-dev` | Actual semver from package.json |
+| Version | `0.1.0-dev` | Actual semver from CI bump |
 | Command name | `pnpm cli` | `scope` |
 | Update check | Disabled | Enabled |
