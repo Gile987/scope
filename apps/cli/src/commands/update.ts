@@ -85,7 +85,7 @@ export function registerUpdateCommand(program: Command): void {
         try { unlinkSync(tmpFile); } catch { /* ignore */ }
         console.error(
           "\nUpdate failed. You can reinstall manually:\n" +
-            "  gh api repos/" + REPO + "/contents/cli-install.sh -H \"Accept: application/vnd.github.raw\" | bash",
+            "  gh api repos/" + REPO + "/contents/install-cli.sh -H \"Accept: application/vnd.github.raw\" | bash",
         );
         process.exit(1);
       }

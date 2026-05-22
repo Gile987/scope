@@ -10,7 +10,7 @@ The CLI is bundled into a single `.mjs` file using [esbuild](https://esbuild.git
 flowchart LR
     A[scope-core<br/>apps/cli/] -->|publish-cli.yml| B[GitHub Actions]
     B -->|gh release create| C[scope-doc releases<br/>scope.mjs]
-    C -->|cli-install.sh| D[User workstation<br/>~/.local/bin/scope]
+    C -->|install-cli.sh| D[User workstation<br/>~/.local/bin/scope]
 ```
 
 ## Building
@@ -78,10 +78,10 @@ The publish workflow (`.github/workflows/publish-cli.yml`) is triggered manually
 Users install via the `gh` CLI (required since the repo is EMU-protected):
 
 ```bash
-gh api repos/growth-ecosystems/scope-doc/contents/cli-install.sh -H "Accept: application/vnd.github.raw" | bash
+gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H "Accept: application/vnd.github.raw" | bash
 ```
 
-The installer (`cli-install.sh` in scope-doc):
+The installer (`install-cli.sh` in scope-doc):
 1. Downloads `scope.mjs` from the latest `cli/v*` release
 2. Places it at `~/.local/bin/scope`
 3. Makes it executable

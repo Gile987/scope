@@ -127,7 +127,7 @@ jobs:
             --notes "## Installation
 
           \`\`\`bash
-          gh api repos/growth-ecosystems/scope-doc/contents/cli-install.sh -H \"Accept: application/vnd.github.raw\" | bash
+          gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H \"Accept: application/vnd.github.raw\" | bash
           \`\`\`
 
           Or download \`scope.mjs\` from this release and place it in your PATH.
