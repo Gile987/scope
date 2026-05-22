@@ -62,7 +62,7 @@ fi
 # Parse version and asset URL
 VERSION=$(echo "$RELEASE_JSON" | node -e "
   const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-  process.stdout.write(d.tag_name || '');
+  process.stdout.write((d.tag_name || '').replace(/^(cli\/)?v/, ''));
 ")
 ASSET_URL=$(echo "$RELEASE_JSON" | node -e "
   const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));

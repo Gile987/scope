@@ -74,12 +74,13 @@ export const RELEASES_REPO = "growth-ecosystems/scope-doc";
 
 export const RELEASES_URL =
   process.env.SCOPE_RELEASES_URL ||
-  `https://api.github.com/repos/${RELEASES_REPO}/releases/latest`;
+  `https://api.github.com/repos/${RELEASES_REPO}/releases`;
 
 /**
- * Fetch the latest released CLI version using the `gh` CLI.
- * Falls back to the GitHub REST API if `gh` is unavailable.
- * Returns the version string (without leading "v") or undefined on failure.
+ * Fetch the latest released CLI version.
+ * Only considers releases with a `cli/v*` tag prefix.
+ * Uses `gh release list` (handles EMU auth), falls back to REST API.
+ * Returns the version string (without prefix) or undefined on failure.
  * Timeout defaults to 5000ms but can be overridden (background check uses 2000ms).
  */
 export async function fetchLatestVersion(timeoutMs = 5000): Promise<string | undefined> {
@@ -88,10 +89,11 @@ export async function fetchLatestVersion(timeoutMs = 5000): Promise<string | und
     // Prefer gh CLI — it handles EMU/private repo auth natively
     try {
       const tag = execSync(
-        `gh release view --repo ${RELEASES_REPO} --json tagName -q '.tagName'`,
+        `gh release list --repo ${RELEASES_REPO} --json tagName -q '[.[].tagName | select(startswith("cli/v"))][0]'`,
         { encoding: "utf-8", timeout: timeoutMs, stdio: ["pipe", "pipe", "pipe"] },
       ).trim();
-      const version = tag.replace(/^v/, "");
+      if (!tag.startsWith("cli/v")) return undefined;
+      const version = tag.slice("cli/v".length);
       if (semver.valid(version)) return version;
     } catch {
       // gh not available or failed — fall through to REST API
@@ -118,10 +120,13 @@ export async function fetchLatestVersion(timeoutMs = 5000): Promise<string | und
 
     if (!res.ok) return undefined;
 
-    const data = (await res.json()) as { tag_name?: string };
-    if (!data.tag_name) return undefined;
+    const data = (await res.json()) as Array<{ tag_name?: string }> | { tag_name?: string };
+    // Handle both array (releases list) and single object (test mock compatibility)
+    const releases = Array.isArray(data) ? data : [data];
+    const match = releases.find((r) => r.tag_name?.startsWith("cli/v"));
+    if (!match?.tag_name) return undefined;
 
-    const latest = data.tag_name.replace(/^v/, "");
+    const latest = match.tag_name.slice("cli/v".length);
     return semver.valid(latest) ? latest : undefined;
   } catch {
     return undefined;

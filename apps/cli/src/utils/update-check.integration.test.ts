@@ -63,7 +63,7 @@ describe("update-check (via bundle)", () => {
   });
 
   it("shows update notification after command output when newer version is available", async () => {
-    releaseResponse = { status: 200, body: { tag_name: "v99.0.0" } };
+    releaseResponse = { status: 200, body: [{ tag_name: "cli/v99.0.0" }] };
     await startServers();
     const tempDir = mkdtempSync(join(tmpdir(), "scope-uc-"));
     try {
@@ -78,7 +78,7 @@ describe("update-check (via bundle)", () => {
   });
 
   it("does not show notification when version is current", async () => {
-    releaseResponse = { status: 200, body: { tag_name: "v0.0.0-dev" } };
+    releaseResponse = { status: 200, body: [{ tag_name: "cli/v0.0.0-dev" }] };
     await startServers();
     const tempDir = mkdtempSync(join(tmpdir(), "scope-uc-"));
     try {
@@ -90,7 +90,7 @@ describe("update-check (via bundle)", () => {
   });
 
   it("does not show notification when current is newer than release", async () => {
-    releaseResponse = { status: 200, body: { tag_name: "v0.0.0-alpha" } };
+    releaseResponse = { status: 200, body: [{ tag_name: "cli/v0.0.0-alpha" }] };
     await startServers();
     const tempDir = mkdtempSync(join(tmpdir(), "scope-uc-"));
     try {
@@ -102,7 +102,7 @@ describe("update-check (via bundle)", () => {
   });
 
   it("suppressed when SCOPE_NO_UPDATE_CHECK=1", async () => {
-    releaseResponse = { status: 200, body: { tag_name: "v99.0.0" } };
+    releaseResponse = { status: 200, body: [{ tag_name: "cli/v99.0.0" }] };
     await startServers();
     const tempDir = mkdtempSync(join(tmpdir(), "scope-uc-"));
     try {
@@ -135,7 +135,7 @@ describe("update-check (via bundle)", () => {
   });
 
   it("silently handles invalid semver in tag_name", async () => {
-    releaseResponse = { status: 200, body: { tag_name: "not-a-version" } };
+    releaseResponse = { status: 200, body: [{ tag_name: "not-a-version" }] };
     await startServers();
     const tempDir = mkdtempSync(join(tmpdir(), "scope-uc-"));
     try {
@@ -147,7 +147,7 @@ describe("update-check (via bundle)", () => {
   });
 
   it("respects cooldown — second invocation does not notify again", async () => {
-    releaseResponse = { status: 200, body: { tag_name: "v99.0.0" } };
+    releaseResponse = { status: 200, body: [{ tag_name: "cli/v99.0.0" }] };
     await startServers();
     const tempDir = mkdtempSync(join(tmpdir(), "scope-uc-"));
     try {
@@ -164,7 +164,7 @@ describe("update-check (via bundle)", () => {
   });
 
   it("handles pre-release versions correctly", async () => {
-    releaseResponse = { status: 200, body: { tag_name: "v2.0.0-beta.1" } };
+    releaseResponse = { status: 200, body: [{ tag_name: "cli/v2.0.0-beta.1" }] };
     await startServers();
     const tempDir = mkdtempSync(join(tmpdir(), "scope-uc-"));
     try {
@@ -178,7 +178,7 @@ describe("update-check (via bundle)", () => {
   });
 
   it("checks again after cooldown period expires", async () => {
-    releaseResponse = { status: 200, body: { tag_name: "v99.0.0" } };
+    releaseResponse = { status: 200, body: [{ tag_name: "cli/v99.0.0" }] };
     await startServers();
     const tempDir = mkdtempSync(join(tmpdir(), "scope-uc-"));
     try {
