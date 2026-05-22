@@ -27,8 +27,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-tags: true
 
       - name: Install pnpm
         run: |
@@ -47,9 +45,10 @@ jobs:
       - name: Resolve current CLI version from git tag
         working-directory: apps/cli
         run: |
-          CURRENT=$(git tag --list 'cli/v*' --sort=-v:refname | head -n1 | sed 's|^cli/v||')
-          if [ -z "$CURRENT" ]; then
-            echo "::error::No cli/v* tag found. Create an initial tag (e.g. cli/v0.2.0) before publishing."
+          CURRENT=$(gh api repos/${{ github.repository }}/git/matching-refs/tags/cli/v \
+            --jq '[.[].ref | sub("refs/tags/cli/v"; "")] | sort_by(split(".") | map(tonumber)) | last')
+          if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then
+            echo "::error::No cli/v* tag found. Create an initial tag (e.g. cli/v0.0.0) before publishing."
             exit 1
           fi
           echo "Resolved current CLI version from tag: ${CURRENT}"
