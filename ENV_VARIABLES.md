@@ -10,21 +10,131 @@ The sophisticated criteria system can be configured via environment variables in
 
 Base URL of the Scope API used by all CLI commands. Override this to point the CLI at a remote or Docker-hosted API instance.
 
-## LLM Configuration (Criteria Prompt Generation)
+## LLM Configuration (Portal AI Features)
+
+The portal's AI features — criteria prompt generation, prompt-feature
+extraction/generation, and task-prompt generation/variation — all call an
+OpenAI-style chat-completions endpoint through the
+[`@azure-rest/ai-inference`](https://www.npmjs.com/package/@azure-rest/ai-inference)
+SDK. Two backends are supported, resolved in `acquireInferenceClient`
+([`apps/api/src/llm-token.ts`](apps/api/src/llm-token.ts)) using the
+following priority order. The **first source that returns a credential
+wins**; later sources are not consulted.
+
+| # | Source | Trigger | `via` log tag |
+|---|--------|---------|---------------|
+| 1 | Azure AI Foundry via env vars | `AZURE_AI_INFERENCE_ENDPOINT` + `AZURE_AI_INFERENCE_API_KEY` both set | `azure-ai-foundry-env` |
+| 2 | Azure AI Foundry via Token Manager | At least one `azure-ai-foundry` key registered at the Portal `/secrets/keys/new` (recommended for integration / prod — credentials live in Key Vault, the API round-robins across valid keys) | `azure-ai-foundry-token-manager` |
+| 3 | GitHub Models via env var | `GITHUB_MODELS_API_KEY` set | `github-models-env` |
+| 4 | GitHub Models via Token Manager | A `github-models` key registered at `/secrets/keys/new` | `github-models-token-manager` |
+| 5 | Bare GitHub token fallback | `GITHUB_TOKEN` set | `github-token` |
+
+**Two important properties of this chain:**
+
+- **Foundry beats GitHub Models, and env vars beat the Token Manager
+  within each backend.** Having both a Foundry env var and a registered
+  `github-models` key means every call goes to Foundry; the GitHub
+  Models key is dormant.
+- **There is no automatic failover at request time.** The chain only
+  steps down when the predecessor returns *nothing* (env var unset, no
+  key registered). It does **not** step down when the predecessor
+  returns a credential that then 4xx/5xx's on the actual chat-completion
+  call. This is intentional — silent fallback would mask misconfiguration
+  (e.g. a wrong Foundry deployment name) and hide the real error from
+  the user.
+
+If no source returns a credential, the portal's AI buttons return HTTP
+`503` with a single actionable error message (`LLM not configured: no
+inference backend available. Please register a new secret key for GitHub
+Model or Azure Foundry.`), and the rest of the API works unchanged.
+
+Every successful acquisition also logs a single line so operators can
+verify which provider served a given AI call:
+
+```
+[llm-token] inference provider: source=azure-ai-foundry via=azure-ai-foundry-env endpoint=https://<resource>.services.ai.azure.com/models model=gpt-4.1-mini
+```
+
+> **Local dev with Docker Compose:** the three Foundry-related variables
+> (`AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_AI_INFERENCE_API_KEY`, `LLM_MODEL`)
+> must live in **`.env.local`** at the repo root, **not** `.env`. The `.env`
+> file is auto-generated per worktree by `worktree-env` and will overwrite
+> manual edits. `.env.local` is gitignored and is loaded into the `api`
+> service via Compose's `env_file:` directive (`required: false`).
+>
+> ```bash
+> cp .env.local.example .env.local
+> # edit .env.local with your Foundry endpoint, key, and model
+> docker compose up -d --force-recreate --no-deps api
+> ```
+>
+> Compose only re-reads `env_file:` when the container is **created**, so
+> `docker compose restart api` will *not* pick up `.env.local` changes.
+> Use `--force-recreate` (or restart the whole stack with
+> `pnpm docker:up:copilot` / `pnpm docker:dev:copilot`) after editing the
+> file.
+
+### AZURE_AI_INFERENCE_ENDPOINT
+**Required (with `AZURE_AI_INFERENCE_API_KEY`) to use Azure AI Foundry**
+**Type:** URL string
+
+Base URL of the Azure AI Foundry inference endpoint (e.g.
+`https://<foundry-resource>.services.ai.azure.com/models`). When set together
+with `AZURE_AI_INFERENCE_API_KEY` the API issues all portal-LLM calls to this
+endpoint and ignores GitHub Models. This is the recommended production
+configuration: GitHub Models' public endpoint regularly takes >1 minute under
+load (see [#847](https://github.com/growth-ecosystems/scope-core/issues/847)),
+while a Foundry deployment of the same model returns in well under a second.
+
+> **The `/models` suffix is required.** The Azure portal shows the resource
+> URL without it, but the inference data plane only responds on
+> `/models/chat/completions`. Without the suffix every call returns HTTP
+> 404 "Resource not found". The API auto-appends `/models` when it detects
+> a bare `services.ai.azure.com` host and emits a warning at startup, but
+> you should fix the env var to silence it.
+>
+> ```
+> ✅ https://<resource>.services.ai.azure.com/models
+> ❌ https://<resource>.services.ai.azure.com
+> ```
+
+- **Docker Compose:** put in `.env.local` (see note above).
+- **Kubernetes:** sourced from the `azure-ai-inference-secrets`
+  ExternalSecret (Key Vault key `azure-ai-inference-endpoint`).
+
+### AZURE_AI_INFERENCE_API_KEY
+**Required (with `AZURE_AI_INFERENCE_ENDPOINT`) to use Azure AI Foundry**
+**Type:** string
+
+API key for the Foundry endpoint.
+
+- **Docker Compose:** put in `.env.local` (see note above).
+- **Kubernetes:** sourced from the `azure-ai-inference-secrets`
+  ExternalSecret (Key Vault key `azure-ai-inference-api-key`).
 
 ### GITHUB_MODELS_API_KEY
-**Required for AI prompt generation**
+**Optional (used as fallback when Foundry is not configured)**
 **Type:** string
 
-GitHub personal access token (with the `models` read permission) used to authenticate with GitHub Models (`https://models.inference.ai.azure.com`) via the Azure AI Inference SDK. When set, the API can auto-generate evaluation prompts from natural-language behavior descriptions during criteria creation.
+GitHub personal access token (with the `models` read permission) used to
+authenticate with GitHub Models (`https://models.inference.ai.azure.com`).
+Useful for local dev where no Foundry endpoint is available. Goes in `.env`
+(or `.env.base`) since it is read via Compose variable substitution, not
+the api service's `env_file`.
 
-> **Note:** This is separate from `GITHUB_TOKEN`, which is used by the Judge and worker services for Copilot SDK / ACP access and does **not** need the `models` permission.
+> **Note:** This is separate from `GITHUB_TOKEN`, which is used by the Judge
+> and worker services for Copilot SDK / ACP access and does **not** need the
+> `models` permission. If `GITHUB_MODELS_API_KEY` is unset the API also
+> accepts `GITHUB_TOKEN` (or `TOKEN_MANAGER_URL` with a registered
+> `github-models` token) as a fallback.
 
 ### LLM_MODEL
-**Default:** `gpt-4.1`
+**Default:** `gpt-4.1` (applied inside the API when unset)
 **Type:** string
 
-The model name to use for criteria prompt generation via GitHub Models. Examples: `gpt-4.1`, `gpt-4o`, `gpt-4.1-mini`.
+Model name / deployment name used by both backends. For Foundry, this must
+match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
+`gpt-4o`, `gpt-4.1-mini`. Put in `.env.local` (see note above).
 
 ## Judge Strategy Configuration
 

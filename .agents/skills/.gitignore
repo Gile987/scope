@@ -9,3 +9,5 @@
 !storybook/**
 !scope-api/
 !scope-api/**
+!release-notes/
+!release-notes/**

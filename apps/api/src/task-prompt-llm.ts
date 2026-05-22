@@ -1,11 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import ModelClient, { isUnexpected } from "@azure-rest/ai-inference";
-import { AzureKeyCredential } from "@azure/core-auth";
-import { isGitHubModelsTokenAvailable, acquireGitHubModelsToken } from "./llm-token.js";
-
-const GITHUB_MODELS_ENDPOINT = "https://models.inference.ai.azure.com";
+import { isUnexpected } from "@azure-rest/ai-inference";
+import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 // ---------------------------------------------------------------------------
 // Generate task prompt from a short description or create a variation
@@ -48,7 +45,7 @@ export interface GenerateTaskPromptResult {
 }
 
 export function isTaskPromptLlmAvailable(): boolean {
-  return isGitHubModelsTokenAvailable();
+  return inferenceAvailable();
 }
 
 function buildGenerateUserMessage(description: string | undefined, existingPrompts: string[]): string {
@@ -86,10 +83,10 @@ export async function generateTaskPrompt(
 ): Promise<GenerateTaskPromptResult> {
   const { description, existingPrompt } = opts;
 
-  const token = await acquireGitHubModelsToken();
-  const llm = ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token));
+  const { client: llm, model: foundryModel } = await acquireInferenceClient();
 
-  const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
+  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
+  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
 
   const isVariation = !!existingPrompt;
   const systemPrompt = isVariation ? VARIATION_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT;
