@@ -44,6 +44,8 @@ jobs:
 
       - name: Resolve current CLI version from git tag
         working-directory: apps/cli
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           CURRENT=$(gh api repos/${{ github.repository }}/git/matching-refs/tags/cli/v \
             --jq '[.[].ref | sub("refs/tags/cli/v"; "")] | sort_by(split(".") | map(tonumber)) | last')
