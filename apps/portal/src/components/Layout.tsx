@@ -159,135 +159,132 @@ export function Layout() {
     <TooltipProvider delayDuration={150} skipDelayDuration={300}>
       <div
         className={cn(
-          "flex bg-background",
+          "flex flex-col bg-background",
           isFullBleed ? "h-screen overflow-hidden" : "min-h-screen",
         )}
       >
-        {/* Desktop sidebar — icon-only, full height */}
-        <aside
-          className="hidden w-14 shrink-0 flex-col items-center border-r border-border/60 bg-card/40 sm:flex"
-          aria-label="Primary navigation"
-        >
-          {/* Logo */}
-          <Link
-            to="/"
-            className="flex h-14 w-full items-center justify-center border-b border-border/60"
-            aria-label="Scope home"
-          >
-            <Activity className="h-6 w-6" />
+        {/* Top header — full width, centered logo */}
+        <header className="sticky top-0 z-50 flex h-12 shrink-0 items-center justify-center border-b border-border/60 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <Link to="/" className="flex items-center gap-2 font-bold" aria-label="Scope home">
+            <Activity className="h-5 w-5" />
+            <span>Scope</span>
           </Link>
+        </header>
 
-          {/* Primary nav (scrollable when overflowing) */}
-          <nav className="flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-3">
-            {visibleNavItems.map((item) => {
-              const isActive = location.pathname.startsWith(item.to);
-              return (
-                <SidebarIconLink
-                  key={item.to}
-                  to={item.to}
-                  label={item.label}
-                  icon={item.icon}
-                  active={isActive}
-                />
-              );
-            })}
-          </nav>
-
-          {/* Footer: API docs + Admin */}
-          <div className="flex w-full flex-col items-center gap-1 border-t border-border/60 py-3">
-            <SidebarIconLink
-              to="/api-docs"
-              label="API Documentation"
-              icon={Plug}
-              active={false}
-              external
-            />
-            <SidebarIconLink
-              to="/admin"
-              label="Admin"
-              icon={Settings}
-              active={adminActive}
-            />
-          </div>
-        </aside>
-
-        {/* Main column (mobile header + content + version footer) */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          {/* Mobile top bar (logo + hamburger) — hidden on sm+ */}
-          <header className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border/60 bg-background/95 px-3 backdrop-blur sm:hidden">
-            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="-ml-1">
-                  <Menu className="h-5 w-5" />
-                  <span className="sr-only">Toggle navigation</span>
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-64 pt-10">
-                <SheetTitle className="sr-only">Navigation</SheetTitle>
-                <nav className="flex flex-col space-y-1">
-                  {visibleNavItems.map((item) => {
-                    const isActive = location.pathname.startsWith(item.to);
-                    return (
-                      <Link
-                        key={item.to}
-                        to={item.to}
-                        onClick={() => setMobileOpen(false)}
-                        className={cn(
-                          "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                          isActive
-                            ? "bg-accent text-accent-foreground"
-                            : "text-muted-foreground",
-                        )}
-                      >
-                        <item.icon className="h-4 w-4" />
-                        {item.label}
-                      </Link>
-                    );
-                  })}
-                  <div className="my-2 h-px bg-border/60" />
-                  <a
-                    href="/api-docs"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                  >
-                    <Plug className="h-4 w-4" />
-                    API Documentation
-                  </a>
-                  <Link
-                    to="/admin"
-                    onClick={() => setMobileOpen(false)}
-                    className={cn(
-                      "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                      adminActive
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground",
-                    )}
-                  >
-                    <Settings className="h-4 w-4" />
-                    Admin
-                  </Link>
-                </nav>
-              </SheetContent>
-            </Sheet>
-            <Link to="/" className="flex items-center gap-2 font-bold">
-              <Activity className="h-5 w-5" />
-              <span>Scope</span>
-            </Link>
-          </header>
-
-          {/* Main content */}
-          <main
-            className={cn(
-              "flex-1 min-h-0",
-              isFullBleed ? "flex flex-col" : "container py-6",
-            )}
+        <div className="flex min-h-0 flex-1">
+          {/* Desktop sidebar — icon-only */}
+          <aside
+            className="hidden w-14 shrink-0 flex-col items-center border-r border-border/60 bg-card/40 sm:flex"
+            aria-label="Primary navigation"
           >
-            <Outlet />
-          </main>
+            {/* Primary nav (scrollable when overflowing) */}
+            <nav className="flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-3">
+              {visibleNavItems.map((item) => {
+                const isActive = location.pathname.startsWith(item.to);
+                return (
+                  <SidebarIconLink
+                    key={item.to}
+                    to={item.to}
+                    label={item.label}
+                    icon={item.icon}
+                    active={isActive}
+                  />
+                );
+              })}
+            </nav>
 
-          {/* Version footer — hidden in full-bleed mode */}
-          {!isFullBleed && <VersionFooter />}
+            {/* Footer: API docs + Admin */}
+            <div className="flex w-full flex-col items-center gap-1 border-t border-border/60 py-3">
+              <SidebarIconLink
+                to="/api-docs"
+                label="API Documentation"
+                icon={Plug}
+                active={false}
+                external
+              />
+              <SidebarIconLink
+                to="/admin"
+                label="Admin"
+                icon={Settings}
+                active={adminActive}
+              />
+            </div>
+          </aside>
+
+          {/* Main column (mobile header + content + version footer) */}
+          <div className="flex min-w-0 flex-1 flex-col">
+            {/* Mobile nav bar (hamburger only, logo lives in top header) */}
+            <div className="flex h-10 items-center border-b border-border/60 bg-background/95 px-2 backdrop-blur sm:hidden">
+              <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+                <SheetTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <Menu className="h-5 w-5" />
+                    <span className="sr-only">Toggle navigation</span>
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-64 pt-10">
+                  <SheetTitle className="sr-only">Navigation</SheetTitle>
+                  <nav className="flex flex-col space-y-1">
+                    {visibleNavItems.map((item) => {
+                      const isActive = location.pathname.startsWith(item.to);
+                      return (
+                        <Link
+                          key={item.to}
+                          to={item.to}
+                          onClick={() => setMobileOpen(false)}
+                          className={cn(
+                            "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                            isActive
+                              ? "bg-accent text-accent-foreground"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          <item.icon className="h-4 w-4" />
+                          {item.label}
+                        </Link>
+                      );
+                    })}
+                    <div className="my-2 h-px bg-border/60" />
+                    <a
+                      href="/api-docs"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                    >
+                      <Plug className="h-4 w-4" />
+                      API Documentation
+                    </a>
+                    <Link
+                      to="/admin"
+                      onClick={() => setMobileOpen(false)}
+                      className={cn(
+                        "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                        adminActive
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      <Settings className="h-4 w-4" />
+                      Admin
+                    </Link>
+                  </nav>
+                </SheetContent>
+              </Sheet>
+            </div>
+
+            {/* Main content */}
+            <main
+              className={cn(
+                "flex-1 min-h-0",
+                isFullBleed ? "flex flex-col" : "container py-6",
+              )}
+            >
+              <Outlet />
+            </main>
+
+            {/* Version footer — hidden in full-bleed mode */}
+            {!isFullBleed && <VersionFooter />}
+          </div>
         </div>
       </div>
     </TooltipProvider>
