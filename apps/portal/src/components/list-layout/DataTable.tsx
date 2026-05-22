@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { SortDir } from "./useListUrlState";
@@ -34,6 +35,17 @@ export interface DataTableColumn<T> {
   className?: string;
 }
 
+export interface DataTableSelection<T> {
+  /** Currently selected row ids. */
+  selectedIds: ReadonlySet<Key>;
+  /** Toggle a single row's selection. */
+  onToggle: (id: Key, item: T) => void;
+  /** Toggle every currently rendered row at once. */
+  onToggleAll: (allIds: Key[], allItems: readonly T[]) => void;
+  /** Optional predicate to disable selection for specific rows. */
+  isDisabled?: (item: T) => boolean;
+}
+
 export interface DataTableProps<T> {
   items: readonly T[];
   columns: readonly DataTableColumn<T>[];
@@ -43,6 +55,8 @@ export interface DataTableProps<T> {
   activeId?: Key | null;
   /** Called when a row body cell is clicked. */
   onRowClick?: (item: T) => void;
+  /** Multi-selection support — renders a leading checkbox column. */
+  selection?: DataTableSelection<T>;
   /** Current sort column. */
   sort?: string | null;
   sortDir?: SortDir;
@@ -65,6 +79,7 @@ export function DataTable<T>({
   getRowId,
   activeId,
   onRowClick,
+  selection,
   sort,
   sortDir = "asc",
   onSortChange,
@@ -75,14 +90,36 @@ export function DataTable<T>({
   className,
 }: DataTableProps<T>) {
   const visibleColumns = columns.filter((c) => !c.hidden);
-
   const rowPadY = density === "compact" ? "py-1.5" : "py-3";
+
+  const selectableItems = selection
+    ? items.filter((it) => !(selection.isDisabled?.(it) ?? false))
+    : [];
+  const selectableIds = selectableItems.map((it) => getRowId(it));
+  const selectedVisibleCount = selectableIds.filter((id) => selection?.selectedIds.has(id)).length;
+  const allVisibleSelected =
+    selectableIds.length > 0 && selectedVisibleCount === selectableIds.length;
+  const someVisibleSelected = selectedVisibleCount > 0 && !allVisibleSelected;
+
+  const colSpan = visibleColumns.length + (selection ? 1 : 0);
 
   return (
     <div className={cn("rounded-md border", className)}>
       <Table>
         <TableHeader>
           <TableRow>
+            {selection && (
+              <TableHead style={{ width: "40px" }} className="text-center">
+                <Checkbox
+                  checked={
+                    allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false
+                  }
+                  disabled={selectableIds.length === 0}
+                  onCheckedChange={() => selection.onToggleAll(selectableIds, selectableItems)}
+                  aria-label={allVisibleSelected ? "Deselect all" : "Select all"}
+                />
+              </TableHead>
+            )}
             {visibleColumns.map((col) => {
               const isActiveSort = sort === col.id;
               const alignClass =
@@ -129,6 +166,11 @@ export function DataTable<T>({
           {loading ? (
             Array.from({ length: loadingRows }).map((_, i) => (
               <TableRow key={`skeleton-${i}`}>
+                {selection && (
+                  <TableCell className={rowPadY}>
+                    <Skeleton className="h-4 w-4" />
+                  </TableCell>
+                )}
                 {visibleColumns.map((col) => (
                   <TableCell key={col.id} className={rowPadY}>
                     <Skeleton className="h-4 w-full max-w-[140px]" />
@@ -138,10 +180,7 @@ export function DataTable<T>({
             ))
           ) : items.length === 0 ? (
             <TableRow>
-              <TableCell
-                colSpan={visibleColumns.length}
-                className="h-32 text-center text-muted-foreground"
-              >
+              <TableCell colSpan={colSpan} className="h-32 text-center text-muted-foreground">
                 {emptyState ?? "No results"}
               </TableCell>
             </TableRow>
@@ -149,16 +188,33 @@ export function DataTable<T>({
             items.map((item) => {
               const rowId = getRowId(item);
               const isActive = activeId !== undefined && activeId !== null && rowId === activeId;
+              const isSelected = selection?.selectedIds.has(rowId) ?? false;
+              const isSelectionDisabled = selection?.isDisabled?.(item) ?? false;
               return (
                 <TableRow
                   key={rowId}
                   data-active={isActive ? "true" : undefined}
+                  data-selected={isSelected ? "true" : undefined}
                   className={cn(
                     onRowClick && "cursor-pointer",
                     isActive && "bg-accent/60 hover:bg-accent",
+                    isSelected && !isActive && "bg-primary/5 hover:bg-primary/10",
                   )}
                   onClick={onRowClick ? () => onRowClick(item) : undefined}
                 >
+                  {selection && (
+                    <TableCell
+                      className={cn(rowPadY, "text-center")}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={isSelected}
+                        disabled={isSelectionDisabled}
+                        onCheckedChange={() => selection.onToggle(rowId, item)}
+                        aria-label={isSelected ? "Deselect row" : "Select row"}
+                      />
+                    </TableCell>
+                  )}
                   {visibleColumns.map((col) => {
                     const alignClass =
                       col.align === "right"

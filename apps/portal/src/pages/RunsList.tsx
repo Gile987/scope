@@ -1,13 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo, useState, useEffect, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState, useEffect, useCallback, type Key } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { Plus, Trash2, Repeat, RotateCcw, Pause, Play } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import {
   ListLayout,
@@ -17,9 +22,11 @@ import {
   ClearFiltersLink,
   DataTable,
   Pagination,
+  BulkActionBar,
   useListUrlState,
   type DataTableColumn,
 } from "@/components/list-layout";
+import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { formatDate, formatId, formatDuration, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, RunStatus, RunOutcome } from "@/types";
@@ -28,15 +35,22 @@ const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionI
 
 export function RunsList() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const detailOutlet = useOutlet();
   const { id: activeId } = useParams<{ id?: string }>();
   const [searchParams] = useSearchParams();
+  const isForceRetryModifierActive = useShiftModifier();
 
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
 
   // Cursor pagination — keep a stack of cursors that map a virtual page number
   // to an `after` cursor (page 1 = no cursor, page 2 = stack[0], …).
   const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([undefined]);
+
+  // Multi-selection state — preserved while the user navigates pages.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+
   // Reset stack whenever filters or page size change.
   const filtersKey = useMemo(
     () =>
@@ -54,12 +68,12 @@ export function RunsList() {
     [
       state.search,
       state.pageSize,
-      // serialized filters captured via filtersKey
       searchParams.toString(),
     ],
   );
   useEffect(() => {
     setCursorStack([undefined]);
+    setSelectedIds(new Set());
     if (state.page !== 1) state.setPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtersKey]);
@@ -154,6 +168,131 @@ export function RunsList() {
     },
     [state, cursors.next],
   );
+
+  // ---- Bulk action mutations ----
+  const invalidateRuns = () => queryClient.invalidateQueries({ queryKey: ["runs"] });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkDeleteRuns(ids),
+    onSuccess: (res) => {
+      toast.success(`Deleted ${res.deleted} run${res.deleted !== 1 ? "s" : ""}`);
+      setSelectedIds(new Set());
+      invalidateRuns();
+    },
+    onError: (err: Error) => toast.error(`Failed to delete: ${err.message}`),
+  });
+
+  const bulkRetryMutation = useMutation({
+    mutationFn: ({ ids, force }: { ids: string[]; force?: boolean }) =>
+      api.bulkRetryRuns(ids, { force }),
+    onSuccess: (res) => {
+      toast.success(`Retried ${res.retried} run${res.retried !== 1 ? "s" : ""}${res.skipped ? `, skipped ${res.skipped}` : ""}`);
+      setSelectedIds(new Set());
+      invalidateRuns();
+    },
+    onError: (err: Error) => toast.error(`Failed to retry: ${err.message}`),
+  });
+
+  const bulkResubmitMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkResubmitRuns(ids, 1),
+    onSuccess: (res) => {
+      toast.success(`Resubmitted ${res.submitted} run${res.submitted !== 1 ? "s" : ""}${res.failed.length ? `, ${res.failed.length} failed` : ""}`);
+      setSelectedIds(new Set());
+      invalidateRuns();
+    },
+    onError: (err: Error) => toast.error(`Failed to resubmit: ${err.message}`),
+  });
+
+  const bulkPauseMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkPauseRuns(ids),
+    onSuccess: (res) => {
+      toast.success(`Paused ${res.paused} run${res.paused !== 1 ? "s" : ""}${res.skipped ? `, skipped ${res.skipped}` : ""}`);
+      setSelectedIds(new Set());
+      invalidateRuns();
+    },
+    onError: (err: Error) => toast.error(`Failed to pause: ${err.message}`),
+  });
+
+  const bulkResumeMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkResumeRuns(ids),
+    onSuccess: (res) => {
+      toast.success(`Resumed ${res.resumed} run${res.resumed !== 1 ? "s" : ""}${res.skipped ? `, skipped ${res.skipped}` : ""}`);
+      setSelectedIds(new Set());
+      invalidateRuns();
+    },
+    onError: (err: Error) => toast.error(`Failed to resume: ${err.message}`),
+  });
+
+  // ---- Selection helpers ----
+  const toggleRowSelection = useCallback((id: Key) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const key = String(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleAllSelection = useCallback((allIds: Key[]) => {
+    setSelectedIds((prev) => {
+      const stringIds = allIds.map((id) => String(id));
+      const allSelected = stringIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const id of stringIds) next.delete(id);
+      } else {
+        for (const id of stringIds) next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectedRunsList = useMemo(
+    () => allRuns.filter((r) => selectedIds.has(r._id)),
+    [allRuns, selectedIds],
+  );
+
+  // Capability counts so action buttons can disable cleanly.
+  const selectionCaps = useMemo(() => {
+    let retryable = 0;
+    let pausable = 0;
+    let resumable = 0;
+    for (const r of selectedRunsList) {
+      const s = r.run?.status;
+      if (s === "done") retryable += 1;
+      if (s === "pending" || s === "queued" || s === "processing") pausable += 1;
+      if (s === "paused") resumable += 1;
+    }
+    return { retryable, pausable, resumable };
+  }, [selectedRunsList]);
+
+  const isBusy =
+    bulkDeleteMutation.isPending ||
+    bulkRetryMutation.isPending ||
+    bulkResubmitMutation.isPending ||
+    bulkPauseMutation.isPending ||
+    bulkResumeMutation.isPending;
+
+  const handleBulkRetry = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    bulkRetryMutation.mutate({ ids: [...selectedIds], force: isForceRetryModifierActive });
+  }, [bulkRetryMutation, selectedIds, isForceRetryModifierActive]);
+
+  const handleBulkResubmit = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    bulkResubmitMutation.mutate([...selectedIds]);
+  }, [bulkResubmitMutation, selectedIds]);
+
+  const handleBulkPause = useCallback(() => {
+    if (selectionCaps.pausable === 0) return;
+    bulkPauseMutation.mutate([...selectedIds]);
+  }, [bulkPauseMutation, selectedIds, selectionCaps.pausable]);
+
+  const handleBulkResume = useCallback(() => {
+    if (selectionCaps.resumable === 0) return;
+    bulkResumeMutation.mutate([...selectedIds]);
+  }, [bulkResumeMutation, selectedIds, selectionCaps.resumable]);
 
   // Filter options derived from current page (counts reflect this page only).
   const workerOptions = useMemo(
@@ -314,12 +453,78 @@ export function RunsList() {
       detail={detailOutlet}
     >
       <div className="flex flex-col gap-3">
+        <BulkActionBar
+          count={selectedIds.size}
+          onClear={() => setSelectedIds(new Set())}
+          itemLabel="run"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isBusy || selectionCaps.pausable === 0}
+            onClick={handleBulkPause}
+            title="Pause pending/queued/processing runs"
+          >
+            <Pause className="h-3.5 w-3.5" /> Pause
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isBusy || selectionCaps.resumable === 0}
+            onClick={handleBulkResume}
+            title="Resume paused runs"
+          >
+            <Play className="h-3.5 w-3.5" /> Resume
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isBusy || selectionCaps.retryable === 0}
+            onClick={handleBulkRetry}
+            title={
+              isForceRetryModifierActive
+                ? "Force retry (ignore attempt limits)"
+                : "Retry completed runs — hold Shift to force"
+            }
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            {isForceRetryModifierActive ? "Force Retry" : "Retry"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isBusy || selectedIds.size === 0}
+            onClick={handleBulkResubmit}
+            title="Resubmit selected runs as a new submission"
+          >
+            <Repeat className="h-3.5 w-3.5" /> Resubmit
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="gap-1.5"
+            disabled={isBusy || selectedIds.size === 0}
+            onClick={() => setDeleteDialogOpen(true)}
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </Button>
+        </BulkActionBar>
+
         <DataTable
           items={sortedRuns}
           columns={columns}
           getRowId={(r) => r._id}
           activeId={activeId}
           onRowClick={(r) => navigate({ pathname: `/runs/${r._id}/preview`, search: window.location.search })}
+          selection={{
+            selectedIds,
+            onToggle: (id) => toggleRowSelection(id),
+            onToggleAll: (ids) => toggleAllSelection(ids),
+          }}
           sort={state.sort}
           sortDir={state.sortDir}
           onSortChange={state.toggleSort}
@@ -342,6 +547,32 @@ export function RunsList() {
           itemLabel="runs"
         />
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the selected runs along with their logs,
+              turns, and report associations. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                setDeleteDialogOpen(false);
+                bulkDeleteMutation.mutate([...selectedIds]);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ListLayout>
   );
 }
