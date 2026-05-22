@@ -2,12 +2,9 @@
 # Scope CLI installer
 #
 # Install via gh CLI (recommended):
-#   gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
-#
-# Install via curl with token:
-#   curl -fsSL -H "Authorization: token $GH_TOKEN" \
-#     "$(gh api repos/growth-ecosystems/scope-doc/releases/latest --jq '.assets[] | select(.name=="install.sh") | .url')" \
-#     -H "Accept: application/octet-stream" | bash
+#   TAG=$(gh release list --repo growth-ecosystems/scope-doc --json tagName \
+#     -q '[.[].tagName | select(startswith("cli/v"))][0]')
+#   gh release download "$TAG" --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
 #
 # Requires: node (>= 20) and either `gh` CLI (authenticated) or GH_TOKEN/GITHUB_TOKEN.
 #
@@ -16,6 +13,7 @@
 set -euo pipefail
 
 REPO="growth-ecosystems/scope-doc"
+TAG_PREFIX="cli/v"
 INSTALL_DIR="${SCOPE_INSTALL_DIR:-$HOME/.local/bin}"
 BINARY_NAME="scope"
 
@@ -46,23 +44,33 @@ else
   fi
 fi
 
-# --- Fetch latest release ---
+# --- Find latest CLI release (matching cli/v* tag) ---
 
-info "Fetching latest release from $REPO..."
+info "Fetching latest CLI release from $REPO..."
 
 if [ "$HAS_GH" = "1" ]; then
-  RELEASE_JSON=$(gh api "repos/$REPO/releases/latest" 2>/dev/null) || error "Failed to fetch release info. Run 'gh auth login' if not authenticated."
+  RELEASE_JSON=$(gh api "repos/$REPO/releases" --paginate 2>/dev/null | node -e "
+    const releases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+    const match = (Array.isArray(releases) ? releases : []).find(r => (r.tag_name || '').startsWith('${TAG_PREFIX}'));
+    if (match) process.stdout.write(JSON.stringify(match));
+    else process.exit(1);
+  ") || error "No CLI release found (no release with ${TAG_PREFIX}* tag). Run 'gh auth login' if not authenticated."
 else
   RELEASE_JSON=$(curl -fsSL \
     -H "Authorization: token $TOKEN" \
     -H "Accept: application/vnd.github.v3+json" \
-    "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null) || error "Failed to fetch release info. Check your token."
+    "https://api.github.com/repos/$REPO/releases" 2>/dev/null | node -e "
+    const releases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+    const match = (Array.isArray(releases) ? releases : []).find(r => (r.tag_name || '').startsWith('${TAG_PREFIX}'));
+    if (match) process.stdout.write(JSON.stringify(match));
+    else process.exit(1);
+  ") || error "No CLI release found. Check your token or create a release with a ${TAG_PREFIX}* tag."
 fi
 
 # Parse version and asset URL
 VERSION=$(echo "$RELEASE_JSON" | node -e "
   const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-  process.stdout.write((d.tag_name || '').replace(/^(cli\/)?v/, ''));
+  process.stdout.write((d.tag_name || '').replace(/^cli\/v/, ''));
 ")
 ASSET_URL=$(echo "$RELEASE_JSON" | node -e "
   const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));

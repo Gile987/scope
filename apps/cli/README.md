@@ -5,7 +5,8 @@ Command-line interface for the Scope AI coding agent benchmarking platform.
 ## Installation
 
 ```bash
-gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+TAG=$(gh release list --repo growth-ecosystems/scope-doc --json tagName -q '[.[].tagName | select(startswith("cli/v"))][0]')
+gh release download "$TAG" --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
 ```
 
 **Prerequisites:**
@@ -60,7 +61,8 @@ scope run --help
 Re-run the install script to update to the latest version:
 
 ```bash
-gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+TAG=$(gh release list --repo growth-ecosystems/scope-doc --json tagName -q '[.[].tagName | select(startswith("cli/v"))][0]')
+gh release download "$TAG" --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
 ```
 
 The CLI will also notify you when a newer version is available. Suppress this with:

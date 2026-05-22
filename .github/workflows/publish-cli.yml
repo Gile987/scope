@@ -129,7 +129,8 @@ jobs:
             --notes "## Installation
 
           \`\`\`bash
-          gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+          TAG=\$(gh release list --repo growth-ecosystems/scope-doc --json tagName -q '[.[].tagName | select(startswith(\"cli/v\"))][0]')
+          gh release download \"\$TAG\" --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
           \`\`\`
 
           Or download \`scope.mjs\` from this release and place it in your PATH.

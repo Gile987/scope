@@ -78,7 +78,8 @@ The publish workflow (`.github/workflows/publish-cli.yml`) is triggered manually
 Users install via the `gh` CLI (required since the repo is EMU-protected):
 
 ```bash
-gh release download --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
+TAG=$(gh release list --repo growth-ecosystems/scope-doc --json tagName -q '[.[].tagName | select(startswith("cli/v"))][0]')
+gh release download "$TAG" --repo growth-ecosystems/scope-doc --pattern install.sh -O - | bash
 ```
 
 The installer (`apps/cli/install.sh`):

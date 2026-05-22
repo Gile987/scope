@@ -50,10 +50,13 @@ describe("update command", () => {
     // Simulate bundled CLI
     process.env.SCOPE_CLI_VERSION = "0.2.0";
     // Mock execSync: gh release download returns void (stdio: inherit),
-    // version check returns version string
+    // version check returns version string, gh release list returns tag
     mockedExecSync.mockImplementation((cmd: string) => {
       if (typeof cmd === "string" && cmd.includes("--version")) {
         return "0.3.0\n";
+      }
+      if (typeof cmd === "string" && cmd.includes("gh release list")) {
+        return "cli/v0.3.0\n";
       }
       return Buffer.from("");
     });
