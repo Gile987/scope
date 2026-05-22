@@ -342,12 +342,14 @@ export function SubmitRun() {
       const profile = (profiles as ProfileWithVersion[]).find((p) => p._id === v.profileId);
       const resolvedProfileVersion = v.profileVersion ?? profile?.latestVersion;
       return {
-        profileId: v.profileId,
-        ...(resolvedProfileVersion ? { profileVersion: resolvedProfileVersion } : {}),
+        profileId: resolvedProfileVersion ? `${v.profileId}@${resolvedProfileVersion}` : v.profileId,
       };
     });
 
     const inVariationMode = selectedProfileId && profileVariations.length > 0;
+    const baseProfileSpec = selectedProfileId
+      ? (selectedProfileVersion ? `${selectedProfileId}@${selectedProfileVersion}` : selectedProfileId)
+      : undefined;
 
     submitMutation.mutate({
       scenario: {
@@ -365,16 +367,12 @@ export function SubmitRun() {
       ...(inVariationMode ? {} : { ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}) }),
       ...(inVariationMode
         ? {
-            profileId: selectedProfileId,
-            ...(selectedProfileVersion ? { profileVersion: selectedProfileVersion } : {}),
+            profileId: baseProfileSpec,
             profileVariations,
           }
         : {}),
-      ...(selectedProfileId && profileVariations.length === 0
-        ? {
-            profileId: selectedProfileId,
-            ...(selectedProfileVersion ? { profileVersion: selectedProfileVersion } : {}),
-          }
+      ...(baseProfileSpec && profileVariations.length === 0
+        ? { profileId: baseProfileSpec }
         : {}),
     });
   };

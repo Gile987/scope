@@ -679,9 +679,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
-          "profileVersion": {
-            "type": "integer",
-          },
           "scenario": {
             "$ref": "#/components/schemas/Scenario",
           },
@@ -1542,9 +1539,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "profileId": {
             "type": "string",
-          },
-          "profileVersion": {
-            "type": "integer",
           },
         },
         "required": [

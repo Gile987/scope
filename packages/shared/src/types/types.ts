@@ -145,7 +145,6 @@ export interface OsInfo {
 
 export interface ProfileVariationInput {
   profileId: string;
-  profileVersion?: number;
   label?: string;
 }
 

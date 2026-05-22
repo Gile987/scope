@@ -28,6 +28,7 @@ import {
   decodeCursor,
   encodeCursor,
   parseExtensionSpec,
+  parseProfileSpec,
   resolveAgentVersion,
 } from "shared";
 import type { ProfileDocument, ProfileVersionDocument } from "shared";
@@ -73,7 +74,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId, profileVersion: requestedProfileVersion, profileVariations, priority: requestedPriority } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority } = req.body;
     let worker = req.query.worker as string | undefined;
 
     type VariationInput = {
@@ -82,11 +83,11 @@ apiRoute(ctx.app, ctx.registry, {
       label?: string;
     };
 
-    const typedProfileVariations = (Array.isArray(profileVariations) ? profileVariations : []) as VariationInput[];
+    const typedProfileVariations = (Array.isArray(profileVariations) ? profileVariations : []) as Array<{ profileId: string; label?: string }>;
     const isVariationSubmit = typedProfileVariations.length > 0;
 
     if (isVariationSubmit) {
-      if (!requestedProfileId) {
+      if (!requestedProfileSpec) {
         res.status(400).json({ error: "profileId (the base profile) is required when profileVariations are provided" });
         return;
       }
@@ -128,7 +129,12 @@ apiRoute(ctx.app, ctx.registry, {
         }
       }
 
-      const baseProfileId = requestedProfileId;
+      const baseParsed = (() => {
+        try { return parseProfileSpec(requestedProfileSpec); }
+        catch (err) { res.status(400).json({ error: (err as Error).message }); return null; }
+      })();
+      if (!baseParsed) return;
+      const baseProfileId = baseParsed.profileId;
       const baseProfile = await ctx.profileCollection.findOne({
         _id: baseProfileId,
         deletedAt: { $exists: false },
@@ -139,9 +145,14 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       const variationEntries: VariationInput[] = [
-        { profileId: baseProfileId, profileVersion: requestedProfileVersion, label: "base" },
-        ...typedProfileVariations,
+        { profileId: baseProfileId, profileVersion: baseParsed.version, label: "base" },
       ];
+      for (const v of typedProfileVariations) {
+        let parsed: { profileId: string; version?: number };
+        try { parsed = parseProfileSpec(v.profileId); }
+        catch (err) { res.status(400).json({ error: (err as Error).message }); return; }
+        variationEntries.push({ profileId: parsed.profileId, profileVersion: parsed.version, ...(v.label ? { label: v.label } : {}) });
+      }
 
       if (variationEntries.length > MAX_PROFILE_VARIATIONS) {
         res.status(400).json({ error: `A maximum of ${MAX_PROFILE_VARIATIONS} variations (including base profile) is supported` });
@@ -390,7 +401,17 @@ apiRoute(ctx.app, ctx.registry, {
     let profileId: string | undefined;
     let profileVersionId: string | undefined;
     let profileVersion: ProfileVersionDocument | null = null;
-    if (requestedProfileId) {
+    if (requestedProfileSpec) {
+      let requestedProfileId: string;
+      let requestedProfileVersion: number | undefined;
+      try {
+        const parsed = parseProfileSpec(requestedProfileSpec);
+        requestedProfileId = parsed.profileId;
+        requestedProfileVersion = parsed.version;
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+        return;
+      }
       const profile = await ctx.profileCollection.findOne({
         _id: requestedProfileId,
         deletedAt: { $exists: false },

@@ -90,10 +90,8 @@ export const api = {
     skills?: string[];
     agentVersion?: string;
     profileId?: string;
-    profileVersion?: number;
     profileVariations?: Array<{
       profileId: string;
-      profileVersion?: number;
     }>;
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
