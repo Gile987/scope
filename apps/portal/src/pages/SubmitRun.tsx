@@ -338,12 +338,10 @@ export function SubmitRun() {
 
     const normalizedVariationDrafts = variationDrafts.filter((v) => v.profileId.trim().length > 0);
 
-    const profileVariations = normalizedVariationDrafts.map((v) => {
+    const profileVariations: string[] = normalizedVariationDrafts.map((v) => {
       const profile = (profiles as ProfileWithVersion[]).find((p) => p._id === v.profileId);
       const resolvedProfileVersion = v.profileVersion ?? profile?.latestVersion;
-      return {
-        profileId: resolvedProfileVersion ? `${v.profileId}@${resolvedProfileVersion}` : v.profileId,
-      };
+      return resolvedProfileVersion ? `${v.profileId}@${resolvedProfileVersion}` : v.profileId;
     });
 
     const inVariationMode = selectedProfileId && profileVariations.length > 0;

@@ -93,7 +93,7 @@ Currently all versions of an agent share a single queue (e.g., `queue-coder-acp-
 
 Profile fan-out mode is also supported for comparative runs:
 
-1. User selects a base `profileId` (optionally pinned via `profileId@version`) and a `profileVariations[]` array of additional profiles to compare against. Each variation entry is `{ profileId: "<id>" | "<id>@<version>", label?: string }`.
+1. User selects a base `profileId` (optionally pinned via `profileId@version`) and a `profileVariations[]` array of profile spec strings to compare against (e.g. `["def456", "ghi789@2"]`)
 2. API parses each spec, validates every variation upfront, then expands one submit call into multiple requests under one shared `submissionId`
 3. Each expanded request resolves configuration from its variation profile; unpinned specs resolve to `latestVersion`
 4. Expanded requests persist `profileId` and `profileVersionId` on each `RequestDocument` for indexing and traceability

@@ -83,7 +83,9 @@ apiRoute(ctx.app, ctx.registry, {
       label?: string;
     };
 
-    const typedProfileVariations = (Array.isArray(profileVariations) ? profileVariations : []) as Array<{ profileId: string; label?: string }>;
+    const typedProfileVariations: string[] = Array.isArray(profileVariations)
+      ? profileVariations.filter((v: unknown): v is string => typeof v === "string")
+      : [];
     const isVariationSubmit = typedProfileVariations.length > 0;
 
     if (isVariationSubmit) {
@@ -147,11 +149,11 @@ apiRoute(ctx.app, ctx.registry, {
       const variationEntries: VariationInput[] = [
         { profileId: baseProfileId, profileVersion: baseParsed.version, label: "base" },
       ];
-      for (const v of typedProfileVariations) {
+      for (const spec of typedProfileVariations) {
         let parsed: { profileId: string; version?: number };
-        try { parsed = parseProfileSpec(v.profileId); }
+        try { parsed = parseProfileSpec(spec); }
         catch (err) { res.status(400).json({ error: (err as Error).message }); return; }
-        variationEntries.push({ profileId: parsed.profileId, profileVersion: parsed.version, ...(v.label ? { label: v.label } : {}) });
+        variationEntries.push({ profileId: parsed.profileId, profileVersion: parsed.version });
       }
 
       if (variationEntries.length > MAX_PROFILE_VARIATIONS) {

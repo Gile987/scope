@@ -675,7 +675,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "profileVariations": {
             "items": {
-              "$ref": "#/components/schemas/ProfileVariationInput",
+              "type": "string",
             },
             "type": "array",
           },
@@ -1529,20 +1529,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name",
           "latestVersion",
           "createdAt",
-        ],
-        "type": "object",
-      },
-      "ProfileVariationInput": {
-        "properties": {
-          "label": {
-            "type": "string",
-          },
-          "profileId": {
-            "type": "string",
-          },
-        },
-        "required": [
-          "profileId",
         ],
         "type": "object",
       },

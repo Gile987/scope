@@ -143,11 +143,6 @@ export interface OsInfo {
   arch: string;       // os.arch() → "x64", "arm64"
 }
 
-export interface ProfileVariationInput {
-  profileId: string;
-  label?: string;
-}
-
 // Request document stored in MongoDB
 export interface RequestDocument {
   _id: string;  // UUID as _id (for CosmosDB sharding compatibility)
