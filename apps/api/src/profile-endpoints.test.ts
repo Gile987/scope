@@ -41,6 +41,14 @@ describe("Profile API Endpoints", () => {
     vi.clearAllMocks();
     mocks = createAllMockDependencies();
     _injectTestDependencies(mocks);
+    // Default: assume the target agent exists and exposes the model used in
+    // tests below. Individual tests can override this to assert the new
+    // capability-check failure paths.
+    (mocks.agentCollection.findOne as any).mockResolvedValue({
+      _id: "coder-acp-copilot",
+      name: "Copilot",
+      supportedModels: ["gpt-4o", "gpt-5"],
+    });
   });
 
   describe("POST /api/v1/profiles", () => {

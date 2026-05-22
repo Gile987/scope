@@ -50,6 +50,13 @@ export function CreateProfile() {
   const supportedModels = selectedAgent?.supportedModels ?? [];
   const isVscodeWorker = worker.includes("vscode");
 
+  // A profile must be self-sufficient to submit a run, which requires a
+  // model. Agents that don't expose any supportedModels can't back a
+  // profile — hide them from the worker dropdown so the rule is obvious.
+  const eligibleAgents = agents.filter(
+    (a: CodingAgent) => Array.isArray(a.supportedModels) && a.supportedModels.length > 0,
+  );
+
   // Clear extensions when the user switches to a non-vscode worker.
   useEffect(() => {
     if (worker && !isVscodeWorker) {
@@ -129,10 +136,9 @@ export function CreateProfile() {
     setDescription(descParts.join(". ").slice(0, 512));
   };
 
-  // Model is only required when the selected agent declares supportedModels;
-  // otherwise the Model dropdown isn't rendered and we shouldn't gate on it.
-  const requiresModel = supportedModels.length > 0;
-  const canSubmit = name.trim() && name.length <= 128 && description.length <= 512 && worker && (!requiresModel || model);
+  // A profile requires a model, so we always gate on it; the worker dropdown
+  // is already filtered to agents that declare supportedModels.
+  const canSubmit = name.trim() && name.length <= 128 && description.length <= 512 && worker && model;
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -217,11 +223,16 @@ export function CreateProfile() {
                 <SelectValue placeholder="Select a worker" />
               </SelectTrigger>
               <SelectContent>
-                {agents.map((a: CodingAgent) => (
+                {eligibleAgents.map((a: CodingAgent) => (
                   <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {eligibleAgents.length < agents.length && (
+              <p className="text-xs text-muted-foreground">
+                Agents without selectable models are hidden — a profile requires a model.
+              </p>
+            )}
           </div>
 
           {supportedModels.length > 0 && (

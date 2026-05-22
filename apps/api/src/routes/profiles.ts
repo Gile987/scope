@@ -41,6 +41,28 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
 
+      // A profile must be self-sufficient to submit a run, which requires a
+      // model. Agents that don't declare any supportedModels can't satisfy
+      // that contract, so creating a profile for them is rejected upfront.
+      const agentDoc = await ctx.agentCollection.findOne({ _id: workerType, deletedAt: { $exists: false } });
+      if (!agentDoc) {
+        res.status(404).json({ error: `Agent not found: ${workerType}` });
+        return;
+      }
+      if (!agentDoc.supportedModels || agentDoc.supportedModels.length === 0) {
+        res.status(400).json({
+          error: `Agent "${workerType}" does not declare any supportedModels; profiles cannot be created for it.`,
+        });
+        return;
+      }
+      if (!agentDoc.supportedModels.includes(model)) {
+        res.status(400).json({
+          error: `Invalid model "${model}" for agent "${workerType}"`,
+          supportedModels: agentDoc.supportedModels,
+        });
+        return;
+      }
+
       const now = new Date();
       const profileId = uuidv4();
       const versionId = `${profileId}@1`;
@@ -250,6 +272,27 @@ apiRoute(ctx.app, ctx.registry, {
       // Extensions are only supported by VS Code workers
       if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
         res.status(400).json({ error: `Worker type "${workerType}" does not support VS Code extensions` });
+        return;
+      }
+
+      // Same self-sufficiency rule as POST /profiles: a profile (and any new
+      // version) must carry a model, so reject agents that don't expose any.
+      const agentDoc = await ctx.agentCollection.findOne({ _id: workerType, deletedAt: { $exists: false } });
+      if (!agentDoc) {
+        res.status(404).json({ error: `Agent not found: ${workerType}` });
+        return;
+      }
+      if (!agentDoc.supportedModels || agentDoc.supportedModels.length === 0) {
+        res.status(400).json({
+          error: `Agent "${workerType}" does not declare any supportedModels; profile versions cannot be created for it.`,
+        });
+        return;
+      }
+      if (!agentDoc.supportedModels.includes(model)) {
+        res.status(400).json({
+          error: `Invalid model "${model}" for agent "${workerType}"`,
+          supportedModels: agentDoc.supportedModels,
+        });
         return;
       }
 
