@@ -365,8 +365,8 @@ export function SubmitRun() {
       ...(inVariationMode ? {} : { ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}) }),
       ...(inVariationMode
         ? {
-            baseProfileId: selectedProfileId,
-            ...(selectedProfileVersion ? { baseProfileVersion: selectedProfileVersion } : {}),
+            profileId: selectedProfileId,
+            ...(selectedProfileVersion ? { profileVersion: selectedProfileVersion } : {}),
             profileVariations,
           }
         : {}),

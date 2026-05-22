@@ -73,7 +73,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId, profileVersion: requestedProfileVersion, baseProfileId, baseProfileVersion, profileVariations, priority: requestedPriority } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId, profileVersion: requestedProfileVersion, profileVariations, priority: requestedPriority } = req.body;
     let worker = req.query.worker as string | undefined;
 
     type VariationInput = {
@@ -83,16 +83,11 @@ apiRoute(ctx.app, ctx.registry, {
     };
 
     const typedProfileVariations = (Array.isArray(profileVariations) ? profileVariations : []) as VariationInput[];
-    const isVariationSubmit = Boolean(baseProfileId) || typedProfileVariations.length > 0;
+    const isVariationSubmit = typedProfileVariations.length > 0;
 
     if (isVariationSubmit) {
-      if (!baseProfileId) {
-        res.status(400).json({ error: "baseProfileId is required when profileVariations are provided" });
-        return;
-      }
-
-      if (requestedProfileId && requestedProfileId !== baseProfileId) {
-        res.status(400).json({ error: "Use either profileId or baseProfileId/profileVariations, not both" });
+      if (!requestedProfileId) {
+        res.status(400).json({ error: "profileId (the base profile) is required when profileVariations are provided" });
         return;
       }
 
@@ -133,6 +128,7 @@ apiRoute(ctx.app, ctx.registry, {
         }
       }
 
+      const baseProfileId = requestedProfileId;
       const baseProfile = await ctx.profileCollection.findOne({
         _id: baseProfileId,
         deletedAt: { $exists: false },
@@ -143,7 +139,7 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       const variationEntries: VariationInput[] = [
-        { profileId: baseProfileId, profileVersion: baseProfileVersion ?? requestedProfileVersion, label: "base" },
+        { profileId: baseProfileId, profileVersion: requestedProfileVersion, label: "base" },
         ...typedProfileVariations,
       ];
 

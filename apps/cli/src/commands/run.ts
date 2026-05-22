@@ -127,9 +127,7 @@ run
           process.exit(1);
         }
 
-        body.baseProfileId = baseProfile;
         body.profileVariations = parsed;
-        delete body.profileId;
       }
 
       const response = await fetch(`${normalizeUrl(url)}/api/v1/requests?worker=${worker}`, {
