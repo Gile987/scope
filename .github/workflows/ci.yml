@@ -883,7 +883,7 @@ jobs:
           echo "deps_tag=${DEPS_TAG}" >> "$GITHUB_OUTPUT"
           echo "image=${DEPS_IMAGE}" >> "$GITHUB_OUTPUT"
 
-      - name: Build base image (if deps image missing)
+      - name: Build base image (if not in ACR)
         if: steps.deps.outputs.exists == 'false'
         run: |
           WORKER_DIR="apps/workers/coder-acp-copilot-windows"
@@ -899,7 +899,7 @@ jobs:
             --file "${WORKER_DIR}/Dockerfile.base" \
             .
 
-      - name: Build deps image (if deps image missing)
+      - name: Build deps image (if not in ACR)
         if: steps.deps.outputs.exists == 'false'
         run: |
           WORKER_DIR="apps/workers/coder-acp-copilot-windows"
