@@ -149,7 +149,11 @@ export interface AzureAiFoundrySecretValue {
   model?: string;
 }
 
-function trimTrailingSlashes(value: string): string {
+/**
+ * Remove all trailing forward slashes from a string. Used to normalize
+ * user-supplied endpoint URLs/paths before appending suffixes.
+ */
+export function trimTrailingSlashes(value: string): string {
   let result = value;
   while (result.endsWith("/")) {
     result = result.slice(0, -1);
