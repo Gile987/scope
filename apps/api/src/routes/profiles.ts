@@ -16,6 +16,7 @@ import type { ProfileDocument, ProfileVersionDocument } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { RouteContext } from "../route-context.js";
 import { resolveSkillSpecs } from "../utils/skill-helpers.js";
+import { validateAgentForModel } from "../utils/agent-helpers.js";
 
 export function registerProfilesRoutes(ctx: RouteContext): void {
 
@@ -44,22 +45,13 @@ apiRoute(ctx.app, ctx.registry, {
       // A profile must be self-sufficient to submit a run, which requires a
       // model. Agents that don't declare any supportedModels can't satisfy
       // that contract, so creating a profile for them is rejected upfront.
-      const agentDoc = await ctx.agentCollection.findOne({ _id: workerType, deletedAt: { $exists: false } });
-      if (!agentDoc) {
-        res.status(404).json({ error: `Agent not found: ${workerType}` });
-        return;
-      }
-      if (!agentDoc.supportedModels || agentDoc.supportedModels.length === 0) {
-        res.status(400).json({
-          error: `Agent "${workerType}" does not declare any supportedModels; profiles cannot be created for it.`,
-        });
-        return;
-      }
-      if (!agentDoc.supportedModels.includes(model)) {
-        res.status(400).json({
-          error: `Invalid model "${model}" for agent "${workerType}"`,
-          supportedModels: agentDoc.supportedModels,
-        });
+      const agentCheck = await validateAgentForModel(ctx.agentCollection, workerType, model, "profiles");
+      if (!agentCheck.ok) {
+        const payload: Record<string, unknown> = { error: agentCheck.error };
+        if ("supportedModels" in agentCheck && agentCheck.supportedModels) {
+          payload.supportedModels = agentCheck.supportedModels;
+        }
+        res.status(agentCheck.status).json(payload);
         return;
       }
 
@@ -277,22 +269,13 @@ apiRoute(ctx.app, ctx.registry, {
 
       // Same self-sufficiency rule as POST /profiles: a profile (and any new
       // version) must carry a model, so reject agents that don't expose any.
-      const agentDoc = await ctx.agentCollection.findOne({ _id: workerType, deletedAt: { $exists: false } });
-      if (!agentDoc) {
-        res.status(404).json({ error: `Agent not found: ${workerType}` });
-        return;
-      }
-      if (!agentDoc.supportedModels || agentDoc.supportedModels.length === 0) {
-        res.status(400).json({
-          error: `Agent "${workerType}" does not declare any supportedModels; profile versions cannot be created for it.`,
-        });
-        return;
-      }
-      if (!agentDoc.supportedModels.includes(model)) {
-        res.status(400).json({
-          error: `Invalid model "${model}" for agent "${workerType}"`,
-          supportedModels: agentDoc.supportedModels,
-        });
+      const agentCheck = await validateAgentForModel(ctx.agentCollection, workerType, model, "profile versions");
+      if (!agentCheck.ok) {
+        const payload: Record<string, unknown> = { error: agentCheck.error };
+        if ("supportedModels" in agentCheck && agentCheck.supportedModels) {
+          payload.supportedModels = agentCheck.supportedModels;
+        }
+        res.status(agentCheck.status).json(payload);
         return;
       }
 
