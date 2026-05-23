@@ -40,14 +40,14 @@ jobs:
           HASH=$(sha256sum ${{ env.WORKER_DIR }}/Dockerfile.base | cut -c1-12)
           BASE_TAG="base-${HASH}"
           ACR_LOGIN_SERVER=$(az acr show --name "${{ vars.ACR_NAME }}" --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" --query loginServer -o tsv)
-          BASE_IMAGE="${ACR_LOGIN_SERVER}/scoped/coder-acp-copilot-windows-base:${BASE_TAG}"
+          BASE_IMAGE="${ACR_LOGIN_SERVER}/scoped/windows-base:${BASE_TAG}"
           echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
           echo "base_image=${BASE_IMAGE}" >> "$GITHUB_OUTPUT"
 
       - name: Check if base image already exists
         id: check
         run: |
-          if az acr repository show-tags --name "${{ vars.ACR_NAME }}" --repository scoped/coder-acp-copilot-windows-base --query "[?@=='${{ steps.tags.outputs.base_tag }}']" -o tsv | grep -q .; then
+          if az acr repository show-tags --name "${{ vars.ACR_NAME }}" --repository scoped/windows-base --query "[?@=='${{ steps.tags.outputs.base_tag }}']" -o tsv | grep -q .; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -60,8 +60,8 @@ jobs:
             --registry "${{ vars.ACR_NAME }}" \
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --platform windows/amd64 \
-            --image "scoped/coder-acp-copilot-windows-base:${{ steps.tags.outputs.base_tag }}" \
-            --image "scoped/coder-acp-copilot-windows-base:latest" \
+            --image "scoped/windows-base:${{ steps.tags.outputs.base_tag }}" \
+            --image "scoped/windows-base:latest" \
             --file "${{ env.WORKER_DIR }}/Dockerfile.base" \
             .
 
