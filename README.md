@@ -274,7 +274,7 @@ pnpm cli criteria --help
 
 ```bash
 # Submit with explicit model and agent version
-pnpm cli run submit -m "Create a Hello World API" -w coder-acp-copilot \
+pnpm cli run submit --task "Create a Hello World API" -w coder-acp-copilot \
   --model claude-sonnet-4 --agent-version copilot-0.0.415
 
 # Model and agent version are required; if omitted the API auto-selects:

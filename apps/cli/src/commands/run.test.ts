@@ -234,3 +234,60 @@ describe("run retry", () => {
     );
   });
 });
+
+describe("run submit", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("accepts --task and sends it as scenario.task", async () => {
+    mockFetchWith({
+      id: "req-submit-1",
+      workerType: "coder-acp-copilot",
+      status: "queued",
+    });
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code}) called`);
+    }) as never);
+
+    const program = makeProgram();
+    await program.parseAsync(
+      ["run", "submit", "--task", "Create a Hello World API", "--no-stream", "-u", "http://localhost:3100"],
+      { from: "user" },
+    );
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:3100/api/v1/requests?worker=coder-acp-copilot",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          scenario: {
+            task: "Create a Hello World API",
+            criteria: [],
+          },
+        }),
+      }),
+    );
+  });
+
+  it("shows error with --task when neither task nor scenario is provided", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code}) called`);
+    }) as never);
+
+    const program = makeProgram();
+    await expect(
+      program.parseAsync(["run", "submit", "--no-stream", "-u", "http://localhost:3100"], { from: "user" }),
+    ).rejects.toThrow("process.exit(1) called");
+
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Error: --task or --scenario is required"));
+  });
+});

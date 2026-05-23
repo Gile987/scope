@@ -36,7 +36,7 @@ run
   .option("-s, --scenario <path>", "Path to scenario YAML file (provides task + criteria)")
   .option("-p, --persona <path>", "Path to persona YAML file (provides judge personality)")
   .option("-t, --traits <path>", "Path to traits.yaml (default: config/traits.yaml next to persona)")
-  .option("-m, --message <message>", "Message/task to process (overrides scenario task)")
+  .option("-m, --task <task>", "Task to process (overrides scenario task)")
   .option("-w, --worker <worker>", "Worker to use (coder-acp-claude-code, coder-acp-copilot)", "coder-acp-copilot")
   .option("-c, --criteria <criteria...>", "Evaluation criteria (overrides scenario criteria)")
   .option("--max-iterations <number>", "Max judge iterations for multi-turn mode", parseInt)
@@ -52,7 +52,7 @@ run
 
     try {
       // Resolve scenario + persona YAML if provided
-      let message = options.message;
+      let task = options.task;
       let criteria = options.criteria;
       let personaInstructions: string | undefined;
       let personaObj: Record<string, unknown> | undefined;
@@ -60,27 +60,27 @@ run
       if (scenario) {
         const resolved = resolveScenarioAndPersona(scenario, persona, traits);
         // Scenario provides task and criteria (CLI flags override)
-        if (!message) message = resolved.task;
+        if (!task) task = resolved.task;
         if (!criteria || criteria.length === 0) criteria = resolved.criteria;
         personaInstructions = resolved.personaInstructions;
         personaObj = resolved.persona;
 
         console.log(`${label('Scenario:')} ${value(scenario)}`);
         if (persona) console.log(`${label('Persona:')} ${value(persona)}`);
-        console.log(`${label('Task:')} ${message.substring(0, 100)}${message.length > 100 ? '...' : ''}`);
+        console.log(`${label('Task:')} ${task.substring(0, 100)}${task.length > 100 ? '...' : ''}`);
         console.log(`${label('Criteria:')} ${value(String(criteria.length))} items`);
         console.log();
       }
 
-      if (!message) {
-        console.error(errorText("Error: --message or --scenario is required"));
+      if (!task) {
+        console.error(errorText("Error: --task or --scenario is required"));
         process.exit(1);
       }
 
       // Build request body — scenario is the source of truth
       const body: Record<string, unknown> = {
         scenario: {
-          task: message,
+          task,
           criteria: criteria || [],
         },
       };
