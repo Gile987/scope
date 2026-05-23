@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { KeyType, KeyValidationResult, deriveCapabilities, parseAzureAiFoundrySecret } from "shared";
+import { KeyType, KeyValidationResult, deriveCapabilities, parseAzureAiFoundrySecret, trimTrailingSlashes } from "shared";
 
 /**
  * Validate a key by calling the provider's API and derive its capabilities.
@@ -274,14 +274,6 @@ async function validateAzureAiFoundry(
   }
 }
 
-function stripTrailingSlashes(value: string): string {
-  let result = value;
-  while (result.endsWith("/")) {
-    result = result.slice(0, -1);
-  }
-  return result;
-}
-
 function buildFoundryChatCompletionsUrl(
   endpoint: string
 ):
@@ -308,7 +300,7 @@ function buildFoundryChatCompletionsUrl(
     return { status: "invalid", error: "Foundry endpoint must target *.services.ai.azure.com" };
   }
 
-  const normalizedPath = stripTrailingSlashes(parsedUrl.pathname);
+  const normalizedPath = trimTrailingSlashes(parsedUrl.pathname);
   const hasModelsSuffix = normalizedPath.endsWith("/models");
 
   parsedUrl.pathname = `${normalizedPath}/chat/completions`;
