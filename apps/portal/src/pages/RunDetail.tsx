@@ -988,6 +988,45 @@ export function RunDetail() {
               </Card>
             )}
 
+            {/* Enrichment card */}
+            {activeRun?.status === "done" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Enrichment</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Status:</span>{" "}
+                    <Badge variant={
+                      activeRun.postProcessorStatus === "done" ? "success" :
+                      activeRun.postProcessorStatus === "failed" ? "destructive" :
+                      "secondary"
+                    }>
+                      {(!activeRun.postProcessorStatus || activeRun.postProcessorStatus === "queued") && "Pending"}
+                      {activeRun.postProcessorStatus === "processing" && "Enriching"}
+                      {activeRun.postProcessorStatus === "done" && "Enriched"}
+                      {activeRun.postProcessorStatus === "failed" && "Failed"}
+                    </Badge>
+                  </div>
+                  {activeRun.postProcessorVersion !== undefined && (
+                    <div>
+                      <span className="text-muted-foreground">Version:</span>{" "}
+                      <span className="font-mono font-medium">v{activeRun.postProcessorVersion}</span>
+                    </div>
+                  )}
+                  {activeRun.postProcessorStatus === "done" && activeRun.turns?.some(t => t.atifUrl) && (
+                    <div>
+                      <span className="text-muted-foreground">Artifacts:</span>{" "}
+                      <span className="font-medium">ATIF trajectory</span>
+                      <span className="text-muted-foreground ml-1">
+                        ({activeRun.turns!.filter(t => t.atifUrl).length} iteration{activeRun.turns!.filter(t => t.atifUrl).length !== 1 ? "s" : ""})
+                      </span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Extensions card */}
             {run.extensions && run.extensions.length > 0 && (
               <Card>
