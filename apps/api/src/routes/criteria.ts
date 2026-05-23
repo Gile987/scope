@@ -6,7 +6,6 @@ import {
   CreateCriteriaInputSchema,
   CriteriaGraphSchema,
   CriteriaResponseSchema,
-  DependencyGraph,
   UpdateCriteriaInputSchema,
 } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
@@ -15,41 +14,13 @@ import { computeMdp } from "../criteria-mdp.js";
 import type { MdpAnalyzableRun } from "../criteria-mdp.js";
 import { generateCriteriaPrompt, isLlmAvailable } from "../llm.js";
 import { isInferenceError } from "../llm-token.js";
-
-type CriteriaGraphNode = Pick<CriteriaDocument, "id" | "dependsOn">;
-
-function normalizeDependsOn(dependsOn: unknown): string[] {
-  if (!Array.isArray(dependsOn)) {
-    return [];
-  }
-  return dependsOn.map((dependency) => String(dependency).trim()).filter(Boolean);
-}
-
-function ensureNoSelfReference(id: string, dependsOn: string[]): void {
-  if (dependsOn.includes(id)) {
-    throw new Error("A criterion cannot depend on itself");
-  }
-}
-
-function ensureDependenciesExist(
-  dependsOn: string[],
-  availableIds: ReadonlySet<string>,
-): void {
-  for (const dependencyId of dependsOn) {
-    if (!availableIds.has(dependencyId)) {
-      throw new Error(`Dependency '${dependencyId}' does not exist`);
-    }
-  }
-}
-
-function ensureAcyclicCriteria(criteria: CriteriaGraphNode[]): void {
-  new DependencyGraph(
-    criteria.map((criterion) => ({
-      ...criterion,
-      dependsOn: criterion.dependsOn ?? [],
-    })),
-  );
-}
+import {
+  normalizeDependsOn,
+  ensureNoSelfReference,
+  ensureDependenciesExist,
+  ensureAcyclicCriteria,
+} from "../criteria-validation.js";
+import type { CriteriaGraphNode } from "../criteria-validation.js";
 
 async function loadActiveCriteria(ctx: RouteContext): Promise<CriteriaGraphNode[]> {
   return ctx.criteriaCollection
@@ -194,39 +165,21 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
-    const seededIds = new Set<string>();
-    for (const config of criteria) {
-      if (!config.id || !config.prompt) {
-        continue;
-      }
-
-      const id = config.id.trim();
-      if (seededIds.has(id)) {
-        continue;
-      }
-      const dependsOn = normalizeDependsOn(config.dependsOn);
-      const shouldSeedExisting = existingIds.has(id);
-      const shouldSeedNew = pendingSeeds.has(id);
-
-      if (!shouldSeedExisting && !shouldSeedNew) {
-        continue;
-      }
-
+    for (const [id, pending] of pendingSeeds) {
       try {
         await ctx.criteriaCollection.updateOne(
           { id },
           {
             $setOnInsert: {
               id,
-              prompt: config.prompt.trim(),
-              dependsOn,
+              prompt: pending.prompt,
+              dependsOn: pending.dependsOn,
               createdAt: new Date(),
             },
           },
           { upsert: true },
         );
         seeded++;
-        seededIds.add(id);
       } catch (err) {
         errors.push(`Failed to seed ${id}: ${err instanceof Error ? err.message : String(err)}`);
       }
