@@ -53,7 +53,7 @@ const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "priority", label: "Priority" },
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
-  { id: "postProcessing", label: "Post-Processing" },
+  { id: "postProcessing", label: "Enrichment" },
   { id: "report", label: "Report" },
   { id: "attempt", label: "Attempt" },
   { id: "turns", label: "Turns" },
@@ -1594,7 +1594,7 @@ export function RunsList() {
               {isCol("priority") && <TableHead className="w-[60px]">Priority</TableHead>}
               {isCol("status") && <TableHead className="w-[100px]">Status</TableHead>}
               {isCol("outcome") && <TableHead className="w-[100px]">Outcome</TableHead>}
-              {isCol("postProcessing") && <TableHead className="w-[120px]">Post-Processing</TableHead>}
+              {isCol("postProcessing") && <TableHead className="w-[120px]">Enrichment</TableHead>}
               {isCol("report") && <TableHead className="w-[100px]">Report</TableHead>}
               {isCol("attempt") && <TableHead className="w-[60px]">Attempt</TableHead>}
               {isCol("turns") && <TableHead className="w-[80px]">Turns</TableHead>}
@@ -1901,8 +1901,8 @@ function RunRow({
             "secondary"
           }>
             {(!run.run.postProcessorStatus || run.run.postProcessorStatus === "queued") && "Pending"}
-            {run.run.postProcessorStatus === "processing" && "Processing"}
-            {run.run.postProcessorStatus === "done" && "Done"}
+            {run.run.postProcessorStatus === "processing" && "Enriching"}
+            {run.run.postProcessorStatus === "done" && "Enriched"}
             {run.run.postProcessorStatus === "failed" && "Failed"}
           </Badge>
         ) : (
@@ -2364,7 +2364,7 @@ function GroupRows({
             );
           })()}
         </TableCell>}
-        {/* Post-Processing */}
+        {/* Enrichment */}
         {isCol("postProcessing") && <TableCell>
           <span className="text-xs text-muted-foreground">–</span>
         </TableCell>}

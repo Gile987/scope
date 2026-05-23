@@ -360,10 +360,10 @@ export function RunDetail() {
                   activeRun.postProcessorStatus === "failed" ? "destructive" :
                   "secondary"
                 }>
-                  {(!activeRun.postProcessorStatus || activeRun.postProcessorStatus === "queued") && "Post-processing pending"}
-                  {activeRun.postProcessorStatus === "processing" && "Post-processing…"}
-                  {activeRun.postProcessorStatus === "done" && "Post-processed"}
-                  {activeRun.postProcessorStatus === "failed" && "Post-processing failed"}
+                  {(!activeRun.postProcessorStatus || activeRun.postProcessorStatus === "queued") && "Enrichment pending"}
+                  {activeRun.postProcessorStatus === "processing" && "Enriching…"}
+                  {activeRun.postProcessorStatus === "done" && "Enriched"}
+                  {activeRun.postProcessorStatus === "failed" && "Enrichment failed"}
                 </Badge>
               )}
               <span className="font-mono">{run.workerType}</span>
