@@ -1895,11 +1895,14 @@ function RunRow({
       </TableCell>}
       {isCol("postProcessing") && <TableCell>
         {run.run?.status === "done" ? (
-          <Badge variant={
-            run.run.postProcessorStatus === "done" ? "success" :
-            run.run.postProcessorStatus === "failed" ? "destructive" :
-            "secondary"
-          }>
+          <Badge
+            variant={
+              run.run.postProcessorStatus === "done" ? "success" :
+              run.run.postProcessorStatus === "failed" ? "destructive" :
+              "secondary"
+            }
+            title={run.run.postProcessorVersion !== undefined ? `Enrichment v${run.run.postProcessorVersion}` : undefined}
+          >
             {(!run.run.postProcessorStatus || run.run.postProcessorStatus === "queued") && "Pending"}
             {run.run.postProcessorStatus === "processing" && "Enriching"}
             {run.run.postProcessorStatus === "done" && "Enriched"}

@@ -355,11 +355,14 @@ export function RunDetail() {
               />
               {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
               {activeRun?.status === "done" && (
-                <Badge variant={
-                  activeRun.postProcessorStatus === "done" ? "success" :
-                  activeRun.postProcessorStatus === "failed" ? "destructive" :
-                  "secondary"
-                }>
+                <Badge
+                  variant={
+                    activeRun.postProcessorStatus === "done" ? "success" :
+                    activeRun.postProcessorStatus === "failed" ? "destructive" :
+                    "secondary"
+                  }
+                  title={activeRun.postProcessorVersion !== undefined ? `Enrichment v${activeRun.postProcessorVersion}` : undefined}
+                >
                   {(!activeRun.postProcessorStatus || activeRun.postProcessorStatus === "queued") && "Enrichment pending"}
                   {activeRun.postProcessorStatus === "processing" && "Enriching…"}
                   {activeRun.postProcessorStatus === "done" && "Enriched"}
