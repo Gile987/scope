@@ -518,17 +518,34 @@ export function RunDetail() {
               Download Archive
             </Button>
           )}
-          {activeRun?.postProcessorStatus === "done" && activeRun?.turns?.some(t => t.atifUrl) && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => window.open(api.atifUrl(run._id), "_blank")}
-            >
-              <Download className="h-4 w-4" />
-              Download ATIF
-            </Button>
-          )}
+          {activeRun?.postProcessorStatus === "done" && activeRun?.turns?.some(t => t.atifUrl) && (() => {
+            const turnsWithAtif = activeRun.turns!.filter(t => t.atifUrl);
+            if (turnsWithAtif.length === 1) {
+              return (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => window.open(api.atifUrl(run._id, turnsWithAtif[0].iteration), "_blank")}
+                >
+                  <Download className="h-4 w-4" />
+                  ATIF
+                </Button>
+              );
+            }
+            return turnsWithAtif.map(t => (
+              <Button
+                key={t.iteration}
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => window.open(api.atifUrl(run._id, t.iteration), "_blank")}
+              >
+                <Download className="h-4 w-4" />
+                ATIF #{t.iteration}
+              </Button>
+            ));
+          })()}
           {canShowRetry && (
             <Button
               variant="outline"
