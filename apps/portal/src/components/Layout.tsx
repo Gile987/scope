@@ -56,7 +56,6 @@ const navItems: NavItem[] = [
   { to: "/criteria/mdp", label: "MDP", icon: GitBranch },
   { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
   { to: "/runs", label: "Runs", icon: List },
-  { to: "/runs/new", label: "New Run", icon: Plus },
   { to: "/reports", label: "Reports", icon: FileText },
   { to: "/insights", label: "Insights", icon: Lightbulb },
   { to: "/criteria", label: "Criteria", icon: FlaskConical },
@@ -102,18 +101,21 @@ interface SidebarIconLinkProps {
   icon: React.ComponentType<{ className?: string }>;
   active: boolean;
   external?: boolean;
+  emphasized?: boolean;
 }
 
-function SidebarIconLink({ to, label, icon: Icon, active, external }: SidebarIconLinkProps) {
+function SidebarIconLink({ to, label, icon: Icon, active, external, emphasized }: SidebarIconLinkProps) {
   const className = cn(
     "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors",
-    active
-      ? "bg-accent text-foreground"
-      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+    emphasized
+      ? "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
+      : active
+        ? "bg-accent text-foreground"
+        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
   );
   const content = (
     <>
-      {active && (
+      {active && !emphasized && (
         <span
           className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-primary"
           aria-hidden
@@ -194,6 +196,15 @@ export function Layout() {
           >
             {/* Primary nav (scrollable when overflowing) */}
             <nav className="flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-3">
+              {/* New Run — emphasized primary CTA */}
+              <SidebarIconLink
+                to="/runs/new"
+                label="New Run"
+                icon={Plus}
+                active={location.pathname === "/runs/new"}
+                emphasized
+              />
+              <div className="my-1 h-px w-6 bg-border/60" aria-hidden />
               {visibleNavItems.map((item) => {
                 const isActive = location.pathname.startsWith(item.to);
                 return (
