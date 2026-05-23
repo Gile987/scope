@@ -109,6 +109,8 @@ export interface RunState {
   updatedAt?: string;
   pausedAt?: string;
   resumedAt?: string;
+  postProcessorVersion?: number;
+  postProcessorStatus?: "queued" | "processing" | "done" | "failed";
 }
 
 export interface Run {

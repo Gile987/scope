@@ -354,6 +354,13 @@ export function RunDetail() {
                 startedAt={activeRun?.startedAt}
               />
               {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
+              {activeRun?.postProcessorStatus && activeRun.postProcessorStatus !== "done" && (
+                <Badge variant={activeRun.postProcessorStatus === "failed" ? "destructive" : "secondary"}>
+                  {activeRun.postProcessorStatus === "queued" && "Post-processing queued"}
+                  {activeRun.postProcessorStatus === "processing" && "Post-processing…"}
+                  {activeRun.postProcessorStatus === "failed" && "Post-processing failed"}
+                </Badge>
+              )}
               <span className="font-mono">{run.workerType}</span>
               {run.model && (
                 <>

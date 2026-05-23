@@ -36,7 +36,7 @@ import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "postProcessing" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
@@ -53,6 +53,7 @@ const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "priority", label: "Priority" },
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
+  { id: "postProcessing", label: "Post-Processing" },
   { id: "report", label: "Report" },
   { id: "attempt", label: "Attempt" },
   { id: "turns", label: "Turns" },
@@ -1593,6 +1594,7 @@ export function RunsList() {
               {isCol("priority") && <TableHead className="w-[60px]">Priority</TableHead>}
               {isCol("status") && <TableHead className="w-[100px]">Status</TableHead>}
               {isCol("outcome") && <TableHead className="w-[100px]">Outcome</TableHead>}
+              {isCol("postProcessing") && <TableHead className="w-[120px]">Post-Processing</TableHead>}
               {isCol("report") && <TableHead className="w-[100px]">Report</TableHead>}
               {isCol("attempt") && <TableHead className="w-[60px]">Attempt</TableHead>}
               {isCol("turns") && <TableHead className="w-[80px]">Turns</TableHead>}
@@ -1890,6 +1892,22 @@ function RunRow({
       </TableCell>}
       {isCol("outcome") && <TableCell>
         <OutcomeBadge outcome={run.run?.outcome} />
+      </TableCell>}
+      {isCol("postProcessing") && <TableCell>
+        {run.run?.postProcessorStatus ? (
+          <Badge variant={
+            run.run.postProcessorStatus === "done" ? "success" :
+            run.run.postProcessorStatus === "failed" ? "destructive" :
+            "secondary"
+          }>
+            {run.run.postProcessorStatus === "queued" && "Queued"}
+            {run.run.postProcessorStatus === "processing" && "Processing"}
+            {run.run.postProcessorStatus === "done" && "Done"}
+            {run.run.postProcessorStatus === "failed" && "Failed"}
+          </Badge>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
       </TableCell>}
       {isCol("report") && <TableCell>
         {reportSummaries?.[run._id] ? (
@@ -2345,6 +2363,10 @@ function GroupRows({
               </div>
             );
           })()}
+        </TableCell>}
+        {/* Post-Processing */}
+        {isCol("postProcessing") && <TableCell>
+          <span className="text-xs text-muted-foreground">–</span>
         </TableCell>}
         {/* Report */}
         {isCol("report") && <TableCell>
