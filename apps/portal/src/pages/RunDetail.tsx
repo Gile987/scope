@@ -354,13 +354,13 @@ export function RunDetail() {
                 startedAt={activeRun?.startedAt}
               />
               {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
-              {activeRun?.postProcessorStatus && (
+              {activeRun?.status === "done" && (
                 <Badge variant={
                   activeRun.postProcessorStatus === "done" ? "success" :
                   activeRun.postProcessorStatus === "failed" ? "destructive" :
                   "secondary"
                 }>
-                  {activeRun.postProcessorStatus === "queued" && "Post-processing queued"}
+                  {(!activeRun.postProcessorStatus || activeRun.postProcessorStatus === "queued") && "Post-processing pending"}
                   {activeRun.postProcessorStatus === "processing" && "Post-processing…"}
                   {activeRun.postProcessorStatus === "done" && "Post-processed"}
                   {activeRun.postProcessorStatus === "failed" && "Post-processing failed"}

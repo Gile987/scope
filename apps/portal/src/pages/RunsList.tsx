@@ -1894,13 +1894,13 @@ function RunRow({
         <OutcomeBadge outcome={run.run?.outcome} />
       </TableCell>}
       {isCol("postProcessing") && <TableCell>
-        {run.run?.postProcessorStatus ? (
+        {run.run?.status === "done" ? (
           <Badge variant={
             run.run.postProcessorStatus === "done" ? "success" :
             run.run.postProcessorStatus === "failed" ? "destructive" :
             "secondary"
           }>
-            {run.run.postProcessorStatus === "queued" && "Queued"}
+            {(!run.run.postProcessorStatus || run.run.postProcessorStatus === "queued") && "Pending"}
             {run.run.postProcessorStatus === "processing" && "Processing"}
             {run.run.postProcessorStatus === "done" && "Done"}
             {run.run.postProcessorStatus === "failed" && "Failed"}
