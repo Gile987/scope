@@ -48,6 +48,7 @@ export interface ConversationTurn {
    *  without fetching the JSONL blob. */
   toolCallCount?: number;
   aiCallCount?: number;
+  atifUrl?: string;
 }
 
 export interface Scenario {

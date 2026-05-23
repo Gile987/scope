@@ -518,6 +518,17 @@ export function RunDetail() {
               Download Archive
             </Button>
           )}
+          {activeRun?.postProcessorStatus === "done" && activeRun?.turns?.some(t => t.atifUrl) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => window.open(api.atifUrl(run._id), "_blank")}
+            >
+              <Download className="h-4 w-4" />
+              Download ATIF
+            </Button>
+          )}
           {canShowRetry && (
             <Button
               variant="outline"
