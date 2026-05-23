@@ -37,7 +37,6 @@ jobs:
       - name: Compute base image tag
         id: tags
         run: |
-          # Tag based on content hash of Dockerfile.base for cache-busting
           HASH=$(sha256sum ${{ env.WORKER_DIR }}/Dockerfile.base | cut -c1-12)
           BASE_TAG="base-${HASH}"
           ACR_LOGIN_SERVER=$(az acr show --name "${{ vars.ACR_NAME }}" --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" --query loginServer -o tsv)
@@ -45,17 +44,7 @@ jobs:
           echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
           echo "base_image=${BASE_IMAGE}" >> "$GITHUB_OUTPUT"
 
-      - name: Check if base image already exists
-        id: check
-        run: |
-          if az acr repository show-tags --name "${{ vars.ACR_NAME }}" --repository scoped/coder-acp-copilot-windows-base --query "[?@=='${{ steps.tags.outputs.base_tag }}']" -o tsv | grep -q .; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Build and push base image
-        if: steps.check.outputs.exists != 'true'
         run: |
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
@@ -93,7 +82,6 @@ jobs:
       - name: Compute deps image tag
         id: tags
         run: |
-          # Tag based on base image + versions.env content
           HASH=$(cat ${{ env.WORKER_DIR }}/Dockerfile.deps ${{ env.WORKER_DIR }}/versions.env | sha256sum | cut -c1-12)
           DEPS_TAG="deps-${HASH}"
           ACR_LOGIN_SERVER=$(az acr show --name "${{ vars.ACR_NAME }}" --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" --query loginServer -o tsv)
@@ -101,17 +89,7 @@ jobs:
           echo "deps_tag=${DEPS_TAG}" >> "$GITHUB_OUTPUT"
           echo "deps_image=${DEPS_IMAGE}" >> "$GITHUB_OUTPUT"
 
-      - name: Check if deps image already exists
-        id: check
-        run: |
-          if az acr repository show-tags --name "${{ vars.ACR_NAME }}" --repository scoped/coder-acp-copilot-windows-deps --query "[?@=='${{ steps.tags.outputs.deps_tag }}']" -o tsv | grep -q .; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Build and push deps image
-        if: steps.check.outputs.exists != 'true'
         run: |
           az acr build \
             --registry "${{ vars.ACR_NAME }}" \
