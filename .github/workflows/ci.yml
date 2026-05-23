@@ -865,18 +865,57 @@ jobs:
         id: deps
         run: |
           WORKER_DIR="apps/workers/coder-acp-copilot-windows"
-          HASH=$(cat ${WORKER_DIR}/Dockerfile.deps ${WORKER_DIR}/versions.env | sha256sum | cut -c1-12)
-          DEPS_TAG="deps-${HASH}"
           ACR_LOGIN_SERVER=$(az acr show --name "${{ vars.ACR_NAME }}" --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" --query loginServer -o tsv)
+          echo "acr_login_server=${ACR_LOGIN_SERVER}" >> "$GITHUB_OUTPUT"
+
+          DEPS_HASH=$(cat ${WORKER_DIR}/Dockerfile.deps ${WORKER_DIR}/versions.env | sha256sum | cut -c1-12)
+          DEPS_TAG="deps-${DEPS_HASH}"
           DEPS_IMAGE="${ACR_LOGIN_SERVER}/scoped/coder-acp-copilot-windows-deps:${DEPS_TAG}"
 
-          # Fall back to latest if the exact tag doesn't exist yet
-          if ! az acr repository show-tags --name "${{ vars.ACR_NAME }}" --repository scoped/coder-acp-copilot-windows-deps --query "[?@=='${DEPS_TAG}']" -o tsv | grep -q .; then
-            echo "::warning::Deps image ${DEPS_TAG} not found, falling back to latest"
-            DEPS_IMAGE="${ACR_LOGIN_SERVER}/scoped/coder-acp-copilot-windows-deps:latest"
+          # Check if deps image exists; if not, build base + deps on the fly
+          if az acr repository show-tags --name "${{ vars.ACR_NAME }}" --repository scoped/coder-acp-copilot-windows-deps --query "[?@=='${DEPS_TAG}']" -o tsv | grep -q .; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Deps image ${DEPS_TAG} not found — will build base + deps images first"
           fi
 
+          echo "deps_tag=${DEPS_TAG}" >> "$GITHUB_OUTPUT"
           echo "image=${DEPS_IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Build base image (if deps image missing)
+        if: steps.deps.outputs.exists == 'false'
+        run: |
+          WORKER_DIR="apps/workers/coder-acp-copilot-windows"
+          BASE_HASH=$(sha256sum ${WORKER_DIR}/Dockerfile.base | cut -c1-12)
+          BASE_TAG="base-${BASE_HASH}"
+
+          az acr build \
+            --registry "${{ vars.ACR_NAME }}" \
+            --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
+            --platform windows/amd64 \
+            --image "scoped/coder-acp-copilot-windows-base:${BASE_TAG}" \
+            --image "scoped/coder-acp-copilot-windows-base:latest" \
+            --file "${WORKER_DIR}/Dockerfile.base" \
+            .
+
+      - name: Build deps image (if deps image missing)
+        if: steps.deps.outputs.exists == 'false'
+        run: |
+          WORKER_DIR="apps/workers/coder-acp-copilot-windows"
+          ACR_LOGIN_SERVER="${{ steps.deps.outputs.acr_login_server }}"
+          BASE_IMAGE="${ACR_LOGIN_SERVER}/scoped/coder-acp-copilot-windows-base:latest"
+
+          az acr build \
+            --registry "${{ vars.ACR_NAME }}" \
+            --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
+            --platform windows/amd64 \
+            --image "scoped/coder-acp-copilot-windows-deps:${{ steps.deps.outputs.deps_tag }}" \
+            --image "scoped/coder-acp-copilot-windows-deps:latest" \
+            --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+            --build-arg "COPILOT_CLI_VERSION=${{ steps.versions.outputs.copilot_version }}" \
+            --file "${WORKER_DIR}/Dockerfile.deps" \
+            .
 
       - name: Compute image tags
         id: tags
