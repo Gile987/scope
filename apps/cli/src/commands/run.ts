@@ -49,7 +49,7 @@ run
   .option("--profile-variations-file <path>", "Path to JSON file containing profile variation entries")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
-  .action(async (options) => {
+  .action(async (options, command) => {
     const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, baseProfile, profileVariationsFile } = options;
 
     try {
@@ -130,7 +130,19 @@ run
         body.profileVariations = parsed;
       }
 
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/requests?worker=${worker}`, {
+      // In variation mode the API derives the worker per-variation from each
+      // profile's workerType, and explicitly rejects `?worker=`. Skip the
+      // query param so the request isn't 400'd, and warn if --worker was
+      // explicitly passed (default values are silently ignored).
+      const isVariationSubmit = Array.isArray(body.profileVariations) && body.profileVariations.length > 0;
+      if (isVariationSubmit && command.getOptionValueSource("worker") === "cli") {
+        console.warn(label("Warning:"), "--worker is ignored in variation mode; worker is derived per-variation from each profile's workerType.");
+      }
+      const submitUrl = isVariationSubmit
+        ? `${normalizeUrl(url)}/api/v1/requests`
+        : `${normalizeUrl(url)}/api/v1/requests?worker=${worker}`;
+
+      const response = await fetch(submitUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
