@@ -829,12 +829,11 @@ jobs:
       !cancelled() &&
       github.repository == 'growth-ecosystems/scope-core' &&
       (needs.test.result == 'success' || needs.test.result == 'skipped') &&
-      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
       (
         (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || contains(github.event.inputs.images, 'coder-acp-copilot-windows'))) ||
         ((github.event_name == 'push' || github.event_name == 'pull_request') && (needs.detect-changes.outputs.coder-acp-copilot-windows == 'true' || needs.detect-changes.outputs.shared == 'true'))
       )
-    needs: [test, build, detect-changes]
+    needs: [test, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
     steps:
@@ -861,6 +860,23 @@ jobs:
           fi
           echo "extra_args=${EXTRA_ARGS}" >> "$GITHUB_OUTPUT"
           echo "copilot_version=${COPILOT_CLI_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve deps image tag
+        id: deps
+        run: |
+          WORKER_DIR="apps/workers/coder-acp-copilot-windows"
+          HASH=$(cat ${WORKER_DIR}/Dockerfile.deps ${WORKER_DIR}/versions.env | sha256sum | cut -c1-12)
+          DEPS_TAG="deps-${HASH}"
+          ACR_LOGIN_SERVER=$(az acr show --name "${{ vars.ACR_NAME }}" --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" --query loginServer -o tsv)
+          DEPS_IMAGE="${ACR_LOGIN_SERVER}/scoped/coder-acp-copilot-windows-deps:${DEPS_TAG}"
+
+          # Fall back to latest if the exact tag doesn't exist yet
+          if ! az acr repository show-tags --name "${{ vars.ACR_NAME }}" --repository scoped/coder-acp-copilot-windows-deps --query "[?@=='${DEPS_TAG}']" -o tsv | grep -q .; then
+            echo "::warning::Deps image ${DEPS_TAG} not found, falling back to latest"
+            DEPS_IMAGE="${ACR_LOGIN_SERVER}/scoped/coder-acp-copilot-windows-deps:latest"
+          fi
+
+          echo "image=${DEPS_IMAGE}" >> "$GITHUB_OUTPUT"
 
       - name: Compute image tags
         id: tags
@@ -893,6 +909,7 @@ jobs:
             --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
             --platform windows/amd64 \
             ${{ steps.tags.outputs.image_args }} \
+            --build-arg DEPS_IMAGE=${{ steps.deps.outputs.image }} \
             --build-arg GIT_COMMIT=${{ steps.tags.outputs.git_sha }} \
             --build-arg BUILD_TIME=${{ steps.tags.outputs.build_time }} \
             ${{ steps.versions.outputs.extra_args }} \

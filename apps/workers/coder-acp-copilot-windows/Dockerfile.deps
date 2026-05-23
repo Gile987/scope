@@ -1,0 +1,11 @@
+# --- Windows Deps Image ---
+# Adds version-pinned worker dependencies (Copilot CLI) on top of the base image.
+# Rebuilt when versions.env changes.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+# Install GitHub Copilot CLI globally to C:\tools so it lands on PATH
+ARG COPILOT_CLI_VERSION
+RUN npm install -g --prefix C:\tools "@github/copilot@${env:COPILOT_CLI_VERSION}"
