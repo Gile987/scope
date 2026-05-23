@@ -428,6 +428,28 @@ export function RunsList() {
       hidden: columnVisibility.isHidden("created"),
       cell: (r) => <span className="text-xs text-muted-foreground">{formatDate(r.createdAt)}</span>,
     },
+    {
+      id: "actions",
+      header: "",
+      width: "48px",
+      cell: (r) => (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          title="Re-run identical"
+          disabled={bulkResubmitMutation.isPending}
+          onClick={(e) => {
+            e.stopPropagation();
+            bulkResubmitMutation.mutate([r._id]);
+          }}
+        >
+          <Repeat className="h-3.5 w-3.5" />
+          <span className="sr-only">Re-run</span>
+        </Button>
+      ),
+    },
   ];
 
   return (
