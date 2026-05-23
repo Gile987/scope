@@ -148,7 +148,7 @@ export function SubmitRun() {
   const [saveProfileOpen, setSaveProfileOpen] = useState(false);
 
   // UI state
-  const [showGallery, setShowGallery] = useState(true);
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
@@ -250,7 +250,7 @@ export function SubmitRun() {
 
   const applyProfile = (profileId: string | null) => {
     setSelectedProfileId(profileId);
-    setShowGallery(false);
+    setGalleryOpen(false);
     if (!profileId) return;
     const p = profileList.find((p) => p._id === profileId);
     if (!p?.version) return;
@@ -289,7 +289,7 @@ export function SubmitRun() {
       setSelectedExtensions(run.extensions);
       setExtensionsOpen(true);
     }
-    setShowGallery(false);
+    setGalleryOpen(false);
     toast.success(`Loaded settings from run ${run._id.slice(-6)}`);
   };
 
@@ -417,72 +417,47 @@ export function SubmitRun() {
         </div>
       </div>
 
-      {/* Quick Start gallery */}
-      {showGallery && (topProfiles.length > 0 || recentRuns.length > 0) && (
-        <Card className="border-dashed">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-base">Quick start</CardTitle>
-                <CardDescription>Start from a profile, re-run a recent submission, or configure from scratch.</CardDescription>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowGallery(false)}
-              >
-                Skip
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              <GalleryCard
-                icon={FilePlus2}
-                title="Blank run"
-                description="Configure from scratch"
-                onClick={() => setShowGallery(false)}
-              />
-              {topProfiles.map((p) => (
-                <GalleryCard
-                  key={p._id}
-                  icon={SlidersHorizontal}
-                  title={p.name}
-                  description={`Profile · v${p.latestVersion} · ${p.version?.workerType ?? "—"}`}
-                  onClick={() => applyProfile(p._id)}
-                />
-              ))}
-              {recentRuns.map((r) => (
-                <GalleryCard
-                  key={r._id}
-                  icon={History}
-                  title={truncate(r.scenario?.task ?? "Untitled run", 60)}
-                  description={`Recent · ${r.workerType}${r.model ? ` · ${r.model}` : ""}`}
-                  onClick={() => applyRecentRun(r)}
-                />
-              ))}
-            </div>
-            {profileList.length > 3 && (
-              <p className="mt-3 text-xs text-muted-foreground">
-                {profileList.length - 3} more profile{profileList.length - 3 === 1 ? "" : "s"} available — use the Profile field below.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {!showGallery && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="gap-1.5 -mt-2"
-          onClick={() => setShowGallery(true)}
+      {/* Quick Start gallery (collapsible, default closed) */}
+      {(topProfiles.length > 0 || recentRuns.length > 0) && (
+        <CollapsibleCard
+          icon={Sparkles}
+          title="Quick start"
+          summary="Start from a profile or re-run a recent submission"
+          open={galleryOpen}
+          onOpenChange={setGalleryOpen}
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Start from a preset
-        </Button>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <GalleryCard
+              icon={FilePlus2}
+              title="Blank run"
+              description="Configure from scratch"
+              onClick={() => setGalleryOpen(false)}
+            />
+            {topProfiles.map((p) => (
+              <GalleryCard
+                key={p._id}
+                icon={SlidersHorizontal}
+                title={p.name}
+                description={`Profile · v${p.latestVersion} · ${p.version?.workerType ?? "—"}`}
+                onClick={() => applyProfile(p._id)}
+              />
+            ))}
+            {recentRuns.map((r) => (
+              <GalleryCard
+                key={r._id}
+                icon={History}
+                title={truncate(r.scenario?.task ?? "Untitled run", 60)}
+                description={`Recent · ${r.workerType}${r.model ? ` · ${r.model}` : ""}`}
+                onClick={() => applyRecentRun(r)}
+              />
+            ))}
+          </div>
+          {profileList.length > 3 && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {profileList.length - 3} more profile{profileList.length - 3 === 1 ? "" : "s"} available — use the Profile field below.
+            </p>
+          )}
+        </CollapsibleCard>
       )}
 
       {/* ─── Scenario ──────────────────────────────────────────────────── */}
