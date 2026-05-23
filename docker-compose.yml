@@ -630,6 +630,22 @@ services:
       api:
         condition: service_started
 
+  post-processor:
+    build:
+      context: .
+      dockerfile: apps/workers/post-processor/Dockerfile
+    profiles: [post-processor]
+    environment:
+      <<: *common-env
+      AZURE_STORAGE_QUEUE_POSTPROCESSOR: post-processor-queue
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+
 volumes:
   mongodb_data:
   azurite_data:

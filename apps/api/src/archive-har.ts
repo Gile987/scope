@@ -54,7 +54,7 @@ export function rewriteHarUrlsForArchive<T extends {
   run?: {
     harUrl?: string;
     rawChatUrl?: string;
-    turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; chatResultUrl?: string; toolCallsUrl?: string; [key: string]: unknown }>;
+    turns?: Array<{ iteration: number; harUrl?: string; rawChatUrl?: string; chatResultUrl?: string; toolCallsUrl?: string; atifUrl?: string; [key: string]: unknown }>;
     [key: string]: unknown;
   };
 }>(resource: T): T {
@@ -79,6 +79,9 @@ export function rewriteHarUrlsForArchive<T extends {
         }
         if (turn.toolCallsUrl) {
           turn.toolCallsUrl = `iteration-${turn.iteration}.tool-calls.jsonl`;
+        }
+        if (turn.atifUrl) {
+          turn.atifUrl = `iteration-${turn.iteration}.trajectory.json`;
         }
       }
     }
@@ -372,6 +375,7 @@ export interface ArchivableRun {
       rawChatUrl?: string;
       chatResultUrl?: string;
       toolCallsUrl?: string;
+      atifUrl?: string;
       [key: string]: unknown;
     }>;
     [key: string]: unknown;
@@ -518,6 +522,26 @@ export async function packRunIntoTar(
         size: contentLength,
       });
       await pipeline(readableStreamBody, entry);
+    } catch (blobError) {
+      if (isBlobNotFound(blobError)) continue;
+      throw blobError;
+    }
+  }
+
+  // Bundle per-iteration ATIF trajectory JSON files into the archive.
+  for (const turn of turns) {
+    if (!turn.atifUrl) continue;
+    try {
+      const blobName = blobNameFromSnapshotsUrl(turn.atifUrl);
+      if (!blobName) continue;
+      const blobClient = container.getBlockBlobClient(blobName);
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
+      const entry = pack.entry({
+        name: `${id}/iteration-${turn.iteration}.trajectory.json`,
+        size: downloadResponse.contentLength,
+      });
+      await pipeline(downloadResponse.readableStreamBody, entry);
     } catch (blobError) {
       if (isBlobNotFound(blobError)) continue;
       throw blobError;

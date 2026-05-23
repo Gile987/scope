@@ -7247,6 +7247,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/{id}/atif": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "ATIF v1.7 trajectory JSON file",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download ATIF trajectory file",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/{id}/cancel": {
       "post": {
         "responses": {
@@ -7663,6 +7689,40 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Download full run archive for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/atif": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "ATIF v1.7 trajectory JSON file",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download ATIF trajectory file for a specific attempt",
         "tags": [
           "Requests",
         ],
