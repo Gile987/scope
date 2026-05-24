@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import "dotenv/config";
-import { PostProcessor, PostProcessorConfig } from "./post-processor.js";
+import { PostProcessor, type PostProcessorConfig } from "./post-processor.js";
 import { AtifHandler } from "./handlers/atif-handler.js";
 
 const config: PostProcessorConfig = {
@@ -17,6 +17,7 @@ const config: PostProcessorConfig = {
   redisHost: process.env.REDIS_HOST || "localhost",
   redisPort: Number(process.env.REDIS_PORT) || 6379,
   redisPassword: process.env.REDIS_PASSWORD || "",
+  apiBaseUrl: process.env.SCOPE_MT_API_URL || process.env.API_BASE_URL || "http://localhost:3001",
 };
 
 const processor = new PostProcessor(config);

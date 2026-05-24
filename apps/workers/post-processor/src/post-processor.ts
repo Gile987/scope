@@ -6,7 +6,9 @@ import { BaseQueueProcessor, BlobStorage, type BaseQueueProcessorConfig, type Lo
 import { POST_PROCESSOR_VERSION } from "./version.js";
 import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from "./types.js";
 
-export type PostProcessorConfig = BaseQueueProcessorConfig;
+export interface PostProcessorConfig extends BaseQueueProcessorConfig {
+  apiBaseUrl?: string;
+}
 
 interface RequestDocument {
   _id: string;
@@ -27,9 +29,11 @@ interface RequestDocument {
 export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
   private handlers = new Map<string, PostProcessHandler>();
   private blobStorage: BlobStorage;
+  private apiBaseUrl?: string;
 
   constructor(config: PostProcessorConfig) {
     super(config, "post-processor");
+    this.apiBaseUrl = config.apiBaseUrl;
     this.blobStorage = new BlobStorage({
       storageAccountName: config.storageAccountName,
       storageConnectionString: config.storageConnectionString,
@@ -92,6 +96,9 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
       );
 
       await log("info", `Post-processing complete (v${POST_PROCESSOR_VERSION})`);
+
+      // Trigger report generation now that enrichment is done
+      await this.triggerReportGeneration(doc._id, log);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       await log("error", `Handler '${msg.type}' failed: ${errMsg}`);
@@ -108,5 +115,29 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
     // Delete queue message on success
     const popReceipt = heartbeat.stop();
     await this.safeDeleteMessage(message.messageId, popReceipt);
+  }
+
+  /**
+   * Fire-and-forget report generation trigger via REST API.
+   * Called after post-processing succeeds so reports can use enriched data.
+   */
+  private async triggerReportGeneration(requestId: string, log: (level: string, message: string) => Promise<void>): Promise<void> {
+    if (!this.apiBaseUrl) return;
+
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/api/v1/reports/trigger`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId }),
+      });
+      if (response.ok) {
+        const result = await response.json() as { triggered: number };
+        await log("info", `Triggered report generation: ${result.triggered} report(s) created`);
+      } else {
+        await log("warn", `Failed to trigger report generation: ${response.status} ${response.statusText}`);
+      }
+    } catch (error) {
+      await log("warn", `Failed to trigger report generation: ${error}`);
+    }
   }
 }

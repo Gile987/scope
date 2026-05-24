@@ -544,8 +544,6 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       );
       await log("warn", "Run was cancelled or retried concurrently — skipping final update");
     } else {
-      // Fire-and-forget report generation (only if we actually wrote the final status)
-      await this.triggerReportGeneration(requestId);
       console.log(
         `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
       );

@@ -638,6 +638,7 @@ services:
     environment:
       <<: *common-env
       AZURE_STORAGE_QUEUE_POSTPROCESSOR: post-processor-queue
+      SCOPE_MT_API_URL: http://api:80
     depends_on:
       mongodb:
         condition: service_healthy
@@ -645,6 +646,8 @@ services:
         condition: service_healthy
       azurite:
         condition: service_healthy
+      api:
+        condition: service_started
 
 volumes:
   mongodb_data:
