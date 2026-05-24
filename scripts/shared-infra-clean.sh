@@ -37,9 +37,8 @@ fi
 ACCOUNT_NAME=$(echo "$CONNECTION_STRING" | sed -n 's|^mongodb://\([^:]*\):.*|\1|p')
 
 # Get tenant and subscription from azd environment
-REPO_BASE="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
-AZURE_SUBSCRIPTION_ID=$(cd "$REPO_BASE" && azd env get-value AZURE_SUBSCRIPTION_ID 2>/dev/null || true)
-AZURE_TENANT_ID=$(cd "$REPO_BASE" && azd env get-value AZURE_TENANT_ID 2>/dev/null || true)
+AZURE_SUBSCRIPTION_ID=$(azd env get-value AZURE_SUBSCRIPTION_ID 2>/dev/null || true)
+AZURE_TENANT_ID=$(azd env get-value AZURE_TENANT_ID 2>/dev/null || true)
 
 echo "⚠️  This will DROP the database from the shared CosmosDB account."
 echo ""
