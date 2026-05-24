@@ -12,6 +12,7 @@
     "shared-infra:setup": "scripts/shared-infra-setup.sh",
     "shared-infra:use": "scripts/shared-infra-use.sh",
     "shared-infra:use:off": "scripts/shared-infra-use.sh --off",
+    "shared-infra:clean": "scripts/shared-infra-clean.sh",
     "storybook": "worktree-env && pnpm --filter portal storybook",
     "dev:coder-acp-claude-code": "pnpm --filter coder-acp-claude-code dev",
     "dev:coder-acp-copilot": "pnpm --filter coder-acp-copilot dev",
