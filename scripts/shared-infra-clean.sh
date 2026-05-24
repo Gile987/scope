@@ -35,12 +35,10 @@ fi
 
 # Extract account name from connection string (format: mongodb://ACCOUNT-NAME:key@HOST:PORT/...)
 ACCOUNT_NAME=$(echo "$CONNECTION_STRING" | sed -n 's|^mongodb://\([^:]*\):.*|\1|p')
-COSMOS_HOST=$(echo "$CONNECTION_STRING" | sed -n 's|^mongodb://[^@]*@\([^:/]*\).*|\1|p')
 
 echo "⚠️  This will DROP the database from the shared CosmosDB account."
 echo ""
 echo "   Account:  ${ACCOUNT_NAME:-unknown}"
-echo "   Host:     ${COSMOS_HOST:-unknown}"
 echo "   Database: $DB_NAME"
 echo ""
 
