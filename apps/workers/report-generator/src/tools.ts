@@ -341,6 +341,41 @@ export function createReportTools(
     },
   });
 
+  const getAtifTrajectory = defineTool("get_atif_trajectory", {
+    description:
+      "Get the ATIF (AI Task Interchange Format) trajectory for a specific iteration or the latest one. " +
+      "Returns the full structured trajectory including events, tool calls, and agent actions. " +
+      "Use this to analyze the agent's step-by-step behavior during an iteration.",
+    parameters: {
+      type: "object",
+      properties: {
+        iteration: {
+          type: "number",
+          description:
+            "The iteration number (1-based) to fetch the ATIF trajectory for. If omitted, returns the latest iteration that has an ATIF file.",
+        },
+      },
+    },
+    handler: async (args: { iteration?: number }) => {
+      try {
+        const url = args.iteration
+          ? `${apiBaseUrl}/api/v1/requests/${requestId}/atif?iteration=${args.iteration}`
+          : `${apiBaseUrl}/api/v1/requests/${requestId}/atif`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          if (response.status === 404) {
+            return { error: "No ATIF trajectory available for this iteration" };
+          }
+          return { error: `Failed to fetch ATIF: ${response.status} ${response.statusText}` };
+        }
+        const trajectory = await response.json();
+        return { trajectory, iteration: args.iteration ?? "latest" };
+      } catch (err) {
+        return { error: `Failed to fetch ATIF trajectory: ${err}` };
+      }
+    },
+  });
+
   const searchInsights = defineTool("search_insights", {
     description:
       "Search existing insights by keyword query. Use this to check if a similar insight already exists before creating a new one. Returns matching insights sorted by reference count.",
@@ -478,6 +513,7 @@ export function createReportTools(
     listTurns,
     getTurnDetail,
     getCriteriaTrajectory,
+    getAtifTrajectory,
     extractSnapshot,
     readFile,
     listDirectory,
