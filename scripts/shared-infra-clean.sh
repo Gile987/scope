@@ -33,8 +33,14 @@ if [ -z "$CONNECTION_STRING" ]; then
   exit 1
 fi
 
-echo "⚠️  This will DROP the database: $DB_NAME"
-echo "   from the shared CosmosDB account."
+# Extract account name from connection string (format: mongodb://ACCOUNT-NAME:...)
+ACCOUNT_NAME=$(echo "$CONNECTION_STRING" | sed -n 's|^mongodb://\([^:]*\):.*|\1|p')
+
+echo "⚠️  This will DROP the database from the shared CosmosDB account."
+echo ""
+echo "   Account:  ${ACCOUNT_NAME:-unknown}"
+echo "   Database: $DB_NAME"
+echo "   Host:     ${CONNECTION_STRING%%@*}@..."
 echo ""
 
 # Confirmation
