@@ -174,6 +174,7 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/db-migrations.md](docs/architecture/db-migrations.md) | MongoDB migration framework |
 | [docs/architecture/deployment.md](docs/architecture/deployment.md) | Single-branch deployment, int→prod promotion |
 | [docs/architecture/cli-distribution.md](docs/architecture/cli-distribution.md) | CLI bundling, publishing, installation, update check |
+| [docs/architecture/retry.md](docs/architecture/retry.md) | Retry utilities: `withRetry` function and `@Retry` decorator |
 | [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md) | SSE + Change Streams, Redis pub/sub, polling patterns |
 | [docs/research/delta-storage.md](docs/research/delta-storage.md) | Space-efficient storage of iteration snapshots |
 | [ENV_VARIABLES.md](ENV_VARIABLES.md) | Environment variable reference |
