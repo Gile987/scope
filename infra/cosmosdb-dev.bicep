@@ -11,13 +11,16 @@
 // Used by: azd provision (see azure.yaml)
 // ---------------------------------------------------------------------------
 
-@description('Name of the CosmosDB account (must be globally unique, 3-44 lowercase alphanumeric/hyphens)')
-param accountName string
+@description('azd environment name — used to derive the CosmosDB account name')
+param environmentName string
 
 @description('Azure region for the CosmosDB account')
 param location string = resourceGroup().location
 
 param tags object = {}
+
+// Derive account name from azd environment name (must be globally unique, lowercase, 3-44 chars)
+var accountName = 'cosmos-${environmentName}'
 
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   name: accountName
