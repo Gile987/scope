@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import type { DequeuedMessageItem } from "@azure/storage-queue";
-import { BaseQueueProcessor, BlobStorage, type BaseQueueProcessorConfig, type LogEvent, type VisibilityHeartbeat } from "shared";
+import { BaseQueueProcessor, BlobStorage, Retry, type BaseQueueProcessorConfig, type LogEvent, type VisibilityHeartbeat } from "shared";
 import { POST_PROCESSOR_VERSION } from "./version.js";
 import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from "./types.js";
 
@@ -97,8 +97,12 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
 
       await log("info", `Post-processing complete (v${POST_PROCESSOR_VERSION})`);
 
-      // Trigger report generation now that enrichment is done
-      await this.triggerReportGeneration(doc._id, log);
+      // Trigger report generation now that enrichment is done (best-effort)
+      try {
+        await this.triggerReportGeneration(doc._id, log);
+      } catch (error) {
+        await log("warn", `Failed to trigger report generation after retries: ${error}`);
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       await log("error", `Handler '${msg.type}' failed: ${errMsg}`);
@@ -118,26 +122,27 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
   }
 
   /**
-   * Fire-and-forget report generation trigger via REST API.
+   * Trigger report generation via REST API.
    * Called after post-processing succeeds so reports can use enriched data.
    */
+  @Retry({ maxRetries: 3, baseDelayMs: 1000, isRetryable: () => true })
   private async triggerReportGeneration(requestId: string, log: (level: LogEvent["level"], message: string) => Promise<void>): Promise<void> {
     if (!this.apiBaseUrl) return;
 
-    try {
-      const response = await fetch(`${this.apiBaseUrl}/api/v1/reports/trigger`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId }),
-      });
-      if (response.ok) {
-        const result = await response.json() as { triggered: number };
-        await log("info", `Triggered report generation: ${result.triggered} report(s) created`);
-      } else {
-        await log("warn", `Failed to trigger report generation: ${response.status} ${response.statusText}`);
-      }
-    } catch (error) {
-      await log("warn", `Failed to trigger report generation: ${error}`);
+    const response = await fetch(`${this.apiBaseUrl}/api/v1/reports/trigger`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId }),
+    });
+    if (response.ok) {
+      const result = await response.json() as { triggered: number };
+      await log("info", `Triggered report generation: ${result.triggered} report(s) created`);
+      return;
     }
+    if (response.status >= 400 && response.status < 500) {
+      await log("warn", `Failed to trigger report generation (${response.status}), not retrying`);
+      return;
+    }
+    throw new Error(`Report trigger returned ${response.status} ${response.statusText}`);
   }
 }
