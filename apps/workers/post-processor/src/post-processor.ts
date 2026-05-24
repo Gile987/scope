@@ -121,7 +121,7 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
    * Fire-and-forget report generation trigger via REST API.
    * Called after post-processing succeeds so reports can use enriched data.
    */
-  private async triggerReportGeneration(requestId: string, log: (level: string, message: string) => Promise<void>): Promise<void> {
+  private async triggerReportGeneration(requestId: string, log: (level: LogEvent["level"], message: string) => Promise<void>): Promise<void> {
     if (!this.apiBaseUrl) return;
 
     try {
