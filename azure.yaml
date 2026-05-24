@@ -1,0 +1,10 @@
+# Azure Developer CLI (azd) project manifest
+# Used by: pnpm shared-infra:setup (azd provision)
+# Deploys a shared dev CosmosDB for MongoDB account (serverless)
+name: scope-dev-infra
+metadata:
+  template: scope-dev-infra
+infra:
+  provider: bicep
+  path: infra
+  module: cosmosdb-dev

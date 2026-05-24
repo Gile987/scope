@@ -2,7 +2,7 @@
 # =============================================================================
 # shared-infra-use.sh — Activate/deactivate shared infra for this worktree
 # =============================================================================
-# Reads the connection string from .env.shared-infra in the repo base folder
+# Reads the connection string from azd's environment at the repo base folder
 # and writes it (plus the SCOPE_SHARED_INFRA flag) to .env.local in the
 # current worktree. This causes the dev-compose.sh wrapper to skip the local
 # MongoDB container and use the shared CosmosDB instead.
@@ -10,15 +10,25 @@
 # Usage:
 #   ./scripts/shared-infra-use.sh          # activate
 #   ./scripts/shared-infra-use.sh --off    # deactivate
+#
+# Prerequisites:
+#   - azd CLI installed (https://aka.ms/azd)
+#   - 'pnpm shared-infra:setup' has been run at least once
 # =============================================================================
 set -euo pipefail
 
 REPO_BASE="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
-SHARED_ENV="$REPO_BASE/.env.shared-infra"
 LOCAL_ENV=".env.local"
 
 # Keys managed by this script
 MANAGED_KEYS=("SCOPE_SHARED_INFRA" "MONGO_CONNECTION_STRING")
+
+# Ensure .azure symlink exists in this worktree (points to repo base)
+if [ ! -L .azure ] && [ ! -d .azure ]; then
+  ln -sfn "$REPO_BASE/.azure" .azure
+elif [ -L .azure ]; then
+  ln -sfn "$REPO_BASE/.azure" .azure
+fi
 
 # Remove managed keys from .env.local
 remove_managed_keys() {
@@ -26,7 +36,6 @@ remove_managed_keys() {
     return
   fi
   for key in "${MANAGED_KEYS[@]}"; do
-    # Remove the key line and any comment line immediately above it that we added
     sed -i.bak "/^${key}=/d" "$LOCAL_ENV"
   done
   sed -i.bak '/^# \[shared-infra\]/d' "$LOCAL_ENV"
@@ -34,7 +43,6 @@ remove_managed_keys() {
 
   # Remove file if empty (only whitespace/newlines left)
   if [ ! -s "$LOCAL_ENV" ] || ! grep -qP '\S' "$LOCAL_ENV" 2>/dev/null; then
-    # Portable check for non-empty content
     if ! grep -q '[^[:space:]]' "$LOCAL_ENV" 2>/dev/null; then
       rm -f "$LOCAL_ENV"
     fi
@@ -49,24 +57,16 @@ if [[ "${1:-}" == "--off" ]]; then
 fi
 
 # --- Activation ---
-if [ ! -f "$SHARED_ENV" ]; then
-  echo "ERROR: $SHARED_ENV not found."
+# Read connection string from azd environment
+CONNECTION_STRING=$(azd env get-value AZURE_COSMOS_CONNECTION_STRING 2>/dev/null) || true
+
+if [ -z "${CONNECTION_STRING:-}" ]; then
+  echo "ERROR: Could not read AZURE_COSMOS_CONNECTION_STRING from azd environment."
   echo ""
-  echo "Run the one-time setup first:"
+  echo "Make sure the shared infra has been provisioned:"
   echo "  pnpm shared-infra:setup"
   echo ""
-  echo "Or if someone else already ran it, ensure you're in a worktree of the same repo."
-  exit 1
-fi
-
-# Source the shared env to get MONGO_CONNECTION_STRING
-set -a
-# shellcheck disable=SC1090
-source "$SHARED_ENV"
-set +a
-
-if [ -z "${MONGO_CONNECTION_STRING:-}" ]; then
-  echo "ERROR: MONGO_CONNECTION_STRING not found in $SHARED_ENV"
+  echo "azd state location: $REPO_BASE/.azure/"
   exit 1
 fi
 
@@ -78,7 +78,7 @@ remove_managed_keys
   echo ""
   echo "# [shared-infra] Managed by 'pnpm shared-infra:use' — do not edit manually"
   echo "SCOPE_SHARED_INFRA=1"
-  echo "MONGO_CONNECTION_STRING=$MONGO_CONNECTION_STRING"
+  echo "MONGO_CONNECTION_STRING=$CONNECTION_STRING"
 } >> "$LOCAL_ENV"
 
 # Show the database that will be used (from .env if it exists)
@@ -92,7 +92,7 @@ fi
 
 echo "✓ Shared infra activated for this worktree."
 echo "  Database: $DB_NAME"
-echo "  Connection: ${MONGO_CONNECTION_STRING:0:40}..."
+echo "  Connection: ${CONNECTION_STRING:0:40}..."
 echo ""
 echo "All 'pnpm docker:*' commands will now use CosmosDB (local MongoDB won't start)."
 echo "To deactivate: pnpm shared-infra:use --off"

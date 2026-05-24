@@ -3,7 +3,6 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
-.env.shared-infra
 .port-offset
 *.log
 .DS_Store

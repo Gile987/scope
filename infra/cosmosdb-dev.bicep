@@ -8,11 +8,7 @@
 // capacity mode. Databases are created on-demand by the application; no need
 // to pre-provision them here.
 //
-// Usage:
-//   az deployment group create \
-//     --resource-group <rg-name> \
-//     --template-file infra/cosmosdb-dev.bicep \
-//     --parameters accountName=<name>
+// Used by: azd provision (see azure.yaml)
 // ---------------------------------------------------------------------------
 
 @description('Name of the CosmosDB account (must be globally unique, 3-44 lowercase alphanumeric/hyphens)')
@@ -54,6 +50,6 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   }
 }
 
-// Output the connection string for scripts to consume
-output connectionString string = cosmosAccount.listConnectionStrings().connectionStrings[0].connectionString
-output accountName string = cosmosAccount.name
+// azd captures outputs into .azure/<env>/.env as AZURE_COSMOS_CONNECTION_STRING
+output AZURE_COSMOS_CONNECTION_STRING string = cosmosAccount.listConnectionStrings().connectionStrings[0].connectionString
+output AZURE_COSMOS_ACCOUNT_NAME string = cosmosAccount.name
