@@ -5,6 +5,7 @@ import { defineTool } from "@github/copilot-sdk";
 import { readFileSync, readdirSync, statSync, existsSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
+import type { RequestDocument } from "shared";
 
 /**
  * Create tools for the report agent to access run data via the REST API
@@ -29,22 +30,22 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const request = await response.json();
-        const run = request.run || {};
+        const request: RequestDocument = await response.json();
+        const run = request.run;
         return {
           id: request._id,
           task: request.scenario?.task,
           criteria: request.scenario?.criteria,
           workerType: request.workerType,
-          status: run.status,
-          outcome: run.outcome,
+          status: run?.status,
+          outcome: run?.outcome,
           persona: request.persona,
           personaInstructions: request.personaInstructions,
           maxIterations: request.maxIterations,
-          turnCount: run.turns?.length || 0,
+          turnCount: run?.turns?.length || 0,
           createdAt: request.createdAt,
           updatedAt: request.updatedAt,
-          error: run.error,
+          error: run?.error,
         };
       } catch (err) {
         return { error: `Failed to fetch run summary: ${err}` };
@@ -65,9 +66,9 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const request = await response.json();
-        const run = request.run || {};
-        const turns = (run.turns || []).map((turn: any) => ({
+        const request: RequestDocument = await response.json();
+        const run = request.run;
+        const turns = (run?.turns || []).map((turn: any) => ({
           iteration: turn.iteration,
           passed: turn.passed,
           timestamp: turn.timestamp,
@@ -106,9 +107,9 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const request = await response.json();
-        const run = request.run || {};
-        const turn = (run.turns || []).find((t: any) => t.iteration === args.iteration);
+        const request: RequestDocument = await response.json();
+        const run = request.run;
+        const turn = (run?.turns || []).find((t: any) => t.iteration === args.iteration);
         if (!turn) {
           return { error: `Turn ${args.iteration} not found` };
         }
@@ -142,9 +143,9 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const request = await response.json();
-        const run = request.run || {};
-        const turns = run.turns || [];
+        const request: RequestDocument = await response.json();
+        const run = request.run;
+        const turns = run?.turns || [];
 
         // Collect all criterion IDs
         const criterionIds = new Set<string>();
