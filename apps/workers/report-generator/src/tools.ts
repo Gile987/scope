@@ -352,15 +352,14 @@ export function createReportTools(
         iteration: {
           type: "number",
           description:
-            "The iteration number (1-based) to fetch the ATIF trajectory for. If omitted, returns the latest iteration that has an ATIF file.",
+            "The iteration number (1-based) to fetch the ATIF trajectory for.",
         },
       },
+      required: ["iteration"],
     },
-    handler: async (args: { iteration?: number }) => {
+    handler: async (args: { iteration: number }) => {
       try {
-        const url = args.iteration
-          ? `${apiBaseUrl}/api/v1/requests/${requestId}/atif?iteration=${args.iteration}`
-          : `${apiBaseUrl}/api/v1/requests/${requestId}/atif`;
+        const url = `${apiBaseUrl}/api/v1/requests/${requestId}/atif?iteration=${args.iteration}`;
         const response = await fetch(url);
         if (!response.ok) {
           if (response.status === 404) {
@@ -369,7 +368,7 @@ export function createReportTools(
           return { error: `Failed to fetch ATIF: ${response.status} ${response.statusText}` };
         }
         const trajectory = await response.json();
-        return { trajectory, iteration: args.iteration ?? "latest" };
+        return { trajectory, iteration: args.iteration };
       } catch (err) {
         return { error: `Failed to fetch ATIF trajectory: ${err}` };
       }
