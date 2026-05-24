@@ -1,4 +1,5 @@
 ---
+
 name: typescript
 description: >
   TypeScript best practices for this monorepo. Use this skill when:
@@ -8,29 +9,37 @@ description: >
   (4) adding or modifying types and interfaces.
 metadata:
   version: "1.0.0"
+
 ---
 
 # TypeScript Best Practices
 
-## Never Leave `response.json()` Untyped
+## Never Leave Values Untyped at `any` Boundaries
 
-When calling `fetch()` or any API client that returns JSON, **always annotate the result** with the expected type:
+Whenever data crosses a boundary that erases type information (`response.json()`, `JSON.parse()`, external library returns, database query results, queue message payloads), **immediately annotate or narrow the type**:
 
 ```typescript
-// ❌ BAD — returns `any`, wrong property access compiles silently
+// ❌ BAD — `any` leaks through, wrong property access compiles silently
 const data = await response.json();
 data.turns; // no error even if turns lives at data.run.turns
 
-// ✅ GOOD — TypeScript catches incorrect property access
+const parsed = JSON.parse(rawMessage);
+parsed.requestId; // unverified assumption
+
+// ✅ GOOD — type boundary is explicit, TypeScript verifies all access
 import type { RequestDocument } from "shared";
 const data: RequestDocument = await response.json();
 data.run?.turns; // correct path, verified at compile time
+
+const parsed: QueueMessagePayload = JSON.parse(rawMessage);
+parsed.requestId; // known to exist
 ```
 
 ### Why This Matters
 
-- `response.json()` returns `Promise<any>` — TypeScript cannot verify property access
-- Bugs from wrong data paths are invisible at compile time and tests may share the same wrong assumption
+- `any` propagates silently — one untyped value infects everything it touches
+- Bugs from wrong property paths are invisible at compile time
+- Tests may share the same wrong assumption as the code (mocks mirror the bug)
 - Adding a type annotation is zero-cost at runtime but catches entire classes of bugs
 
 ### Guidelines
@@ -57,7 +66,7 @@ run?.turns; // type is `ConversationTurn[] | undefined`
 This monorepo defines canonical types in `packages/shared/src/types/`. Always import from there rather than redeclaring shapes:
 
 | Type | Use For |
-|------|---------|
+| --- | --- |
 | `RequestDocument` | Full request document (includes `run?: RunState`) |
 | `RunState` | Per-attempt run state (status, turns, outcome) |
 | `ConversationTurn` | Individual iteration within a run |
