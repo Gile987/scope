@@ -47,19 +47,19 @@ if [[ "${1:-}" != "--yes" ]] && [[ "${1:-}" != "-y" ]]; then
   fi
 fi
 
-# Drop the database using mongosh or mongoDB shell
+# Drop the database using Node.js (mongodb driver is already in the project)
 echo "→ Dropping database '$DB_NAME'..."
 
-# Try mongosh first, fall back to legacy mongo shell
-if command -v mongosh &>/dev/null; then
-  mongosh "$CONNECTION_STRING/$DB_NAME" --quiet --eval "db.dropDatabase()"
-elif command -v mongo &>/dev/null; then
-  mongo "$CONNECTION_STRING/$DB_NAME" --quiet --eval "db.dropDatabase()"
-else
-  echo "ERROR: Neither 'mongosh' nor 'mongo' found in PATH."
-  echo "Install mongosh: https://www.mongodb.com/docs/mongodb-shell/install/"
-  exit 1
-fi
+CONNECTION_STRING="$CONNECTION_STRING" DB_NAME="$DB_NAME" node -e "
+const { MongoClient } = require('mongodb');
+(async () => {
+  const client = new MongoClient(process.env.CONNECTION_STRING);
+  await client.connect();
+  await client.db(process.env.DB_NAME).dropDatabase();
+  await client.close();
+  console.log('Done.');
+})().catch(e => { console.error(e.message); process.exit(1); });
+"
 
 echo ""
 echo "✓ Database '$DB_NAME' dropped."
