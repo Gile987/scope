@@ -2784,17 +2784,33 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "model": {
-            "type": "string",
+            "type": [
+              "string",
+              "null",
+            ],
           },
           "name": {
             "type": "string",
           },
           "systemPrompt": {
-            "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
+              },
+              {
+                "type": [
+                  "object",
+                  "null",
+                ],
+              },
+            ],
           },
           "timeoutMs": {
             "exclusiveMinimum": 0,
-            "type": "integer",
+            "type": [
+              "integer",
+              "null",
+            ],
           },
           "trigger": {
             "$ref": "#/components/schemas/ReportTrigger",
