@@ -15,3 +15,5 @@
 !resilience/**
 !typescript/
 !typescript/**
+!cosmosdb-mongodb/
+!cosmosdb-mongodb/**
