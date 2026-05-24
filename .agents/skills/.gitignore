@@ -11,3 +11,5 @@
 !scope-api/**
 !release-notes/
 !release-notes/**
+!resilience/
+!resilience/**
