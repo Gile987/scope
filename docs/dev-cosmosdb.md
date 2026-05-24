@@ -60,9 +60,22 @@ pnpm docker:up:infra        # only starts redis + azurite (mongodb skipped)
 To go back to local MongoDB:
 
 ```bash
-pnpm shared-infra:use --off
+pnpm shared-infra:use:off
 pnpm docker:dev:copilot     # uses local MongoDB again
 ```
+
+## Resetting the Database
+
+To drop and recreate the worktree's database (useful for a clean slate):
+
+```bash
+pnpm shared-infra:clean     # prompts for confirmation
+pnpm shared-infra:clean -- --yes  # skip confirmation
+```
+
+This drops only the worktree-specific database — the CosmosDB account and other
+worktrees' databases are unaffected. The database is re-created automatically on
+next app start.
 
 ## How It Works (Technical Details)
 
