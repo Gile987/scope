@@ -84,13 +84,10 @@ next app start.
 2. It sources `.env.local` and checks `SCOPE_SHARED_INFRA`
 3. If `SCOPE_SHARED_INFRA=1`:
 
-    - Does NOT add `--profile mongodb` → mongodb container won't start
-    - Passes `--env-file .env.local` → compose interpolates `MONGO_CONNECTION_STRING`
-
+Does NOT add `--profile mongodb` → mongodb container won't startPasses `--env-file .env.local` → compose interpolates `MONGO_CONNECTION_STRING`
 4. If not set:
 
-    - Adds `--profile mongodb` → local mongodb starts as before
-    - Compose uses the default fallback: `mongodb://mongodb:27017`
+Adds `--profile mongodb` → local mongodb starts as beforeCompose uses the default fallback: `mongodb://mongodb:27017`
 
 The `mongodb` service is behind `profiles: [mongodb]` in `docker-compose.yml`.
 All `depends_on: mongodb` entries use `required: false` so services start
@@ -123,10 +120,11 @@ Databases are created on first write — no pre-provisioning needed.
 repo-base/
 ├── .azure/                    # azd state (gitignored, shared across worktrees)
 ├── azure.yaml                 # azd project manifest (checked in)
-├── infra/cosmosdb-dev.bicep   # Bicep template for the CosmosDB account
+├── infra/main.bicep           # Bicep template for the CosmosDB account
 └── scripts/
     ├── shared-infra-setup.sh  # One-time: azd provision
     ├── shared-infra-use.sh    # Per-worktree activation
+    ├── shared-infra-clean.sh  # Drop worktree database
     └── dev-compose.sh         # Docker compose wrapper (auto-detection)
 
 worktree/

@@ -3,6 +3,7 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
+.azure
 .port-offset
 *.log
 .DS_Store
