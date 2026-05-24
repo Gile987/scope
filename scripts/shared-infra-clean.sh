@@ -36,13 +36,11 @@ fi
 # Extract account name from connection string (format: mongodb://ACCOUNT-NAME:key@HOST:PORT/...)
 ACCOUNT_NAME=$(echo "$CONNECTION_STRING" | sed -n 's|^mongodb://\([^:]*\):.*|\1|p')
 
-# Get tenant and subscription from azd environment
+# Get subscription from azd environment
 AZURE_SUBSCRIPTION_ID=$(azd env get-value AZURE_SUBSCRIPTION_ID 2>/dev/null || true)
-AZURE_TENANT_ID=$(azd env get-value AZURE_TENANT_ID 2>/dev/null || true)
 
 echo "⚠️  This will DROP the database from the shared CosmosDB account."
 echo ""
-echo "   Tenant:       ${AZURE_TENANT_ID:-unknown}"
 echo "   Subscription: ${AZURE_SUBSCRIPTION_ID:-unknown}"
 echo "   Account:      ${ACCOUNT_NAME:-unknown}"
 echo "   Database:     $DB_NAME"
