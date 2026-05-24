@@ -9,39 +9,49 @@
 // to pre-provision them here.
 //
 // Used by: azd provision (see azure.yaml)
-// targetScope = subscription so azd doesn't prompt for a resource group.
 // ---------------------------------------------------------------------------
 
-targetScope = 'subscription'
-
-@description('azd environment name — used to derive resource group and account names')
+@description('azd environment name — used to derive the CosmosDB account name')
 param environmentName string
 
-@description('Azure region for all resources')
-param location string
+@description('Azure region for the CosmosDB account')
+param location string = resourceGroup().location
 
 param tags object = {}
 
-// Derive names from azd environment name
-var resourceGroupName = 'rg-${environmentName}'
+// Derive account name from azd environment name
 var accountName = 'cosmos-${environmentName}'
 
-resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
-  name: resourceGroupName
+resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
+  name: accountName
   location: location
+  kind: 'MongoDB'
   tags: tags
-}
-
-module cosmosDb 'cosmosdb-account.bicep' = {
-  name: 'cosmosdb-deploy'
-  scope: rg
-  params: {
-    accountName: accountName
-    location: location
-    tags: tags
+  properties: {
+    databaseAccountOfferType: 'Standard'
+    capabilities: [
+      { name: 'EnableMongo' }
+      { name: 'EnableServerless' }
+    ]
+    apiProperties: {
+      serverVersion: '7.0'
+    }
+    locations: [
+      {
+        locationName: location
+        failoverPriority: 0
+        isZoneRedundant: false
+      }
+    ]
+    backupPolicy: {
+      type: 'Continuous'
+      continuousModeProperties: {
+        tier: 'Continuous7Days'
+      }
+    }
   }
 }
 
 // azd captures outputs into .azure/<env>/.env
-output AZURE_COSMOS_CONNECTION_STRING string = cosmosDb.outputs.connectionString
-output AZURE_COSMOS_ACCOUNT_NAME string = cosmosDb.outputs.accountName
+output AZURE_COSMOS_CONNECTION_STRING string = cosmosAccount.listConnectionStrings().connectionStrings[0].connectionString
+output AZURE_COSMOS_ACCOUNT_NAME string = cosmosAccount.name

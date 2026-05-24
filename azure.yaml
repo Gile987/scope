@@ -4,6 +4,7 @@
 name: scope-dev-infra
 metadata:
   template: scope-dev-infra
+resourceGroup: rg-${AZURE_ENV_NAME}
 infra:
   provider: bicep
   path: infra
