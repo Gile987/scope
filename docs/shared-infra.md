@@ -1,4 +1,4 @@
-# Developer CosmosDB Instance
+# Shared Dev Infrastructure
 
 Some issues can only be reproduced on real Azure CosmosDB for MongoDB — index
 behavior, RU limits, sort-on-unindexed rejection, etc. This guide explains how
@@ -27,6 +27,7 @@ pnpm shared-infra:setup
 ```
 
 This:
+
 1. Runs `azd provision` (interactive — prompts for subscription, location, env name)
 2. Deploys a **serverless** CosmosDB for MongoDB account (zero cost when idle)
 3. Stores the connection string in the azd environment at `<repo-base>/.azure/`
@@ -82,11 +83,14 @@ next app start.
 1. **`scripts/dev-compose.sh`** wraps all `docker compose` calls in `package.json`
 2. It sources `.env.local` and checks `SCOPE_SHARED_INFRA`
 3. If `SCOPE_SHARED_INFRA=1`:
-   - Does NOT add `--profile mongodb` → mongodb container won't start
-   - Passes `--env-file .env.local` → compose interpolates `MONGO_CONNECTION_STRING`
+
+    - Does NOT add `--profile mongodb` → mongodb container won't start
+    - Passes `--env-file .env.local` → compose interpolates `MONGO_CONNECTION_STRING`
+
 4. If not set:
-   - Adds `--profile mongodb` → local mongodb starts as before
-   - Compose uses the default fallback: `mongodb://mongodb:27017`
+
+    - Adds `--profile mongodb` → local mongodb starts as before
+    - Compose uses the default fallback: `mongodb://mongodb:27017`
 
 The `mongodb` service is behind `profiles: [mongodb]` in `docker-compose.yml`.
 All `depends_on: mongodb` entries use `required: false` so services start
@@ -97,7 +101,7 @@ without it when the profile is inactive.
 `MONGO_DATABASE` is in `.env.base` and gets suffixed by `worktree-env`:
 
 | Checkout | Database name |
-|----------|--------------|
+| --- | --- |
 | Main | `requests-db` |
 | Worktree `fix-indexes` | `requests-db-fix-indexes` |
 | Worktree `perf-test` | `requests-db-perf-test` |
@@ -115,7 +119,7 @@ Databases are created on first write — no pre-provisioning needed.
 
 ## File Layout
 
-```
+```javascript
 repo-base/
 ├── .azure/                    # azd state (gitignored, shared across worktrees)
 ├── azure.yaml                 # azd project manifest (checked in)
