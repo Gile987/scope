@@ -7,4 +7,3 @@ metadata:
 infra:
   provider: bicep
   path: infra
-  module: cosmosdb-dev
