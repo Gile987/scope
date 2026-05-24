@@ -143,7 +143,7 @@ pnpm open:portal                  # Open portal in browser
 
 ### Shared Dev Infrastructure (CosmosDB)
 
-For testing against real Azure CosmosDB (e.g. index behavior), a shared dev instance can be provisioned. Each worktree gets its own isolated database. See [docs/shared-infra.md](docs/shared-infra.md) for setup and usage.
+For testing against real Azure CosmosDB (e.g. index behavior), a shared dev instance can be provisioned. Each worktree gets its own isolated database. See [docs/shared-dev-infra.md](docs/shared-dev-infra.md) for setup and usage.
 
 ## Rust Components
 
@@ -180,5 +180,5 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/cli-distribution.md](docs/architecture/cli-distribution.md) | CLI bundling, publishing, installation, update check |
 | [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md) | SSE + Change Streams, Redis pub/sub, polling patterns |
 | [docs/research/delta-storage.md](docs/research/delta-storage.md) | Space-efficient storage of iteration snapshots |
-| [docs/shared-infra.md](docs/shared-infra.md) | Shared dev infrastructure (CosmosDB) setup and worktree isolation |
+| [docs/shared-dev-infra.md](docs/shared-dev-infra.md) | Shared dev infrastructure (CosmosDB) setup and worktree isolation |
 | [ENV_VARIABLES.md](ENV_VARIABLES.md) | Environment variable reference |
