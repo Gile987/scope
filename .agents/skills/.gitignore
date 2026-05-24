@@ -13,3 +13,5 @@
 !release-notes/**
 !resilience/
 !resilience/**
+!typescript/
+!typescript/**
