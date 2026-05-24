@@ -40,15 +40,21 @@ ACCOUNT_NAME=$(echo "$CONNECTION_STRING" | sed -n 's|^mongodb://\([^:]*\):.*|\1|
 AZURE_SUBSCRIPTION_ID=$(azd env get-value AZURE_SUBSCRIPTION_ID 2>/dev/null || true)
 SUBSCRIPTION_NAME=""
 TENANT_NAME=""
+TENANT_ID=""
 if [ -n "$AZURE_SUBSCRIPTION_ID" ]; then
   SUBSCRIPTION_NAME=$(az account show --subscription "$AZURE_SUBSCRIPTION_ID" --query "name" -o tsv 2>/dev/null || true)
+  TENANT_ID=$(az account show --subscription "$AZURE_SUBSCRIPTION_ID" --query "tenantId" -o tsv 2>/dev/null || true)
   TENANT_NAME=$(az account show --subscription "$AZURE_SUBSCRIPTION_ID" --query "tenantDisplayName" -o tsv 2>/dev/null || true)
 fi
 
 echo "⚠️  This will DROP the database from the shared CosmosDB account."
 echo ""
-echo "   Tenant:       ${TENANT_NAME:-unknown}"
-echo "   Subscription: ${SUBSCRIPTION_NAME:-$AZURE_SUBSCRIPTION_ID}"
+if [ -n "$TENANT_NAME" ]; then
+  echo "   Tenant:       $TENANT_NAME ($TENANT_ID)"
+elif [ -n "$TENANT_ID" ]; then
+  echo "   Tenant:       $TENANT_ID"
+fi
+echo "   Subscription: ${SUBSCRIPTION_NAME:-unknown} ($AZURE_SUBSCRIPTION_ID)"
 echo "   Account:      ${ACCOUNT_NAME:-unknown}"
 echo "   Database:     $DB_NAME"
 echo ""
