@@ -47,18 +47,21 @@ if [[ "${1:-}" != "--yes" ]] && [[ "${1:-}" != "-y" ]]; then
   fi
 fi
 
-# Drop the database using Node.js (mongodb driver is already in the project)
+# Drop the database using the mongodb driver (resolved from packages/shared)
 echo "→ Dropping database '$DB_NAME'..."
 
-CONNECTION_STRING="$CONNECTION_STRING" DB_NAME="$DB_NAME" node -e "
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SHARED_DIR="$SCRIPT_DIR/../packages/shared"
+
+CONNECTION_STRING="$CONNECTION_STRING" DB_NAME="$DB_NAME" node --input-type=module --eval "
+import { createRequire } from 'module';
+const require = createRequire('$SHARED_DIR/package.json');
 const { MongoClient } = require('mongodb');
-(async () => {
-  const client = new MongoClient(process.env.CONNECTION_STRING);
-  await client.connect();
-  await client.db(process.env.DB_NAME).dropDatabase();
-  await client.close();
-  console.log('Done.');
-})().catch(e => { console.error(e.message); process.exit(1); });
+const client = new MongoClient(process.env.CONNECTION_STRING);
+await client.connect();
+await client.db(process.env.DB_NAME).dropDatabase();
+await client.close();
+console.log('Done.');
 "
 
 echo ""
