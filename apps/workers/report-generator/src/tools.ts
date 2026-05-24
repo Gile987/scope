@@ -29,19 +29,21 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const run = await response.json();
+        const request = await response.json();
+        const run = request.run || {};
         return {
-          id: run._id,
-          task: run.scenario?.task,
-          criteria: run.scenario?.criteria,
-          workerType: run.workerType,
+          id: request._id,
+          task: request.scenario?.task,
+          criteria: request.scenario?.criteria,
+          workerType: request.workerType,
           status: run.status,
-          persona: run.persona,
-          personaInstructions: run.personaInstructions,
-          maxIterations: run.maxIterations,
+          outcome: run.outcome,
+          persona: request.persona,
+          personaInstructions: request.personaInstructions,
+          maxIterations: request.maxIterations,
           turnCount: run.turns?.length || 0,
-          createdAt: run.createdAt,
-          updatedAt: run.updatedAt,
+          createdAt: request.createdAt,
+          updatedAt: request.updatedAt,
           error: run.error,
         };
       } catch (err) {
@@ -63,7 +65,8 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const run = await response.json();
+        const request = await response.json();
+        const run = request.run || {};
         const turns = (run.turns || []).map((turn: any) => ({
           iteration: turn.iteration,
           passed: turn.passed,
@@ -103,7 +106,8 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const run = await response.json();
+        const request = await response.json();
+        const run = request.run || {};
         const turn = (run.turns || []).find((t: any) => t.iteration === args.iteration);
         if (!turn) {
           return { error: `Turn ${args.iteration} not found` };
@@ -138,7 +142,8 @@ export function createReportTools(
         if (!response.ok) {
           return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
         }
-        const run = await response.json();
+        const request = await response.json();
+        const run = request.run || {};
         const turns = run.turns || [];
 
         // Collect all criterion IDs
