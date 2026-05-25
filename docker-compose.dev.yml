@@ -180,6 +180,10 @@ services:
         - action: rebuild
           path: ./pnpm-lock.yaml
 
+  register-version-post-processor:
+    build:
+      target: dev
+
   post-processor:
     build:
       target: dev
