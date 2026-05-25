@@ -73,7 +73,7 @@ export class AtifHandler implements PostProcessHandler {
         const result = await parseHar(tempHarPath);
 
         // Upload trajectory.json
-        const trajectoryBlobName = `${requestId}/runs/${runId}/iteration-${turn.iteration}/trajectory.json`;
+        const trajectoryBlobName = `${requestId}/runs/${runId}/iteration-${turn.iteration}/atif.trajectory.json`;
         const trajectoryUrl = await ctx.blobStorage.uploadJson(
           trajectoryBlobName,
           result.trajectory,

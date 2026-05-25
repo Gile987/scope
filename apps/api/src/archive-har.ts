@@ -81,7 +81,7 @@ export function rewriteHarUrlsForArchive<T extends {
           turn.toolCallsUrl = `iteration-${turn.iteration}.tool-calls.jsonl`;
         }
         if (turn.atifUrl) {
-          turn.atifUrl = `iteration-${turn.iteration}.trajectory.json`;
+          turn.atifUrl = `iteration-${turn.iteration}.atif.trajectory.json`;
         }
       }
     }
@@ -538,7 +538,7 @@ export async function packRunIntoTar(
       const downloadResponse = await blobClient.download();
       if (!downloadResponse.readableStreamBody || !downloadResponse.contentLength) continue;
       const entry = pack.entry({
-        name: `${id}/iteration-${turn.iteration}.trajectory.json`,
+        name: `${id}/iteration-${turn.iteration}.atif.trajectory.json`,
         size: downloadResponse.contentLength,
       });
       await pipeline(downloadResponse.readableStreamBody, entry);

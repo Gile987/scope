@@ -99,22 +99,22 @@ describe("ATIF endpoints", () => {
       variant.mockRequest(mocks, "req-1", {
         _id: "run-1", status: "done",
         turns: [
-          { iteration: 1, atifUrl: blobUrl("req-1/iter-1.trajectory.json") },
-          { iteration: 2, atifUrl: blobUrl("req-1/iter-2.trajectory.json") },
+          { iteration: 1, atifUrl: blobUrl("req-1/iter-1.atif.trajectory.json") },
+          { iteration: 2, atifUrl: blobUrl("req-1/iter-2.atif.trajectory.json") },
         ],
       });
 
       const res = await supertest(app).get(atifUrl("req-1", "?iteration=2")).buffer(true).parse(rawParser);
       expect(res.status).toBe(200);
       expect(res.headers["content-type"]).toMatch("application/json");
-      expect(res.headers["content-disposition"]).toContain("req-1-iteration-2.trajectory.json");
-      expect(mockGetBlockBlobClient).toHaveBeenCalledWith("req-1/iter-2.trajectory.json");
+      expect(res.headers["content-disposition"]).toContain("req-1-iteration-2.atif.trajectory.json");
+      expect(mockGetBlockBlobClient).toHaveBeenCalledWith("req-1/iter-2.atif.trajectory.json");
     });
 
     it("returns 404 when blob is not found in storage", async () => {
       variant.mockRequest(mocks, "req-1", {
         _id: "run-1", status: "done",
-        turns: [{ iteration: 1, atifUrl: blobUrl("req-1/iter-1.trajectory.json") }],
+        turns: [{ iteration: 1, atifUrl: blobUrl("req-1/iter-1.atif.trajectory.json") }],
       });
       const { RestError } = await import("@azure/storage-blob");
       mockDownload.mockRejectedValue(Object.assign(new RestError("not found", { statusCode: 404, code: "BlobNotFound" } as any)));

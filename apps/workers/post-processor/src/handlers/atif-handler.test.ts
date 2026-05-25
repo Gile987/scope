@@ -34,7 +34,7 @@ describe("AtifHandler", () => {
     ctx = {
       blobStorage: {
         downloadBlobToBuffer: vi.fn().mockResolvedValue(Buffer.from("{}")),
-        uploadJson: vi.fn().mockResolvedValue("https://storage.blob.core.windows.net/snapshots/req-1/runs/run-1/iteration-1/trajectory.json"),
+        uploadJson: vi.fn().mockResolvedValue("https://storage.blob.core.windows.net/snapshots/req-1/runs/run-1/iteration-1/atif.trajectory.json"),
       } as any,
       collection: {
         findOne: vi.fn().mockResolvedValue({
@@ -69,7 +69,7 @@ describe("AtifHandler", () => {
     expect(ctx.blobStorage.downloadBlobToBuffer).toHaveBeenCalledTimes(2);
     expect(ctx.blobStorage.uploadJson).toHaveBeenCalledTimes(2);
     expect(ctx.blobStorage.uploadJson).toHaveBeenCalledWith(
-      "req-1/runs/run-1/iteration-1/trajectory.json",
+      "req-1/runs/run-1/iteration-1/atif.trajectory.json",
       expect.objectContaining({ schema_version: "ATIF-v1.7" }),
     );
     expect(ctx.collection.updateOne).toHaveBeenCalledTimes(2);

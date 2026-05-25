@@ -36,7 +36,7 @@ export function registerRequestsAtifRoutes(ctx: RouteContext): void {
 
       await downloadBlobToResponse(ctx, res, turn.atifUrl, {
         contentType: "application/json",
-        filename: `${id}-iteration-${iterNum}.trajectory.json`,
+        filename: `${id}-iteration-${iterNum}.atif.trajectory.json`,
         label: "ATIF",
       });
     },
