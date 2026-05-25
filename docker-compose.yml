@@ -647,6 +647,7 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       redis:
         condition: service_healthy
       azurite:
