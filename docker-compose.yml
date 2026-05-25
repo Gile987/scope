@@ -22,8 +22,8 @@
 # Shared environment blocks (YAML anchors)
 # ---------------------------------------------------------------------------
 x-common-env: &common-env
-  MONGO_CONNECTION_STRING: mongodb://mongodb:27017
-  MONGO_DATABASE: requests-db
+  MONGO_CONNECTION_STRING: ${MONGO_CONNECTION_STRING:-mongodb://mongodb:27017}
+  MONGO_DATABASE: ${MONGO_DATABASE:-requests-db}
   MONGO_COLLECTION: requests
   REDIS_HOST: redis
   REDIS_PORT: "6379"
@@ -40,6 +40,7 @@ x-worker-env: &worker-env
 x-worker-deps: &worker-deps
   mongodb:
     condition: service_healthy
+    required: false
   redis:
     condition: service_healthy
   azurite:
@@ -55,6 +56,7 @@ services:
   # MongoDB (compatible with CosmosDB MongoDB API)
   mongodb:
     image: mongo:7.0
+    profiles: [mongodb]
     ports:
       - "${MONGODB_PORT:-27000}:27017"
     environment:
@@ -160,11 +162,12 @@ services:
       dockerfile: apps/api/Dockerfile
       target: builder
     environment:
-      MONGO_CONNECTION_STRING: mongodb://mongodb:27017
-      MONGO_DATABASE: requests-db
+      MONGO_CONNECTION_STRING: ${MONGO_CONNECTION_STRING:-mongodb://mongodb:27017}
+      MONGO_DATABASE: ${MONGO_DATABASE:-requests-db}
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
     restart: "no"
     working_dir: /app
     command: ["pnpm", "--filter", "db-migrations", "migrate:up"]
@@ -199,14 +202,13 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       redis:
         condition: service_healthy
       azurite:
         condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
-
-  # Register agent definitions and versions (local dev — no real version env vars)
   register-agents:
     image: curlimages/curl:latest
     depends_on:
@@ -342,6 +344,7 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       lowkey-vault:
         condition: service_healthy
 
@@ -361,6 +364,7 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       azurite:
         condition: service_healthy
       db-migrate:
@@ -623,6 +627,7 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       redis:
         condition: service_healthy
       azurite:

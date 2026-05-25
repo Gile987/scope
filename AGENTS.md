@@ -141,6 +141,10 @@ pnpm dev:<worker-name>            # Individual worker (native)
 pnpm open:portal                  # Open portal in browser
 ```
 
+### Shared Dev Infrastructure (CosmosDB)
+
+For testing against real Azure CosmosDB (e.g. index behavior), a shared dev instance can be provisioned. Each worktree gets its own isolated database. See [docs/shared-dev-infra.md](docs/shared-dev-infra.md) for setup and usage.
+
 ## Rust Components
 
 When making changes to any Rust component (e.g. the AI gateway in `apps/gateway/`), follow the `rust-best-practices` skill. This skill is available at `.agents/skills/rust-best-practices/SKILL.md` and covers idiomatic Rust, ownership patterns, error handling with `Result`, and performance guidelines.
@@ -177,4 +181,5 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/retry.md](docs/architecture/retry.md) | Retry utilities: `withRetry` function and `@Retry` decorator |
 | [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md) | SSE + Change Streams, Redis pub/sub, polling patterns |
 | [docs/research/delta-storage.md](docs/research/delta-storage.md) | Space-efficient storage of iteration snapshots |
+| [docs/shared-dev-infra.md](docs/shared-dev-infra.md) | Shared dev infrastructure (CosmosDB) setup and worktree isolation |
 | [ENV_VARIABLES.md](ENV_VARIABLES.md) | Environment variable reference |
