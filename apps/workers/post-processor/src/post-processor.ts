@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 import type { DequeuedMessageItem } from "@azure/storage-queue";
-import { MongoClient } from "mongodb";
 import { BaseQueueProcessor, BlobStorage, Retry, type BaseQueueProcessorConfig, type LogEvent, type VisibilityHeartbeat } from "shared";
 import { POST_PROCESSOR_VERSION } from "./version.js";
 import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from "./types.js";
@@ -44,23 +43,6 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
   registerHandler(handler: PostProcessHandler): void {
     this.handlers.set(handler.type, handler);
     console.log(`[post-processor] Registered handler: ${handler.type}`);
-  }
-
-  override async start(): Promise<void> {
-    // Self-register version before entering the poll loop so the scheduler's
-    // PostProcessorDispatcher can detect runs needing processing. In K8s this
-    // is a separate Job, but for resilience we also do it on startup.
-    const mongo = new MongoClient(this.config.mongoUri);
-    await mongo.connect();
-    await mongo.db(this.config.mongoDatabase).collection("services").updateOne(
-      { _id: "post-processor" } as any,
-      { $set: { version: POST_PROCESSOR_VERSION, updatedAt: new Date() } },
-      { upsert: true },
-    );
-    await mongo.close();
-    console.log(`[post-processor] Registered version: ${POST_PROCESSOR_VERSION}`);
-
-    await super.start();
   }
 
   protected async handleRequest(
