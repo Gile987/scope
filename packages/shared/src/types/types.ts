@@ -390,6 +390,7 @@ export interface BaseQueueProcessorConfig {
 export interface QueueProcessorConfig extends BaseQueueProcessorConfig {
   apiBaseUrl?: string; // For auto-triggering report generation via REST API
   tokenManagerUrl?: string; // For resolving MCP server secrets at job dispatch time
+  postProcessorQueueName?: string; // Queue name for event-driven post-processor dispatch
 }
 
 // --- Enhanced Criteria System types ---

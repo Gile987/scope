@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { DequeuedMessageItem } from "@azure/storage-queue";
+import { DequeuedMessageItem, QueueClient } from "@azure/storage-queue";
+import { DefaultAzureCredential } from "@azure/identity";
 import os from "node:os";
 import {
   RequestDocument,
@@ -37,10 +38,50 @@ import { extractSkillsToWorkspace } from "../skills/skill-extractor.js";
  */
 export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocument> {
   private processor: WorkerProcessor;
+  private postProcessorQueueClient: QueueClient | null = null;
 
   constructor(config: QueueProcessorConfig, processor: WorkerProcessor) {
     super(config, processor.workerName);
     this.processor = processor;
+
+    // Create post-processor queue client if configured (event-driven dispatch)
+    if (config.postProcessorQueueName) {
+      if (config.storageConnectionString) {
+        this.postProcessorQueueClient = new QueueClient(
+          config.storageConnectionString,
+          config.postProcessorQueueName,
+        );
+      } else {
+        const credential = new DefaultAzureCredential();
+        const queueUrl = `https://${config.storageAccountName}.queue.core.windows.net`;
+        this.postProcessorQueueClient = new QueueClient(
+          `${queueUrl}/${config.postProcessorQueueName}`,
+          credential,
+        );
+      }
+    }
+  }
+
+  /**
+   * Enqueue a post-processing message (non-fatal on failure — polling dispatcher
+   * will catch up within 2s if this fails).
+   */
+  private async enqueuePostProcessing(requestId: string, runId: string): Promise<void> {
+    if (!this.postProcessorQueueClient) return;
+    try {
+      const message = Buffer.from(
+        JSON.stringify({ type: "atif", requestId, runId }),
+      ).toString("base64");
+      await this.postProcessorQueueClient.sendMessage(message);
+      console.log(`[${this.workerName}] Post-processing enqueued for ${requestId}`);
+    } catch (err) {
+      console.warn(`[${this.workerName}] Failed to enqueue post-processing for ${requestId}:`, err);
+    }
+  }
+
+  /** Override base hook to enqueue post-processing when a run completes via the error path. */
+  protected override async onRunTerminal(requestId: string, runId: string): Promise<void> {
+    await this.enqueuePostProcessing(requestId, runId);
   }
 
   /** Build workerVersion and OS fields for stamping on request documents.
@@ -186,6 +227,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
             "run.finishedAt": new Date(),
             "run.updatedAt": new Date(),
             updatedAt: new Date(),
+            ...(this.postProcessorQueueClient ? { "run.postProcessorStatus": "queued" } : {}),
           },
         } as any,
       ));
@@ -201,6 +243,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         // Run is terminal — drop the heartbeat key so the API stops
         // surfacing it (TTL would expire it eventually anyway).
         await this.heartbeatStore.delete(requestDoc.run!._id);
+        // Enqueue post-processing even for failed runs (partial trajectory is useful)
+        await this.enqueuePostProcessing(requestDoc._id, requestDoc.run!._id);
       } else {
         // Either the original worker resumed beating between our read and
         // write, or a concurrent retry already demoted this run, or the
@@ -534,6 +578,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           updatedAt: new Date(),
           ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
           ...(result.passed ? {} : { "run.error": result.finalResult }),
+          // Claim for post-processing atomically so polling dispatcher won't re-enqueue
+          ...(this.postProcessorQueueClient ? { "run.postProcessorStatus": "queued" } : {}),
         },
       }
     ));
@@ -547,6 +593,9 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       console.log(
         `[${this.workerName}] Multi-turn ${finalStatus} for request ${requestId} (${result.turns.length} iterations)`
       );
+
+      // Event-driven post-processor dispatch — enqueue immediately on completion
+      await this.enqueuePostProcessing(requestId, runId);
     }
 
     // Drop the Redis liveness heartbeat now that the run is terminal so it
