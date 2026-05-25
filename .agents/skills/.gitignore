@@ -17,3 +17,5 @@
 !typescript/**
 !cosmosdb-mongodb/
 !cosmosdb-mongodb/**
+!documentation/
+!documentation/**
