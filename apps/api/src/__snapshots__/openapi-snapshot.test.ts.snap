@@ -7274,16 +7274,29 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "The iteration number (1-based)",
+            "in": "query",
+            "name": "iteration",
+            "required": true,
+            "schema": {
+              "description": "The iteration number (1-based)",
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
             "description": "ATIF v1.7 trajectory JSON file",
           },
+          "400": {
+            "description": "Missing or invalid iteration",
+          },
           "404": {
             "description": "Not found",
           },
         },
-        "summary": "Download ATIF trajectory file",
+        "summary": "Download ATIF trajectory file for a specific iteration",
         "tags": [
           "Requests",
         ],
@@ -7729,6 +7742,16 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "The iteration number (1-based)",
+            "in": "query",
+            "name": "iteration",
+            "required": true,
+            "schema": {
+              "description": "The iteration number (1-based)",
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -7738,7 +7761,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "description": "Not found",
           },
         },
-        "summary": "Download ATIF trajectory file for a specific attempt",
+        "summary": "Download ATIF trajectory file for a specific attempt and iteration",
         "tags": [
           "Requests",
         ],

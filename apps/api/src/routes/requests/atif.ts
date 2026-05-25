@@ -17,26 +17,21 @@ async function handleAtif(
   id: string,
   iterationParam: string | undefined,
 ): Promise<void> {
-  let atifUrl: string | undefined;
-  let label: string;
-
-  if (iterationParam) {
-    const iterNum = parseInt(iterationParam, 10);
-    if (isNaN(iterNum) || iterNum < 1) {
-      res.status(400).json({ error: "Invalid iteration number" });
-      return;
-    }
-    const turns = targetRun.turns;
-    const turn = turns?.find((t: { iteration: number }) => t.iteration === iterNum);
-    atifUrl = turn?.atifUrl;
-    label = `${id}-iteration-${iterNum}`;
-  } else {
-    // Default to last iteration with an ATIF file
-    const turns = targetRun.turns;
-    const turnWithAtif = turns?.slice().reverse().find((t) => t.atifUrl);
-    atifUrl = turnWithAtif?.atifUrl;
-    label = id;
+  if (!iterationParam) {
+    res.status(400).json({ error: "Missing required query parameter: iteration" });
+    return;
   }
+
+  const iterNum = parseInt(iterationParam, 10);
+  if (isNaN(iterNum) || iterNum < 1) {
+    res.status(400).json({ error: "Invalid iteration number" });
+    return;
+  }
+
+  const turns = targetRun.turns;
+  const turn = turns?.find((t: { iteration: number }) => t.iteration === iterNum);
+  const atifUrl = turn?.atifUrl;
+  const label = `${id}-iteration-${iterNum}`;
 
   if (!atifUrl) {
     res.status(404).json({ error: "No ATIF trajectory available" });
@@ -75,12 +70,13 @@ apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/requests/:id/atif",
   tags: ["Requests"],
-  summary: "Download ATIF trajectory file",
+  summary: "Download ATIF trajectory file for a specific iteration",
   params: z.object({ id: z.string() }),
+  query: z.object({ iteration: z.string().describe("The iteration number (1-based)") }),
   response: z.any(),
   rawResponse: true,
   responseDescription: "ATIF v1.7 trajectory JSON file",
-  errorResponses: { 404: { description: "Not found" } },
+  errorResponses: { 400: { description: "Missing or invalid iteration" }, 404: { description: "Not found" } },
   handler: async (req, res) => {
     try {
       const { id } = req.params;
@@ -108,8 +104,9 @@ apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/requests/:id/runs/:runId/atif",
   tags: ["Requests"],
-  summary: "Download ATIF trajectory file for a specific attempt",
+  summary: "Download ATIF trajectory file for a specific attempt and iteration",
   params: z.object({ id: z.string(), runId: z.string() }),
+  query: z.object({ iteration: z.string().describe("The iteration number (1-based)") }),
   response: z.any(),
   rawResponse: true,
   responseDescription: "ATIF v1.7 trajectory JSON file",
