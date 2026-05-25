@@ -24,8 +24,8 @@ export class PostProcessorDispatcher {
     private readonly collection: Collection<RequestDocument>,
     private readonly db: Db,
     private readonly queueClient: QueueClient,
-    private readonly pollIntervalMs: number = 2000,
-    private readonly batchSize: number = 10,
+    private readonly pollIntervalMs: number = 30_000,
+    private readonly batchSize: number = 30,
   ) {}
 
   start(): void {

@@ -131,11 +131,16 @@ async function main(): Promise<void> {
   await postProcessorQueueClient.createIfNotExists();
   console.log(`[Scheduler] Ensured post-processor queue exists: ${postProcessorQueueName}`);
 
+  const ppPollIntervalMs = parseInt(
+    process.env.SCHEDULER_PP_POLL_INTERVAL_MS || "30000",
+    10,
+  );
+
   const postProcessorDispatcher = new PostProcessorDispatcher(
     collection,
     db,
     postProcessorQueueClient,
-    POLL_INTERVAL_MS,
+    ppPollIntervalMs,
   );
   postProcessorDispatcher.start();
   console.log("[Scheduler] Post-processor dispatch loop started");
