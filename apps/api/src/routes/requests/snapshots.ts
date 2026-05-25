@@ -8,7 +8,7 @@ import type { Response } from "express";
 import { apiRoute } from "../../openapi/api-route.js";
 import type { RouteContext } from "../../route-context.js";
 import { resolveRunForRequest } from "./resolve-run.js";
-import { createBlobServiceClient, extractBlobName } from "./blob-helpers.js";
+import { downloadBlobToResponse } from "./blob-helpers.js";
 
 async function handleSnapshot(
   ctx: RouteContext,
@@ -30,29 +30,11 @@ async function handleSnapshot(
     return;
   }
 
-  const blobServiceClient = createBlobServiceClient(ctx);
-
-  const blobName = extractBlobName(turn.snapshotUrl);
-  if (!blobName) {
-    res.status(500).json({ error: "Invalid snapshot URL format" });
-    return;
-  }
-  const containerClient = blobServiceClient.getContainerClient("snapshots");
-  const blobClient = containerClient.getBlockBlobClient(blobName);
-
-  const downloadResponse = await blobClient.download();
-  if (!downloadResponse.readableStreamBody) {
-    res.status(500).json({ error: "Failed to download snapshot" });
-    return;
-  }
-
-  res.setHeader("Content-Type", "application/gzip");
-  res.setHeader("Content-Disposition", `attachment; filename="${id}-iteration-${iterNum}.tar.gz"`);
-  if (downloadResponse.contentLength) {
-    res.setHeader("Content-Length", downloadResponse.contentLength);
-  }
-
-  downloadResponse.readableStreamBody.pipe(res);
+  await downloadBlobToResponse(ctx, res, turn.snapshotUrl, {
+    contentType: "application/gzip",
+    filename: `${id}-iteration-${iterNum}.tar.gz`,
+    label: "snapshot",
+  });
 }
 
 export function registerRequestsSnapshotsRoutes(ctx: RouteContext): void {

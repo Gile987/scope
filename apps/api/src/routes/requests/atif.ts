@@ -8,7 +8,7 @@ import type { Response } from "express";
 import { apiRoute } from "../../openapi/api-route.js";
 import type { RouteContext } from "../../route-context.js";
 import { resolveRunForRequest } from "./resolve-run.js";
-import { createBlobServiceClient, extractBlobName } from "./blob-helpers.js";
+import { downloadBlobToResponse } from "./blob-helpers.js";
 
 async function handleAtif(
   ctx: RouteContext,
@@ -31,36 +31,17 @@ async function handleAtif(
   const turns = targetRun.turns;
   const turn = turns?.find((t: { iteration: number }) => t.iteration === iterNum);
   const atifUrl = turn?.atifUrl;
-  const label = `${id}-iteration-${iterNum}`;
 
   if (!atifUrl) {
     res.status(404).json({ error: "No ATIF trajectory available" });
     return;
   }
 
-  const blobServiceClient = createBlobServiceClient(ctx);
-
-  const blobName = extractBlobName(atifUrl);
-  if (!blobName) {
-    res.status(500).json({ error: "Invalid ATIF URL format" });
-    return;
-  }
-  const containerClient = blobServiceClient.getContainerClient("snapshots");
-  const blobClient = containerClient.getBlockBlobClient(blobName);
-
-  const downloadResponse = await blobClient.download();
-  if (!downloadResponse.readableStreamBody) {
-    res.status(500).json({ error: "Failed to download ATIF file" });
-    return;
-  }
-
-  res.setHeader("Content-Type", "application/json");
-  res.setHeader("Content-Disposition", `attachment; filename="${label}.trajectory.json"`);
-  if (downloadResponse.contentLength) {
-    res.setHeader("Content-Length", downloadResponse.contentLength);
-  }
-
-  downloadResponse.readableStreamBody.pipe(res);
+  await downloadBlobToResponse(ctx, res, atifUrl, {
+    contentType: "application/json",
+    filename: `${id}-iteration-${iterNum}.trajectory.json`,
+    label: "ATIF",
+  });
 }
 
 export function registerRequestsAtifRoutes(ctx: RouteContext): void {

@@ -8,7 +8,7 @@ import type { Response } from "express";
 import { apiRoute } from "../../openapi/api-route.js";
 import type { RouteContext } from "../../route-context.js";
 import { resolveRunForRequest } from "./resolve-run.js";
-import { createBlobServiceClient, extractBlobName } from "./blob-helpers.js";
+import { downloadBlobToResponse } from "./blob-helpers.js";
 
 async function handleHar(
   ctx: RouteContext,
@@ -41,29 +41,11 @@ async function handleHar(
     return;
   }
 
-  const blobServiceClient = createBlobServiceClient(ctx);
-
-  const blobName = extractBlobName(harUrl);
-  if (!blobName) {
-    res.status(500).json({ error: "Invalid HAR URL format" });
-    return;
-  }
-  const containerClient = blobServiceClient.getContainerClient("snapshots");
-  const blobClient = containerClient.getBlockBlobClient(blobName);
-
-  const downloadResponse = await blobClient.download();
-  if (!downloadResponse.readableStreamBody) {
-    res.status(500).json({ error: "Failed to download HAR file" });
-    return;
-  }
-
-  res.setHeader("Content-Type", "application/json");
-  res.setHeader("Content-Disposition", `attachment; filename="${label}.har"`);
-  if (downloadResponse.contentLength) {
-    res.setHeader("Content-Length", downloadResponse.contentLength);
-  }
-
-  downloadResponse.readableStreamBody.pipe(res);
+  await downloadBlobToResponse(ctx, res, harUrl, {
+    contentType: "application/json",
+    filename: `${label}.har`,
+    label: "HAR",
+  });
 }
 
 export function registerRequestsHarRoutes(ctx: RouteContext): void {
