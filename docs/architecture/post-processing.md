@@ -4,18 +4,12 @@ The post-processing pipeline generates derived artifacts from completed benchmar
 
 ## Architecture Overview
 
-```
-┌──────────────┐     queue message      ┌────────────────────┐
-│ Coder Worker │ ──────────────────────► │  Post-Processor    │
-│ (on run end) │                         │  Worker            │
-└──────────────┘                         │                    │
-                                         │  ┌──────────────┐  │
-┌──────────────┐     backfill/upgrade    │  │ AtifHandler   │  │
-│  Scheduler   │ ──────────────────────► │  └──────────────┘  │
-│  (polling)   │                         │  ┌──────────────┐  │
-└──────────────┘                         │  │ Future...     │  │
-                                         │  └──────────────┘  │
-                                         └────────────────────┘
+```mermaid
+flowchart LR
+    CW[Coder Worker] -->|queue message<br/>on run completion| PP[Post-Processor Worker]
+    SC[Scheduler] -->|backfill / upgrade| PP
+    PP --> AH[AtifHandler]
+    PP --> FH[Future Handlers...]
 ```
 
 Two paths trigger post-processing:
@@ -32,16 +26,18 @@ Two paths trigger post-processing:
 1. Queue message arrives: `{ type: "atif", requestId, runId }`
 2. Worker fetches the request document from MongoDB
 3. For each iteration turn with a `harUrl`:
-   - Downloads the HAR blob from Azure Blob Storage
-   - Calls `atifact`'s `parseHar()` to convert HAR → ATIF v1.7 trajectory
-   - Uploads `atif.trajectory.json` to blob storage at `{requestId}/runs/{runId}/iteration-{N}/atif.trajectory.json`
-   - Updates `run.turns.$.atifUrl` in the request document
+
+    - Downloads the HAR blob from Azure Blob Storage
+    - Calls `atifact`'s `parseHar()` to convert HAR → ATIF v1.7 trajectory
+    - Uploads `atif.trajectory.json` to blob storage at `{requestId}/runs/{runId}/iteration-{N}/atif.trajectory.json`
+    - Updates `run.turns.$.atifUrl` in the request document
+
 4. On success, stamps `run.postProcessorVersion` and sets `run.postProcessorStatus: "done"`
 5. Triggers report generation via the API (best-effort, with retry)
 
 ### Blob Storage Layout
 
-```
+```javascript
 {requestId}/
   runs/{runId}/
     iteration-1/
@@ -53,7 +49,7 @@ Two paths trigger post-processing:
 ### API Endpoints
 
 | Endpoint | Description |
-|----------|-------------|
+| --- | --- |
 | `GET /api/v1/requests/:id/atif?iteration=N` | Download ATIF for the latest run |
 | `GET /api/v1/requests/:id/runs/:runId/atif?iteration=N` | Download ATIF for a specific run |
 
@@ -111,14 +107,17 @@ This allows deploying handler improvements and having them automatically applied
 
 ## Status Lifecycle
 
-```
-(no status) ──► queued ──► processing ──► done
-                                    └──► failed
+```mermaid
+stateDiagram-v2
+    [*] --> queued
+    queued --> processing
+    processing --> done
+    processing --> failed
 ```
 
 | Status | Meaning |
-|--------|---------|
-| _(absent)_ | Run hasn't been dispatched for post-processing yet |
+| --- | --- |
+| *(absent)* | Run hasn't been dispatched for post-processing yet |
 | `queued` | Message sent to queue, awaiting pickup |
 | `processing` | Worker is actively processing |
 | `done` | Post-processing completed successfully |
@@ -127,7 +126,7 @@ This allows deploying handler improvements and having them automatically applied
 ## Configuration
 
 | Environment Variable | Default | Description |
-|---------------------|---------|-------------|
+| --- | --- | --- |
 | `AZURE_STORAGE_QUEUE_POSTPROCESSOR` | `post-processor-queue` | Queue name for post-processor messages |
 | `SCHEDULER_PP_POLL_INTERVAL_MS` | `30000` | Scheduler backfill polling interval |
 | `BATCH_SIZE` | `1` | Messages to process per poll (worker-side) |
