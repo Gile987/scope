@@ -5,7 +5,8 @@ Best practices for writing and maintaining documentation in this repository.
 ## When to Use
 
 Use this skill when:
-1. Writing or updating architecture docs (`docs/architecture/`)
+
+1. Writing or updating any documentation in `docs/`
 2. Adding diagrams to markdown files
 3. Creating README or onboarding documentation
 
@@ -18,7 +19,7 @@ Mermaid is natively rendered by GitHub, the portal markdown viewer, and most doc
 ### Common Diagram Types
 
 | Use Case | Mermaid Type |
-|----------|-------------|
+| --- | --- |
 | Architecture / data flow | `flowchart LR` or `flowchart TD` |
 | State machines / lifecycles | `stateDiagram-v2` |
 | Sequences / request flows | `sequenceDiagram` |
@@ -27,13 +28,13 @@ Mermaid is natively rendered by GitHub, the portal markdown viewer, and most doc
 
 ### Example
 
-```markdown
+````markdown
 ​```mermaid
 flowchart LR
     A[Service A] -->|REST| B[Service B]
     B --> C[(Database)]
 ​```
-```
+````
 
 ### Guidelines
 
