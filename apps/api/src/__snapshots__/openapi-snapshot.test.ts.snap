@@ -7757,6 +7757,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "200": {
             "description": "ATIF v1.7 trajectory JSON file",
           },
+          "400": {
+            "description": "Missing or invalid iteration",
+          },
           "404": {
             "description": "Not found",
           },

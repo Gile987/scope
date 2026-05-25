@@ -1,117 +1,45 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { RestError } from "@azure/storage-blob";
 import { z } from "zod";
-import type { RunState } from "shared";
-import type { Response } from "express";
-import { apiRoute } from "../../openapi/api-route.js";
 import type { RouteContext } from "../../route-context.js";
-import { resolveRunForRequest } from "./resolve-run.js";
 import { downloadBlobToResponse } from "./blob-helpers.js";
+import { registerArtifactRoutes } from "./artifact-route.js";
 
-async function handleAtif(
-  ctx: RouteContext,
-  res: Response,
-  targetRun: RunState,
-  id: string,
-  iterationParam: string | undefined,
-): Promise<void> {
-  if (!iterationParam) {
-    res.status(400).json({ error: "Missing required query parameter: iteration" });
-    return;
-  }
+export function registerRequestsAtifRoutes(ctx: RouteContext): void {
+  registerArtifactRoutes(ctx, {
+    path: "atif",
+    summary: "Download ATIF trajectory file for a specific iteration",
+    perRunSummary: "Download ATIF trajectory file for a specific attempt and iteration",
+    responseDescription: "ATIF v1.7 trajectory JSON file",
+    errorResponses: { 400: { description: "Missing or invalid iteration" }, 404: { description: "Not found" } },
+    query: z.object({ iteration: z.string().describe("The iteration number (1-based)") }),
+    blobNotFoundMessage: "ATIF file not found — the blob may have been deleted or is no longer available",
+    handler: async (ctx, req, res, targetRun, id) => {
+      const iterationParam = req.query.iteration as string | undefined;
+      if (!iterationParam) {
+        res.status(400).json({ error: "Missing required query parameter: iteration" });
+        return;
+      }
 
-  const iterNum = parseInt(iterationParam, 10);
-  if (isNaN(iterNum) || iterNum < 1) {
-    res.status(400).json({ error: "Invalid iteration number" });
-    return;
-  }
+      const iterNum = parseInt(iterationParam, 10);
+      if (isNaN(iterNum) || iterNum < 1) {
+        res.status(400).json({ error: "Invalid iteration number" });
+        return;
+      }
 
-  const turns = targetRun.turns;
-  const turn = turns?.find((t: { iteration: number }) => t.iteration === iterNum);
-  const atifUrl = turn?.atifUrl;
+      const turn = targetRun.turns?.find((t: { iteration: number }) => t.iteration === iterNum);
+      if (!turn?.atifUrl) {
+        res.status(404).json({ error: "No ATIF trajectory available" });
+        return;
+      }
 
-  if (!atifUrl) {
-    res.status(404).json({ error: "No ATIF trajectory available" });
-    return;
-  }
-
-  await downloadBlobToResponse(ctx, res, atifUrl, {
-    contentType: "application/json",
-    filename: `${id}-iteration-${iterNum}.trajectory.json`,
-    label: "ATIF",
+      await downloadBlobToResponse(ctx, res, turn.atifUrl, {
+        contentType: "application/json",
+        filename: `${id}-iteration-${iterNum}.trajectory.json`,
+        label: "ATIF",
+      });
+    },
   });
 }
 
-export function registerRequestsAtifRoutes(ctx: RouteContext): void {
-
-// Request-level ATIF download
-apiRoute(ctx.app, ctx.registry, {
-  method: "get",
-  path: "/api/v1/requests/:id/atif",
-  tags: ["Requests"],
-  summary: "Download ATIF trajectory file for a specific iteration",
-  params: z.object({ id: z.string() }),
-  query: z.object({ iteration: z.string().describe("The iteration number (1-based)") }),
-  response: z.any(),
-  rawResponse: true,
-  responseDescription: "ATIF v1.7 trajectory JSON file",
-  errorResponses: { 400: { description: "Missing or invalid iteration" }, 404: { description: "Not found" } },
-  handler: async (req, res) => {
-    try {
-      const { id } = req.params;
-      const iterationParam = req.query.iteration as string | undefined;
-
-      const resource = await ctx.requestCollection.findOne({ _id: id });
-      if (!resource) {
-        res.status(404).json({ error: "Request not found" });
-        return;
-      }
-
-      await handleAtif(ctx, res, resource.run!, id, iterationParam);
-    } catch (error) {
-      if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
-        res.status(404).json({ error: "ATIF file not found — the blob may have been deleted or is no longer available" });
-        return;
-      }
-      throw error;
-    }
-  },
-});
-
-// Per-run ATIF download
-apiRoute(ctx.app, ctx.registry, {
-  method: "get",
-  path: "/api/v1/requests/:id/runs/:runId/atif",
-  tags: ["Requests"],
-  summary: "Download ATIF trajectory file for a specific attempt and iteration",
-  params: z.object({ id: z.string(), runId: z.string() }),
-  query: z.object({ iteration: z.string().describe("The iteration number (1-based)") }),
-  response: z.any(),
-  rawResponse: true,
-  responseDescription: "ATIF v1.7 trajectory JSON file",
-  errorResponses: { 404: { description: "Not found" } },
-  handler: async (req, res) => {
-    try {
-      const { id, runId } = req.params;
-      const iterationParam = req.query.iteration as string | undefined;
-
-      const resolved = await resolveRunForRequest(ctx, id, runId);
-      if ("error" in resolved) {
-        res.status(resolved.status).json({ error: resolved.error });
-        return;
-      }
-
-      await handleAtif(ctx, res, resolved.run, id, iterationParam);
-    } catch (error) {
-      if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
-        res.status(404).json({ error: "ATIF file not found — the blob may have been deleted or is no longer available" });
-        return;
-      }
-      throw error;
-    }
-  },
-});
-
-}
