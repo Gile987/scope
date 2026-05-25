@@ -534,14 +534,6 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
-      "demo": {
-        "options": [
-          "--count",
-          "--message",
-          "--url",
-          "--workers",
-        ],
-      },
       "download": {
         "options": [
           "--dir",
