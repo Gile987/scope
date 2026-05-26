@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { parse as parseYaml } from 'yaml';
-import { PromptFeatureConfig } from '../types/types.js';
+import type { PromptFeatureConfig } from '@scope/core';
 import { PromptFeatureProvider } from './prompt-feature-provider.js';
 
 /**

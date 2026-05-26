@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { TaskPromptDocument, PromptFeatureResult } from '../types/types.js';
+import type { TaskPromptDocument, PromptFeatureResult } from '@scope/core';
 import { computeTaskPromptId } from './task-prompt-id.js';
 
 /**

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { PromptFeatureConfig, PromptFeatureDocument } from '../types/types.js';
+import type { PromptFeatureConfig, PromptFeatureDocument } from '@scope/core';
 
 /**
  * MongoDB-backed prompt feature store for CRUD operations on prompt feature definitions.

@@ -2,4 +2,4 @@
 // Licensed under the MIT License.
 
 export { ExtensionClient } from './extension-client.js';
-export { parseExtensionSpec } from '../types/extension.js';
+export { parseExtensionSpec } from '@scope/core';

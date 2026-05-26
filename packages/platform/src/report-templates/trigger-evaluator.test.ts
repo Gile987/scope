@@ -7,7 +7,7 @@ import type {
   RequestDocument,
   TaskPromptDocument,
   ReportTrigger,
-} from '../types/types.js';
+} from '@scope/core';
 
 // --- Helpers ---
 

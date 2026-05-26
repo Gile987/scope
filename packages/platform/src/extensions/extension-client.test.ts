@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ExtensionClient } from './extension-client.js';
-import { parseExtensionSpec } from '../types/extension.js';
+import { parseExtensionSpec } from '@scope/core';
 
 // Mock global fetch
 const mockFetch = vi.fn();

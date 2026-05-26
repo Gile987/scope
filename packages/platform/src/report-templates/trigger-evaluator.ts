@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import {
+import type {
   ReportTrigger,
   RequestDocument,
   TaskPromptDocument,
   PromptFeatureResult,
-} from '../types/types.js';
+} from '@scope/core';
 
 /**
  * Evaluate whether a report template's trigger matches a completed run.

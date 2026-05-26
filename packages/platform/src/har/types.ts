@@ -1,22 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/**
- * Tool call extracted from a HAR file.
- * Represents a single tool invocation captured during a coding agent session.
- */
-export interface ToolCall {
-  /** Tool call ID (from the LLM response) */
-  id: string;
-  /** Tool/function name */
-  name: string;
-  /** Tool arguments (parsed JSON) */
-  arguments: Record<string, unknown>;
-  /** Tool response content (matched by tool_call_id) */
-  response?: string;
-  /** ISO timestamp of the HTTP request */
-  timestamp?: string;
-}
+// ToolCall is the canonical definition in @scope/core; re-export for backward compat
+export type { ToolCall } from "@scope/core";
 
 /**
  * Minimal HAR 1.2 types — just enough for parsing DevProxy output.

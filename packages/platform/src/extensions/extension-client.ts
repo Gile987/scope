@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { ExtensionConfig, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo } from '../types/extension.js';
-import { parseExtensionSpec } from '../types/extension.js';
+import type { ExtensionConfig, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo } from '@scope/core';
+import { parseExtensionSpec } from '@scope/core';
 
 /** VS Code marketplace Gallery API response types (subset). */
 interface MarketplaceExtension {

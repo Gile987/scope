@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { ReportTemplateDocument } from '../types/types.js';
+import type { ReportTemplateDocument } from '@scope/core';
 
 /**
  * MongoDB-backed store for report template CRUD operations.
