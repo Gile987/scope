@@ -226,6 +226,7 @@ async function main(): Promise<void> {
     redisPassword: process.env.REDIS_PASSWORD || "",
     apiBaseUrl: process.env.SCOPE_MT_API_URL,
     tokenManagerUrl: process.env.TOKEN_MANAGER_URL,
+    postProcessorQueueName: process.env.QUEUE_NAME_POST_PROCESSOR || "post-processor-queue",
   };
 
   const processor = new CopilotProcessor();

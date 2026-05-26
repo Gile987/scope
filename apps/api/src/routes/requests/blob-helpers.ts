@@ -3,6 +3,7 @@
 
 import { BlobServiceClient } from "@azure/storage-blob";
 import { DefaultAzureCredential } from "@azure/identity";
+import type { Response } from "express";
 import type { RouteContext } from "../../route-context.js";
 
 /** Build a BlobServiceClient from the RouteContext storage configuration. */
@@ -28,4 +29,46 @@ export function extractBlobName(
   const idx = parsed.pathname.indexOf(containerPrefix);
   if (idx === -1) return null;
   return parsed.pathname.substring(idx + containerPrefix.length);
+}
+
+export interface DownloadBlobOptions {
+  contentType: string;
+  filename: string;
+  label: string;
+}
+
+/**
+ * Download a blob artifact by its storage URL and pipe it to the HTTP response.
+ * Handles blob-name extraction, Content-Type/Disposition headers, and streaming.
+ */
+export async function downloadBlobToResponse(
+  ctx: RouteContext,
+  res: Response,
+  artifactUrl: string,
+  options: DownloadBlobOptions,
+): Promise<void> {
+  const blobServiceClient = createBlobServiceClient(ctx);
+
+  const blobName = extractBlobName(artifactUrl);
+  if (!blobName) {
+    res.status(500).json({ error: `Invalid ${options.label} URL format` });
+    return;
+  }
+  const containerClient = blobServiceClient.getContainerClient("snapshots");
+  const blobClient = containerClient.getBlockBlobClient(blobName);
+
+  const downloadResponse = await blobClient.download();
+  if (!downloadResponse.readableStreamBody) {
+    res.status(500).json({ error: `Failed to download ${options.label}` });
+    return;
+  }
+
+  res.setHeader("Content-Type", options.contentType);
+  const safeFilename = options.filename.replace(/[\\"]/g, "\\$&");
+  res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
+  if (downloadResponse.contentLength) {
+    res.setHeader("Content-Length", downloadResponse.contentLength);
+  }
+
+  downloadResponse.readableStreamBody.pipe(res);
 }

@@ -207,6 +207,12 @@ export const api = {
     return `${BASE}/requests/${id}/archive`;
   },
 
+  /** Get ATIF trajectory download URL */
+  atifUrl: (id: string, iteration?: number): string => {
+    const qs = iteration ? `?iteration=${iteration}` : "";
+    return `${BASE}/requests/${id}/atif${qs}`;
+  },
+
   /** Download a batch archive of multiple runs as a single .tar.gz */
   batchArchive: async (ids: string[]): Promise<void> => {
     const resp = await fetch(`${BASE}/requests/archive`, {

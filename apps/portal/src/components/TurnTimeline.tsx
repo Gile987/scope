@@ -116,6 +116,20 @@ export function TurnTimeline({ turns, runId, attemptRunId }: TurnTimelineProps) 
                       HAR
                     </Button>
                   )}
+                  {turn.atifUrl && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(api.atifUrl(runId, turn.iteration), "_blank");
+                      }}
+                    >
+                      <Download className="h-3 w-3" />
+                      ATIF
+                    </Button>
+                  )}
                   {turn.videoUrls && turn.videoUrls.length > 0 && (
                     <Button
                       variant="ghost"

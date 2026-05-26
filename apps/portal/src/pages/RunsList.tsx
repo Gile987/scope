@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
+import { EnrichmentBadge } from "@/components/EnrichmentBadge";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, ChevronsLeft, ChevronsRight, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
@@ -36,7 +37,7 @@ import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "postProcessing" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
@@ -53,6 +54,7 @@ const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "priority", label: "Priority" },
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
+  { id: "postProcessing", label: "Enrichment" },
   { id: "report", label: "Report" },
   { id: "attempt", label: "Attempt" },
   { id: "turns", label: "Turns" },
@@ -1593,6 +1595,7 @@ export function RunsList() {
               {isCol("priority") && <TableHead className="w-[60px]">Priority</TableHead>}
               {isCol("status") && <TableHead className="w-[100px]">Status</TableHead>}
               {isCol("outcome") && <TableHead className="w-[100px]">Outcome</TableHead>}
+              {isCol("postProcessing") && <TableHead className="w-[120px]">Enrichment</TableHead>}
               {isCol("report") && <TableHead className="w-[100px]">Report</TableHead>}
               {isCol("attempt") && <TableHead className="w-[60px]">Attempt</TableHead>}
               {isCol("turns") && <TableHead className="w-[80px]">Turns</TableHead>}
@@ -1890,6 +1893,13 @@ function RunRow({
       </TableCell>}
       {isCol("outcome") && <TableCell>
         <OutcomeBadge outcome={run.run?.outcome} />
+      </TableCell>}
+      {isCol("postProcessing") && <TableCell>
+        {run.run?.status === "done" ? (
+          <EnrichmentBadge status={run.run.postProcessorStatus} version={run.run.postProcessorVersion} />
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
       </TableCell>}
       {isCol("report") && <TableCell>
         {reportSummaries?.[run._id] ? (
@@ -2345,6 +2355,10 @@ function GroupRows({
               </div>
             );
           })()}
+        </TableCell>}
+        {/* Enrichment */}
+        {isCol("postProcessing") && <TableCell>
+          <span className="text-xs text-muted-foreground">–</span>
         </TableCell>}
         {/* Report */}
         {isCol("report") && <TableCell>

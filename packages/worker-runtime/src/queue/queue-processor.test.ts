@@ -267,3 +267,101 @@ describe("CodingAgentQueueProcessor.handleRequest redelivery handling", () => {
     expect((h.qp as any).processMultiTurn).toHaveBeenCalledTimes(1);
   });
 });
+
+// ─── Post-processor event-driven dispatch ────────────────────────────────────
+describe("CodingAgentQueueProcessor.enqueuePostProcessing", () => {
+  it("sends a post-processor queue message when postProcessorQueueName is configured", async () => {
+    const configWithPP: QueueProcessorConfig = {
+      ...testConfig,
+      postProcessorQueueName: "post-processor-queue",
+    };
+    const qp = new CodingAgentQueueProcessor(configWithPP, stubProcessor);
+
+    const sendMessage = vi.fn().mockResolvedValue({});
+    (qp as any).postProcessorQueueClient = { sendMessage };
+
+    await (qp as any).enqueuePostProcessing("req-123", "run-456");
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const decoded = JSON.parse(
+      Buffer.from(sendMessage.mock.calls[0][0], "base64").toString(),
+    );
+    expect(decoded).toEqual({ type: "atif", requestId: "req-123", runId: "run-456" });
+  });
+
+  it("does nothing when postProcessorQueueClient is null", async () => {
+    const qp = new CodingAgentQueueProcessor(testConfig, stubProcessor);
+    expect((qp as any).postProcessorQueueClient).toBeNull();
+    await (qp as any).enqueuePostProcessing("req-123", "run-456");
+  });
+
+  it("logs a warning but does not throw on queue send failure", async () => {
+    const configWithPP: QueueProcessorConfig = {
+      ...testConfig,
+      postProcessorQueueName: "post-processor-queue",
+    };
+    const qp = new CodingAgentQueueProcessor(configWithPP, stubProcessor);
+
+    const sendMessage = vi.fn().mockRejectedValue(new Error("queue unavailable"));
+    (qp as any).postProcessorQueueClient = { sendMessage };
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await (qp as any).enqueuePostProcessing("req-123", "run-456");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to enqueue post-processing"),
+      expect.any(Error),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("enqueues post-processing on stale-heartbeat redelivery when run is marked failed", async () => {
+    const configWithPP: QueueProcessorConfig = {
+      ...testConfig,
+      postProcessorQueueName: "post-processor-queue",
+    };
+    const qp = new CodingAgentQueueProcessor(configWithPP, stubProcessor);
+
+    const requestId = "req-stale";
+    const runId = "run-stale";
+    const requestDoc = {
+      _id: requestId,
+      workerType: "coder-acp-copilot",
+      scenario: { criteria: [], task: "x" },
+      run: {
+        _id: runId,
+        status: "processing",
+        attemptNumber: 1,
+        startedAt: new Date(Date.now() - 10 * 60 * 1000),
+      },
+    } as any;
+
+    const findOneAndUpdate = vi.fn().mockResolvedValue(requestDoc);
+    (qp as any).collection = { findOneAndUpdate };
+    (qp as any).safeDeleteMessage = vi.fn().mockResolvedValue(undefined);
+    (qp as any).heartbeatStore = new InMemoryHeartbeatStore();
+    (qp as any).processMultiTurn = vi.fn().mockResolvedValue(undefined);
+
+    const sendMessage = vi.fn().mockResolvedValue({});
+    (qp as any).postProcessorQueueClient = { sendMessage };
+
+    const heartbeat: VisibilityHeartbeat = {
+      stop: () => "pop-1",
+      get popReceipt() { return "pop-1"; },
+    };
+    const message = { messageId: "msg-1", popReceipt: "pop-1", messageText: "" } as any;
+    const log = vi.fn().mockResolvedValue(undefined);
+
+    await (qp as any).handleRequest(requestDoc, message, heartbeat, log, { runId });
+
+    // Should have set postProcessorStatus in the atomic claim
+    const [, update] = findOneAndUpdate.mock.calls[0];
+    expect(update.$set["run.postProcessorStatus"]).toBe("queued");
+
+    // Should have enqueued the message
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const decoded = JSON.parse(
+      Buffer.from(sendMessage.mock.calls[0][0], "base64").toString(),
+    );
+    expect(decoded).toEqual({ type: "atif", requestId, runId });
+  });
+});

@@ -339,6 +339,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
             if (updated) {
               // Run is terminal — drop the Redis liveness heartbeat.
               await this.heartbeatStore.delete(runId);
+              await this.onRunTerminal(documentId, runId);
             }
           }
           if (!updated) {
@@ -396,6 +397,15 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void>;
+
+  /**
+   * Hook called when a run reaches terminal state ("done").
+   * Override in subclasses to trigger follow-up actions (e.g. post-processing).
+   * Default implementation is a no-op.
+   */
+  protected async onRunTerminal(_requestId: string, _runId: string): Promise<void> {
+    // No-op by default — subclasses can override
+  }
 
   /**
    * Delete a queue message, logging a warning instead of throwing on failure.

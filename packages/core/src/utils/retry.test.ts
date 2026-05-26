@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { describe, it, expect, vi } from "vitest";
-import { withRetry, isCosmosDb429 } from "./retry.js";
+import { withRetry, isCosmosDb429, Retry } from "./retry.js";
 
 describe("isCosmosDb429", () => {
   it("returns true for TooManyRequests error", () => {
@@ -91,5 +91,51 @@ describe("withRetry", () => {
 
     expect(onRetry).toHaveBeenCalledTimes(2);
     expect(onRetry).toHaveBeenCalledWith(cosmos429, expect.any(Number));
+  });
+});
+
+describe("Retry decorator", () => {
+  it("retries a decorated method on failure then succeeds", async () => {
+    let attempts = 0;
+
+    class Service {
+      @Retry({ maxRetries: 3, baseDelayMs: 1, isRetryable: () => true })
+      async doWork(): Promise<string> {
+        attempts++;
+        if (attempts < 3) throw new Error("transient");
+        return "done";
+      }
+    }
+
+    const svc = new Service();
+    const result = await svc.doWork();
+    expect(result).toBe("done");
+    expect(attempts).toBe(3);
+  });
+
+  it("throws after retries exhausted", async () => {
+    class Service {
+      @Retry({ maxRetries: 2, baseDelayMs: 1, isRetryable: () => true })
+      async doWork(): Promise<string> {
+        throw new Error("always fails");
+      }
+    }
+
+    const svc = new Service();
+    await expect(svc.doWork()).rejects.toThrow("always fails");
+  });
+
+  it("preserves this context", async () => {
+    class Service {
+      value = "hello";
+
+      @Retry({ maxRetries: 1, baseDelayMs: 1, isRetryable: () => true })
+      async getValue(): Promise<string> {
+        return this.value;
+      }
+    }
+
+    const svc = new Service();
+    expect(await svc.getValue()).toBe("hello");
   });
 });

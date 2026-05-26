@@ -246,6 +246,29 @@ services:
         - action: rebuild
           path: ./pnpm-lock.yaml
 
+  register-version-post-processor:
+    build:
+      target: dev
+
+  post-processor:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/workers/post-processor/src
+          target: /app/apps/workers/post-processor/src
+        - action: sync
+          path: ./packages/shared/src
+          target: /app/packages/shared/src
+        - action: sync
+          path: ./config
+          target: /app/config
+        - action: rebuild
+          path: ./apps/workers/post-processor/package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+
   # Gateway: cargo-watch inside dev container, sync source files in
   gateway:
     build:

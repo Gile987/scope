@@ -61,10 +61,10 @@ export const UpdateReportTemplateInputSchema = z
     name: z.string().optional(),
     description: z.string().optional(),
     userPrompt: z.string().optional(),
-    systemPrompt: ReportTemplateSystemPromptSchema.optional(),
+    systemPrompt: ReportTemplateSystemPromptSchema.nullable().optional(),
     trigger: ReportTriggerSchema.optional(),
-    model: z.string().optional(),
-    timeoutMs: z.number().int().positive().optional(),
+    model: z.string().nullable().optional(),
+    timeoutMs: z.number().int().positive().nullable().optional(),
   })
   .openapi("UpdateReportTemplateInput");
 
