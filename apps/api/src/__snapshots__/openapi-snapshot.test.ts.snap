@@ -2784,17 +2784,33 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "model": {
-            "type": "string",
+            "type": [
+              "string",
+              "null",
+            ],
           },
           "name": {
             "type": "string",
           },
           "systemPrompt": {
-            "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
+              },
+              {
+                "type": [
+                  "object",
+                  "null",
+                ],
+              },
+            ],
           },
           "timeoutMs": {
             "exclusiveMinimum": 0,
-            "type": "integer",
+            "type": [
+              "integer",
+              "null",
+            ],
           },
           "trigger": {
             "$ref": "#/components/schemas/ReportTrigger",
@@ -7247,6 +7263,45 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/{id}/atif": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "The iteration number (1-based)",
+            "in": "query",
+            "name": "iteration",
+            "required": true,
+            "schema": {
+              "description": "The iteration number (1-based)",
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "ATIF v1.7 trajectory JSON file",
+          },
+          "400": {
+            "description": "Missing or invalid iteration",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download ATIF trajectory file for a specific iteration",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/{id}/cancel": {
       "post": {
         "responses": {
@@ -7663,6 +7718,53 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Download full run archive for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/atif": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "The iteration number (1-based)",
+            "in": "query",
+            "name": "iteration",
+            "required": true,
+            "schema": {
+              "description": "The iteration number (1-based)",
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "ATIF v1.7 trajectory JSON file",
+          },
+          "400": {
+            "description": "Missing or invalid iteration",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download ATIF trajectory file for a specific attempt and iteration",
         "tags": [
           "Requests",
         ],

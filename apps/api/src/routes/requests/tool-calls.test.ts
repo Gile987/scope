@@ -99,7 +99,7 @@ describe("Tool-calls endpoints", () => {
       expect(res.status).toBe(200);
       expect(res.headers["content-type"]).toMatch("application/x-ndjson");
       expect(res.headers["content-disposition"]).toContain("tool-calls.jsonl");
-      expect(mockGetBlobClient).toHaveBeenCalledWith("req-1/iter-1-tool-calls.jsonl");
+      expect(mockGetBlockBlobClient).toHaveBeenCalledWith("req-1/iter-1-tool-calls.jsonl");
     });
   });
 });

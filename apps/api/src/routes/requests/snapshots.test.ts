@@ -69,6 +69,7 @@ describe("Snapshots endpoints", () => {
     });
 
     it("returns 400 for invalid iteration number", async () => {
+      variant.mockRequest(mocks, "req-1", { _id: "run-1", status: "done", turns: [] });
       const res = await supertest(app).get(snapUrl("req-1", "abc"));
       expect(res.status).toBe(400);
       expect(res.body).toMatchObject({ error: "Invalid iteration number" });

@@ -7,6 +7,7 @@ import { MongoClient } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { RequestScheduler, WorkerTypeConfig } from "./request-scheduler.js";
+import { PostProcessorDispatcher } from "./post-processor-dispatcher.js";
 import type { RequestDocument } from "shared";
 
 // ── Configuration ────────────────────────────────────────────────────
@@ -124,6 +125,26 @@ async function main(): Promise<void> {
   scheduler.start();
   console.log("[Scheduler] Dispatch loop started");
 
+  // Start the post-processor dispatcher
+  const postProcessorQueueName = process.env.QUEUE_NAME_POST_PROCESSOR || "post-processor-queue";
+  const postProcessorQueueClient = createQueueClient(postProcessorQueueName);
+  await postProcessorQueueClient.createIfNotExists();
+  console.log(`[Scheduler] Ensured post-processor queue exists: ${postProcessorQueueName}`);
+
+  const ppPollIntervalMs = parseInt(
+    process.env.SCHEDULER_PP_POLL_INTERVAL_MS || "30000",
+    10,
+  );
+
+  const postProcessorDispatcher = new PostProcessorDispatcher(
+    collection,
+    db,
+    postProcessorQueueClient,
+    ppPollIntervalMs,
+  );
+  postProcessorDispatcher.start();
+  console.log("[Scheduler] Post-processor dispatch loop started");
+
   // Start health check server
   const healthServer = createHealthServer();
   healthServer.listen(HEALTH_PORT, () => {
@@ -134,6 +155,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     console.log("[Scheduler] Shutting down...");
     await scheduler.stop();
+    await postProcessorDispatcher.stop();
     healthServer.close();
     await mongoClient.close();
     console.log("[Scheduler] Shutdown complete");
