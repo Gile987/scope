@@ -26,6 +26,9 @@ importers:
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
+      turbo:
+        specifier: ^2.9.15
+        version: 2.9.15
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@22.19.10)(happy-dom@20.9.0)(jiti@1.21.7)(msw@2.14.6(@types/node@22.19.10)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.3)
@@ -2931,6 +2934,36 @@ packages:
 
   '@textlint/types@15.5.2':
     resolution: {integrity: sha512-sJOrlVLLXp4/EZtiWKWq9y2fWyZlI8GP+24rnU5avtPWBIMm/1w97yzKrAqYF8czx2MqR391z5akhnfhj2f/AQ==}
+
+  '@turbo/darwin-64@2.9.15':
+    resolution: {integrity: sha512-nnDo9R1Df+s2x6jxlERtbg7xRpuicf8p4J2krcnjeaMBt3q9V41pGXa4t9YM2Y4ozozsVJ+CH405CJUrWIQK4Q==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@turbo/darwin-arm64@2.9.15':
+    resolution: {integrity: sha512-fDSx56oqoFuS+yUQw7hqjQTkjrSLdMcplhuLC8HcSkWC6YrpwEmUUYsPYHPxy4ALvLxnmPQuk6XoSD8tdkjP+g==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@turbo/linux-64@2.9.15':
+    resolution: {integrity: sha512-/bmxn+x/xE+oh0VzEXt/zf2zsORAYZPrL3db5/VrXzYt0Z4wxcvffwJBGlSfla2smfS1BLGBiyWldJlWDXJVXA==}
+    cpu: [x64]
+    os: [linux]
+
+  '@turbo/linux-arm64@2.9.15':
+    resolution: {integrity: sha512-cbOaDe1ijz5As+mimOOHgmRMolZZZO7miNBHHp5xdiYMm2Q/Dwu1JVLx/Kw4s7xjocG/oEoHrpHrxpEAIEfNiw==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@turbo/windows-64@2.9.15':
+    resolution: {integrity: sha512-/Fzm7afui7uK7dFBwrTXKuDhBBTiHk5I+hMVAPMR7cqQyDo2norCNUsN9PdNuYcmzYbhSOxzz498wQYvSAz29w==}
+    cpu: [x64]
+    os: [win32]
+
+  '@turbo/windows-arm64@2.9.15':
+    resolution: {integrity: sha512-fOHEsLcqVdFXLw2ApWv4gxwfHzkUnpo9rHGml+9+dyHj148m/Bc+556kEvb5+4u6prI1LMd8zEZE2HcO6Jn2VQ==}
+    cpu: [arm64]
+    os: [win32]
 
   '@tybys/wasm-util@0.10.2':
     resolution: {integrity: sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg==}
@@ -5944,6 +5977,10 @@ packages:
     resolution: {integrity: sha512-1h/Lnq9yajKY2PEbBadPXj3VxsDDu844OnaAo52UVmIzIvwwtBPIuNvkjuzBlTWpfJyUbG3ez0KSBibQkj4ojg==}
     engines: {node: '>=0.6.11 <=0.7.0 || >=0.7.3'}
 
+  turbo@2.9.15:
+    resolution: {integrity: sha512-VpKvD9Z0Hu/xrGUAYX1wnhfpqv835wIwGqeKfulvBPTOcDap0E3nFwyzCAVV85fB1sBcBDEfTP+7FSW7GzwWSQ==}
+    hasBin: true
+
   tweetnacl@0.14.5:
     resolution: {integrity: sha512-KXXFFdAbFXY4geFIwoyNK+f5Z1b7swfXABfL7HXCmoIWMKU3dmS26672A4EeQtDzLKy7SXmfBu51JolvEKwtGA==}
 
@@ -8126,6 +8163,24 @@ snapshots:
   '@textlint/types@15.5.2':
     dependencies:
       '@textlint/ast-node-types': 15.5.2
+
+  '@turbo/darwin-64@2.9.15':
+    optional: true
+
+  '@turbo/darwin-arm64@2.9.15':
+    optional: true
+
+  '@turbo/linux-64@2.9.15':
+    optional: true
+
+  '@turbo/linux-arm64@2.9.15':
+    optional: true
+
+  '@turbo/windows-64@2.9.15':
+    optional: true
+
+  '@turbo/windows-arm64@2.9.15':
+    optional: true
 
   '@tybys/wasm-util@0.10.2':
     dependencies:
@@ -11747,6 +11802,15 @@ snapshots:
     optional: true
 
   tunnel@0.0.6: {}
+
+  turbo@2.9.15:
+    optionalDependencies:
+      '@turbo/darwin-64': 2.9.15
+      '@turbo/darwin-arm64': 2.9.15
+      '@turbo/linux-64': 2.9.15
+      '@turbo/linux-arm64': 2.9.15
+      '@turbo/windows-64': 2.9.15
+      '@turbo/windows-arm64': 2.9.15
 
   tweetnacl@0.14.5: {}
 
