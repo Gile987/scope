@@ -11,19 +11,19 @@
       "import": "./dist/index.js"
     },
     "./criteria-store": {
-      "source": "./src/criteria/criteria-store.ts",
-      "types": "./dist/criteria/criteria-store.d.ts",
-      "import": "./dist/criteria/criteria-store.js"
+      "source": "./src/criteria-store.ts",
+      "types": "./dist/criteria-store.d.ts",
+      "import": "./dist/criteria-store.js"
     },
     "./criteria-provider": {
-      "source": "./src/criteria/criteria-provider.ts",
-      "types": "./dist/criteria/criteria-provider.d.ts",
-      "import": "./dist/criteria/criteria-provider.js"
+      "source": "./src/criteria-provider.ts",
+      "types": "./dist/criteria-provider.d.ts",
+      "import": "./dist/criteria-provider.js"
     },
     "./criteria-provider-factory": {
-      "source": "./src/criteria/criteria-provider-factory.ts",
-      "types": "./dist/criteria/criteria-provider-factory.d.ts",
-      "import": "./dist/criteria/criteria-provider-factory.js"
+      "source": "./src/criteria-provider-factory.ts",
+      "types": "./dist/criteria-provider-factory.d.ts",
+      "import": "./dist/criteria-provider-factory.js"
     }
   },
   "scripts": {
@@ -32,23 +32,15 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "@asteasolutions/zod-to-openapi": "^8.5.0",
-    "@azure/identity": "^4.5.0",
-    "@azure/storage-blob": "^12.26.0",
-    "@azure/storage-queue": "^12.24.0",
-    "cockatiel": "^3.2.1",
-    "gray-matter": "^4.0.3",
-    "ioredis": "^5.4.1",
-    "mongodb": "^6.12.0",
-    "tar": "^7.4.0",
-    "uuid": "^10.0.0",
-    "yaml": "^2.8.3",
-    "zod": "^4.3.6"
+    "@scope/core": "workspace:*",
+    "@scope/secrets": "workspace:*",
+    "@scope/platform": "workspace:*",
+    "@scope/agent-protocol": "workspace:*",
+    "@scope/criteria": "workspace:*",
+    "@scope/worker-runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
-    "@types/tar": "^6.1.13",
-    "@types/uuid": "^10.0.0",
     "typescript": "^5.6.2"
   }
 }

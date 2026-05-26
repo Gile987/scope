@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { McpServerConfig } from '../types/mcp.js';
+import type { McpServerConfig } from '@scope/core';
 
 /** Maps DB transport type to MCPJungle transport name */
 const TRANSPORT_MAP: Record<string, string> = {

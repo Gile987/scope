@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CriteriaConfig } from '../types/types.js';
+import type { CriteriaConfig } from '@scope/core';
 import { CriteriaProvider } from './criteria-provider.js';
 
 interface CacheEntry {

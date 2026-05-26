@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { SkillConfig, SkillRevisionDocument } from '../types/skill.js';
+import type { SkillConfig, SkillRevisionDocument } from '@scope/core';
 
 /**
  * Client for resolving skill revision refs via the Scope REST API.

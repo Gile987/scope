@@ -17,7 +17,7 @@ import { parseSkillMd } from './skill-parser.js';
 import { validateSkillFrontmatter } from './skill-validator.js';
 import { buildSkillRevisionRef } from './skill-revision-id.js';
 import { SkillRevisionStore } from './skill-revision-store.js';
-import type { SkillRevisionDocument } from '../types/skill.js';
+import type { SkillRevisionDocument } from '@scope/core';
 
 /** Options for the skill resolver */
 export interface SkillResolverOptions {

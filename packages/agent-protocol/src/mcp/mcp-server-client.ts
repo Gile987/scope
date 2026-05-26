@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { McpServerConfig, McpServerDocument } from '../types/mcp.js';
+import type { McpServerConfig, McpServerDocument } from '@scope/core';
 
 /**
  * Client for resolving MCP server slugs via the Scope REST API.

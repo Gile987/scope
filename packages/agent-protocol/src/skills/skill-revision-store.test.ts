@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SkillRevisionStore } from './skill-revision-store.js';
 import { computeSkillRevisionId } from './skill-revision-id.js';
-import type { SkillRevisionDocument } from '../types/skill.js';
+import type { SkillRevisionDocument } from '@scope/core';
 
 /** Build a full SkillRevisionDocument with required defaults */
 function makeRevDoc(overrides: Partial<SkillRevisionDocument> & Pick<SkillRevisionDocument, '_id' | 'ref' | 'source' | 'skillName' | 'commitHash' | 'name' | 'content'>): SkillRevisionDocument {

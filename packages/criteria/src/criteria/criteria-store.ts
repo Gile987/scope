@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { CriteriaConfig, CriteriaDocument } from '../types/types.js';
+import type { CriteriaConfig, CriteriaDocument } from '@scope/core';
 import { DependencyGraph } from '../graph/dependency-graph.js';
 
 /**

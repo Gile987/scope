@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { SkillConfig } from '../types/skill.js';
+import type { SkillConfig } from '@scope/core';
 
 /**
  * Format a lightweight discovery prompt listing available skills.

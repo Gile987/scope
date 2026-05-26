@@ -20,7 +20,7 @@ import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
 import { SkillClient } from './skill-client.js';
-import type { SkillConfig } from '../types/skill.js';
+import type { SkillConfig } from '@scope/core';
 
 /** Directories where extracted skills are placed, per agent convention. */
 const SKILL_INSTALL_DIRS = [

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CriteriaConfig } from '../types/types.js';
+import type { CriteriaConfig } from '@scope/core';
 
 /**
  * Unified interface for loading criteria from different sources.

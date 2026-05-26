@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { McpServerHeader } from '../types/mcp.js';
+import type { McpServerHeader } from '@scope/core';
 
 /**
  * Thrown when the Token Manager is configured but unreachable (network failure).

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import type { SkillRevisionDocument } from '../types/skill.js';
+import type { SkillRevisionDocument } from '@scope/core';
 import { computeSkillRevisionId } from './skill-revision-id.js';
 
 /**

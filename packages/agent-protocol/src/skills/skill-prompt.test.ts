@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { formatSkillsPrompt, formatSkillsDiscoveryPrompt, prependSkillsToMessage } from './skill-prompt.js';
-import type { SkillConfig } from '../types/skill.js';
+import type { SkillConfig } from '@scope/core';
 
 describe('formatSkillsPrompt (legacy full-content)', () => {
   it('returns empty string for no skills', () => {

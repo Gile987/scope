@@ -18,10 +18,16 @@
   },
   "dependencies": {
     "@scope/core": "workspace:*",
-    "@scope/platform": "workspace:*"
+    "@scope/platform": "workspace:*",
+    "gray-matter": "^4.0.3",
+    "mongodb": "^6.12.0",
+    "tar": "^7.4.0",
+    "uuid": "^10.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
+    "@types/tar": "^6.1.13",
+    "@types/uuid": "^10.0.0",
     "typescript": "^5.6.2"
   }
 }

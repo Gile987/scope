@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { parse as parseYaml } from 'yaml';
-import { CriteriaConfig } from '../types/types.js';
+import type { CriteriaConfig } from '@scope/core';
 import { CriteriaProvider } from './criteria-provider.js';
 
 /**

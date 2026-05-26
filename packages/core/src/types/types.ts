@@ -4,10 +4,23 @@
 import type { McpServerConfig } from './mcp.js';
 import type { SkillConfig } from './skill.js';
 import type { ExtensionConfig } from './extension.js';
-import type { ToolCall } from '../har/types.js';
 
-// Re-export ToolCall so consumers can import from types
-export type { ToolCall } from '../har/types.js';
+/**
+ * Tool call extracted from a HAR file.
+ * Represents a single tool invocation captured during a coding agent session.
+ */
+export interface ToolCall {
+  /** Tool call ID (from the LLM response) */
+  id: string;
+  /** Tool/function name */
+  name: string;
+  /** Tool arguments (parsed JSON) */
+  arguments: Record<string, unknown>;
+  /** Tool response content (matched by tool_call_id) */
+  response?: string;
+  /** ISO timestamp of the HTTP request */
+  timestamp?: string;
+}
 
 /** LLM token usage counters for a single interaction */
 export interface TokenUsage {

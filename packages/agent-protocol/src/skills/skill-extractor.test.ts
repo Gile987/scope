@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { extractSkillsToWorkspace } from './skill-extractor.js';
-import type { SkillConfig } from '../types/skill.js';
+import type { SkillConfig } from '@scope/core';
 import { SkillClient } from './skill-client.js';
 import { mkdirSync, existsSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
