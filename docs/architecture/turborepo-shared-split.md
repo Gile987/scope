@@ -139,7 +139,7 @@ Phases 2 and 3 are **alternatives** (not sequential). Both branch off Phase 1 (`
 
 ## Phase 3: Nx Spike (Pending)
 
-Implement the same task orchestration and Docker optimization using Nx instead of Turborepo, so the team can compare both tools hands-on with our actual repo.
+Implement the same task orchestration and Docker optimization using Nx instead of Turborepo, so the team can compare both tools hands-on with our actual repo. Must include Docker integration to allow apples-to-apples comparison with Phase 2.
 
 ### 3.1 Install
 
@@ -153,18 +153,24 @@ pnpm add -Dw nx @nx/js
 - Per-package `project.json` files (or inferred from package.json)
 - `nx affected` for change-based builds
 
-### 3.3 Comparison Criteria
+### 3.3 Docker Optimization
+
+- Use Nx-equivalent of `turbo prune` for minimal Docker contexts (e.g., `nx graph --targets=build` + custom pruning, or `@nx/workspace:run-commands`)
+- Update Dockerfiles to leverage Nx build outputs
+- Update `build-acr.sh` and docker-compose watch paths
+
+### 3.4 Comparison Criteria
 
 - Setup complexity (config files, boilerplate)
 - Build speed (cold and cached)
-- Docker integration (equivalent of `turbo prune`)
+- Docker integration (pruning, minimal contexts)
 - `affected` accuracy and developer experience
 - CI cache integration (GitHub Actions)
 - Learning curve for the team
 
-### 3.4 Deliverable
+### 3.5 Deliverable
 
-A branch with Nx configured, allowing the team to run both side-by-side and make a final decision based on real experience rather than docs/marketing.
+A branch with Nx configured including Docker optimization, allowing the team to run both side-by-side and make a final decision based on real experience rather than docs/marketing.
 
 ## Parallel Work Note
 
