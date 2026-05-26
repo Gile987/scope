@@ -85,5 +85,13 @@
     "copilot"
   ],
   "license": "MIT",
-  "packageManager": "pnpm@10.29.1"
+  "packageManager": "pnpm@10.29.1",
+  "pnpm": {
+    "overrides": {
+      "protobufjs": ">=7.5.8",
+      "@protobufjs/utf8": ">=1.1.1",
+      "@github/copilot": ">=1.0.43",
+      "fast-uri": ">=3.1.2"
+    }
+  }
 }
