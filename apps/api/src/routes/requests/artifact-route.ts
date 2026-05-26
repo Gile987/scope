@@ -89,7 +89,12 @@ export function registerArtifactRoutes(ctx: RouteContext, options: ArtifactRoute
           return;
         }
 
-        await handler(ctx, req, res, resource.run!, id);
+        if (!resource.run) {
+          res.status(404).json({ error: "Request has no run data" });
+          return;
+        }
+
+        await handler(ctx, req, res, resource.run, id);
       } catch (error) {
         if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
           res.status(404).json({ error: blobNotFoundMessage });

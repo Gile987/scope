@@ -82,7 +82,17 @@ export class PostProcessorDispatcher {
           }),
         ).toString("base64");
 
-        await this.queueClient.sendMessage(message);
+        try {
+          await this.queueClient.sendMessage(message);
+        } catch (err) {
+          // Roll back status so the doc is picked up on next poll cycle
+          await this.collection.updateOne(
+            { _id: claimed._id } as any,
+            { $unset: { "run.postProcessorStatus": "" } } as any,
+          );
+          console.error(`[PostProcessorDispatcher] Queue send failed for ${claimed._id}, rolled back status:`, err);
+          break; // Stop batch — queue may be unavailable
+        }
         console.log(`[PostProcessorDispatcher] Dispatched ${claimed._id}`);
       }
     } catch (err) {

@@ -21,7 +21,7 @@ vi.mock("atifact/dist/src/parsers/har.js", () => ({
 // Mock fs/promises
 vi.mock("node:fs/promises", () => ({
   writeFile: vi.fn().mockResolvedValue(undefined),
-  unlink: vi.fn().mockResolvedValue(undefined),
+  rm: vi.fn().mockResolvedValue(undefined),
   mkdtemp: vi.fn().mockResolvedValue("/tmp/atif-test"),
 }));
 

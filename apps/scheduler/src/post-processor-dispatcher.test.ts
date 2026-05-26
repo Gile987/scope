@@ -102,4 +102,24 @@ describe("PostProcessorDispatcher", () => {
 
     expect(queueClient.sendMessage).not.toHaveBeenCalled();
   });
+
+  it("rolls back status when queue send fails", async () => {
+    db._findOne.mockResolvedValue({ _id: "post-processor", version: 1 });
+    collection.findOneAndUpdate
+      .mockResolvedValueOnce({ _id: "req-1", run: { _id: "run-1" } })
+      .mockResolvedValueOnce({ _id: "req-2", run: { _id: "run-2" } });
+    collection.updateOne = vi.fn().mockResolvedValue({});
+    queueClient.sendMessage.mockRejectedValueOnce(new Error("queue unavailable"));
+
+    const dispatcher = new PostProcessorDispatcher(collection, db, queueClient, 60_000, 5);
+    await (dispatcher as any).dispatch();
+
+    // Should have rolled back status for req-1
+    expect(collection.updateOne).toHaveBeenCalledWith(
+      { _id: "req-1" },
+      { $unset: { "run.postProcessorStatus": "" } },
+    );
+    // Should have stopped the batch (req-2 never sent)
+    expect(queueClient.sendMessage).toHaveBeenCalledTimes(1);
+  });
 });

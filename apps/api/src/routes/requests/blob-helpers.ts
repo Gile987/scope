@@ -64,7 +64,8 @@ export async function downloadBlobToResponse(
   }
 
   res.setHeader("Content-Type", options.contentType);
-  res.setHeader("Content-Disposition", `attachment; filename="${options.filename}"`);
+  const safeFilename = options.filename.replace(/[\\"]/g, "\\$&");
+  res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
   if (downloadResponse.contentLength) {
     res.setHeader("Content-Length", downloadResponse.contentLength);
   }

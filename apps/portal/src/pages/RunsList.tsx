@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
+import { EnrichmentBadge } from "@/components/EnrichmentBadge";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, ChevronsLeft, ChevronsRight, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
@@ -1895,19 +1896,7 @@ function RunRow({
       </TableCell>}
       {isCol("postProcessing") && <TableCell>
         {run.run?.status === "done" ? (
-          <Badge
-            variant={
-              run.run.postProcessorStatus === "done" ? "success" :
-              run.run.postProcessorStatus === "failed" ? "destructive" :
-              "secondary"
-            }
-            title={run.run.postProcessorVersion !== undefined ? `Enrichment v${run.run.postProcessorVersion}` : undefined}
-          >
-            {(!run.run.postProcessorStatus || run.run.postProcessorStatus === "queued") && "Pending"}
-            {run.run.postProcessorStatus === "processing" && "Enriching"}
-            {run.run.postProcessorStatus === "done" && "Enriched"}
-            {run.run.postProcessorStatus === "failed" && "Failed"}
-          </Badge>
+          <EnrichmentBadge status={run.run.postProcessorStatus} version={run.run.postProcessorVersion} />
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
         )}

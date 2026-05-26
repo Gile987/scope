@@ -12,7 +12,7 @@
  * And sorts by updatedAt DESC.
  *
  * Cosmos DB handles multi-property equality filters via index intersection on
- * single-field indexes (run.status, deletedAt — from migration 009). For the
+ * single-field indexes (run.status, deletedAt — from migration 014). For the
  * ORDER BY + the key selectivity filter (postProcessorStatus), we create a
  * 2-field compound index on the sort field and the most selective filter.
  */

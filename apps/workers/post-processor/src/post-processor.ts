@@ -67,7 +67,9 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
       return;
     }
 
-    // Set status to "processing"
+    // Set status to "processing".
+    // Concurrency safety: the Azure Storage Queue guarantees at-most-once delivery
+    // via visibility timeout, so only one worker processes a given message at a time.
     await this.collection.updateOne(
       { _id: doc._id } as any,
       { $set: { "run.postProcessorStatus": "processing" } } as any,

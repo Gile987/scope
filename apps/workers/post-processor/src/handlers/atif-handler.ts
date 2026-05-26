@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { writeFile, unlink, mkdtemp } from "node:fs/promises";
+import { writeFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from "../types.js";
@@ -9,6 +9,9 @@ import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from ".
 /**
  * Extracts the blob name (path within the container) from a full blob storage URL.
  * Handles both Azure and Azurite URL formats.
+ *
+ * Note: The container name ("snapshots") is coupled to the BlobStorage client config.
+ * Both use the same container — HAR blobs and ATIF blobs live in "snapshots".
  */
 function extractBlobName(url: string, container = "snapshots"): string | null {
   const parsed = new URL(url);
@@ -97,8 +100,9 @@ export class AtifHandler implements PostProcessHandler {
         }
       } finally {
         // Clean up temp files
-        await unlink(tempHarPath).catch(() => {});
-        await unlink(tempDir).catch(() => {});
+        await rm(tempDir, { recursive: true }).catch((e) => {
+          ctx.log("info", `Cleanup failed for ${tempDir}: ${e}`);
+        });
       }
     }
 
