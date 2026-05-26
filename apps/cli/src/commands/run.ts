@@ -9,16 +9,13 @@ import { tmpdir } from "os";
 import { join, resolve, dirname, basename } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
-import React from "react";
-import { render } from "ink";
-import { DemoApp } from "../components/DemoApp.js";
 import { resolveScenarioAndPersona } from "../config-loader.js";
 import { configureHelp } from "../utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { runGetAction } from "../run-get-action.js";
-import { normalizeUrl, printFollowUpCommands, DEFAULT_WORKERS, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 
 export function registerRunCommands(program: Command): void {
 const run = program
@@ -462,35 +459,6 @@ run
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
     }
-  });
-
-run
-  .command("demo")
-  .description("Run concurrent requests to all coders with a live TUI dashboard")
-  .requiredOption("-m, --message <message>", "Message/prompt to send to all coders")
-  .option("-c, --count <count>", "Number of requests to send to each coder", "5")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-  .option("-w, --workers <workers>", "Comma-separated list of workers", DEFAULT_WORKERS.join(","))
-  .action((options) => {
-    const { message, count, url, workers: workersStr } = options;
-    const workersList = workersStr.split(",").map((w: string) => w.trim());
-    const countNum = parseInt(count, 10);
-
-    if (isNaN(countNum) || countNum < 1) {
-      console.error(errorText("Error: count must be a positive integer"));
-      process.exit(1);
-    }
-
-    console.clear();
-    const { waitUntilExit } = render(
-      React.createElement(DemoApp, {
-        apiUrl: url,
-        message,
-        count: countNum,
-        workers: workersList,
-      })
-    );
-    waitUntilExit().catch(() => {});
   });
 
 run
