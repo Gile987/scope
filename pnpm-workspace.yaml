@@ -15,7 +15,6 @@ packages:
   - packages/agent-protocol
   - packages/criteria
   - packages/worker-runtime
-  - packages/shared
   - packages/version-checking
   - packages/github-auth
   - packages/model-scanning

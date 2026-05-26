@@ -951,34 +951,6 @@ importers:
         specifier: ^5.6.2
         version: 5.9.3
 
-  packages/shared:
-    dependencies:
-      '@scope/agent-protocol':
-        specifier: workspace:*
-        version: link:../agent-protocol
-      '@scope/core':
-        specifier: workspace:*
-        version: link:../core
-      '@scope/criteria':
-        specifier: workspace:*
-        version: link:../criteria
-      '@scope/platform':
-        specifier: workspace:*
-        version: link:../platform
-      '@scope/secrets':
-        specifier: workspace:*
-        version: link:../secrets
-      '@scope/worker-runtime':
-        specifier: workspace:*
-        version: link:../worker-runtime
-    devDependencies:
-      '@types/node':
-        specifier: ^22.7.0
-        version: 22.19.10
-      typescript:
-        specifier: ^5.6.2
-        version: 5.9.3
-
   packages/version-checking:
     devDependencies:
       typescript:
