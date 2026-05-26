@@ -14,12 +14,13 @@ describe("deriveCapabilities", () => {
   });
 
   describe("github-pat-classic", () => {
-    it("returns copilot capabilities when copilot scope is present", () => {
+    it("returns github-public-api + copilot capabilities when copilot scope is present", () => {
       const result: KeyValidationResult = {
         status: "valid",
         scopes: ["copilot", "repo"],
       };
       expect(deriveCapabilities("github-pat-classic", result)).toEqual([
+        "github-public-api",
         "copilot-sdk",
         "copilot-cli",
       ]);
@@ -34,28 +35,33 @@ describe("deriveCapabilities", () => {
       expect(caps).not.toContain("copilot-models");
     });
 
-    it("returns empty array when copilot scope is missing", () => {
+    it("returns just github-public-api when copilot scope is missing", () => {
       const result: KeyValidationResult = {
         status: "valid",
         scopes: ["repo"],
       };
-      expect(deriveCapabilities("github-pat-classic", result)).toEqual([]);
+      expect(deriveCapabilities("github-pat-classic", result)).toEqual([
+        "github-public-api",
+      ]);
     });
   });
 
   describe("github-pat-fine-grained", () => {
-    it("returns github-models when capability was probed", () => {
+    it("returns github-public-api + github-models when capability was probed", () => {
       const result: KeyValidationResult = {
         status: "valid",
         capabilities: ["github-models"],
       };
       expect(deriveCapabilities("github-pat-fine-grained", result)).toEqual([
+        "github-public-api",
         "github-models",
       ]);
     });
 
-    it("returns empty array when no capabilities probed", () => {
-      expect(deriveCapabilities("github-pat-fine-grained", validResult)).toEqual([]);
+    it("returns just github-public-api when no capabilities probed", () => {
+      expect(deriveCapabilities("github-pat-fine-grained", validResult)).toEqual([
+        "github-public-api",
+      ]);
     });
   });
 
@@ -68,6 +74,7 @@ describe("deriveCapabilities", () => {
     it("includes all expected capabilities", () => {
       expect(deriveCapabilities("github-oauth", validResult)).toEqual([
         "github-models",
+        "github-public-api",
         "copilot-models",
         "copilot-sdk",
         "copilot-cli",
@@ -92,6 +99,18 @@ describe("deriveCapabilities", () => {
 
     it("returns empty array for non-valid status", () => {
       expect(deriveCapabilities("anthropic-oauth", invalidResult)).toEqual([]);
+    });
+  });
+
+  describe("azure-ai-foundry", () => {
+    it("returns azure-ai-inference when valid", () => {
+      expect(deriveCapabilities("azure-ai-foundry", validResult)).toEqual([
+        "azure-ai-inference",
+      ]);
+    });
+
+    it("returns empty array for non-valid status", () => {
+      expect(deriveCapabilities("azure-ai-foundry", invalidResult)).toEqual([]);
     });
   });
 });

@@ -1,12 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import ModelClient, { isUnexpected } from "@azure-rest/ai-inference";
-import { AzureKeyCredential } from "@azure/core-auth";
+import { isUnexpected } from "@azure-rest/ai-inference";
 import { PromptFeatureConfig, PromptFeatureResult, SuggestedPromptFeature } from "shared";
-import { isGitHubModelsTokenAvailable, acquireGitHubModelsToken } from "./llm-token.js";
-
-const GITHUB_MODELS_ENDPOINT = "https://models.inference.ai.azure.com";
+import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
 
 // ---------------------------------------------------------------------------
 // Generate prompt feature prompt (mirrors criteria generateCriteriaPrompt)
@@ -50,7 +47,7 @@ export interface GeneratePromptFeatureResult {
 }
 
 export function isLlmAvailable(): boolean {
-  return isGitHubModelsTokenAvailable();
+  return inferenceAvailable();
 }
 
 function buildGenerateUserMessage(behavior: string, existing: ExistingPromptFeature[]): string {
@@ -73,10 +70,10 @@ export async function generatePromptFeaturePrompt(
   existingFeatures: ExistingPromptFeature[] = [],
   model?: string,
 ): Promise<GeneratePromptFeatureResult> {
-  const token = await acquireGitHubModelsToken();
-  const llm = ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token));
+  const { client: llm, model: foundryModel } = await acquireInferenceClient();
 
-  const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
+  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
+  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
   const userMessage = buildGenerateUserMessage(behavior, existingFeatures);
 
   const response = await llm.path("/chat/completions").post({
@@ -183,10 +180,10 @@ export async function extractPromptFeatures(
   features: PromptFeatureConfig[],
   model?: string,
 ): Promise<ExtractionResult> {
-  const token = await acquireGitHubModelsToken();
-  const llm = ModelClient(GITHUB_MODELS_ENDPOINT, new AzureKeyCredential(token));
+  const { client: llm, model: foundryModel } = await acquireInferenceClient();
 
-  const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
+  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
+  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
   const userMessage = buildExtractUserMessage(taskText, features);
 
   const response = await llm.path("/chat/completions").post({

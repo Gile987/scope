@@ -112,6 +112,7 @@ export interface CodingAgentDocument {
   modelProvider?: string;     // Model provider (e.g. "github-copilot", "anthropic") — used by scanners to discover agents
   supportedModels: string[];  // Empty array = model selection disabled
   defaultModel?: string;
+  available?: boolean;        // Whether this agent is available for new submissions (default: true)
   versions?: AgentVersion[];  // Registered agent versions (embedded array)
   createdAt: Date;
   updatedAt?: Date;
@@ -234,6 +235,23 @@ export interface RunState {
   turns?: ConversationTurn[];
   workerVersion?: string;
   os?: OsInfo;
+  /** Wall-clock time of the last heartbeat written by the worker actively
+   *  processing this attempt. **Stored in Redis, not Mongo** — the API
+   *  enriches this field on response from a Redis MGET so the portal can
+   *  show "Last heartbeat: Xs ago". The redelivery handler reads it
+   *  directly from Redis to distinguish a real worker crash (stale or
+   *  missing) from a spurious Azure Storage Queue redelivery while the
+   *  original worker is still alive (fresh). Never persisted to Mongo. */
+  lastHeartbeatAt?: Date;
+  /** Identity of the worker process currently (or last) handling this
+   *  attempt. Stamped at message pickup. `instanceId` is a per-process UUID
+   *  generated at worker startup; `podName` comes from `process.env.HOSTNAME`
+   *  when running under Kubernetes. Useful for troubleshooting ("which pod
+   *  ran this?") and for the redelivery handler's log lines. */
+  worker?: {
+    instanceId: string;
+    podName?: string;
+  };
   harUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
@@ -266,6 +284,8 @@ export const RUN_STATE_FIELD_NAMES = [
   "turns",
   "workerVersion",
   "os",
+  "lastHeartbeatAt",
+  "worker",
   "harUrl",
   "videoUrls",
   "setupVideoUrls",

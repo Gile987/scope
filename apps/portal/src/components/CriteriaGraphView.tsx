@@ -33,8 +33,14 @@ interface CriterionNodeData {
 
 // ─── Dagre layout helper ─────────────────────────────────────────────────────
 
-const NODE_WIDTH = 160;
+const NODE_MIN_WIDTH = 140;
 const NODE_HEIGHT = 44;
+const CHAR_WIDTH_PX = 6.5;
+const NODE_PADDING_PX = 50; // padding for dot, gaps, borders
+
+function estimateNodeWidth(label: string): number {
+  return Math.max(NODE_MIN_WIDTH, Math.ceil(label.length * CHAR_WIDTH_PX + NODE_PADDING_PX));
+}
 
 function layoutGraph(
   nodes: Node<CriterionNodeData>[],
@@ -44,8 +50,11 @@ function layoutGraph(
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 50 });
 
+  const widths = new Map<string, number>();
   for (const node of nodes) {
-    g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
+    const w = estimateNodeWidth(node.data.label);
+    widths.set(node.id, w);
+    g.setNode(node.id, { width: w, height: NODE_HEIGHT });
   }
   for (const edge of edges) {
     g.setEdge(edge.source, edge.target);
@@ -55,10 +64,11 @@ function layoutGraph(
 
   const laidOut = nodes.map((node) => {
     const pos = g.node(node.id);
+    const w = widths.get(node.id) ?? NODE_MIN_WIDTH;
     return {
       ...node,
       position: {
-        x: pos.x - NODE_WIDTH / 2,
+        x: pos.x - w / 2,
         y: pos.y - NODE_HEIGHT / 2,
       },
     };
@@ -92,15 +102,15 @@ function CriterionNode({ data }: NodeProps<Node<CriterionNodeData>>) {
   return (
     <div
       className={cn(
-        "rounded-md border px-3 py-2 text-xs font-mono shadow-sm min-w-[140px] max-w-[180px] text-center",
+        "rounded-md border px-3 py-2 text-xs font-mono shadow-sm min-w-[140px] text-center whitespace-nowrap",
         statusStyles[status]
       )}
       title={data.prompt}
     >
       <Handle type="target" position={Position.Top} className="!bg-slate-500 !w-2 !h-2 !border-0" />
-      <div className="flex items-center justify-center gap-1.5 truncate">
+      <div className="flex items-center justify-center gap-1.5">
         <span className={cn("w-2 h-2 rounded-full shrink-0", statusDot[status])} />
-        <span className="truncate">{data.label}</span>
+        <span>{data.label}</span>
       </div>
       {data.iteration !== undefined && (
         <div className="text-[10px] opacity-60 mt-0.5">iter {data.iteration}</div>

@@ -9,16 +9,13 @@ import { tmpdir } from "os";
 import { join, resolve, dirname, basename } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
-import React from "react";
-import { render } from "ink";
-import { DemoApp } from "../components/DemoApp.js";
 import { resolveScenarioAndPersona } from "../config-loader.js";
 import { configureHelp } from "../utils/helpFormatter.js";
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon, styleText } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
 import { runGetAction } from "../run-get-action.js";
-import { normalizeUrl, printFollowUpCommands, DEFAULT_WORKERS, withOutputOption } from "../utils/shared.js";
+import { normalizeUrl, printFollowUpCommands, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 
 export function registerRunCommands(program: Command): void {
 const run = program
@@ -45,7 +42,7 @@ run
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options) => {
     const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion } = options;
@@ -221,7 +218,7 @@ run
   .command("status")
   .description("Get status of a request")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -268,7 +265,7 @@ run
   .command("get")
   .description("Get full details of a run")
   .requiredOption("-i, --id <id>", "Run ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     await runGetAction({ id: options.id, url: options.url, output: options.output });
@@ -278,7 +275,7 @@ run
   .command("logs")
   .description("Stream logs for a request")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .option("--from-start", "Include historical logs from start")
   .action(async (options) => {
     const { id } = options;
@@ -337,7 +334,7 @@ withOutputOption(
 run
   .command("list")
   .description("List all requests")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .option("-w, --worker <worker>", "Filter by worker")
   .option("--submission-id <id>", "Filter by submission ID")
   .option("--turns <expr>", "Filter by actual turns (e.g. '>=5', '<=10', '=3')")
@@ -432,39 +429,10 @@ run
   });
 
 run
-  .command("demo")
-  .description("Run concurrent requests to all coders with a live TUI dashboard")
-  .requiredOption("-m, --message <message>", "Message/prompt to send to all coders")
-  .option("-c, --count <count>", "Number of requests to send to each coder", "5")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
-  .option("-w, --workers <workers>", "Comma-separated list of workers", DEFAULT_WORKERS.join(","))
-  .action((options) => {
-    const { message, count, url, workers: workersStr } = options;
-    const workersList = workersStr.split(",").map((w: string) => w.trim());
-    const countNum = parseInt(count, 10);
-
-    if (isNaN(countNum) || countNum < 1) {
-      console.error(errorText("Error: count must be a positive integer"));
-      process.exit(1);
-    }
-
-    console.clear();
-    const { waitUntilExit } = render(
-      React.createElement(DemoApp, {
-        apiUrl: url,
-        message,
-        count: countNum,
-        workers: workersList,
-      })
-    );
-    waitUntilExit().catch(() => {});
-  });
-
-run
   .command("delete")
   .description("Soft-delete a run (can still be listed with --include-deleted)")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     const { id, url } = options;
     try {
@@ -484,13 +452,58 @@ run
   });
 
 run
+  .command("cancel")
+  .description("Cancel one or more runs (marks as failed and signals active workers to exit)")
+  .requiredOption("-i, --id <ids...>", "Request ID(s) to cancel")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .action(async (options) => {
+    const { id: ids, url } = options;
+    const baseUrl = normalizeUrl(url);
+    try {
+      if (ids.length === 1) {
+        const response = await fetch(`${baseUrl}/api/v1/requests/${ids[0]}/cancel`, { method: "POST" });
+        if (!response.ok) {
+          const error = await response.json();
+          console.error(errorText("Error:"), error.error || JSON.stringify(error));
+          process.exit(1);
+        }
+        const result = await response.json() as { id: string; previousStatus: string; status: string; outcome: string };
+        console.log(`${successText('Cancelled run')} ${value(result.id)} (was ${result.previousStatus})`);
+      } else {
+        const response = await fetch(`${baseUrl}/api/v1/requests/bulk-cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          console.error(errorText("Error:"), error.error || JSON.stringify(error));
+          process.exit(1);
+        }
+        const result = await response.json() as { cancelled: number; skipped: number; results: { id: string; cancelled: boolean; previousStatus?: string; error?: string }[] };
+        for (const r of result.results) {
+          if (r.cancelled) {
+            console.log(`${successText('Cancelled')} ${value(r.id)} (was ${r.previousStatus})`);
+          } else {
+            console.log(`${errorText('Skipped')} ${value(r.id)}: ${r.error}`);
+          }
+        }
+        console.log(`\n${label('Total:')} ${result.cancelled} cancelled, ${result.skipped} skipped`);
+      }
+    } catch (error) {
+      console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+run
   .command("download")
   .description("Download all artifacts of a run (workspaces + run document)")
   .requiredOption("-i, --id <id>", "Request ID")
   .option("-o, --output <path>", "Output file path (default: <id>.tar.gz)")
   .option("-e, --extract", "Extract the archive after downloading")
   .option("-d, --dir <path>", "Extraction directory (implies --extract)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     const { id, url } = options;
     const shouldExtract = options.extract || !!options.dir;
@@ -571,7 +584,7 @@ run
   .option("-o, --output <path>", "Output file path (default: batch-<timestamp>.tar.gz)")
   .option("-e, --extract", "Extract the archive after downloading")
   .option("-d, --dir <path>", "Extraction directory (implies --extract)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     const { url } = options;
     const shouldExtract = options.extract || !!options.dir;
@@ -668,7 +681,7 @@ run
   .description("Upload a run archive to the API (previously downloaded via 'run download')")
   .argument("<path>", "Path to .tar.gz archive or extracted directory")
   .option("--dry-run", "Preview what would be uploaded without sending")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (inputPath: string, options) => {
     const { url, dryRun } = options;
 
@@ -774,7 +787,7 @@ run
   .description("Upload a batch run archive (multiple runs in one .tar.gz, as produced by 'run download-batch')")
   .argument("<path>", "Path to batch .tar.gz archive")
   .option("--dry-run", "Preview what would be uploaded without sending")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (inputPath: string, options) => {
     const { url, dryRun } = options;
 
@@ -854,13 +867,15 @@ run
   .command("retry")
   .description("Retry a request — starts a new attempt while preserving previous attempts in history")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-f, --force", "Allow retrying a successful run")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
-    const { id } = options;
+    const { id, force } = options;
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${id}/retry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: force ? JSON.stringify({ force: true }) : undefined,
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: response.statusText }));
@@ -892,7 +907,7 @@ run
   .command("attempts")
   .description("List all attempts for a request (current + history)")
   .requiredOption("-i, --id <id>", "Request ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;

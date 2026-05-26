@@ -522,18 +522,16 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
-      "delete": {
+      "cancel": {
         "options": [
           "--id",
           "--url",
         ],
       },
-      "demo": {
+      "delete": {
         "options": [
-          "--count",
-          "--message",
+          "--id",
           "--url",
-          "--workers",
         ],
       },
       "download": {
@@ -582,6 +580,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
       "retry": {
         "options": [
+          "--force",
           "--id",
           "--url",
         ],
@@ -722,6 +721,11 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         ],
       },
     },
+  },
+  "update": {
+    "options": [
+      "--force",
+    ],
   },
 }
 `;

@@ -72,11 +72,15 @@ React 19 web UI with Vite, Tailwind CSS, Radix UI (shadcn/ui), TanStack Query, a
 
 - Real-time data flow: [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md)
 
+> **Storybook**: When adding or modifying portal components, update the corresponding Storybook stories. Use the `storybook` skill for guidance.
+
 ### CLI (`apps/cli/`)
 
 Command-line interface built with Commander.js and Ink (React for terminals). Used for submitting runs, streaming logs, managing criteria, and CI/CD automation. Run `pnpm cli --help` to discover subcommands.
 
 > **CLI ↔ Portal parity**: Every feature available in the Portal must also be available in the CLI. The CLI is the primary interface for CI/CD and power users — it must never lag behind the Portal in capabilities.
+
+- Distribution and standalone installation: [docs/architecture/cli-distribution.md](docs/architecture/cli-distribution.md)
 
 ### Token Manager (`apps/token-manager/`)
 
@@ -137,6 +141,10 @@ pnpm dev:<worker-name>            # Individual worker (native)
 pnpm open:portal                  # Open portal in browser
 ```
 
+### Shared Dev Infrastructure (CosmosDB)
+
+For testing against real Azure CosmosDB (e.g. index behavior), a shared dev instance can be provisioned. Each worktree gets its own isolated database. See [docs/shared-dev-infra.md](docs/shared-dev-infra.md) for setup and usage.
+
 ## Rust Components
 
 When making changes to any Rust component (e.g. the AI gateway in `apps/gateway/`), follow the `rust-best-practices` skill. This skill is available at `.agents/skills/rust-best-practices/SKILL.md` and covers idiomatic Rust, ownership patterns, error handling with `Result`, and performance guidelines.
@@ -169,6 +177,8 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/skills.md](docs/architecture/skills.md) | Agent Skills spec, registration, resolution, delivery |
 | [docs/architecture/db-migrations.md](docs/architecture/db-migrations.md) | MongoDB migration framework |
 | [docs/architecture/deployment.md](docs/architecture/deployment.md) | Single-branch deployment, int→prod promotion |
+| [docs/architecture/cli-distribution.md](docs/architecture/cli-distribution.md) | CLI bundling, publishing, installation, update check |
 | [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md) | SSE + Change Streams, Redis pub/sub, polling patterns |
 | [docs/research/delta-storage.md](docs/research/delta-storage.md) | Space-efficient storage of iteration snapshots |
+| [docs/shared-dev-infra.md](docs/shared-dev-infra.md) | Shared dev infrastructure (CosmosDB) setup and worktree isolation |
 | [ENV_VARIABLES.md](ENV_VARIABLES.md) | Environment variable reference |

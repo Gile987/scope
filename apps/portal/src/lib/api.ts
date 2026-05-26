@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp } from "@/types";
 
 import { qs } from "./url";
+import { recordServerDate } from "./serverClock";
 
 const BASE = "/api/v1";
 
@@ -12,6 +13,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
+  // Sample the server's wall-clock from the standard HTTP `Date` header so
+  // relative-time displays survive a misconfigured local clock.
+  recordServerDate(res.headers.get("Date"));
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     const message = body.error || `HTTP ${res.status}`;
@@ -99,13 +103,21 @@ export const api = {
   },
 
   /** Retry a request (start a new attempt) */
-  retryRun: (id: string): Promise<{ requestId: string; runId: string; attemptNumber: number }> => {
-    return request(`/requests/${id}/retry`, { method: "POST" });
+  retryRun: (id: string, options?: { force?: boolean }): Promise<{ requestId: string; runId: string; attemptNumber: number }> => {
+    return request(`/requests/${id}/retry`, {
+      method: "POST",
+      body: options?.force ? JSON.stringify({ force: true }) : undefined,
+    });
   },
 
   /** Pause a request */
   pauseRun: (id: string): Promise<{ id: string; status: string }> => {
     return request(`/requests/${id}/pause`, { method: "POST" });
+  },
+
+  /** Cancel a request (marks as failed and signals worker to exit) */
+  cancelRun: (id: string): Promise<{ id: string; previousStatus: string; status: string; outcome: string }> => {
+    return request(`/requests/${id}/cancel`, { method: "POST" });
   },
 
   /** Resume a paused request */
@@ -127,10 +139,10 @@ export const api = {
   },
 
   /** Bulk retry multiple requests */
-  bulkRetryRuns: (ids: string[]): Promise<{ retried: number; skipped: number; results: Array<{ requestId: string; runId?: string; attemptNumber?: number; error?: string }> }> => {
+  bulkRetryRuns: (ids: string[], options?: { force?: boolean }): Promise<{ retried: number; skipped: number; results: Array<{ requestId: string; runId?: string; attemptNumber?: number; error?: string }> }> => {
     return request(`/requests/bulk-retry`, {
       method: "POST",
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({ ids, force: options?.force }),
     });
   },
 
@@ -202,6 +214,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
     });
+    recordServerDate(resp.headers.get("Date"));
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ error: resp.statusText }));
       throw new Error(err.error ?? "Failed to download batch archive");
@@ -231,6 +244,44 @@ export const api = {
   /** SSE endpoint URL for log streaming */
   logsUrl: (id: string, fromStart = true): string => {
     return `${BASE}/requests/${id}/logs?fromStart=${fromStart}`;
+  },
+
+  // ─── Per-run artifact URLs (for historical attempts) ─────────────────────
+
+  /** SSE endpoint URL for log streaming of a specific attempt */
+  runLogsUrl: (requestId: string, runId: string, fromStart = true): string => {
+    return `${BASE}/requests/${requestId}/runs/${runId}/logs?fromStart=${fromStart}`;
+  },
+
+  /** HAR file download URL for a specific attempt */
+  runHarUrl: (requestId: string, runId: string, iteration?: number): string => {
+    const qs = iteration ? `?iteration=${iteration}` : "";
+    return `${BASE}/requests/${requestId}/runs/${runId}/har${qs}`;
+  },
+
+  /** Video stream URL for a specific attempt */
+  runVideoUrl: (requestId: string, runId: string, iteration?: number, index = 0, phase?: string): string => {
+    const params = new URLSearchParams();
+    if (phase) params.set("phase", phase);
+    if (iteration) params.set("iteration", String(iteration));
+    if (index > 0) params.set("index", String(index));
+    const qs = params.toString();
+    return `${BASE}/requests/${requestId}/runs/${runId}/video${qs ? `?${qs}` : ""}`;
+  },
+
+  /** Tool-calls JSONL URL for a specific attempt */
+  runToolCallsUrl: (requestId: string, runId: string, iteration: number): string => {
+    return `${BASE}/requests/${requestId}/runs/${runId}/tool-calls?iteration=${iteration}`;
+  },
+
+  /** Full run archive download URL for a specific attempt */
+  runArchiveUrl: (requestId: string, runId: string): string => {
+    return `${BASE}/requests/${requestId}/runs/${runId}/archive`;
+  },
+
+  /** Snapshot download URL for a specific attempt */
+  runSnapshotUrl: (requestId: string, runId: string, iteration: number): string => {
+    return `${BASE}/requests/${requestId}/runs/${runId}/snapshots/${iteration}`;
   },
 
   // ─── Criteria ──────────────────────────────────────────────────────────────
@@ -850,6 +901,12 @@ export const api = {
     const params = new URLSearchParams({ q: query });
     if (limit) params.set("limit", String(limit));
     return request(`/skills/search/external?${params}`);
+  },
+
+  /** Discover skills available in a GitHub repo by scanning well-known directories */
+  discoverSkills: (source: string): Promise<SkillDiscoveryResult[]> => {
+    const params = new URLSearchParams({ source });
+    return request(`/skills/discover?${params}`);
   },
 
   /** Import a skill */

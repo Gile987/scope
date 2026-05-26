@@ -7,6 +7,7 @@ import type { QueueClient } from "@azure/storage-queue";
 import type { Express } from "express";
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import type { BlobStorage } from "shared";
+import type { HeartbeatStore } from "shared";
 import type {
   TaskPromptStore,
   TaskPromptDocument,
@@ -61,7 +62,8 @@ export type RunHistoryDocument = z.infer<typeof RunHistoryDocumentSchema>;
 
 export const VALID_WORKERS = [
   "coder-acp-claude-code",
-  "coder-acp-copilot"
+  "coder-acp-copilot",
+  "coder-acp-copilot-windows"
 ] as const;
 export type WorkerType = (typeof VALID_WORKERS)[number];
 
@@ -112,6 +114,10 @@ export interface RouteContext {
 
   // Blob storage (log persistence + snapshots)
   blobStorage: BlobStorage;
+
+  // Per-run liveness heartbeat store (Redis-backed). Used by the runs
+  // routes to enrich `processing` responses with `run.lastHeartbeatAt`.
+  heartbeatStore: HeartbeatStore;
 
   // Config
   validWorkers: readonly string[];

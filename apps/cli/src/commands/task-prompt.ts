@@ -9,7 +9,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { criterionIcon, dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 
 export function registerTaskPromptCommands(program: Command): void {
 // ─── Task Prompt management ─────────────────────────────────────────────────
@@ -30,7 +30,7 @@ taskPrompt
   .option("-s, --search <search>", "Filter by text content")
   .option("-l, --limit <n>", "Maximum number of results", "50")
   .option("--offset <n>", "Number of results to skip", "0")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -91,7 +91,7 @@ taskPrompt
   .command("get")
   .description("Get details of a single task prompt")
   .requiredOption("-i, --id <id>", "Task prompt ID (UUID)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -160,7 +160,7 @@ taskPrompt
         console.log(`\n${label('Features:')} ${dimTimestamp('(not extracted)')}`);
       }
 
-      console.log(`\n${label('View runs:')} ${dimTimestamp(`pnpm cli run list --task-prompt-id ${tp._id}`)}`);
+      console.log(`\n${label('View runs:')} ${dimTimestamp(`scope run list --task-prompt-id ${tp._id}`)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -172,7 +172,7 @@ taskPrompt
   .description("Register a task prompt (idempotent — same text returns existing entity)")
   .option("-t, --text <text>", "Task prompt text")
   .option("-f, --file <path>", "Read task prompt text from file")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       let text = options.text;
@@ -215,7 +215,7 @@ taskPrompt
   .command("delete")
   .description("Soft-delete a task prompt")
   .requiredOption("-i, --id <id>", "Task prompt ID (UUID)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}`, {
@@ -242,7 +242,7 @@ taskPrompt
   .requiredOption("-i, --id <id>", "Task prompt ID (UUID)")
   .option("--model <model>", "LLM model to use for extraction")
   .option("--force", "Force re-extraction even if already extracted")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;

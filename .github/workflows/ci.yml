@@ -42,6 +42,10 @@ permissions:
   pull-requests: write
   issues: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
 
 jobs:
@@ -382,6 +386,45 @@ jobs:
       - name: Build
         run: pnpm build
 
+  cli-bundle-test:
+    name: CLI Bundle Integration Tests
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.typescript == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.1 --activate
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI bundle
+        run: pnpm build:cli
+
+      - name: Run integration tests
+        run: pnpm vitest run --config vitest.integration.config.ts apps/cli/src/bundle.integration.test.ts apps/cli/src/utils/update-check.integration.test.ts
+
+      - name: Upload CLI bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: scope-cli-bundle
+          path: apps/cli/dist/scope.mjs
+          retention-days: 7
+
   gateway:
     name: "Gateway: lint, test & build"
     needs: [detect-changes]
@@ -477,6 +520,7 @@ jobs:
       db-migrations: ${{ steps.changes.outputs.db-migrations }}
       shared: ${{ steps.changes.outputs.shared }}
       gateway: ${{ steps.changes.outputs.gateway }}
+      coder-acp-copilot-windows: ${{ steps.changes.outputs.coder-acp-copilot-windows }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
       typescript: ${{ steps.changes.outputs.typescript }}
     steps:
@@ -520,6 +564,8 @@ jobs:
               - 'packages/db-migrations/**'
             gateway:
               - 'apps/gateway/**'
+            coder-acp-copilot-windows:
+              - 'apps/workers/coder-acp-copilot-windows/**'
             typescript:
               - 'apps/**'
               - '!apps/gateway/**'
@@ -774,12 +820,92 @@ jobs:
           cache-to: type=gha,mode=max,scope=gateway
 
   # ---------------------------------------------------------------------------
+  # Build Windows image — uses az acr build --platform windows/amd64
+  # ---------------------------------------------------------------------------
+  build-windows-image:
+    name: "Build image: coder-acp-copilot-windows"
+    if: >-
+      always() &&
+      !cancelled() &&
+      github.repository == 'growth-ecosystems/scope-core' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (
+        (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || contains(github.event.inputs.images, 'coder-acp-copilot-windows'))) ||
+        ((github.event_name == 'push' || github.event_name == 'pull_request') && (needs.detect-changes.outputs.coder-acp-copilot-windows == 'true' || needs.detect-changes.outputs.shared == 'true'))
+      )
+    needs: [test, build, detect-changes]
+    runs-on: ubuntu-latest
+    environment: integration
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Load pinned versions
+        id: versions
+        run: |
+          EXTRA_ARGS=""
+          VERSION_FILE="apps/workers/coder-acp-copilot-windows/versions.env"
+          if [ -f "$VERSION_FILE" ]; then
+            while IFS='=' read -r key value; do
+              [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+              export "$key=$value"
+              EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+            done < "$VERSION_FILE"
+          fi
+          echo "extra_args=${EXTRA_ARGS}" >> "$GITHUB_OUTPUT"
+          echo "copilot_version=${COPILOT_CLI_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+
+          VERSION_PREFIX="copilot-${{ steps.versions.outputs.copilot_version }}"
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            GIT_SHA="${{ github.event.pull_request.head.sha }}"
+            IMAGE_ARGS="--image scoped/coder-acp-copilot-windows:${GIT_SHA}"
+            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/coder-acp-copilot-windows:pr-${{ github.event.pull_request.number }}-latest"
+          else
+            GIT_SHA="${{ github.sha }}"
+            SHORT_SHA="${GIT_SHA:0:7}"
+            TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+            IMAGE_ARGS="--image scoped/coder-acp-copilot-windows:${GIT_SHA}"
+            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/coder-acp-copilot-windows:${TIMESTAMP}-${SHORT_SHA}"
+            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/coder-acp-copilot-windows:${VERSION_PREFIX}-${TIMESTAMP}-${SHORT_SHA}"
+          fi
+
+          echo "git_sha=${GIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_args=${IMAGE_ARGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push to ACR (Windows)
+        run: |
+          az acr build \
+            --registry "${{ vars.ACR_NAME }}" \
+            --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
+            --platform windows/amd64 \
+            ${{ steps.tags.outputs.image_args }} \
+            --build-arg GIT_COMMIT=${{ steps.tags.outputs.git_sha }} \
+            --build-arg BUILD_TIME=${{ steps.tags.outputs.build_time }} \
+            ${{ steps.versions.outputs.extra_args }} \
+            --file apps/workers/coder-acp-copilot-windows/Dockerfile.windows \
+            .
+
+  # ---------------------------------------------------------------------------
   # Summary
   # ---------------------------------------------------------------------------
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [test, integration-test, lint, build, gateway]
+    needs: [test, integration-test, lint, build, cli-bundle-test, gateway]
     if: always()
 
     steps:
@@ -789,6 +915,7 @@ jobs:
              [ "${{ needs.integration-test.result }}" = "success" -o "${{ needs.integration-test.result }}" = "skipped" ] && \
              [ "${{ needs.lint.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ] && \
+             [ "${{ needs.cli-bundle-test.result }}" = "success" -o "${{ needs.cli-bundle-test.result }}" = "skipped" ] && \
              [ "${{ needs.gateway.result }}" = "success" -o "${{ needs.gateway.result }}" = "skipped" ]; then
             echo "✅ All checks passed!"
             exit 0
@@ -798,6 +925,7 @@ jobs:
             echo "  Integration Tests: ${{ needs.integration-test.result }}"
             echo "  Lint: ${{ needs.lint.result }}"
             echo "  Build: ${{ needs.build.result }}"
+            echo "  CLI Bundle Tests: ${{ needs.cli-bundle-test.result }}"
             echo "  Gateway: ${{ needs.gateway.result }}"
             exit 1
           fi

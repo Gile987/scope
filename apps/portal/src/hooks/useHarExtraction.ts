@@ -21,11 +21,11 @@ export type { ConversationSegment, HarExtractedData, ToolCall };
 // All tabs (Conversation, Network, Tool Calls) share this cache.
 // Generic so each consumer can use their own HAR type definition.
 // ---------------------------------------------------------------------------
-export function useHarData<T = unknown>(runId: string, iteration?: number, enabled = true) {
+export function useHarData<T = unknown>(runId: string, iteration?: number, enabled = true, attemptRunId?: string) {
   return useQuery<T>({
-    queryKey: ["har", runId, iteration],
+    queryKey: ["har", runId, iteration, attemptRunId],
     queryFn: async () => {
-      const url = api.harUrl(runId, iteration);
+      const url = attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration);
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
@@ -38,11 +38,11 @@ export function useHarData<T = unknown>(runId: string, iteration?: number, enabl
 // ---------------------------------------------------------------------------
 // React hook: fetch HAR for a turn and extract thinking + tool calls
 // ---------------------------------------------------------------------------
-export function useHarExtraction(runId: string, iteration?: number, hasHar?: boolean): {
+export function useHarExtraction(runId: string, iteration?: number, hasHar?: boolean, attemptRunId?: string): {
   data: HarExtractedData | undefined;
   isLoading: boolean;
 } {
-  const { data: har, isLoading } = useHarData<HarFile>(runId, iteration, !!hasHar);
+  const { data: har, isLoading } = useHarData<HarFile>(runId, iteration, !!hasHar, attemptRunId);
 
   const data = useMemo(() => {
     if (!har) return undefined;
@@ -63,6 +63,7 @@ export function useAllTurnsToolCalls(
   runId: string,
   turns?: ConversationTurn[],
   topLevelHarUrl?: string,
+  attemptRunId?: string,
 ): { allToolCalls: AggregatedToolCall[]; isLoading: boolean } {
   // Turns that already have pre-computed `toolCalls` (legacy inline shape)
   // don't need any blob fetch.
@@ -98,9 +99,9 @@ export function useAllTurnsToolCalls(
 
   const jsonlResults = useQueries({
     queries: jsonlQueries.map((q) => ({
-      queryKey: ["tool-calls", runId, q.iteration],
+      queryKey: ["tool-calls", runId, q.iteration, attemptRunId],
       queryFn: async () => {
-        const url = api.toolCallsUrl(runId, q.iteration);
+        const url = attemptRunId ? api.runToolCallsUrl(runId, attemptRunId, q.iteration) : api.toolCallsUrl(runId, q.iteration);
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
@@ -140,9 +141,9 @@ export function useAllTurnsToolCalls(
 
   const results = useQueries({
     queries: queries.map((q) => ({
-      queryKey: ["har", runId, q.iteration],
+      queryKey: ["har", runId, q.iteration, attemptRunId],
       queryFn: async () => {
-        const url = api.harUrl(runId, q.iteration);
+        const url = attemptRunId ? api.runHarUrl(runId, attemptRunId, q.iteration) : api.harUrl(runId, q.iteration);
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<HarFile>;

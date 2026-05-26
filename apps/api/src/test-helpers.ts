@@ -153,6 +153,7 @@ export function createMockSkillRevisionStore(): Record<string, any> {
 export function createMockSkillResolver(): Record<string, any> {
   return {
     resolve: vi.fn().mockResolvedValue({ ref: "mock-ref" }),
+    discoverSkills: vi.fn().mockResolvedValue([]),
   };
 }
 
