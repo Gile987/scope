@@ -132,8 +132,10 @@ Use `turbo prune` to generate minimal build contexts per image.
 Each phase gets its own PR:
 
 1. **PR #950: Phase 1** - Split packages ✅ COMPLETE
-2. **PR: Phase 2** - Turborepo integration + Docker build optimization (combined)
-3. **PR: Phase 3** - Nx spike (parallel evaluation for team comparison)
+2. **PR: Phase 2** - Turborepo integration + Docker build optimization (based off Phase 1 branch)
+3. **PR: Phase 3** - Nx spike (based off Phase 1 branch, alternative to Phase 2)
+
+Phases 2 and 3 are **alternatives** (not sequential). Both branch off Phase 1 (`cedricvidal-microsoft/glowing-barnacle`) so the team can evaluate Turborepo vs Nx side-by-side before deciding which to merge. Only one of Phase 2 or Phase 3 will ultimately be merged.
 
 ## Phase 3: Nx Spike (Pending)
 
