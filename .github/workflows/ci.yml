@@ -533,7 +533,12 @@ jobs:
           base: ${{ github.event.before }}
           filters: |
             shared:
-              - 'packages/shared/**'
+              - 'packages/core/**'
+              - 'packages/secrets/**'
+              - 'packages/platform/**'
+              - 'packages/agent-protocol/**'
+              - 'packages/criteria/**'
+              - 'packages/worker-runtime/**'
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'tsconfig.base.json'
