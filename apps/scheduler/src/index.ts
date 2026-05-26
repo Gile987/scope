@@ -7,7 +7,7 @@ import { MongoClient } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { RequestScheduler, WorkerTypeConfig } from "./request-scheduler.js";
-import type { RequestDocument } from "shared";
+import type { RequestDocument } from "@scope/core";
 
 // ── Configuration ────────────────────────────────────────────────────
 
