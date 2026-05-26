@@ -6,6 +6,7 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
+COPY nx.json ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/secrets/package.json ./packages/secrets/
 COPY apps/token-manager/package.json ./apps/token-manager/

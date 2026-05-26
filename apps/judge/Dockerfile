@@ -6,6 +6,7 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
+COPY nx.json ./
 COPY packages/agent-protocol/package.json ./packages/agent-protocol/
 COPY packages/core/package.json ./packages/core/
 COPY packages/criteria/package.json ./packages/criteria/
