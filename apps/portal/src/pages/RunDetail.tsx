@@ -55,10 +55,13 @@ export function RunDetail() {
     queryFn: () => api.getRun(id!),
     enabled: !!id,
     refetchInterval: (query) => {
-      const status = query.state.data?.run?.status;
-      // Stop polling once terminal (done)
-      if (status === "done") return false;
-      return 5_000;
+      const data = query.state.data;
+      const status = data?.run?.status;
+      const ppStatus = data?.run?.postProcessorStatus;
+      // Keep polling while run is in progress OR post-processing is pending/in-progress
+      if (status !== "done") return 5_000;
+      if (ppStatus && ppStatus !== "done" && ppStatus !== "failed") return 5_000;
+      return false;
     },
   });
 
