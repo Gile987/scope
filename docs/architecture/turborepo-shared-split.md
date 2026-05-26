@@ -2,9 +2,9 @@
 
 ## Status
 
-- **Phase 1: Split `packages/shared`** - ✅ COMPLETE
-- **Phase 2: Integrate Turborepo** - Pending (separate PR)
-- **Phase 3: Optimize Docker builds** - Pending (separate PR)
+- **Phase 1: Split `packages/shared`** - ✅ COMPLETE (PR #950)
+- **Phase 2: Turborepo + Docker optimization** - Pending (single PR)
+- **Phase 3: Nx spike** - Pending (separate PR, for comparison)
 
 ## Problem
 
@@ -52,7 +52,7 @@ The monolithic `packages/shared` has been split into 6 fine-grained packages:
 
 **vs. before**: ANY change rebuilt ALL 12+ images.
 
-## Phase 2: Integrate Turborepo (Pending)
+## Phase 2: Turborepo + Docker Optimization (Pending)
 
 ### 2.1 Install
 
@@ -101,9 +101,7 @@ Add `.turbo/` to `.gitignore`.
 
 Use self-hosted cache on Azure Blob (via `turborepo-remote-cache` by ducktors) or GitHub Actions cache (via `rharkor/caching-for-turbo`). No org data leaves our infrastructure.
 
-## Phase 3: Optimize Docker Builds (Pending)
-
-### 3.1 Use `turbo prune` for minimal Docker contexts
+### 2.5 Use `turbo prune` for minimal Docker contexts
 
 ```dockerfile
 FROM node:22-alpine AS pruner
@@ -121,11 +119,11 @@ COPY --from=installer /app/node_modules ./node_modules
 RUN turbo run build --filter=api
 ```
 
-### 3.2 Update docker-compose watch paths
+### 2.6 Update docker-compose watch paths
 
 Replace blanket `packages/shared/src` watch with specific package paths per service.
 
-### 3.3 Update `build-acr.sh`
+### 2.7 Update `build-acr.sh`
 
 Use `turbo prune` to generate minimal build contexts per image.
 
@@ -134,8 +132,37 @@ Use `turbo prune` to generate minimal build contexts per image.
 Each phase gets its own PR:
 
 1. **PR #950: Phase 1** - Split packages ✅ COMPLETE
-2. **PR: Phase 2** - Turborepo integration
-3. **PR: Phase 3** - Docker build optimization
+2. **PR: Phase 2** - Turborepo integration + Docker build optimization (combined)
+3. **PR: Phase 3** - Nx spike (parallel evaluation for team comparison)
+
+## Phase 3: Nx Spike (Pending)
+
+Implement the same task orchestration and Docker optimization using Nx instead of Turborepo, so the team can compare both tools hands-on with our actual repo.
+
+### 3.1 Install
+
+```bash
+pnpm add -Dw nx @nx/js
+```
+
+### 3.2 Configure
+
+- `nx.json` with task pipelines (build, test, lint)
+- Per-package `project.json` files (or inferred from package.json)
+- `nx affected` for change-based builds
+
+### 3.3 Comparison Criteria
+
+- Setup complexity (config files, boilerplate)
+- Build speed (cold and cached)
+- Docker integration (equivalent of `turbo prune`)
+- `affected` accuracy and developer experience
+- CI cache integration (GitHub Actions)
+- Learning curve for the team
+
+### 3.4 Deliverable
+
+A branch with Nx configured, allowing the team to run both side-by-side and make a final decision based on real experience rather than docs/marketing.
 
 ## Parallel Work Note
 
