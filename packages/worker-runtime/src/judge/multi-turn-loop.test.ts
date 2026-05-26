@@ -643,7 +643,7 @@ describe("runMultiTurnLoop — per-iteration timeout", () => {
       .mockReset()
       .mockResolvedValue({ log: { version: "1.2", creator: { name: "test", version: "1" }, entries: [] } });
     mockExtractToolCalls.mockReset().mockReturnValue([]);
-    const mod = await import("../types/types.js");
+    const mod = await import("@scope/core");
     MULTI_TURN_DEFAULTS_REF = mod.MULTI_TURN_DEFAULTS;
     originalTimeout = MULTI_TURN_DEFAULTS_REF.ITERATION_TIMEOUT_MS;
   });
