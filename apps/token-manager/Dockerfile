@@ -1,27 +1,22 @@
-FROM node:22.22.0-slim AS builder
-
+FROM node:22.22.0-slim AS pruner
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
-
 WORKDIR /app
+COPY . .
+RUN npx turbo prune token-manager --docker
 
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY tsconfig.base.json ./
-COPY packages/core/package.json ./packages/core/
-COPY packages/secrets/package.json ./packages/secrets/
-COPY apps/token-manager/package.json ./apps/token-manager/
-
+FROM node:22.22.0-slim AS installer
+RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
+WORKDIR /app
+COPY --from=pruner /app/out/json/ .
 RUN pnpm install --frozen-lockfile
 
-COPY packages/core/tsconfig.json ./packages/core/
-COPY packages/core/src ./packages/core/src/
-COPY packages/secrets/tsconfig.json ./packages/secrets/
-COPY packages/secrets/src ./packages/secrets/src/
-COPY apps/token-manager/tsconfig.json ./apps/token-manager/
-COPY apps/token-manager/src ./apps/token-manager/src/
-
-RUN pnpm --filter core build && \
-    pnpm --filter secrets build && \
-    pnpm --filter token-manager build
+FROM node:22.22.0-slim AS builder
+RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
+WORKDIR /app
+COPY --from=installer /app/ .
+COPY --from=pruner /app/out/full/ .
+COPY tsconfig.base.json ./
+RUN pnpm run build --filter=token-manager...
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
@@ -40,11 +35,7 @@ RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 
 WORKDIR /app
 
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY packages/core/package.json ./packages/core/
-COPY packages/secrets/package.json ./packages/secrets/
-COPY apps/token-manager/package.json ./apps/token-manager/
-
+COPY --from=pruner /app/out/json/ .
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/core/dist ./packages/core/dist/

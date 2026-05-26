@@ -1,35 +1,22 @@
-FROM node:22.22.0-slim AS builder
-
+FROM node:22.22.0-slim AS pruner
 RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
-
 WORKDIR /app
+COPY . .
+RUN npx turbo prune post-processor --docker
 
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY tsconfig.base.json ./
-COPY packages/agent-protocol/package.json ./packages/agent-protocol/
-COPY packages/core/package.json ./packages/core/
-COPY packages/platform/package.json ./packages/platform/
-COPY packages/worker-runtime/package.json ./packages/worker-runtime/
-COPY apps/workers/post-processor/package.json ./apps/workers/post-processor/
-
+FROM node:22.22.0-slim AS installer
+RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
+WORKDIR /app
+COPY --from=pruner /app/out/json/ .
 RUN pnpm install --frozen-lockfile
 
-COPY packages/core/tsconfig.json ./packages/core/
-COPY packages/core/src ./packages/core/src/
-COPY packages/platform/tsconfig.json ./packages/platform/
-COPY packages/platform/src ./packages/platform/src/
-COPY packages/agent-protocol/tsconfig.json ./packages/agent-protocol/
-COPY packages/agent-protocol/src ./packages/agent-protocol/src/
-COPY packages/worker-runtime/tsconfig.json ./packages/worker-runtime/
-COPY packages/worker-runtime/src ./packages/worker-runtime/src/
-COPY apps/workers/post-processor/tsconfig.json ./apps/workers/post-processor/
-COPY apps/workers/post-processor/src ./apps/workers/post-processor/src/
-
-RUN pnpm --filter core build && \
-    pnpm --filter platform build && \
-    pnpm --filter agent-protocol build && \
-    pnpm --filter worker-runtime build && \
-    pnpm --filter post-processor build
+FROM node:22.22.0-slim AS builder
+RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
+WORKDIR /app
+COPY --from=installer /app/ .
+COPY --from=pruner /app/out/full/ .
+COPY tsconfig.base.json ./
+RUN pnpm run build --filter=post-processor...
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
@@ -48,13 +35,7 @@ RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
 
 WORKDIR /app
 
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY packages/agent-protocol/package.json ./packages/agent-protocol/
-COPY packages/core/package.json ./packages/core/
-COPY packages/platform/package.json ./packages/platform/
-COPY packages/worker-runtime/package.json ./packages/worker-runtime/
-COPY apps/workers/post-processor/package.json ./apps/workers/post-processor/
-
+COPY --from=pruner /app/out/json/ .
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/agent-protocol/dist ./packages/agent-protocol/dist/
