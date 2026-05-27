@@ -34,10 +34,10 @@ ENV PATH="C:\tools;C:\tools\bin;C:\Program Files\nodejs;C:\Program Files\Git\cmd
 
 # --- Pruner stage: generate minimal workspace ---
 FROM base AS pruner
-SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+SHELL ["cmd", "/S", "/C"]
 WORKDIR C:/app
 COPY . .
-RUN C:\tools\pnpm.exe dlx turbo@2.9.15 prune coder-acp-copilot-windows --docker
+RUN npm install -g turbo@2.9.15 && turbo prune coder-acp-copilot-windows --docker
 
 # --- Builder stage: compile TypeScript ---
 FROM base AS builder
