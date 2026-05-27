@@ -11,3 +11,13 @@
 !scope-api/**
 !release-notes/
 !release-notes/**
+!resilience/
+!resilience/**
+!typescript/
+!typescript/**
+!cosmosdb-mongodb/
+!cosmosdb-mongodb/**
+!documentation/
+!documentation/**
+!service-deployment/
+!service-deployment/**

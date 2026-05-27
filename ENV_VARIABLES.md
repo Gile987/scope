@@ -259,6 +259,26 @@ Timeout for the Copilot SDK session used by the report-generator worker. If the 
 
 Git commit hash embedded in reporter metadata. Automatically set during CI/CD builds. Used to track which version of the report-generator produced a given report.
 
+## Scheduler Configuration
+
+### SCHEDULER_POLL_INTERVAL_MS
+**Default:** `2000`
+**Type:** integer (milliseconds)
+
+How often the request scheduler polls MongoDB for pending requests to dispatch to coder workers. Applies to all worker types. Lower values reduce queue latency; higher values save RUs.
+
+### SCHEDULER_PP_POLL_INTERVAL_MS
+**Default:** `30000`
+**Type:** integer (milliseconds)
+
+How often the post-processor dispatcher polls for completed runs needing post-processing. This is a **backfill/catch-up** mechanism — the primary dispatch path is event-driven (coder workers enqueue directly on run completion). The 30s default keeps idle RU consumption low while still catching missed events or version-upgrade backfills within a reasonable window. Reduce temporarily for large backfills.
+
+### QUEUE_NAME_POST_PROCESSOR
+**Default:** `post-processor-queue`
+**Type:** string
+
+Azure Storage Queue name used by both the scheduler (to enqueue post-processing work) and the post-processor worker (to dequeue). Must match between the two services.
+
 ## Worker Configuration
 
 ### SCOPE_RUN_HEARTBEAT_STALE_MS

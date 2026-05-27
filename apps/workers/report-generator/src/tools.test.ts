@@ -45,12 +45,13 @@ describe("createReportTools - insight tools", () => {
     tools = createReportTools(API_BASE, REQUEST_ID, SNAPSHOTS_DIR, REPORT_ID);
   });
 
-  it("returns 11 tools including insight tools", () => {
-    expect(tools).toHaveLength(11);
+  it("returns 12 tools including insight tools", () => {
+    expect(tools).toHaveLength(12);
     const names = tools.map((t: any) => t.name);
     expect(names).toContain("search_insights");
     expect(names).toContain("create_insight");
     expect(names).toContain("reference_insight");
+    expect(names).toContain("get_atif_trajectory");
   });
 
   describe("search_insights", () => {
@@ -244,36 +245,42 @@ describe("createReportTools - duration fields", () => {
   const RUN_WITH_DURATIONS = {
     _id: REQUEST_ID,
     scenario: { task: "build app", criteria: ["c1", "c2"] },
-    turns: [
-      {
-        iteration: 1,
-        passed: false,
-        timestamp: "2026-03-25T10:00:00Z",
-        startedAt: "2026-03-25T09:55:00Z",
-        durationMs: 300000,
-        codingAgentResponse: "response 1",
-        judgeFeedback: "needs fix",
-        snapshotUrl: "https://blob/snap1",
-        criteriaResults: [
-          { criterionId: "c1", passed: true, evaluated: true, feedback: "ok" },
-          { criterionId: "c2", passed: false, evaluated: true, feedback: "missing" },
-        ],
-      },
-      {
-        iteration: 2,
-        passed: true,
-        timestamp: "2026-03-25T10:05:00Z",
-        startedAt: "2026-03-25T10:00:00Z",
-        durationMs: 300000,
-        codingAgentResponse: "response 2",
-        judgeFeedback: "all good",
-        snapshotUrl: "https://blob/snap2",
-        criteriaResults: [
-          { criterionId: "c1", passed: true, evaluated: true, feedback: "ok" },
-          { criterionId: "c2", passed: true, evaluated: true, feedback: "ok" },
-        ],
-      },
-    ],
+    workerType: "coder-acp-copilot",
+    maxIterations: 5,
+    run: {
+      status: "done",
+      outcome: "succeeded",
+      turns: [
+        {
+          iteration: 1,
+          passed: false,
+          timestamp: "2026-03-25T10:00:00Z",
+          startedAt: "2026-03-25T09:55:00Z",
+          durationMs: 300000,
+          codingAgentResponse: "response 1",
+          judgeFeedback: "needs fix",
+          snapshotUrl: "https://blob/snap1",
+          criteriaResults: [
+            { criterionId: "c1", passed: true, evaluated: true, feedback: "ok" },
+            { criterionId: "c2", passed: false, evaluated: true, feedback: "missing" },
+          ],
+        },
+        {
+          iteration: 2,
+          passed: true,
+          timestamp: "2026-03-25T10:05:00Z",
+          startedAt: "2026-03-25T10:00:00Z",
+          durationMs: 300000,
+          codingAgentResponse: "response 2",
+          judgeFeedback: "all good",
+          snapshotUrl: "https://blob/snap2",
+          criteriaResults: [
+            { criterionId: "c1", passed: true, evaluated: true, feedback: "ok" },
+            { criterionId: "c2", passed: true, evaluated: true, feedback: "ok" },
+          ],
+        },
+      ],
+    },
   };
 
   beforeEach(() => {
@@ -319,7 +326,10 @@ describe("createReportTools - duration fields", () => {
   it("list_turns handles missing duration fields gracefully", async () => {
     const runNoDurations = {
       ...RUN_WITH_DURATIONS,
-      turns: RUN_WITH_DURATIONS.turns.map(({ startedAt, durationMs, ...rest }: any) => rest),
+      run: {
+        ...RUN_WITH_DURATIONS.run,
+        turns: RUN_WITH_DURATIONS.run.turns.map(({ startedAt, durationMs, ...rest }: any) => rest),
+      },
     };
     fetchMock.mockResolvedValueOnce(mockResponse(runNoDurations));
 

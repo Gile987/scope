@@ -16,6 +16,7 @@ import {
   DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
+import { EnrichmentBadge } from "@/components/EnrichmentBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { LogViewer } from "@/components/LogViewer";
 import { TurnTimeline } from "@/components/TurnTimeline";
@@ -54,10 +55,13 @@ export function RunDetail() {
     queryFn: () => api.getRun(id!),
     enabled: !!id,
     refetchInterval: (query) => {
-      const status = query.state.data?.run?.status;
-      // Stop polling once terminal (done)
-      if (status === "done") return false;
-      return 5_000;
+      const data = query.state.data;
+      const status = data?.run?.status;
+      const ppStatus = data?.run?.postProcessorStatus;
+      // Keep polling while run is in progress OR post-processing is pending/in-progress
+      if (status !== "done") return 5_000;
+      if (ppStatus && ppStatus !== "done" && ppStatus !== "failed") return 5_000;
+      return false;
     },
   });
 
@@ -354,6 +358,9 @@ export function RunDetail() {
                 startedAt={activeRun?.startedAt}
               />
               {activeRun?.status === "done" && <OutcomeBadge outcome={activeRun?.outcome} />}
+              {activeRun?.status === "done" && (
+                <EnrichmentBadge status={activeRun.postProcessorStatus} version={activeRun.postProcessorVersion} />
+              )}
               <span className="font-mono">{run.workerType}</span>
               {run.model && (
                 <>
@@ -970,6 +977,36 @@ export function RunDetail() {
                     <div>
                       <span className="text-muted-foreground">Model:</span>{" "}
                       <span className="font-mono font-medium">{run.model}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Enrichment card */}
+            {activeRun?.status === "done" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Enrichment</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Status:</span>{" "}
+                    <EnrichmentBadge status={activeRun.postProcessorStatus} version={activeRun.postProcessorVersion} />
+                  </div>
+                  {activeRun.postProcessorVersion !== undefined && (
+                    <div>
+                      <span className="text-muted-foreground">Version:</span>{" "}
+                      <span className="font-mono font-medium">v{activeRun.postProcessorVersion}</span>
+                    </div>
+                  )}
+                  {activeRun.postProcessorStatus === "done" && activeRun.turns?.some(t => t.atifUrl) && (
+                    <div>
+                      <span className="text-muted-foreground">Artifacts:</span>{" "}
+                      <span className="font-medium">ATIF trajectory</span>
+                      <span className="text-muted-foreground ml-1">
+                        ({activeRun.turns?.filter(t => t.atifUrl).length ?? 0} iteration{(activeRun.turns?.filter(t => t.atifUrl).length ?? 0) !== 1 ? "s" : ""})
+                      </span>
                     </div>
                   )}
                 </CardContent>

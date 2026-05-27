@@ -48,6 +48,7 @@ export interface ConversationTurn {
    *  without fetching the JSONL blob. */
   toolCallCount?: number;
   aiCallCount?: number;
+  atifUrl?: string;
 }
 
 export interface Scenario {
@@ -109,6 +110,8 @@ export interface RunState {
   updatedAt?: string;
   pausedAt?: string;
   resumedAt?: string;
+  postProcessorVersion?: number;
+  postProcessorStatus?: "queued" | "processing" | "done" | "failed";
 }
 
 export interface Run {

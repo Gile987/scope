@@ -652,6 +652,34 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  apps/workers/post-processor:
+    dependencies:
+      '@azure/storage-queue':
+        specifier: ^12.25.0
+        version: 12.29.0
+      atifact:
+        specifier: ^0.7.0
+        version: 0.7.0
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      mongodb:
+        specifier: ^6.12.0
+        version: 6.21.0
+      shared:
+        specifier: workspace:*
+        version: link:../../../packages/shared
+    devDependencies:
+      '@types/node':
+        specifier: ^22.7.0
+        version: 22.19.10
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
+
   apps/workers/report-generator:
     dependencies:
       '@azure/storage-queue':
@@ -3176,6 +3204,11 @@ packages:
 
   asynckit@0.4.0:
     resolution: {integrity: sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==}
+
+  atifact@0.7.0:
+    resolution: {integrity: sha512-jauiFg+ED7cGne2gC7+5iC7dBgE0dD/m4UMBuOFh3/mQnQioiUfa3RxYSg5iRxWILJYnG8S61LLN+UrLOiInJg==}
+    engines: {node: '>=22'}
+    hasBin: true
 
   autoprefixer@10.4.24:
     resolution: {integrity: sha512-uHZg7N9ULTVbutaIsDRoUkoS8/h3bdsmVJYZ5l3wv8Cp/6UIIoRDm90hZ+BwxUj/hGBEzLxdHNSKuFpn8WOyZw==}
@@ -8460,6 +8493,8 @@ snapshots:
   astral-regex@2.0.0: {}
 
   asynckit@0.4.0: {}
+
+  atifact@0.7.0: {}
 
   autoprefixer@10.4.24(postcss@8.5.6):
     dependencies:
