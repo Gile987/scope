@@ -383,7 +383,7 @@ apiRoute(ctx.app, ctx.registry, {
       const now = new Date();
       const existing = await ctx.skillCollection.findOne({ _id });
 
-      let responseSkill: SkillDocument & { id: string };
+      let responseSkill: Omit<SkillDocument, '_id'> & { id: string };
       let status = 200;
       if (existing) {
         // Upsert: un-delete if soft-deleted, update fields
