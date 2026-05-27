@@ -345,7 +345,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     expect(res.body.error).toMatch(/run\.yaml/i);
   });
 
-  it("returns 400 when run.yaml is missing _id", async () => {
+  it("returns 400 when run.yaml is missing id", async () => {
     const app = buildApp(makeRequestCollection());
     const archive = await buildTarGz({
       "run/run.yaml":
@@ -357,16 +357,16 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
       .attach("archive", archive, "archive.tar.gz");
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/_id/);
+    expect(res.body.error).toMatch(/\bid\b/);
   });
 
   it("returns 400 for in-flight (non-terminal) runs", async () => {
     const app = buildApp(makeRequestCollection());
     const archive = await buildTarGz({
-      // Subdir name must match the run.yaml _id — the importer enforces this
+      // Subdir name must match the run.yaml id — the importer enforces this
       // since blob URLs are derived from the prefix before run.yaml is parsed.
       "in-flight-1/run.yaml":
-        "_id: in-flight-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: in-flight-1\n  attemptNumber: 1\n  status: processing\n",
+        "id: in-flight-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  id: in-flight-1\n  attemptNumber: 1\n  status: processing\n",
     });
 
     const res = await request(app)
@@ -377,14 +377,14 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     expect(res.body.error).toMatch(/in-flight|terminal/i);
   });
 
-  it("returns 409 when a run with the same _id already exists", async () => {
+  it("returns 409 when a run with the same id already exists", async () => {
     const reqs = makeRequestCollection();
     reqs.docs.set("dup-1", { _id: "dup-1", run: { status: "done" } });
     const app = buildApp(reqs);
 
     const archive = await buildTarGz({
       "dup-1/run.yaml":
-        "_id: dup-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: dup-1\n  attemptNumber: 1\n  status: done\n",
+        "id: dup-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  id: dup-1\n  attemptNumber: 1\n  status: done\n",
     });
 
     const res = await request(app)
@@ -402,7 +402,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     // violation that the legacy presence checks would have missed.
     const archive = await buildTarGz({
       "bad/run.yaml":
-        "_id: bad-1\nscenario:\n  task: t\n  criteria: [1, 2]\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: bad-1\n  attemptNumber: 1\n  status: done\n",
+        "id: bad-1\nscenario:\n  task: t\n  criteria: [1, 2]\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  id: bad-1\n  attemptNumber: 1\n  status: done\n",
     });
 
     const res = await request(app)
@@ -430,7 +430,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     const innerIterTar = await buildTarGz({ "hello.txt": "iter-1 contents" });
     const archive = await buildTarGz({
       "bad-cleanup/run.yaml":
-        "_id: bad-cleanup\nscenario:\n  task: t\n  criteria: [1, 2]\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: bad-cleanup\n  attemptNumber: 1\n  status: done\n",
+        "id: bad-cleanup\nscenario:\n  task: t\n  criteria: [1, 2]\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  id: bad-cleanup\n  attemptNumber: 1\n  status: done\n",
       "bad-cleanup/iteration-1.tar.gz": innerIterTar,
     });
 
@@ -448,7 +448,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     }
   });
 
-  it("does not clobber existing run blobs when uploading a duplicate _id", async () => {
+  it("does not clobber existing run blobs when uploading a duplicate id", async () => {
     // Pre-seed Mongo + blob store as if `dup-noclob` had been imported
     // previously. The retry archive contains *different* iteration bytes;
     // the ifNoneMatch guard on uploadStream must refuse to overwrite, and
@@ -464,7 +464,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     const replacementIterTar = await buildTarGz({ "evil.txt": "REPLACEMENT bytes" });
     const archive = await buildTarGz({
       "dup-noclob/run.yaml":
-        "_id: dup-noclob\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: dup-noclob\n  attemptNumber: 1\n  status: done\n",
+        "id: dup-noclob\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  id: dup-noclob\n  attemptNumber: 1\n  status: done\n",
       "dup-noclob/iteration-1.tar.gz": replacementIterTar,
     });
 
@@ -723,7 +723,7 @@ describe("run import/export — round-trip (export → import)", () => {
     );
   });
 
-  it("preserves all top-level + run-level optional fields and the per-attempt run._id", async () => {
+  it("preserves all top-level + run-level optional fields and the per-attempt run.id", async () => {
     // Symmetric round-trip guard. Builds a fixture that exercises every
     // optional field RequestResponseSchema + RunStateSchema know about,
     // plus every artifact type the exporter knows how to pack. Then:
@@ -961,7 +961,7 @@ describe("run import — task-prompt entity creation (#832)", () => {
 
   function makeMinimalUploadYaml(id: string, task: string, taskPromptId?: string) {
     const lines = [
-      `_id: ${id}`,
+      `id: ${id}`,
       `scenario:`,
       `  task: ${JSON.stringify(task)}`,
       `  criteria: []`,
@@ -969,7 +969,7 @@ describe("run import — task-prompt entity creation (#832)", () => {
       `createdAt: 2026-01-01T00:00:00Z`,
       ...(taskPromptId ? [`taskPromptId: ${taskPromptId}`] : []),
       `run:`,
-      `  _id: ${id}`,
+      `  id: ${id}`,
       `  attemptNumber: 1`,
       `  status: done`,
     ];

@@ -59,7 +59,7 @@ describe("Profile API Endpoints", () => {
         });
 
       expect(res.status).toBe(201);
-      expect(res.body).toHaveProperty("_id");
+      expect(res.body).toHaveProperty("id");
       expect(res.body).toHaveProperty("name", "Test Profile");
       expect(res.body).toHaveProperty("latestVersion", 1);
       expect(profileCol.insertOne).toHaveBeenCalledOnce();

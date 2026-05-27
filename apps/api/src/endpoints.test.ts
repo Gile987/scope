@@ -265,13 +265,13 @@ describe("API Endpoints", () => {
 
       const res = await request(app)
         .post("/api/v1/agents")
-        .send({ _id: "new-agent", name: "New Agent" });
+        .send({ id: "new-agent", name: "New Agent" });
 
       expect(res.status).toBe(201);
       expect(res.body).toHaveProperty("id", "new-agent");
     });
 
-    it("returns 400 when _id missing", async () => {
+    it("returns 400 when id missing", async () => {
       const res = await request(app)
         .post("/api/v1/agents")
         .send({ name: "No ID" });
@@ -872,7 +872,7 @@ describe("API Endpoints", () => {
 
       const res = await request(app).get("/api/v1/task-prompts/tp1");
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty("_id", "tp1");
+      expect(res.body).toHaveProperty("id", "tp1");
     });
 
     it("returns 404 when task prompt not found", async () => {
@@ -1256,8 +1256,8 @@ describe("API Endpoints", () => {
       const res = await request(app).get("/api/v1/requests/req-1/runs");
       expect(res.status).toBe(200);
       expect(res.body).toHaveLength(2);
-      expect(res.body[0]._id).toBe("run-2");
-      expect(res.body[1]._id).toBe("run-1");
+      expect(res.body[0].id).toBe("run-2");
+      expect(res.body[1].id).toBe("run-1");
     });
   });
 
@@ -1269,7 +1269,7 @@ describe("API Endpoints", () => {
       });
       const res = await request(app).get("/api/v1/requests/req-1/runs/run-2");
       expect(res.status).toBe(200);
-      expect(res.body._id).toBe("run-2");
+      expect(res.body.id).toBe("run-2");
     });
 
     it("falls back to history collection for older attempts", async () => {
@@ -1286,7 +1286,7 @@ describe("API Endpoints", () => {
       });
       const res = await request(app).get("/api/v1/requests/req-1/runs/run-1");
       expect(res.status).toBe(200);
-      expect(res.body._id).toBe("run-1");
+      expect(res.body.id).toBe("run-1");
     });
 
     it("returns 404 when run id doesn't belong to the request", async () => {

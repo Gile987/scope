@@ -409,8 +409,15 @@ export async function packRunIntoTar(
   const isBlobNotFound = isRestError ?? (() => false);
 
   // Entry 1: run.yaml — the full run document (with relative HAR paths)
+  // Map MongoDB `_id` → `id` for schema-compatible YAML serialization
   const archiveResource = rewriteHarUrlsForArchive(resource);
-  const yamlContent = yamlStringify(archiveResource, { lineWidth: 120 });
+  const { _id: topId, run: archiveRun, ...restArchive } = archiveResource as any;
+  const yamlObj: any = { id: topId, ...restArchive };
+  if (archiveRun) {
+    const { _id: runLevelId, ...restRun } = archiveRun;
+    yamlObj.run = { id: runLevelId, ...restRun };
+  }
+  const yamlContent = yamlStringify(yamlObj, { lineWidth: 120 });
   const yamlBuf = Buffer.from(yamlContent, "utf-8");
   pack.entry({ name: `${id}/run.yaml`, size: yamlBuf.length }, yamlBuf);
 

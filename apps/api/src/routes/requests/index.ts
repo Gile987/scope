@@ -1364,13 +1364,13 @@ async function finalizePendingRun(
   const runState = runDoc.run;
 
   // The exporter always names the wrapping directory after the request's
-  // top-level `_id`. If the prefix on the wire diverges, refuse — otherwise
+  // top-level `id`. If the prefix on the wire diverges, refuse — otherwise
   // the blobs we just streamed live under the wrong requestId and the
   // inserted Mongo document would point at nothing.
-  if (runDoc._id !== prefix) {
+  if (runDoc.id !== prefix) {
     throw new ImportError(
       400,
-      `run.yaml _id "${runDoc._id}" does not match archive subdirectory "${prefix}"`,
+      `run.yaml id "${runDoc.id}" does not match archive subdirectory "${prefix}"`,
     );
   }
 
@@ -1382,11 +1382,11 @@ async function finalizePendingRun(
     );
   }
 
-  const existingRun = await ctx.requestCollection.findOne({ _id: runDoc._id });
+  const existingRun = await ctx.requestCollection.findOne({ _id: runDoc.id });
   if (existingRun) {
     throw new ImportError(
       409,
-      `Run with ID '${runDoc._id}' already exists`,
+      `Run with ID '${runDoc.id}' already exists`,
       { existingStatus: existingRun.run?.status },
     );
   }
@@ -1398,7 +1398,7 @@ async function finalizePendingRun(
   let newLogsUrl: string | undefined;
   if (run.logsTempPath) {
     const logsContainer = blobServiceClient.getContainerClient("logs");
-    const logsBlobPath = `${runDoc._id}/runs/${runState._id}/run.jsonl`;
+    const logsBlobPath = `${runDoc.id}/runs/${runState.id}/run.jsonl`;
     const logsClient = logsContainer.getBlockBlobClient(logsBlobPath);
     try {
       await logsClient.uploadStream(
@@ -1407,7 +1407,7 @@ async function finalizePendingRun(
         undefined,
         {
           blobHTTPHeaders: { blobContentType: "application/x-ndjson" },
-          tags: { requestId: runDoc._id, runId: runState._id },
+          tags: { requestId: runDoc.id, runId: runState.id },
           conditions: { ifNoneMatch: "*" },
         },
       );
@@ -1461,17 +1461,21 @@ async function finalizePendingRun(
   // run.os, run.workerVersion, run.aiCallCount, run.startedAt,
   // run.finishedAt, …). The previous allowlist construction silently
   // dropped all of these on round-trip.
+  const { id: docId, run: _parsedRun, ...restRunDoc } = runDoc as any;
+  const { id: runId, ...restRunState } = runState as any;
   const docToInsert: RequestDocument = {
-    ...(runDoc as unknown as RequestDocument),
+    _id: docId,
+    ...restRunDoc,
     workerType: runDoc.workerType as WorkerType,
     createdAt: runDoc.createdAt ?? new Date(),
     priority: runDoc.priority ?? 0,
     taskPromptId: resolvedTaskPromptId,
     ...(runDoc.submissionId ? {} : { submissionId: uuidv4() }),
     run: {
-      ...(runState as unknown as RunState),
-      // Per-attempt `run._id` is preserved from the yaml (NOT clobbered
-      // with the request `_id`) so retries / history demotion still work.
+      _id: runId,
+      ...restRunState,
+      // Per-attempt `run.id` is preserved from the yaml (NOT clobbered
+      // with the request id) so retries / history demotion still work.
       logsUrl: newLogsUrl ?? runState.logsUrl,
       ...(runState.harUrl ? { harUrl: runState.harUrl } : {}),
       ...(runState.rawChatUrl ? { rawChatUrl: runState.rawChatUrl } : {}),
@@ -1481,7 +1485,7 @@ async function finalizePendingRun(
 
   await ctx.requestCollection.insertOne(docToInsert);
 
-  return { id: runDoc._id, status: runState.status, iterations: run.iterationCount };
+  return { id: runDoc.id, status: runState.status, iterations: run.iterationCount };
 }
 
 /**
@@ -1875,9 +1879,9 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
     const history = await listHistoricalRuns({ runsCollection: ctx.runsCollection }, id);
-    const current = request.run ? [request.run] : [];
+    const current = request.run ? [mapId(request.run)] : [];
     // Combine current + history; current is always the highest attemptNumber
-    res.json([...current, ...history]);
+    res.json([...current, ...history.map(mapId)]);
   },
 });
 
@@ -1898,7 +1902,7 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
     if (request.run?._id === runId) {
-      res.json(request.run);
+      res.json(mapId(request.run));
       return;
     }
     const historical = await getHistoricalRun({ runsCollection: ctx.runsCollection }, runId);
@@ -1906,7 +1910,7 @@ apiRoute(ctx.app, ctx.registry, {
       res.status(404).json({ error: "Run not found for this request" });
       return;
     }
-    res.json(historical);
+    res.json(mapId(historical));
   },
 });
 
