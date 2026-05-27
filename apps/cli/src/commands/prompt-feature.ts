@@ -374,8 +374,8 @@ promptFeature
         process.exit(1);
       }
 
-      const taskPromptDoc = await createResponse.json() as { _id: string };
-      if (!isMachineReadable(format)) console.log(`${label('Task prompt ID:')} ${value(taskPromptDoc._id)}`);
+      const taskPromptDoc = await createResponse.json() as { id: string };
+      if (!isMachineReadable(format)) console.log(`${label('Task prompt ID:')} ${value(taskPromptDoc.id)}`);
 
       // Step 2: Extract features on the task prompt entity
       if (!isMachineReadable(format)) console.log(`${label('Extracting prompt features...')}`);
@@ -384,7 +384,7 @@ promptFeature
       const body: Record<string, unknown> = {};
       if (options.model) body.model = options.model;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(taskPromptDoc._id)}/extract-features${qs}`, {
+      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(taskPromptDoc.id)}/extract-features${qs}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

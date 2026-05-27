@@ -48,7 +48,7 @@ taskPrompt
         process.exit(1);
       }
 
-      const data = await response.json() as { items: Array<{ _id: string; text: string; features?: Array<{ featureId: string; detected: boolean; evaluated: boolean }>; createdAt: string }>; total: number };
+      const data = await response.json() as { items: Array<{ id: string; text: string; features?: Array<{ featureId: string; detected: boolean; evaluated: boolean }>; createdAt: string }>; total: number };
       if (data.items.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No task prompts found."));
         return;
@@ -59,9 +59,9 @@ taskPrompt
       }
 
       const displayFields: DisplayField[] = [
-        { key: '_id', label: 'ID',
-          formatter: (tp: any) => tp._id.substring(0, 8) + '…',
-          tableFormatter: (tp: any) => value(tp._id.substring(0, 8) + '…'),
+        { key: 'id', label: 'ID',
+          formatter: (tp: any) => tp.id.substring(0, 8) + '…',
+          tableFormatter: (tp: any) => value(tp.id.substring(0, 8) + '…'),
         },
         { key: 'text', label: 'Text', formatter: (tp: any) => {
           const text = tp.text.replace(/\n/g, ' ');
@@ -105,7 +105,7 @@ taskPrompt
       }
 
       const tp = await response.json() as {
-        _id: string; text: string;
+        id: string; text: string;
         features?: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
         featuresExtractedAt?: string;
         createdAt: string; deletedAt?: string;
@@ -113,7 +113,7 @@ taskPrompt
 
       if (isMachineReadable(format)) {
         const fields: DisplayField[] = [
-          { key: '_id', label: 'ID' },
+          { key: 'id', label: 'ID' },
           { key: 'text', label: 'Text' },
           { key: 'features', label: 'Features', formatter: (item: any) => {
             if (!item.features) return '(not extracted)';
@@ -128,7 +128,7 @@ taskPrompt
         return;
       }
 
-      console.log(`${label('ID:')}        ${value(tp._id)}`);
+      console.log(`${label('ID:')}        ${value(tp.id)}`);
       console.log(`${label('Created:')}   ${value(tp.createdAt)}`);
       if (tp.deletedAt) console.log(`${label('Deleted:')}   ${value(tp.deletedAt)}`);
       console.log(`${label('Text:')}`);
@@ -160,7 +160,7 @@ taskPrompt
         console.log(`\n${label('Features:')} ${dimTimestamp('(not extracted)')}`);
       }
 
-      console.log(`\n${label('View runs:')} ${dimTimestamp(`scope run list --task-prompt-id ${tp._id}`)}`);
+      console.log(`\n${label('View runs:')} ${dimTimestamp(`scope run list --task-prompt-id ${tp.id}`)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -201,9 +201,9 @@ taskPrompt
         process.exit(1);
       }
 
-      const tp = await response.json() as { _id: string; text: string; createdAt: string };
+      const tp = await response.json() as { id: string; text: string; createdAt: string };
       console.log(successText(`Task prompt registered.`));
-      console.log(`${label('ID:')}      ${value(tp._id)}`);
+      console.log(`${label('ID:')}      ${value(tp.id)}`);
       console.log(`${label('Created:')} ${value(tp.createdAt)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);

@@ -35,7 +35,7 @@ extension
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
         process.exit(1);
       }
-      const extensions = await response.json() as Array<{ _id: string; name: string; publisher: string; description?: string; version?: string; origin: string }>;
+      const extensions = await response.json() as Array<{ id: string; name: string; publisher: string; description?: string; version?: string; origin: string }>;
       if (extensions.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No extensions found."));
         return;
@@ -44,7 +44,7 @@ extension
         console.log(label(`Found ${extensions.length} extension(s):\n`));
       }
       const displayFields: DisplayField[] = [
-        { key: '_id', label: 'ID', tableFormatter: (e: any) => value(e._id) },
+        { key: 'id', label: 'ID', tableFormatter: (e: any) => value(e.id) },
         { key: 'name', label: 'Name' },
         { key: 'publisher', label: 'Publisher' },
         { key: 'origin', label: 'Origin' },
@@ -118,7 +118,7 @@ extension
 
       if (isMachineReadable(format)) {
         const fields: DisplayField[] = [
-          { key: '_id', label: 'ID' },
+          { key: 'id', label: 'ID' },
           { key: 'name', label: 'Name' },
           { key: 'publisher', label: 'Publisher' },
           { key: 'origin', label: 'Origin' },
@@ -130,7 +130,7 @@ extension
         return;
       }
 
-      console.log(`${label('ID:')} ${value(e._id)}`);
+      console.log(`${label('ID:')} ${value(e.id)}`);
       console.log(`${label('Name:')} ${value(e.name)}`);
       console.log(`${label('Publisher:')} ${value(e.publisher)}`);
       console.log(`${label('Origin:')} ${value(e.origin)}`);
@@ -156,7 +156,7 @@ extension
     try {
       const publisher = options.publisher || options.id.split('.')[0];
       const body: Record<string, unknown> = {
-        _id: options.id,
+        id: options.id,
         publisher,
         name: options.name,
         origin: options.origin,
@@ -174,7 +174,7 @@ extension
         process.exit(1);
       }
       const created = await response.json();
-      console.log(successText(`Extension "${created._id}" imported.`));
+      console.log(successText(`Extension "${created.id}" imported.`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

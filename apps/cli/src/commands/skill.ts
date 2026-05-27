@@ -35,7 +35,7 @@ skill
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
         process.exit(1);
       }
-      const skills = await response.json() as Array<{ _id: string; name: string; source: string; description?: string; origin: string }>;
+      const skills = await response.json() as Array<{ id: string; name: string; source: string; description?: string; origin: string }>;
       if (skills.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No skills found."));
         return;
@@ -44,7 +44,7 @@ skill
         console.log(label(`Found ${skills.length} skill(s):\n`));
       }
       const displayFields: DisplayField[] = [
-        { key: '_id', label: 'Slug', tableFormatter: (s: any) => value(s._id) },
+        { key: 'id', label: 'Slug', tableFormatter: (s: any) => value(s.id) },
         { key: 'name', label: 'Name' },
         { key: 'source', label: 'Source' },
         { key: 'origin', label: 'Origin' },
@@ -119,7 +119,7 @@ skill
 
       if (isMachineReadable(format)) {
         const fields: DisplayField[] = [
-          { key: '_id', label: 'Slug' },
+          { key: 'id', label: 'Slug' },
           { key: 'name', label: 'Name' },
           { key: 'source', label: 'Source' },
           { key: 'skillName', label: 'Skill Name' },
@@ -132,7 +132,7 @@ skill
         return;
       }
 
-      console.log(`${label('Slug:')} ${value(s._id)}`);
+      console.log(`${label('Slug:')} ${value(s.id)}`);
       console.log(`${label('Name:')} ${value(s.name)}`);
       console.log(`${label('Source:')} ${value(s.source)}`);
       console.log(`${label('Skill Name:')} ${value(s.skillName)}`);
@@ -176,7 +176,7 @@ skill
         process.exit(1);
       }
       const created = await response.json();
-      console.log(successText(`Skill "${created._id}" imported.`));
+      console.log(successText(`Skill "${created.id}" imported.`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

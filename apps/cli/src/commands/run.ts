@@ -607,7 +607,7 @@ run
           console.error(errorText("No runs found for this submission"));
           process.exit(1);
         }
-        ids = runs.map((r: { _id: string }) => r._id);
+        ids = runs.map((r: { id: string }) => r.id);
         console.log(`${label('Found')} ${value(String(ids.length))} runs`);
       }
 
@@ -924,7 +924,7 @@ run
       if (isMachineReadable(format)) {
         const fields: DisplayField[] = [
           { key: 'attemptNumber', label: 'Attempt' },
-          { key: '_id', label: 'Run ID' },
+          { key: 'id', label: 'Run ID' },
           { key: 'status', label: 'Status' },
           { key: 'outcome', label: 'Outcome' },
           { key: 'updatedAt', label: 'Updated' },
@@ -942,7 +942,7 @@ run
         const status = a.status as string;
         const outcome = a.outcome as string | undefined;
         console.log(
-          `${marker}${label(`Attempt ${a.attemptNumber}:`)} ${value(String(a._id))} ${value(status)}${outcome ? ` / ${value(outcome)}` : ''}${a.updatedAt ? ` (${a.updatedAt})` : ''}`,
+          `${marker}${label(`Attempt ${a.attemptNumber}:`)} ${value(String(a.id))} ${value(status)}${outcome ? ` / ${value(outcome)}` : ''}${a.updatedAt ? ` (${a.updatedAt})` : ''}`,
         );
       }
     } catch (error) {

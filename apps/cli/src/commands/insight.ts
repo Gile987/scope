@@ -47,7 +47,7 @@ insight
         return;
       }
       const displayFields: DisplayField[] = [
-        { key: '_id', label: 'ID', tableFormatter: (r: any) => value(r._id.slice(0, 8) + '…') },
+        { key: 'id', label: 'ID', tableFormatter: (r: any) => value(r.id.slice(0, 8) + '…') },
         { key: 'title', label: 'Title', formatter: (r: any) => r.title.length > 60 ? r.title.slice(0, 57) + '…' : r.title },
         { key: 'category', label: 'Category', formatter: (r: any) => r.category || '—' },
         { key: 'referenceCount', label: 'Refs', formatter: (r: any) => String(r.referenceCount) },
@@ -87,7 +87,7 @@ insight
 
       if (isMachineReadable(format)) {
         const fields: DisplayField[] = [
-          { key: '_id', label: 'ID' },
+          { key: 'id', label: 'ID' },
           { key: 'title', label: 'Title' },
           { key: 'category', label: 'Category', formatter: (r: any) => r.category || '' },
           { key: 'tags', label: 'Tags', formatter: (r: any) => (r.tags ?? []).join(', ') },
@@ -103,7 +103,7 @@ insight
         return;
       }
 
-      console.log(`${label('ID:')} ${value(insightDoc._id)}`);
+      console.log(`${label('ID:')} ${value(insightDoc.id)}`);
       console.log(`${label('Title:')} ${value(insightDoc.title)}`);
       if (insightDoc.category) console.log(`${label('Category:')} ${insightDoc.category}`);
       if (insightDoc.tags?.length) console.log(`${label('Tags:')} ${insightDoc.tags.join(', ')}`);
@@ -150,7 +150,7 @@ insight
         process.exit(1);
       }
       const created = await response.json();
-      console.log(successText(`Insight created: ${created._id}`));
+      console.log(successText(`Insight created: ${created.id}`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

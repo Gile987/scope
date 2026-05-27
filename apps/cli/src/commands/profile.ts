@@ -44,7 +44,7 @@ profile
         console.log(label(`Found ${items.length} profile(s):\n`));
       }
       const displayFields: DisplayField[] = [
-        { key: '_id', label: 'ID', tableFormatter: (p: any) => value(p._id) },
+        { key: 'id', label: 'ID', tableFormatter: (p: any) => value(p.id) },
         { key: 'name', label: 'Name' },
         { key: 'latestVersion', label: 'Version', formatter: (p: any) => `v${p.latestVersion}` },
         { key: 'version.workerType', label: 'Worker', formatter: (p: any) => p.version?.workerType ?? '-' },
@@ -77,7 +77,7 @@ profile
       const profile = await response.json();
       if (!isMachineReadable(format)) {
         console.log(label('Profile:'));
-        console.log(`  ${label('ID:')}      ${value(profile._id)}`);
+        console.log(`  ${label('ID:')}      ${value(profile.id)}`);
         console.log(`  ${label('Name:')}    ${value(profile.name)}`);
         if (profile.description) console.log(`  ${label('Desc:')}    ${dimTimestamp(profile.description)}`);
         console.log(`  ${label('Version:')} ${value(`v${profile.latestVersion}`)}`);
@@ -93,7 +93,7 @@ profile
         }
       } else {
         const displayFields: DisplayField[] = [
-          { key: '_id', label: 'ID' },
+          { key: 'id', label: 'ID' },
           { key: 'name', label: 'Name' },
           { key: 'latestVersion', label: 'Version' },
           { key: 'version.workerType', label: 'Worker', formatter: (p: any) => p.version?.workerType ?? '' },
@@ -146,7 +146,7 @@ profile
 
       const result = await response.json();
       console.log(successText(`Profile "${options.name}" created.`));
-      console.log(`  ${label('ID:')}      ${value(result._id)}`);
+      console.log(`  ${label('ID:')}      ${value(result.id)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -305,7 +305,7 @@ version
 
       const result = await response.json();
       console.log(successText(`Version v${result.version} created.`));
-      console.log(`  ${label('ID:')} ${value(result._id)}`);
+      console.log(`  ${label('ID:')} ${value(result.id)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

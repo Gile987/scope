@@ -35,7 +35,7 @@ agent
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
         process.exit(1);
       }
-      const agents = await response.json() as Array<{ _id: string; name: string; supportedModels: string[]; defaultModel?: string }>;
+      const agents = await response.json() as Array<{ id: string; name: string; supportedModels: string[]; defaultModel?: string }>;
       if (agents.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No agents found."));
         return;
@@ -44,7 +44,7 @@ agent
         console.log(label(`Found ${agents.length} agents:\n`));
       }
       const displayFields: DisplayField[] = [
-        { key: '_id', label: 'ID', tableFormatter: (a: any) => value(a._id) },
+        { key: 'id', label: 'ID', tableFormatter: (a: any) => value(a.id) },
         { key: 'name', label: 'Name' },
         { key: 'supportedModels', label: 'Models', formatter: (a: any) => (a.supportedModels || []).join(', ') || '—' },
         { key: 'defaultModel', label: 'Default', formatter: (a: any) => a.defaultModel || '—' },
@@ -76,7 +76,7 @@ agent
 
       if (isMachineReadable(format)) {
         const fields: DisplayField[] = [
-          { key: '_id', label: 'ID' },
+          { key: 'id', label: 'ID' },
           { key: 'name', label: 'Name' },
           { key: 'description', label: 'Description', formatter: (a: any) => a.description || '' },
           { key: 'supportedModels', label: 'Supported Models', formatter: (a: any) => (a.supportedModels || []).join(', ') },
@@ -88,7 +88,7 @@ agent
         return;
       }
 
-      console.log(`${label('ID:')} ${value(agentDoc._id)}`);
+      console.log(`${label('ID:')} ${value(agentDoc.id)}`);
       console.log(`${label('Name:')} ${value(agentDoc.name)}`);
       if (agentDoc.description) console.log(`${label('Description:')} ${agentDoc.description}`);
       console.log(`${label('Supported Models:')} ${(agentDoc.supportedModels || []).join(', ') || '(none)'}`);
@@ -128,7 +128,7 @@ agent
         process.exit(1);
       }
       const updated = await response.json();
-      console.log(successText(`Agent ${updated._id} updated.`));
+      console.log(successText(`Agent ${updated.id} updated.`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -187,11 +187,11 @@ agentModel
       const agentDoc = await response.json();
       const models = (agentDoc.supportedModels || []) as string[];
       if (models.length === 0) {
-        if (!isMachineReadable(format)) console.log(warnBanner(`Agent ${agentDoc._id} has no supported models.`));
+        if (!isMachineReadable(format)) console.log(warnBanner(`Agent ${agentDoc.id} has no supported models.`));
         return;
       }
       if (!isMachineReadable(format)) {
-        console.log(label(`Models for ${agentDoc._id}:\n`));
+        console.log(label(`Models for ${agentDoc.id}:\n`));
       }
       const items = models.map((m: string) => ({ model: m, default: m === agentDoc.defaultModel ? '✓' : '' }));
       const displayFields: DisplayField[] = [
@@ -223,7 +223,7 @@ agentModel
       const agentDoc = await getResp.json();
       const models: string[] = agentDoc.supportedModels || [];
       if (models.includes(options.model)) {
-        console.log(warnBanner(`Model ${options.model} is already supported by ${agentDoc._id}.`));
+        console.log(warnBanner(`Model ${options.model} is already supported by ${agentDoc.id}.`));
         return;
       }
       models.push(options.model);
@@ -237,7 +237,7 @@ agentModel
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
         process.exit(1);
       }
-      console.log(successText(`Model ${options.model} added to ${agentDoc._id}.`));
+      console.log(successText(`Model ${options.model} added to ${agentDoc.id}.`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -262,7 +262,7 @@ agentModel
       const models: string[] = agentDoc.supportedModels || [];
       const idx = models.indexOf(options.model);
       if (idx === -1) {
-        console.log(warnBanner(`Model ${options.model} is not supported by ${agentDoc._id}.`));
+        console.log(warnBanner(`Model ${options.model} is not supported by ${agentDoc.id}.`));
         return;
       }
       models.splice(idx, 1);
@@ -281,7 +281,7 @@ agentModel
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
         process.exit(1);
       }
-      console.log(successText(`Model ${options.model} removed from ${agentDoc._id}.`));
+      console.log(successText(`Model ${options.model} removed from ${agentDoc.id}.`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -306,7 +306,7 @@ agentModel
       const agentDoc = await getResp.json();
       const models: string[] = agentDoc.supportedModels || [];
       if (!models.includes(options.model)) {
-        console.error(errorText(`Error: model ${options.model} is not in the supported models for ${agentDoc._id}. Add it first with: agent model add -i ${agentDoc._id} --model ${options.model}`));
+        console.error(errorText(`Error: model ${options.model} is not in the supported models for ${agentDoc.id}. Add it first with: agent model add -i ${agentDoc.id} --model ${options.model}`));
         process.exit(1);
       }
       const putResp = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`, {
@@ -319,7 +319,7 @@ agentModel
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
         process.exit(1);
       }
-      console.log(successText(`Default model for ${agentDoc._id} set to ${options.model}.`));
+      console.log(successText(`Default model for ${agentDoc.id} set to ${options.model}.`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);

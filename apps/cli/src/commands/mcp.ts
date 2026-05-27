@@ -45,7 +45,7 @@ mcpServer
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
         process.exit(1);
       }
-      const servers = await response.json() as Array<{ _id: string; name: string; type: string; url: string; description?: string }>;
+      const servers = await response.json() as Array<{ id: string; name: string; type: string; url: string; description?: string }>;
       if (servers.length === 0) {
         if (!isMachineReadable(format)) console.log(warnBanner("No MCP servers found."));
         return;
@@ -54,7 +54,7 @@ mcpServer
         console.log(label(`Found ${servers.length} MCP server(s):\n`));
       }
       const displayFields: DisplayField[] = [
-        { key: '_id', label: 'Slug', tableFormatter: (s: any) => value(s._id) },
+        { key: 'id', label: 'Slug', tableFormatter: (s: any) => value(s.id) },
         { key: 'name', label: 'Name' },
         { key: 'type', label: 'Type' },
         { key: 'url', label: 'URL' },
@@ -87,7 +87,7 @@ mcpServer
 
       if (isMachineReadable(format)) {
         const fields: DisplayField[] = [
-          { key: '_id', label: 'Slug' },
+          { key: 'id', label: 'Slug' },
           { key: 'name', label: 'Name' },
           { key: 'type', label: 'Type' },
           { key: 'url', label: 'URL' },
@@ -99,7 +99,7 @@ mcpServer
         return;
       }
 
-      console.log(`${label('Slug:')} ${value(server._id)}`);
+      console.log(`${label('Slug:')} ${value(server.id)}`);
       console.log(`${label('Name:')} ${value(server.name)}`);
       console.log(`${label('Type:')} ${value(server.type)}`);
       if (server.type === 'stdio') {
@@ -161,7 +161,7 @@ mcpServer
       const env = options.env ? parseEnvPairs(options.env) : undefined;
 
       const body: Record<string, unknown> = {
-        _id: options.id,
+        id: options.id,
         name: options.name,
         type: options.type,
       };
@@ -186,7 +186,7 @@ mcpServer
         process.exit(1);
       }
       const created = await response.json();
-      console.log(successText(`MCP server "${created._id}" created.`));
+      console.log(successText(`MCP server "${created.id}" created.`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
@@ -232,7 +232,7 @@ mcpServer
         process.exit(1);
       }
       const updated = await response.json();
-      console.log(successText(`MCP server "${updated._id}" updated.`));
+      console.log(successText(`MCP server "${updated.id}" updated.`));
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);
       process.exit(1);
