@@ -42,6 +42,8 @@ import {
 import { VersionFooter } from "./VersionFooter";
 import { ThemeToggle } from "./ThemeToggle";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 
 interface NavItem {
   to: string;
@@ -108,7 +110,7 @@ function SidebarIconLink({ to, label, icon: Icon, active, external, emphasized }
   const className = cn(
     "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors",
     emphasized
-      ? "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
+      ? "bg-action text-action-foreground shadow-sm hover:bg-action/90"
       : active
         ? "bg-accent text-foreground"
         : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -159,6 +161,28 @@ export function Layout() {
     (item) => !item.featureKey || isFeatureEnabled(item.featureKey),
   );
 
+  // Pulse the logo while any run is pending / queued / processing.
+  // The API filters by a single status at a time, so we run three small
+  // probes in parallel and combine them. Refetches every 10s.
+  const { data: hasActiveRuns = false } = useQuery({
+    queryKey: ["runs", "active-status-probe"],
+    queryFn: async () => {
+      const [pending, queued, processing] = await Promise.all([
+        api.listRuns({ status: "pending", limit: 1 }),
+        api.listRuns({ status: "queued", limit: 1 }),
+        api.listRuns({ status: "processing", limit: 1 }),
+      ]);
+      return (
+        (pending.data?.length ?? 0) +
+          (queued.data?.length ?? 0) +
+          (processing.data?.length ?? 0) >
+        0
+      );
+    },
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
+
   const isFullBleed = useMemo(
     () =>
       FULL_BLEED_ROUTE_PATTERNS.some((pattern) =>
@@ -177,25 +201,26 @@ export function Layout() {
           isFullBleed ? "h-screen overflow-hidden" : "min-h-screen",
         )}
       >
-        {/* Top header — full width, centered logo */}
-        <header className="sticky top-0 z-50 flex h-12 shrink-0 items-center justify-center border-b border-border/60 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        {/* Top header — logo on the left, controls on the right */}
+        <header className="sticky top-0 z-50 flex h-12 shrink-0 items-center justify-between border-b border-border/60 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <Link to="/" className="flex items-center gap-2 font-bold" aria-label="Scope home">
-            <Activity className="h-5 w-5" />
+            <Activity
+              className={cn("h-5 w-5 text-action", hasActiveRuns && "logo-pulse")}
+              aria-label={hasActiveRuns ? "Runs in progress" : undefined}
+            />
             <span>Scope</span>
           </Link>
-          <div className="absolute right-3 top-1/2 -translate-y-1/2">
-            <ThemeToggle />
-          </div>
+          <ThemeToggle />
         </header>
 
         <div className="flex min-h-0 flex-1">
           {/* Desktop sidebar — icon-only, sticks below the top header */}
           <aside
-            className="sticky top-12 z-30 hidden h-[calc(100vh-3rem)] w-14 shrink-0 flex-col items-center self-start border-r border-border/60 bg-card/40 sm:flex"
+            className="sticky top-12 z-30 hidden h-[calc(100vh-3rem)] w-14 shrink-0 flex-col items-center self-start overflow-y-auto overscroll-contain border-r border-border/60 bg-card/40 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex"
             aria-label="Primary navigation"
           >
-            {/* Primary nav (scrollable when overflowing) */}
-            <nav className="flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-3">
+            {/* Primary nav */}
+            <nav className="flex w-full flex-col items-center gap-1 py-3">
               {/* New Run — emphasized primary CTA */}
               <SidebarIconLink
                 to="/runs/new"
@@ -219,8 +244,8 @@ export function Layout() {
               })}
             </nav>
 
-            {/* Footer: API docs + Admin */}
-            <div className="flex w-full flex-col items-center gap-1 border-t border-border/60 py-3">
+            {/* Footer: API docs + Admin — pinned to bottom when there's room, scrolls with content otherwise */}
+            <div className="mt-auto flex w-full flex-col items-center gap-1 border-t border-border/60 py-3">
               <SidebarIconLink
                 to="/api-docs"
                 label="API Documentation"

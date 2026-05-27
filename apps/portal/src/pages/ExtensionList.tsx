@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback, type Key } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useOutlet, useParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import type { ExtensionDocument } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
   CustomizeColumnsLink,
   DataTable,
   Pagination,
+  BulkActionBar,
   useHiddenColumns,
   useListUrlState,
   type DataTableColumn,
@@ -49,10 +50,15 @@ const COLUMN_DEFS: CustomizeColumnsOption[] = [
 export function ExtensionList() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const detailOutlet = useOutlet();
+  const { id: activeId } = useParams<{ id?: string }>();
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
   const columnVisibility = useHiddenColumns({ storageKey: "extensions" });
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   const { data: extensions = [], isLoading } = useQuery({
     queryKey: ["extensions"],
@@ -65,6 +71,20 @@ export function ExtensionList() {
       queryClient.invalidateQueries({ queryKey: ["extensions"] });
       toast.success("Extension deleted");
     },
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => api.deleteExtension(id)));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      return { deleted: ids.length - failed, failed };
+    },
+    onSuccess: ({ deleted, failed }) => {
+      toast.success(`Deleted ${deleted} extension${deleted !== 1 ? "s" : ""}${failed ? `, ${failed} failed` : ""}`);
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["extensions"] });
+    },
+    onError: (err: Error) => toast.error(`Failed to delete: ${err.message}`),
   });
 
   const activeExtensions = useMemo(
@@ -110,6 +130,26 @@ export function ExtensionList() {
   const total = sortedExtensions.length;
   const pageStart = (state.page - 1) * state.pageSize;
   const pageItems = sortedExtensions.slice(pageStart, pageStart + state.pageSize);
+
+  const toggleRow = useCallback((id: Key) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const key = String(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  const toggleAll = useCallback((ids: Key[]) => {
+    setSelectedIds((prev) => {
+      const stringIds = ids.map((id) => String(id));
+      const allSelected = stringIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) for (const id of stringIds) next.delete(id);
+      else for (const id of stringIds) next.add(id);
+      return next;
+    });
+  }, []);
 
   const columns: DataTableColumn<ExtensionDocument>[] = [
     {
@@ -239,13 +279,41 @@ export function ExtensionList() {
           ) : undefined
         }
         onSecondaryClose={() => setCustomizeOpen(false)}
+        detail={detailOutlet}
+        onDetailClose={() =>
+          navigate({ pathname: "/extensions", search: window.location.search })
+        }
       >
         <div className="flex flex-col gap-3">
+          <BulkActionBar
+            count={selectedIds.size}
+            onClear={() => setSelectedIds(new Set())}
+            itemLabel="extension"
+          >
+            <Button
+              variant="destructive"
+              size="sm"
+              className="gap-1.5"
+              disabled={bulkDeleteMutation.isPending || selectedIds.size === 0}
+              onClick={() => setBulkDeleteOpen(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          </BulkActionBar>
+
           <DataTable
             items={pageItems}
             columns={columns}
             getRowId={(e) => e._id}
-            onRowClick={(e) => navigate(`/extensions/${e._id}`)}
+            activeId={activeId}
+            onRowClick={(e) =>
+              navigate({ pathname: `/extensions/${e._id}/preview`, search: window.location.search })
+            }
+            selection={{
+              selectedIds,
+              onToggle: toggleRow,
+              onToggleAll: toggleAll,
+            }}
             sort={state.sort}
             sortDir={state.sortDir}
             onSortChange={state.toggleSort}
@@ -265,6 +333,31 @@ export function ExtensionList() {
             itemLabel="extensions"
           />
         </div>
+
+        <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Delete {selectedIds.size} extension{selectedIds.size !== 1 ? "s" : ""}?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                This soft-deletes the selected extensions. They will no longer be available for new runs.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => {
+                  setBulkDeleteOpen(false);
+                  bulkDeleteMutation.mutate([...selectedIds]);
+                }}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </ListLayout>
 
       <Dialog open={importOpen} onOpenChange={setImportOpen}>

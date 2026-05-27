@@ -15,6 +15,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { EnrichmentBadge } from "@/components/EnrichmentBadge";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
@@ -329,6 +330,7 @@ export function RunDetail() {
      : (run.skills ?? []);
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="space-y-6">
       {/* Back link + header */}
       <div>
@@ -837,7 +839,16 @@ export function RunDetail() {
               <CardContent className="space-y-3">
                 <div>
                   <h4 className="text-sm font-medium mb-1">Task</h4>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{run.scenario?.task ?? "–"}</p>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-default">
+                        {run.scenario?.task ?? "–"}
+                      </p>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-sm whitespace-pre-wrap">
+                      {run.scenario?.task ?? "–"}
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
                 {run.scenario?.version && (
                   <div>
@@ -1170,6 +1181,7 @@ export function RunDetail() {
         isPending={retryMutation.isPending}
       />
     </div>
+    </TooltipProvider>
   );
 }
 

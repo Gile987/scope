@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback, type Key } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useOutlet, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { CriteriaDocument } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
   CustomizeColumnsPanel,
   DataTable,
   Pagination,
+  BulkActionBar,
   useHiddenColumns,
   useListUrlState,
   type DataTableColumn,
@@ -41,8 +43,13 @@ export function CriteriaList() {
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const detailOutlet = useOutlet();
+  const { id: activeId } = useParams<{ id?: string }>();
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
   const visibility = useHiddenColumns({ storageKey: "criteria" });
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   const { data: criteria = [], isLoading } = useQuery({
     queryKey: ["criteria", state.search],
@@ -52,6 +59,22 @@ export function CriteriaList() {
   const deleteMutation = useMutation({
     mutationFn: api.deleteCriterion,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["criteria"] }),
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => api.deleteCriterion(id)));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      return { deleted: ids.length - failed, failed };
+    },
+    onSuccess: ({ deleted, failed }) => {
+      toast.success(
+        `Deleted ${deleted} criterion${deleted !== 1 ? "s" : ""}${failed ? `, ${failed} failed (likely has dependents)` : ""}`,
+      );
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["criteria"] });
+    },
+    onError: (err: Error) => toast.error(`Failed to delete: ${err.message}`),
   });
 
   const sortedCriteria = useMemo(() => {
@@ -71,6 +94,26 @@ export function CriteriaList() {
   const total = sortedCriteria.length;
   const pageStart = (state.page - 1) * state.pageSize;
   const pageItems = sortedCriteria.slice(pageStart, pageStart + state.pageSize);
+
+  const toggleRow = useCallback((id: Key) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const key = String(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  const toggleAll = useCallback((ids: Key[]) => {
+    setSelectedIds((prev) => {
+      const stringIds = ids.map((id) => String(id));
+      const allSelected = stringIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) for (const id of stringIds) next.delete(id);
+      else for (const id of stringIds) next.add(id);
+      return next;
+    });
+  }, []);
 
   const columns: DataTableColumn<CriteriaDocument>[] = [
     {
@@ -203,13 +246,41 @@ export function CriteriaList() {
         ) : undefined
       }
       onSecondaryClose={() => setCustomizeOpen(false)}
+      detail={detailOutlet}
+      onDetailClose={() =>
+        navigate({ pathname: "/criteria", search: window.location.search })
+      }
     >
       <div className="flex flex-col gap-3">
+        <BulkActionBar
+          count={selectedIds.size}
+          onClear={() => setSelectedIds(new Set())}
+          itemLabel="criterion"
+        >
+          <Button
+            variant="destructive"
+            size="sm"
+            className="gap-1.5"
+            disabled={bulkDeleteMutation.isPending || selectedIds.size === 0}
+            onClick={() => setBulkDeleteOpen(true)}
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </Button>
+        </BulkActionBar>
+
         <DataTable
           items={pageItems}
           columns={columns}
           getRowId={(c) => c.id}
-          onRowClick={(c) => navigate(`/criteria/${c.id}`)}
+          activeId={activeId}
+          onRowClick={(c) =>
+            navigate({ pathname: `/criteria/${c.id}/preview`, search: window.location.search })
+          }
+          selection={{
+            selectedIds,
+            onToggle: toggleRow,
+            onToggleAll: toggleAll,
+          }}
           sort={state.sort}
           sortDir={state.sortDir}
           onSortChange={state.toggleSort}
@@ -227,6 +298,32 @@ export function CriteriaList() {
           itemLabel="criteria"
         />
       </div>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedIds.size} criterion{selectedIds.size !== 1 ? "s" : ""}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the selected criteria. Criteria with dependents
+              will be skipped.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                setBulkDeleteOpen(false);
+                bulkDeleteMutation.mutate([...selectedIds]);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ListLayout>
   );
 }

@@ -3,7 +3,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useOutlet, useParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,8 @@ const FILTER_KEYS = ["status"] as const;
 export function ReportsList() {
   const navigate = useNavigate();
   const location = useLocation();
+  const detailOutlet = useOutlet();
+  const { id: activeId } = useParams<{ id?: string }>();
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
   const [customizeOpen, setCustomizeOpen] = useState(false);
 
@@ -224,13 +226,20 @@ export function ReportsList() {
             ) : null
           }
           onSecondaryClose={() => setCustomizeOpen(false)}
+          detail={detailOutlet}
+          onDetailClose={() =>
+            navigate({ pathname: "/reports", search: window.location.search })
+          }
         >
           <div className="flex flex-col gap-3">
             <DataTable
               items={pageItems}
               columns={columns}
               getRowId={(r) => r._id}
-              onRowClick={(r) => navigate(`/reports/${r._id}`)}
+              activeId={activeId}
+              onRowClick={(r) =>
+                navigate({ pathname: `/reports/${r._id}/preview`, search: window.location.search })
+              }
               sort={state.sort}
               sortDir={state.sortDir}
               onSortChange={state.toggleSort}

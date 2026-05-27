@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback, type Key } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useOutlet, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Insight } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
   CustomizeColumnsPanel,
   DataTable,
   Pagination,
+  BulkActionBar,
   useHiddenColumns,
   useListUrlState,
   type DataTableColumn,
@@ -43,8 +45,14 @@ export function InsightsList() {
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const detailOutlet = useOutlet();
+  const { id: activeId } = useParams<{ id?: string }>();
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
   const visibility = useHiddenColumns({ storageKey: "insights" });
+
+  // Multi-selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   const { data: insights = [], isLoading } = useQuery({
     queryKey: ["insights", state.search],
@@ -54,6 +62,20 @@ export function InsightsList() {
   const deleteMutation = useMutation({
     mutationFn: api.deleteInsight,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["insights"] }),
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => api.deleteInsight(id)));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      return { deleted: ids.length - failed, failed };
+    },
+    onSuccess: ({ deleted, failed }) => {
+      toast.success(`Deleted ${deleted} insight${deleted !== 1 ? "s" : ""}${failed ? `, ${failed} failed` : ""}`);
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["insights"] });
+    },
+    onError: (err: Error) => toast.error(`Failed to delete: ${err.message}`),
   });
 
   const upvoteMutation = useMutation({
@@ -89,6 +111,27 @@ export function InsightsList() {
   const total = sortedInsights.length;
   const pageStart = (state.page - 1) * state.pageSize;
   const pageItems = sortedInsights.slice(pageStart, pageStart + state.pageSize);
+
+  // Selection helpers
+  const toggleRow = useCallback((id: Key) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const key = String(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  const toggleAll = useCallback((ids: Key[]) => {
+    setSelectedIds((prev) => {
+      const stringIds = ids.map((id) => String(id));
+      const allSelected = stringIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) for (const id of stringIds) next.delete(id);
+      else for (const id of stringIds) next.add(id);
+      return next;
+    });
+  }, []);
 
   const columns: DataTableColumn<Insight>[] = [
     {
@@ -279,13 +322,41 @@ export function InsightsList() {
         ) : undefined
       }
       onSecondaryClose={() => setCustomizeOpen(false)}
+      detail={detailOutlet}
+      onDetailClose={() =>
+        navigate({ pathname: "/insights", search: window.location.search })
+      }
     >
       <div className="flex flex-col gap-3">
+        <BulkActionBar
+          count={selectedIds.size}
+          onClear={() => setSelectedIds(new Set())}
+          itemLabel="insight"
+        >
+          <Button
+            variant="destructive"
+            size="sm"
+            className="gap-1.5"
+            disabled={bulkDeleteMutation.isPending || selectedIds.size === 0}
+            onClick={() => setBulkDeleteOpen(true)}
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </Button>
+        </BulkActionBar>
+
         <DataTable
           items={pageItems}
           columns={columns}
           getRowId={(insight) => insight._id}
-          onRowClick={(insight) => navigate(`/insights/${insight._id}`)}
+          activeId={activeId}
+          onRowClick={(insight) =>
+            navigate({ pathname: `/insights/${insight._id}/preview`, search: window.location.search })
+          }
+          selection={{
+            selectedIds,
+            onToggle: toggleRow,
+            onToggleAll: toggleAll,
+          }}
           sort={state.sort}
           sortDir={state.sortDir}
           onSortChange={state.toggleSort}
@@ -313,6 +384,31 @@ export function InsightsList() {
           itemLabel="insights"
         />
       </div>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedIds.size} insight{selectedIds.size !== 1 ? "s" : ""}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This soft-deletes the selected insights. They can be recovered later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                setBulkDeleteOpen(false);
+                bulkDeleteMutation.mutate([...selectedIds]);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ListLayout>
   );
 }

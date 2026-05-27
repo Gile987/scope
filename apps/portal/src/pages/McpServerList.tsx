@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback, type Key } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useOutlet, useParams } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -25,6 +25,7 @@ import {
   CustomizeColumnsLink,
   DataTable,
   Pagination,
+  BulkActionBar,
   useHiddenColumns,
   useListUrlState,
   type DataTableColumn,
@@ -64,6 +65,23 @@ export function McpServerList() {
       toast.success("MCP server deleted");
     },
   });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => api.deleteMcpServer(id)));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      return { deleted: ids.length - failed, failed };
+    },
+    onSuccess: ({ deleted, failed }) => {
+      toast.success(`Deleted ${deleted} MCP server${deleted !== 1 ? "s" : ""}${failed ? `, ${failed} failed` : ""}`);
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+    },
+    onError: (err: Error) => toast.error(`Failed to delete: ${err.message}`),
+  });
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   const activeServers = useMemo(
     () => servers.filter((s: McpServerDocument) => !s.deletedAt),
@@ -108,6 +126,26 @@ export function McpServerList() {
   const total = sortedServers.length;
   const pageStart = (state.page - 1) * state.pageSize;
   const pageItems = sortedServers.slice(pageStart, pageStart + state.pageSize);
+
+  const toggleRow = useCallback((id: Key) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const key = String(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  const toggleAll = useCallback((ids: Key[]) => {
+    setSelectedIds((prev) => {
+      const stringIds = ids.map((id) => String(id));
+      const allSelected = stringIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) for (const id of stringIds) next.delete(id);
+      else for (const id of stringIds) next.add(id);
+      return next;
+    });
+  }, []);
 
   const columns: DataTableColumn<McpServerDocument>[] = [
     {
@@ -249,15 +287,40 @@ export function McpServerList() {
       }
       onSecondaryClose={() => setCustomizeOpen(false)}
       detail={detailOutlet}
-      onDetailClose={() => navigate("/mcp-servers")}
+      onDetailClose={() =>
+        navigate({ pathname: "/mcp-servers", search: window.location.search })
+      }
     >
       <div className="flex flex-col gap-3">
+        <BulkActionBar
+          count={selectedIds.size}
+          onClear={() => setSelectedIds(new Set())}
+          itemLabel="server"
+        >
+          <Button
+            variant="destructive"
+            size="sm"
+            className="gap-1.5"
+            disabled={bulkDeleteMutation.isPending || selectedIds.size === 0}
+            onClick={() => setBulkDeleteOpen(true)}
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </Button>
+        </BulkActionBar>
+
         <DataTable
           items={pageItems}
           columns={columns}
           getRowId={(s) => s._id}
           activeId={activeId}
-          onRowClick={(s) => navigate(`/mcp-servers/${s._id}`)}
+          onRowClick={(s) =>
+            navigate({ pathname: `/mcp-servers/${s._id}/preview`, search: window.location.search })
+          }
+          selection={{
+            selectedIds,
+            onToggle: toggleRow,
+            onToggleAll: toggleAll,
+          }}
           sort={state.sort}
           sortDir={state.sortDir}
           onSortChange={state.toggleSort}
@@ -277,6 +340,31 @@ export function McpServerList() {
           itemLabel="servers"
         />
       </div>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedIds.size} MCP server{selectedIds.size !== 1 ? "s" : ""}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This soft-deletes the selected MCP servers. They will no longer be available for new runs.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                setBulkDeleteOpen(false);
+                bulkDeleteMutation.mutate([...selectedIds]);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ListLayout>
   );
 }

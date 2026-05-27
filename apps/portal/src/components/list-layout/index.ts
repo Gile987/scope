@@ -17,6 +17,8 @@ export { DetailPanel } from "./DetailPanel";
 export type { DetailPanelProps } from "./DetailPanel";
 export { BulkActionBar } from "./BulkActionBar";
 export type { BulkActionBarProps } from "./BulkActionBar";
+export { DateRangeFilter } from "./DateRangeFilter";
+export type { DateRangeFilterProps } from "./DateRangeFilter";
 export {
   CustomizeColumnsPanel,
   CustomizeColumnsLink,

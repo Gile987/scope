@@ -44,8 +44,7 @@ export interface CustomizeColumnsPanelProps {
  * panel to `ListLayout.secondaryPanel`.
  *
  * Toggles apply live: every checkbox change calls back to the parent so the
- * underlying table updates immediately. **Restore** resets to defaults and
- * **Done** simply closes the panel.
+ * underlying table updates immediately. **Restore** resets to defaults.
  */
 export function CustomizeColumnsPanel({
   columns,
@@ -132,7 +131,7 @@ export function CustomizeColumnsPanel({
         </ul>
       </div>
 
-      <footer className="flex items-center justify-between gap-2 border-t border-border/60 px-3 py-2.5 text-sm">
+      <footer className="flex items-center justify-start gap-2 border-t border-border/60 px-3 py-2.5 text-sm">
         <button
           type="button"
           onClick={onReset}
@@ -140,9 +139,6 @@ export function CustomizeColumnsPanel({
         >
           Restore
         </button>
-        <Button size="sm" onClick={onClose}>
-          Done
-        </Button>
       </footer>
     </aside>
   );

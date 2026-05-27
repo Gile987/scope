@@ -25,6 +25,28 @@ export default {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
         },
+        brand: {
+          DEFAULT: "hsl(var(--brand))",
+          foreground: "hsl(var(--brand-foreground))",
+          hover: "hsl(var(--brand-hover))",
+          50: "hsl(var(--brand-50))",
+          300: "hsl(var(--brand-300))",
+          500: "hsl(var(--brand-500))",
+          700: "hsl(var(--brand-700))",
+          900: "hsl(var(--brand-900))",
+        },
+        ink: {
+          0: "hsl(var(--ink-0))",
+          50: "hsl(var(--ink-50))",
+          100: "hsl(var(--ink-100))",
+          300: "hsl(var(--ink-300))",
+          500: "hsl(var(--ink-500))",
+          900: "hsl(var(--ink-900))",
+        },
+        action: {
+          DEFAULT: "hsl(var(--action))",
+          foreground: "hsl(var(--action-foreground))",
+        },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",

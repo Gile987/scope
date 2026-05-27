@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback, type Key } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import type { SkillDocument } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { Trash2, BookOpen, Download } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 import { SkillPicker } from "@/components/SkillPicker";
+import { SkillPreviewPanel } from "./SkillPreviewPanel";
 import {
   ListLayout,
   FilterRail,
@@ -29,6 +30,7 @@ import {
   CustomizeColumnsLink,
   DataTable,
   Pagination,
+  BulkActionBar,
   useHiddenColumns,
   useListUrlState,
   type DataTableColumn,
@@ -49,10 +51,14 @@ const COLUMN_DEFS: CustomizeColumnsOption[] = [
 export function SkillList() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const previewSlug = searchParams.get("preview");
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
   const columnVisibility = useHiddenColumns({ storageKey: "skills" });
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   const { data: skills = [], isLoading } = useQuery({
     queryKey: ["skills"],
@@ -65,6 +71,20 @@ export function SkillList() {
       queryClient.invalidateQueries({ queryKey: ["skills"] });
       toast.success("Skill deleted");
     },
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => api.deleteSkill(id)));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      return { deleted: ids.length - failed, failed };
+    },
+    onSuccess: ({ deleted, failed }) => {
+      toast.success(`Deleted ${deleted} skill${deleted !== 1 ? "s" : ""}${failed ? `, ${failed} failed` : ""}`);
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["skills"] });
+    },
+    onError: (err: Error) => toast.error(`Failed to delete: ${err.message}`),
   });
 
   const activeSkills = useMemo(
@@ -110,6 +130,42 @@ export function SkillList() {
   const total = sortedSkills.length;
   const pageStart = (state.page - 1) * state.pageSize;
   const pageItems = sortedSkills.slice(pageStart, pageStart + state.pageSize);
+
+  const toggleRow = useCallback((id: Key) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const key = String(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  const toggleAll = useCallback((ids: Key[]) => {
+    setSelectedIds((prev) => {
+      const stringIds = ids.map((id) => String(id));
+      const allSelected = stringIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) for (const id of stringIds) next.delete(id);
+      else for (const id of stringIds) next.add(id);
+      return next;
+    });
+  }, []);
+
+  const navigateToPreview = useCallback(
+    (slug: string) => {
+      const params = new URLSearchParams(window.location.search);
+      params.set("preview", slug);
+      navigate({ pathname: "/skills", search: `?${params.toString()}` });
+    },
+    [navigate],
+  );
+
+  const closePreview = useCallback(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete("preview");
+    const search = params.toString();
+    navigate({ pathname: "/skills", search: search ? `?${search}` : "" });
+  }, [navigate]);
 
   const columns: DataTableColumn<SkillDocument>[] = [
     {
@@ -238,13 +294,36 @@ export function SkillList() {
           ) : undefined
         }
         onSecondaryClose={() => setCustomizeOpen(false)}
+        detail={previewSlug ? <SkillPreviewPanel slug={previewSlug} /> : undefined}
+        onDetailClose={closePreview}
       >
         <div className="flex flex-col gap-3">
+          <BulkActionBar
+            count={selectedIds.size}
+            onClear={() => setSelectedIds(new Set())}
+            itemLabel="skill"
+          >
+            <Button
+              variant="destructive"
+              size="sm"
+              className="gap-1.5"
+              disabled={bulkDeleteMutation.isPending || selectedIds.size === 0}
+              onClick={() => setBulkDeleteOpen(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          </BulkActionBar>
           <DataTable
             items={pageItems}
             columns={columns}
             getRowId={(s) => s._id}
-            onRowClick={(s) => navigate(`/skills/${s._id}`)}
+            activeId={previewSlug ?? undefined}
+            onRowClick={(s) => navigateToPreview(s._id)}
+            selection={{
+              selectedIds,
+              onToggle: toggleRow,
+              onToggleAll: toggleAll,
+            }}
             sort={state.sort}
             sortDir={state.sortDir}
             onSortChange={state.toggleSort}
@@ -264,6 +343,31 @@ export function SkillList() {
             itemLabel="skills"
           />
         </div>
+
+        <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Delete {selectedIds.size} skill{selectedIds.size !== 1 ? "s" : ""}?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                This soft-deletes the selected skills. They will no longer be available for new runs.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => {
+                  setBulkDeleteOpen(false);
+                  bulkDeleteMutation.mutate([...selectedIds]);
+                }}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </ListLayout>
 
       <Dialog open={importOpen} onOpenChange={setImportOpen}>

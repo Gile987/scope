@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { type ReactNode, type Key } from "react";
-import { ArrowUp, ArrowDown, ArrowUpDown, ChevronRight } from "lucide-react";
+import { type ReactNode, type Key, useCallback, useEffect, useRef, useState } from "react";
+import { ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -44,6 +44,15 @@ export interface DataTableColumn<T> {
    * string, otherwise the column id.
    */
   cardLabel?: ReactNode;
+  /**
+   * Sticky placement for this column on desktop tables.
+   * Useful for keeping key identifiers or action columns visible while scrolling.
+   */
+  sticky?: "left" | "right";
+  /**
+   * CSS offset for sticky columns (e.g. "40px" when selection column is present).
+   */
+  stickyOffset?: string;
 }
 
 export interface DataTableSelection<T> {
@@ -100,8 +109,47 @@ export function DataTable<T>({
   density = "comfortable",
   className,
 }: DataTableProps<T>) {
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateTableScrollIndicators = useCallback(() => {
+    const el = tableScrollRef.current;
+    if (!el) {
+      setCanScrollLeft(false);
+      setCanScrollRight(false);
+      return;
+    }
+    const hasOverflow = el.scrollWidth - el.clientWidth > 1;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setCanScrollLeft(hasOverflow && left);
+    setCanScrollRight(hasOverflow && right);
+  }, []);
+
   const visibleColumns = columns.filter((c) => !c.hidden);
   const rowPadY = density === "compact" ? "py-1.5" : "py-3";
+
+  useEffect(() => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+
+    updateTableScrollIndicators();
+    const onScroll = () => updateTableScrollIndicators();
+    el.addEventListener("scroll", onScroll, { passive: true });
+
+    const resizeObserver = new ResizeObserver(() => updateTableScrollIndicators());
+    resizeObserver.observe(el);
+    const tableElement = el.querySelector("table");
+    if (tableElement) resizeObserver.observe(tableElement);
+
+    window.addEventListener("resize", onScroll);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      resizeObserver.disconnect();
+    };
+  }, [updateTableScrollIndicators, visibleColumns.length, items.length, selection]);
 
   const selectableItems = selection
     ? items.filter((it) => !(selection.isDisabled?.(it) ?? false))
@@ -123,11 +171,21 @@ export function DataTable<T>({
     <div className={cn(className)}>
       {/* Desktop / wide tablet: classic table */}
       <div className="hidden rounded-md border lg:block">
-      <Table>
+      <div className="relative">
+      <div
+        ref={(node) => {
+          tableScrollRef.current = node?.querySelector("div") as HTMLDivElement | null;
+        }}
+        className="w-full"
+      >
+      <Table className="min-w-max">
         <TableHeader>
           <TableRow>
             {selection && (
-              <TableHead style={{ width: "40px" }} className="text-center">
+              <TableHead
+                style={{ width: "40px" }}
+                className="text-center sticky left-0 z-20 bg-background shadow-sm"
+              >
                 <Checkbox
                   checked={
                     allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false
@@ -146,11 +204,26 @@ export function DataTable<T>({
                   : col.align === "center"
                     ? "text-center"
                     : "text-left";
+              const stickyHeadClass =
+                col.sticky === "left"
+                  ? "sticky z-10 bg-background shadow-sm border-r"
+                  : col.sticky === "right"
+                    ? "sticky z-10 bg-background shadow-sm border-l"
+                    : "";
+              const stickyHeadStyle =
+                col.sticky === "left"
+                  ? { left: col.stickyOffset ?? "0px" }
+                  : col.sticky === "right"
+                    ? { right: col.stickyOffset ?? "0px" }
+                    : undefined;
               return (
                 <TableHead
                   key={col.id}
-                  style={col.width ? { width: col.width } : undefined}
-                  className={cn(alignClass, col.className)}
+                  style={{
+                    ...(col.width ? { width: col.width, maxWidth: col.width } : {}),
+                    ...(stickyHeadStyle ?? {}),
+                  }}
+                  className={cn(alignClass, stickyHeadClass, col.className)}
                 >
                   {col.sortable && onSortChange ? (
                     <button
@@ -214,6 +287,7 @@ export function DataTable<T>({
                   data-active={isActive ? "true" : undefined}
                   data-selected={isSelected ? "true" : undefined}
                   className={cn(
+                    "group",
                     onRowClick && "cursor-pointer",
                     isActive && "bg-accent/60 hover:bg-accent",
                     isSelected && !isActive && "bg-primary/5 hover:bg-primary/10",
@@ -222,7 +296,11 @@ export function DataTable<T>({
                 >
                   {selection && (
                     <TableCell
-                      className={cn(rowPadY, "text-center")}
+                      className={cn(
+                        rowPadY,
+                        "text-center sticky left-0 z-20 bg-background shadow-sm group-hover:bg-muted group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent",
+                      )}
+                      style={{ left: "0px" }}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <Checkbox
@@ -240,12 +318,35 @@ export function DataTable<T>({
                         : col.align === "center"
                           ? "text-center"
                           : "";
+                    const stickyCellClass =
+                      col.sticky === "left"
+                        ? "sticky z-10 bg-background group-hover:bg-muted border-r shadow-sm group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent"
+                        : col.sticky === "right"
+                          ? "sticky z-10 bg-background group-hover:bg-muted border-l shadow-sm group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent"
+                          : "";
+                    const stickyCellStyle =
+                      col.sticky === "left"
+                        ? { left: col.stickyOffset ?? "0px" }
+                        : col.sticky === "right"
+                          ? { right: col.stickyOffset ?? "0px" }
+                          : undefined;
                     return (
                       <TableCell
                         key={col.id}
-                        className={cn(rowPadY, alignClass, col.className)}
+                        style={{
+                          ...(col.width ? { width: col.width, maxWidth: col.width } : {}),
+                          ...(stickyCellStyle ?? {}),
+                        }}
+                        className={cn(
+                          rowPadY,
+                          alignClass,
+                          "overflow-hidden",
+                          col.sticky === "left" && "group-hover:bg-muted group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent",
+                          stickyCellClass,
+                          col.className,
+                        )}
                       >
-                        {col.cell(item)}
+                        <div className="min-w-0">{col.cell(item)}</div>
                       </TableCell>
                     );
                   })}
@@ -255,6 +356,24 @@ export function DataTable<T>({
           )}
         </TableBody>
       </Table>
+      </div>
+      {canScrollLeft && (
+        <>
+          <div className="pointer-events-none absolute inset-y-0 left-0 z-30 w-3 shadow-[inset_8px_0_10px_-10px_rgba(0,0,0,0.45)]" />
+          <div className="pointer-events-none absolute inset-y-0 left-0 z-40 flex items-center pl-0.5 text-muted-foreground/70">
+            <ChevronLeft className="h-3 w-3" />
+          </div>
+        </>
+      )}
+      {canScrollRight && (
+        <>
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-30 w-3 shadow-[inset_-8px_0_10px_-10px_rgba(0,0,0,0.45)]" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-40 flex items-center pr-0.5 text-muted-foreground/70">
+            <ChevronRight className="h-3 w-3" />
+          </div>
+        </>
+      )}
+      </div>
       </div>
 
       {/* Compact (mobile + small tablet): card list */}
