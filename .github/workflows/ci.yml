@@ -755,6 +755,34 @@ jobs:
             --file "${{ matrix.image.dockerfile }}" \
             ${{ matrix.image.context || '.' }}
 
+      - name: Report image size
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          SIZE_BYTES=$(az acr manifest show-metadata \
+            --registry "${{ vars.ACR_NAME }}" \
+            --name "scoped/${{ matrix.image.name }}" \
+            --tag "${{ steps.tags.outputs.git_sha }}" \
+            --query "imageSize" -o tsv 2>/dev/null || echo "unknown")
+          if [ "$SIZE_BYTES" != "unknown" ] && [ -n "$SIZE_BYTES" ]; then
+            SIZE_MB=$(echo "scale=1; $SIZE_BYTES / 1048576" | bc)
+            echo "### 📦 Image: ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
+            echo "Size: **${SIZE_MB} MB** (${SIZE_BYTES} bytes)" >> $GITHUB_STEP_SUMMARY
+          else
+            # Fallback: try listing manifests to get size
+            SIZE_BYTES=$(az acr repository show-manifests \
+              --name "${{ vars.ACR_NAME }}" \
+              --repository "scoped/${{ matrix.image.name }}" \
+              --query "[?tags[?contains(@, '${{ steps.tags.outputs.git_sha }}')]].imageSize | [0]" -o tsv 2>/dev/null || echo "unknown")
+            if [ "$SIZE_BYTES" != "unknown" ] && [ -n "$SIZE_BYTES" ]; then
+              SIZE_MB=$(echo "scale=1; $SIZE_BYTES / 1048576" | bc)
+              echo "### 📦 Image: ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
+              echo "Size: **${SIZE_MB} MB** (${SIZE_BYTES} bytes)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "### 📦 Image: ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
+              echo "Size: _could not determine_" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
   # ---------------------------------------------------------------------------
   # Build gateway image — uses docker/build-push-action with GHA layer cache
   # ---------------------------------------------------------------------------
