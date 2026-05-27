@@ -1351,10 +1351,12 @@ export function RunsList() {
           />
         ) : (
           <div className="space-y-4">
-            {(groupedAndDisplayedRuns as Array<{ groupKey: string; runs: Run[] }>).map(({ groupKey, runs }) => (
+            {(groupedAndDisplayedRuns as Array<{ groupKey: string; runs: Run[] }>).map(({ groupKey, runs }) => {
+              const groupLabel = groupBy === "submissionId" ? "Submission ID" : groupBy === "profile" ? "Profile" : "Task";
+              return (
               <div key={groupKey} className="rounded-lg border border-border/50 overflow-hidden">
                 <div className="bg-muted/30 px-4 py-3 font-semibold text-sm flex items-center justify-between">
-                  <span>{groupKey}</span>
+                  <span><span className="text-muted-foreground">{groupLabel}:</span> {groupKey}</span>
                   <span className="text-xs text-muted-foreground font-normal">{runs.length} run{runs.length !== 1 ? "s" : ""}</span>
                 </div>
                 <DataTable
@@ -1375,7 +1377,8 @@ export function RunsList() {
                   emptyState=""
                 />
               </div>
-            ))}
+            );
+            })}
             {(groupedAndDisplayedRuns as Array<{ groupKey: string; runs: Run[] }>).length === 0 && (
               <div className="text-center py-8 text-muted-foreground">
                 {state.hasActiveFilters
