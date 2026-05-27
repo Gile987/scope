@@ -764,22 +764,12 @@ jobs:
           REGISTRY="${{ vars.ACR_NAME }}"
           echo "Querying size for $REPO:$TAG in $REGISTRY"
 
-          # Get the digest for our tag, then query manifest metadata
-          DIGEST=$(az acr manifest list-metadata \
-            --registry "$REGISTRY" \
-            --name "$REPO" \
-            --query "[?tags && contains(tags, '$TAG')].digest | [0]" -o tsv 2>&1)
-          echo "Digest result: '$DIGEST'"
-
-          SIZE_BYTES=""
-          if [ -n "$DIGEST" ] && [[ "$DIGEST" == sha256:* ]]; then
-            SIZE_BYTES=$(az acr manifest show-metadata \
-              --registry "$REGISTRY" \
-              --name "$REPO" \
-              --digest "$DIGEST" \
-              --query "imageSize" -o tsv 2>&1)
-            echo "Size result: '$SIZE_BYTES'"
-          fi
+          # Use az acr repository show-manifests (stable, not preview)
+          SIZE_BYTES=$(az acr repository show-manifests \
+            --name "$REGISTRY" \
+            --repository "$REPO" \
+            --query "[?tags[?contains(@, '$TAG')]].imageSize | [0]" -o tsv 2>/dev/null)
+          echo "Size query result: '$SIZE_BYTES'"
 
           if [ -n "$SIZE_BYTES" ] && [[ "$SIZE_BYTES" =~ ^[0-9]+$ ]]; then
             SIZE_MB=$(echo "scale=1; $SIZE_BYTES / 1048576" | bc)
@@ -787,9 +777,9 @@ jobs:
             echo "### 📦 Image: ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
             echo "Size: **${SIZE_MB} MB** (${SIZE_BYTES} bytes)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "Image ${{ matrix.image.name }}: could not determine (tag=$TAG, digest=${DIGEST:-none})"
+            echo "Image ${{ matrix.image.name }}: could not determine size"
             echo "### 📦 Image: ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
-            echo "Size: _could not determine_ (tag=$TAG, digest=${DIGEST:-none})" >> $GITHUB_STEP_SUMMARY
+            echo "Size: _could not determine_" >> $GITHUB_STEP_SUMMARY
           fi
 
   # ---------------------------------------------------------------------------
