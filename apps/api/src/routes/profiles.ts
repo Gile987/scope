@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import {
   CreateProfileInputSchema,
+  mapId,
   UpdateProfileIdentitySchema,
   ProfileResponseSchema,
   ProfileVersionResponseSchema,
@@ -101,7 +102,7 @@ apiRoute(ctx.app, ctx.registry, {
       await ctx.profileCollection.insertOne(profileDoc);
       await ctx.profileVersionCollection.insertOne(versionDoc);
 
-      res.status(201).json({ ...profileDoc, version: versionDoc });
+      res.status(201).json({ ...mapId(profileDoc), version: mapId(versionDoc) });
     } catch (error) {
       next(error);
     }
@@ -126,7 +127,7 @@ apiRoute(ctx.app, ctx.registry, {
           const latestVersion = await ctx.profileVersionCollection.findOne(
             { profileId: profile._id, version: profile.latestVersion },
           );
-          return { ...profile, version: latestVersion! };
+          return { ...mapId(profile), version: mapId(latestVersion!) };
         }),
       );
 
@@ -164,7 +165,7 @@ apiRoute(ctx.app, ctx.registry, {
       const latestVersion = await ctx.profileVersionCollection.findOne(
         { profileId: profile._id, version: profile.latestVersion },
       );
-      res.json({ ...profile, version: latestVersion! });
+      res.json({ ...mapId(profile), version: mapId(latestVersion!) });
     } catch (error) {
       next(error);
     }
@@ -193,7 +194,7 @@ apiRoute(ctx.app, ctx.registry, {
         .find({ profileId: profile._id })
         .sort({ version: -1 })
         .toArray();
-      res.json(versions);
+      res.json(versions.map(mapId));
     } catch (error) {
       next(error);
     }
@@ -218,7 +219,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(404).json({ error: "Profile version not found" });
         return;
       }
-      res.json(versionDoc);
+      res.json(mapId(versionDoc));
     } catch (error) {
       next(error);
     }
@@ -308,7 +309,7 @@ apiRoute(ctx.app, ctx.registry, {
         { $set: { latestVersion: newVersion, updatedAt: now } },
       );
 
-      res.status(201).json(versionDoc);
+      res.status(201).json(mapId(versionDoc));
     } catch (error) {
       next(error);
     }
@@ -341,7 +342,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       await ctx.profileCollection.updateOne({ _id: profile._id }, { $set: updateFields });
       const updated = await ctx.profileCollection.findOne({ _id: profile._id });
-      res.json(updated!);
+      res.json(mapId(updated!));
     } catch (error) {
       next(error);
     }

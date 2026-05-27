@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   CreateInsightInputSchema,
   InsightResponseSchema,
+  mapId,
   ReportResponseSchema,
   UpdateInsightInputSchema,
 } from "shared";
@@ -54,7 +55,7 @@ apiRoute(ctx.app, ctx.registry, {
         .sort({ createdAt: -1 })
         .toArray();
 
-      res.json(insights.map((i) => ({ ...i, id: i._id })));
+      res.json(insights.map(mapId));
     } catch (error) {
       next(error);
     }
@@ -110,7 +111,7 @@ apiRoute(ctx.app, ctx.registry, {
         .limit(20)
         .toArray();
 
-      res.json(insights.map((i) => ({ ...i, id: i._id })));
+      res.json(insights.map(mapId));
     } catch (error) {
       next(error);
     }
@@ -136,7 +137,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(404).json({ error: "Insight not found" });
         return;
       }
-      res.json({ ...insight, id: insight._id });
+      res.json(mapId(insight));
     } catch (error) {
       next(error);
     }
@@ -181,7 +182,7 @@ apiRoute(ctx.app, ctx.registry, {
       };
 
       await ctx.insightsCollection.insertOne(doc);
-      res.status(201).json({ ...doc, id: doc._id });
+      res.status(201).json(mapId(doc));
     } catch (error) {
       next(error);
     }
@@ -219,7 +220,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       await ctx.insightsCollection.updateOne({ _id: id }, { $set: updateFields });
       const updated = await ctx.insightsCollection.findOne({ _id: id });
-      res.json({ ...updated, id: updated!._id });
+      res.json(mapId(updated!));
     } catch (error) {
       next(error);
     }
@@ -281,7 +282,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       await ctx.insightsCollection.updateOne({ _id: id }, { $inc: { upvotes: 1 }, $set: { updatedAt: new Date() } });
       const updated = await ctx.insightsCollection.findOne({ _id: id });
-      res.json({ ...updated, id: updated!._id });
+      res.json(mapId(updated!));
     } catch (error) {
       next(error);
     }
@@ -311,7 +312,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       await ctx.insightsCollection.updateOne({ _id: id }, { $inc: { downvotes: 1 }, $set: { updatedAt: new Date() } });
       const updated = await ctx.insightsCollection.findOne({ _id: id });
-      res.json({ ...updated, id: updated!._id });
+      res.json(mapId(updated!));
     } catch (error) {
       next(error);
     }
@@ -341,7 +342,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       await ctx.insightsCollection.updateOne({ _id: id }, { $set: { blocked: true, updatedAt: new Date() } });
       const updated = await ctx.insightsCollection.findOne({ _id: id });
-      res.json({ ...updated, id: updated!._id });
+      res.json(mapId(updated!));
     } catch (error) {
       next(error);
     }
@@ -371,7 +372,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       await ctx.insightsCollection.updateOne({ _id: id }, { $set: { blocked: false, updatedAt: new Date() } });
       const updated = await ctx.insightsCollection.findOne({ _id: id });
-      res.json({ ...updated, id: updated!._id });
+      res.json(mapId(updated!));
     } catch (error) {
       next(error);
     }
@@ -403,7 +404,7 @@ apiRoute(ctx.app, ctx.registry, {
         .sort({ createdAt: -1 })
         .toArray();
 
-      res.json(reports.map((r) => ({ ...r, id: r._id })));
+      res.json(reports.map(mapId));
     } catch (error) {
       next(error);
     }

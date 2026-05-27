@@ -7,6 +7,7 @@ import { join, basename } from "path";
 import { z } from "zod";
 import {
   CreateSkillInputSchema,
+  mapId,
   SkillResponseSchema,
   SkillRevisionResponseSchema,
   SkillSearchResultSchema,
@@ -62,7 +63,7 @@ apiRoute(ctx.app, ctx.registry, {
         .find({ deletedAt: { $exists: false } })
         .toArray();
       skills.sort((a, b) => a._id.localeCompare(b._id));
-      res.json(skills.map((s) => ({ ...s, id: s._id })));
+      res.json(skills.map(mapId));
     } catch (error) {
       next(error);
     }
@@ -342,7 +343,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(404).json({ error: "Skill not found" });
         return;
       }
-      res.json({ ...skill, id: skill._id });
+      res.json(mapId(skill));
     } catch (error) {
       next(error);
     }
@@ -401,7 +402,7 @@ apiRoute(ctx.app, ctx.registry, {
           }
         );
         const updated = await ctx.skillCollection.findOne({ _id });
-        responseSkill = { ...(updated as SkillDocument), id: updated!._id };
+        responseSkill = mapId(updated as SkillDocument);
       } else {
         const skillDoc: SkillDocument = {
           _id,
@@ -413,7 +414,7 @@ apiRoute(ctx.app, ctx.registry, {
           createdAt: now,
         };
         await ctx.skillCollection.insertOne(skillDoc as any);
-        responseSkill = { ...skillDoc, id: skillDoc._id };
+        responseSkill = mapId(skillDoc);
         status = 201;
       }
 

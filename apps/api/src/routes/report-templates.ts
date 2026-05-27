@@ -5,6 +5,7 @@ import { join, basename } from "path";
 import { z } from "zod";
 import {
   CreateReportTemplateInputSchema,
+  mapId,
   REPORT_SYSTEM_PROMPT,
   ReportTemplateResponseSchema,
   UpdateReportTemplateInputSchema,

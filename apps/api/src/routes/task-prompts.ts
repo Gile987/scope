@@ -4,6 +4,7 @@
 import { z } from "zod";
 import {
   CreateTaskPromptInputSchema,
+  mapId,
   PatchTaskPromptFeatureInputSchema,
   PromptFeatureResultSchema,
   SuggestedPromptFeatureSchema,
@@ -88,7 +89,7 @@ apiRoute(ctx.app, ctx.registry, {
     const search = req.query.search;
 
     const { items, total } = await ctx.taskPromptStore.getAll({ limit, offset, search });
-    res.json({ items, total, limit, offset });
+    res.json({ items: items.map(mapId), total, limit, offset });
   },
 });
 
@@ -110,7 +111,7 @@ apiRoute(ctx.app, ctx.registry, {
       res.status(404).json({ error: "Task prompt not found" });
       return;
     }
-    res.json(taskPrompt);
+    res.json(mapId(taskPrompt));
   },
 });
 
@@ -133,7 +134,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     const taskPrompt = await ctx.taskPromptStore.findOrCreate(text);
-    res.status(201).json(taskPrompt);
+    res.status(201).json(mapId(taskPrompt));
   },
 });
 
@@ -267,7 +268,7 @@ apiRoute(ctx.app, ctx.registry, {
       }
 
       const updated = await ctx.taskPromptStore.toggleFeature(id, featureId, detected);
-      res.json(updated);
+      res.json(mapId(updated));
     } catch (err) {
       if (err instanceof Error && err.message.includes("not found")) {
         res.status(404).json({ error: err.message });

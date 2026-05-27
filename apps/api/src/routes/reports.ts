@@ -12,6 +12,7 @@ import {
   BulkTriggerReportsInputSchema,
   CreateReportInputSchema,
   InsightResponseSchema,
+  mapId,
   ReportResponseSchema,
   TriggerReportsInputSchema,
   evaluateTrigger,
@@ -128,7 +129,7 @@ apiRoute(ctx.app, ctx.registry, {
         : [];
       const taskByRequestId = new Map(runs.map(r => [r._id, r.scenario?.task]));
 
-      res.json(reports.map(r => ({ ...r, id: r._id, task: taskByRequestId.get(r.requestId) })));
+      res.json(reports.map(r => ({ ...mapId(r), task: taskByRequestId.get(r.requestId) })));
     } catch (error) {
       next(error);
     }
@@ -322,7 +323,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
 
-      res.json({ ...report, id: report._id });
+      res.json(mapId(report));
     } catch (error) {
       next(error);
     }
@@ -656,8 +657,7 @@ apiRoute(ctx.app, ctx.registry, {
       const enriched = insights.map((insight) => {
         const ref = report.insightReferences!.find((r: InsightReference) => r.insightId === insight._id);
         return {
-          ...insight,
-          id: insight._id,
+          ...mapId(insight),
           referencedAt: ref?.referencedAt,
           isNew: ref?.isNew,
         };

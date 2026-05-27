@@ -7,6 +7,7 @@ import {
   McpServerResponseSchema,
   McpTransportTypeSchema,
   UpdateMcpServerInputSchema,
+  mapId,
 } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { McpServerDocument, RouteContext } from "../route-context.js";
@@ -43,7 +44,7 @@ apiRoute(ctx.app, ctx.registry, {
       .find({ deletedAt: { $exists: false } })
       .toArray();
     servers.sort((a, b) => a._id.localeCompare(b._id));
-    res.json(servers.map((s) => ({ ...s, id: s._id })));
+    res.json(servers.map(mapId));
   },
 });
 
@@ -72,16 +73,16 @@ apiRoute(ctx.app, ctx.registry, {
         const masked = Object.fromEntries(items.map((item) => [item.name, "<secret>"]));
         // Return masked env or headers depending on transport type
         if (server.type === "stdio") {
-          res.json({ ...server, id: server._id, env: masked });
+          res.json({ ...mapId(server), env: masked });
         } else {
           const maskedHeaders = items.map((item) => ({ name: item.name, value: "<secret>" }));
-          res.json({ ...server, id: server._id, headers: maskedHeaders });
+          res.json({ ...mapId(server), headers: maskedHeaders });
         }
         return;
       }
     }
 
-    res.json({ ...server, id: server._id });
+    res.json(mapId(server));
   },
 });
 
@@ -155,7 +156,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     const updated = await ctx.mcpServerCollection.findOne({ _id });
-    res.status(existing ? 200 : 201).json({ ...updated, id: updated!._id });
+    res.status(existing ? 200 : 201).json(mapId(updated!));
   },
 });
 
@@ -270,7 +271,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     const updated = await ctx.mcpServerCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
+    res.json(mapId(updated!));
   },
 });
 

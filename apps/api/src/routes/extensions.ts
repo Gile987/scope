@@ -8,6 +8,7 @@ import {
   ExtensionResponseSchema,
   ExtensionSearchResultSchema,
   ExtensionVersionInfoSchema,
+  mapId,
   UpdateExtensionInputSchema,
 } from "shared";
 import type { ExtensionSearchResult } from "shared";
@@ -32,7 +33,7 @@ apiRoute(ctx.app, ctx.registry, {
       .find({ deletedAt: { $exists: false } })
       .toArray();
     extensions.sort((a, b) => a._id.localeCompare(b._id));
-    res.json(extensions.map((e) => ({ ...e, id: e._id })));
+    res.json(extensions.map(mapId));
   },
 });
 
@@ -120,7 +121,7 @@ apiRoute(ctx.app, ctx.registry, {
       res.status(404).json({ error: "Extension not found" });
       return;
     }
-    res.json({ ...extension, id: extension._id });
+    res.json(mapId(extension));
   },
 });
 
@@ -152,7 +153,7 @@ apiRoute(ctx.app, ctx.registry, {
         },
       );
       const updated = await ctx.extensionCollection.findOne({ _id });
-      res.json({ ...updated, id: updated!._id });
+      res.json(mapId(updated!));
     } else {
       const extensionDoc: ExtensionDocument = {
         _id,
@@ -163,7 +164,7 @@ apiRoute(ctx.app, ctx.registry, {
         createdAt: now,
       };
       await ctx.extensionCollection.insertOne(extensionDoc);
-      res.status(201).json({ ...extensionDoc, id: extensionDoc._id });
+      res.status(201).json(mapId(extensionDoc));
     }
   },
 });
@@ -196,7 +197,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     await ctx.extensionCollection.updateOne({ _id: id }, { $set: updateFields });
     const updated = await ctx.extensionCollection.findOne({ _id: id });
-    res.json({ ...updated, id: updated!._id });
+    res.json(mapId(updated!));
   },
 });
 

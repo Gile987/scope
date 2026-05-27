@@ -6,6 +6,7 @@ import {
   AgentResponseSchema,
   AgentVersionSchema,
   CreateAgentInputSchema,
+  mapId,
   PatchAgentVersionInputSchema,
   RegisterAgentVersionInputSchema,
   UpdateAgentInputSchema,
@@ -35,7 +36,7 @@ apiRoute(ctx.app, ctx.registry, {
         .toArray();
       // Sort in JS for CosmosDB compatibility
       agents.sort((a, b) => a._id.localeCompare(b._id));
-      res.json(agents.map((a) => ({ ...a, id: a._id })));
+      res.json(agents.map(mapId));
     } catch (error) {
       next(error);
     }
@@ -61,7 +62,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(404).json({ error: "Agent not found" });
         return;
       }
-      res.json({ ...agent, id: agent._id });
+      res.json(mapId(agent));
     } catch (error) {
       next(error);
     }
@@ -129,7 +130,7 @@ apiRoute(ctx.app, ctx.registry, {
           }
         );
         const updated = await ctx.agentCollection.findOne({ _id });
-        res.json({ ...updated, id: updated!._id });
+        res.json(mapId(updated!));
       } else {
         // Create new — default to empty supportedModels if not provided
         const agentDoc: CodingAgentDocument = {
@@ -143,7 +144,7 @@ apiRoute(ctx.app, ctx.registry, {
           createdAt: now,
         };
         await ctx.agentCollection.insertOne(agentDoc);
-        res.status(201).json({ ...agentDoc, id: agentDoc._id });
+        res.status(201).json(mapId(agentDoc));
       }
     } catch (error) {
       next(error);
@@ -198,7 +199,7 @@ apiRoute(ctx.app, ctx.registry, {
       await ctx.agentCollection.updateOne({ _id: id }, { $set: updateFields });
 
       const updated = await ctx.agentCollection.findOne({ _id: id });
-      res.json({ ...updated, id: updated!._id });
+      res.json(mapId(updated!));
     } catch (error) {
       next(error);
     }

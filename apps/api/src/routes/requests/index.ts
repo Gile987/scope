@@ -720,7 +720,7 @@ apiRoute(ctx.app, ctx.registry, {
       resources.reverse();
     }
 
-    const data = resources.map(mapId);
+    const data = resources.map(mapId) as any[];
 
     // Enrich `processing` runs with the latest liveness heartbeat from
     // Redis (single MGET; heartbeats live there, not Mongo).
@@ -1848,7 +1848,7 @@ apiRoute(ctx.app, ctx.registry, {
         .sort({ createdAt: -1 })
         .toArray();
 
-      res.json(reports.map(r => ({ ...r, id: r._id })));
+      res.json(reports.map(mapId));
     } catch (error) {
       next(error);
     }

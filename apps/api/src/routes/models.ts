@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { z } from "zod";
-import { ListModelsQuerySchema, ModelResponseSchema } from "shared";
+import { ListModelsQuerySchema, mapId, ModelResponseSchema } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { ModelDocument, RouteContext } from "../route-context.js";
 
@@ -39,7 +39,7 @@ apiRoute(ctx.app, ctx.registry, {
       .find(filter)
       .sort({ modelId: 1 })
       .toArray();
-    res.json(models);
+    res.json(models.map(mapId));
   },
 });
 
@@ -57,7 +57,7 @@ apiRoute(ctx.app, ctx.registry, {
       res.status(404).json({ error: "Model not found" });
       return;
     }
-    res.json(model);
+    res.json(mapId(model));
   },
 });
 
