@@ -516,6 +516,7 @@ jobs:
       model-scanner-copilot: ${{ steps.changes.outputs.model-scanner-copilot }}
       model-scanner-anthropic: ${{ steps.changes.outputs.model-scanner-anthropic }}
       report-generator: ${{ steps.changes.outputs.report-generator }}
+      post-processor: ${{ steps.changes.outputs.post-processor }}
       scheduler: ${{ steps.changes.outputs.scheduler }}
       db-migrations: ${{ steps.changes.outputs.db-migrations }}
       shared: ${{ steps.changes.outputs.shared }}
@@ -558,6 +559,8 @@ jobs:
               - 'apps/model-scanners/anthropic/**'
             report-generator:
               - 'apps/workers/report-generator/**'
+            post-processor:
+              - 'apps/workers/post-processor/**'
             scheduler:
               - 'apps/scheduler/**'
             db-migrations:
@@ -601,6 +604,7 @@ jobs:
           needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
           needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
           needs.detect-changes.outputs.report-generator == 'true' ||
+          needs.detect-changes.outputs.post-processor == 'true' ||
           needs.detect-changes.outputs.scheduler == 'true' ||
           needs.detect-changes.outputs.db-migrations == 'true' ||
           needs.detect-changes.outputs.shared == 'true' ||
@@ -641,6 +645,9 @@ jobs:
           - name: report-generator
             dockerfile: apps/workers/report-generator/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.report-generator == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: post-processor
+            dockerfile: apps/workers/post-processor/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.post-processor == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: scheduler
             dockerfile: apps/scheduler/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.scheduler == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
