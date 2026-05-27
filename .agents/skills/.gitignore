@@ -19,3 +19,5 @@
 !cosmosdb-mongodb/**
 !documentation/
 !documentation/**
+!service-deployment/
+!service-deployment/**
