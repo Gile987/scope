@@ -758,29 +758,36 @@ jobs:
       - name: Report image size
         if: steps.check.outputs.skip != 'true'
         run: |
+          set +e
           TAG="${{ steps.tags.outputs.git_sha }}"
           REPO="scoped/${{ matrix.image.name }}"
           REGISTRY="${{ vars.ACR_NAME }}"
+          echo "Querying size for $REPO:$TAG in $REGISTRY"
 
           # Get the digest for our tag, then query manifest metadata
           DIGEST=$(az acr manifest list-metadata \
             --registry "$REGISTRY" \
             --name "$REPO" \
-            --query "[?tags && contains(tags, '$TAG')].digest | [0]" -o tsv 2>&1) || DIGEST=""
+            --query "[?tags && contains(tags, '$TAG')].digest | [0]" -o tsv 2>&1)
+          echo "Digest result: '$DIGEST'"
 
+          SIZE_BYTES=""
           if [ -n "$DIGEST" ] && [[ "$DIGEST" == sha256:* ]]; then
             SIZE_BYTES=$(az acr manifest show-metadata \
               --registry "$REGISTRY" \
               --name "$REPO" \
               --digest "$DIGEST" \
-              --query "imageSize" -o tsv 2>&1) || SIZE_BYTES=""
+              --query "imageSize" -o tsv 2>&1)
+            echo "Size result: '$SIZE_BYTES'"
           fi
 
           if [ -n "$SIZE_BYTES" ] && [[ "$SIZE_BYTES" =~ ^[0-9]+$ ]]; then
             SIZE_MB=$(echo "scale=1; $SIZE_BYTES / 1048576" | bc)
+            echo "Image ${{ matrix.image.name }}: ${SIZE_MB} MB (${SIZE_BYTES} bytes)"
             echo "### 📦 Image: ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
             echo "Size: **${SIZE_MB} MB** (${SIZE_BYTES} bytes)" >> $GITHUB_STEP_SUMMARY
           else
+            echo "Image ${{ matrix.image.name }}: could not determine (tag=$TAG, digest=${DIGEST:-none})"
             echo "### 📦 Image: ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
             echo "Size: _could not determine_ (tag=$TAG, digest=${DIGEST:-none})" >> $GITHUB_STEP_SUMMARY
           fi
