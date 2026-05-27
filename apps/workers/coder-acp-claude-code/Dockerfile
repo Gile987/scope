@@ -91,12 +91,7 @@ COPY packages/worker-runtime/src ./packages/worker-runtime/src/
 COPY apps/workers/coder-acp-claude-code/tsconfig.json ./apps/workers/coder-acp-claude-code/
 COPY apps/workers/coder-acp-claude-code/src ./apps/workers/coder-acp-claude-code/src/
 
-RUN pnpm --filter core build && \
-    pnpm --filter secrets build && \
-    pnpm --filter platform build && \
-    pnpm --filter agent-protocol build && \
-    pnpm --filter worker-runtime build && \
-    pnpm --filter coder-acp-claude-code build
+RUN npx nx run-many --target=build --projects=coder-acp-claude-code
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev

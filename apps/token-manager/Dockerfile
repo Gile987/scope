@@ -20,9 +20,7 @@ COPY packages/secrets/src ./packages/secrets/src/
 COPY apps/token-manager/tsconfig.json ./apps/token-manager/
 COPY apps/token-manager/src ./apps/token-manager/src/
 
-RUN pnpm --filter core build && \
-    pnpm --filter secrets build && \
-    pnpm --filter token-manager build
+RUN npx nx run-many --target=build --projects=token-manager
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev

@@ -93,12 +93,7 @@ COPY packages/worker-runtime/src ./packages/worker-runtime/src/
 COPY apps/workers/coder-acp-copilot/tsconfig.json ./apps/workers/coder-acp-copilot/
 COPY apps/workers/coder-acp-copilot/src ./apps/workers/coder-acp-copilot/src/
 
-RUN pnpm --filter core build && \
-    pnpm --filter secrets build && \
-    pnpm --filter platform build && \
-    pnpm --filter agent-protocol build && \
-    pnpm --filter worker-runtime build && \
-    pnpm --filter coder-acp-copilot build
+RUN npx nx run-many --target=build --projects=coder-acp-copilot
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev

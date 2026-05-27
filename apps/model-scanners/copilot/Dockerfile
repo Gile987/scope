@@ -23,10 +23,7 @@ COPY packages/model-scanning/src ./packages/model-scanning/src/
 COPY apps/model-scanners/copilot/tsconfig.json ./apps/model-scanners/copilot/
 COPY apps/model-scanners/copilot/src ./apps/model-scanners/copilot/src/
 
-RUN pnpm --filter core build && \
-    pnpm --filter secrets build && \
-    pnpm --filter model-scanning build && \
-    pnpm --filter model-scanner-copilot build
+RUN npx nx run-many --target=build --projects=model-scanner-copilot
 
 # --- Production stage ---
 FROM node:22.22.0-slim

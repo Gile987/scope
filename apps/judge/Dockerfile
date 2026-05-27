@@ -32,13 +32,7 @@ COPY packages/worker-runtime/src ./packages/worker-runtime/src/
 COPY apps/judge/tsconfig.json ./apps/judge/
 COPY apps/judge/src ./apps/judge/src/
 
-RUN pnpm --filter core build && \
-    pnpm --filter secrets build && \
-    pnpm --filter platform build && \
-    pnpm --filter criteria build && \
-    pnpm --filter agent-protocol build && \
-    pnpm --filter worker-runtime build && \
-    pnpm --filter judge build
+RUN npx nx run-many --target=build --projects=judge
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev

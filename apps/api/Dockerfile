@@ -32,13 +32,7 @@ COPY packages/db-migrations/src ./packages/db-migrations/src/
 COPY apps/api/tsconfig.json ./apps/api/
 COPY apps/api/src ./apps/api/src/
 
-RUN pnpm --filter core build && \
-    pnpm --filter secrets build && \
-    pnpm --filter platform build && \
-    pnpm --filter agent-protocol build && \
-    pnpm --filter worker-runtime build && \
-    pnpm --filter db-migrations build && \
-    pnpm --filter api build
+RUN npx nx run-many --target=build --projects=api
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev

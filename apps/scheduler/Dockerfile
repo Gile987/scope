@@ -17,8 +17,7 @@ COPY packages/core/src ./packages/core/src/
 COPY apps/scheduler/tsconfig.json ./apps/scheduler/
 COPY apps/scheduler/src ./apps/scheduler/src/
 
-RUN pnpm --filter core build && \
-    pnpm --filter scheduler build
+RUN npx nx run-many --target=build --projects=scheduler
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev

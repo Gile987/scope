@@ -29,12 +29,7 @@ COPY packages/worker-runtime/src ./packages/worker-runtime/src/
 COPY apps/workers/report-generator/tsconfig.json ./apps/workers/report-generator/
 COPY apps/workers/report-generator/src ./apps/workers/report-generator/src/
 
-RUN pnpm --filter core build && \
-    pnpm --filter secrets build && \
-    pnpm --filter platform build && \
-    pnpm --filter agent-protocol build && \
-    pnpm --filter worker-runtime build && \
-    pnpm --filter report-generator build
+RUN npx nx run-many --target=build --projects=report-generator
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev

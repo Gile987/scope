@@ -23,10 +23,7 @@ COPY packages/model-scanning/src ./packages/model-scanning/src/
 COPY apps/model-scanners/anthropic/tsconfig.json ./apps/model-scanners/anthropic/
 COPY apps/model-scanners/anthropic/src ./apps/model-scanners/anthropic/src/
 
-RUN pnpm --filter core build && \
-    pnpm --filter secrets build && \
-    pnpm --filter model-scanning build && \
-    pnpm --filter model-scanner-anthropic build
+RUN npx nx run-many --target=build --projects=model-scanner-anthropic
 
 # --- Production stage ---
 FROM node:22.22.0-slim
