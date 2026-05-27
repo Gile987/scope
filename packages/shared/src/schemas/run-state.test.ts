@@ -7,18 +7,18 @@ import { RunStateSchema, RunHistoryDocumentSchema } from "./request.js";
 describe("RunStateSchema", () => {
   it("accepts a minimal pending attempt", () => {
     const parsed = RunStateSchema.parse({
-      id: "run-1",
+      _id: "run-1",
       attemptNumber: 1,
       status: "pending",
     });
-    expect(parsed.id).toBe("run-1");
+    expect(parsed._id).toBe("run-1");
     expect(parsed.attemptNumber).toBe(1);
     expect(parsed.status).toBe("pending");
   });
 
   it("accepts a fully populated done attempt", () => {
     const parsed = RunStateSchema.parse({
-      id: "run-2",
+      _id: "run-2",
       attemptNumber: 2,
       status: "done",
       outcome: "succeeded",
@@ -40,7 +40,7 @@ describe("RunStateSchema", () => {
   it("rejects attemptNumber < 1", () => {
     expect(() =>
       RunStateSchema.parse({
-        id: "run-3",
+        _id: "run-3",
         attemptNumber: 0,
         status: "pending",
       })
@@ -50,7 +50,7 @@ describe("RunStateSchema", () => {
   it("rejects unknown status", () => {
     expect(() =>
       RunStateSchema.parse({
-        id: "run-4",
+        _id: "run-4",
         attemptNumber: 1,
         status: "iterating",
       })
@@ -62,7 +62,7 @@ describe("RunHistoryDocumentSchema", () => {
   it("requires requestId", () => {
     expect(() =>
       RunHistoryDocumentSchema.parse({
-        id: "run-5",
+        _id: "run-5",
         attemptNumber: 1,
         status: "done",
         outcome: "failed",
@@ -72,7 +72,7 @@ describe("RunHistoryDocumentSchema", () => {
 
   it("accepts a complete history doc", () => {
     const parsed = RunHistoryDocumentSchema.parse({
-      id: "run-6",
+      _id: "run-6",
       requestId: "req-1",
       attemptNumber: 1,
       status: "done",
@@ -80,6 +80,6 @@ describe("RunHistoryDocumentSchema", () => {
       error: "boom",
     });
     expect(parsed.requestId).toBe("req-1");
-    expect(parsed.id).toBe("run-6");
+    expect(parsed._id).toBe("run-6");
   });
 });

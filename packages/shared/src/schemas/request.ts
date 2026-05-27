@@ -103,7 +103,7 @@ export const CreateRequestInputSchema = z
 
 export const RequestResponseSchema = z
   .object({
-    id: z.string(),
+    _id: z.string(),
     scenario: ScenarioSchema,
     workerType: z.string(),
     model: z.string().optional(),
@@ -146,7 +146,7 @@ export const RequestResponseSchema = z
  */
 export const RunStateSchema = z
   .object({
-    id: z.string(),                                      // Unique per attempt
+    _id: z.string(),                                      // Unique per attempt
     attemptNumber: z.number().int().min(1),              // 1, 2, 3…
     status: RequestStatusSchema,
     outcome: RequestOutcomeSchema.optional(),

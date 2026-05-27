@@ -35,7 +35,7 @@ export const ReportStatusSchema = z.enum([
 
 export const ReportResponseSchema = z
   .object({
-    id: z.string(),
+    _id: z.string(),
     requestId: z.string(),
     templateId: z.string().optional(),
     reporter: ReporterSchema.optional(),

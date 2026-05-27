@@ -28,7 +28,7 @@ export const UpdateProfileIdentitySchema = z
 
 export const ProfileResponseSchema = z
   .object({
-    id: z.string(),
+    _id: z.string(),
     name: z.string(),
     description: z.string().optional(),
     latestVersion: z.number(),
@@ -40,7 +40,7 @@ export const ProfileResponseSchema = z
 
 export const ProfileVersionResponseSchema = z
   .object({
-    id: z.string(),
+    _id: z.string(),
     profileId: z.string(),
     version: z.number(),
     workerType: z.string(),
@@ -55,7 +55,7 @@ export const ProfileVersionResponseSchema = z
 
 export const ProfileWithVersionResponseSchema = z
   .object({
-    id: z.string(),
+    _id: z.string(),
     name: z.string(),
     description: z.string().optional(),
     latestVersion: z.number(),

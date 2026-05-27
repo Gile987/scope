@@ -1367,10 +1367,10 @@ async function finalizePendingRun(
   // top-level `id`. If the prefix on the wire diverges, refuse — otherwise
   // the blobs we just streamed live under the wrong requestId and the
   // inserted Mongo document would point at nothing.
-  if (runDoc.id !== prefix) {
+  if (runDoc._id !== prefix) {
     throw new ImportError(
       400,
-      `run.yaml id "${runDoc.id}" does not match archive subdirectory "${prefix}"`,
+      `run.yaml _id "${runDoc._id}" does not match archive subdirectory "${prefix}"`,
     );
   }
 
@@ -1382,11 +1382,11 @@ async function finalizePendingRun(
     );
   }
 
-  const existingRun = await ctx.requestCollection.findOne({ _id: runDoc.id });
+  const existingRun = await ctx.requestCollection.findOne({ _id: runDoc._id });
   if (existingRun) {
     throw new ImportError(
       409,
-      `Run with ID '${runDoc.id}' already exists`,
+      `Run with ID '${runDoc._id}' already exists`,
       { existingStatus: existingRun.run?.status },
     );
   }
@@ -1398,7 +1398,7 @@ async function finalizePendingRun(
   let newLogsUrl: string | undefined;
   if (run.logsTempPath) {
     const logsContainer = blobServiceClient.getContainerClient("logs");
-    const logsBlobPath = `${runDoc.id}/runs/${runState.id}/run.jsonl`;
+    const logsBlobPath = `${runDoc._id}/runs/${runState._id}/run.jsonl`;
     const logsClient = logsContainer.getBlockBlobClient(logsBlobPath);
     try {
       await logsClient.uploadStream(
@@ -1407,7 +1407,7 @@ async function finalizePendingRun(
         undefined,
         {
           blobHTTPHeaders: { blobContentType: "application/x-ndjson" },
-          tags: { requestId: runDoc.id, runId: runState.id },
+          tags: { requestId: runDoc._id, runId: runState._id },
           conditions: { ifNoneMatch: "*" },
         },
       );
@@ -1461,8 +1461,8 @@ async function finalizePendingRun(
   // run.os, run.workerVersion, run.aiCallCount, run.startedAt,
   // run.finishedAt, …). The previous allowlist construction silently
   // dropped all of these on round-trip.
-  const { id: docId, run: _parsedRun, ...restRunDoc } = runDoc as any;
-  const { id: runId, ...restRunState } = runState as any;
+  const { _id: docId, run: _parsedRun, ...restRunDoc } = runDoc as any;
+  const { _id: runId, ...restRunState } = runState as any;
   const docToInsert: RequestDocument = {
     _id: docId,
     ...restRunDoc,
@@ -1485,7 +1485,7 @@ async function finalizePendingRun(
 
   await ctx.requestCollection.insertOne(docToInsert);
 
-  return { id: runDoc.id, status: runState.status, iterations: run.iterationCount };
+  return { id: runDoc._id, status: runState.status, iterations: run.iterationCount };
 }
 
 /**

@@ -82,10 +82,10 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res, next) => {
     try {
-      const { id: _id, name, description, modelProvider, supportedModels, defaultModel, available } = req.body;
+      const { _id, name, description, modelProvider, supportedModels, defaultModel, available } = req.body;
 
       if (!_id || typeof _id !== "string") {
-        res.status(400).json({ error: "id is required and must be a string" });
+        res.status(400).json({ error: "_id is required and must be a string" });
         return;
       }
       if (!name || typeof name !== "string") {

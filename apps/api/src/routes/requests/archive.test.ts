@@ -357,7 +357,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
       .attach("archive", archive, "archive.tar.gz");
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/\bid\b/);
+    expect(res.body.error).toMatch(/\b_id\b/);
   });
 
   it("returns 400 for in-flight (non-terminal) runs", async () => {
@@ -366,7 +366,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
       // Subdir name must match the run.yaml id — the importer enforces this
       // since blob URLs are derived from the prefix before run.yaml is parsed.
       "in-flight-1/run.yaml":
-        "id: in-flight-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  id: in-flight-1\n  attemptNumber: 1\n  status: processing\n",
+        "_id: in-flight-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: in-flight-1\n  attemptNumber: 1\n  status: processing\n",
     });
 
     const res = await request(app)
@@ -384,7 +384,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
 
     const archive = await buildTarGz({
       "dup-1/run.yaml":
-        "id: dup-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  id: dup-1\n  attemptNumber: 1\n  status: done\n",
+        "_id: dup-1\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: dup-1\n  attemptNumber: 1\n  status: done\n",
     });
 
     const res = await request(app)
@@ -402,7 +402,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     // violation that the legacy presence checks would have missed.
     const archive = await buildTarGz({
       "bad/run.yaml":
-        "id: bad-1\nscenario:\n  task: t\n  criteria: [1, 2]\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  id: bad-1\n  attemptNumber: 1\n  status: done\n",
+        "_id: bad-1\nscenario:\n  task: t\n  criteria: [1, 2]\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: bad-1\n  attemptNumber: 1\n  status: done\n",
     });
 
     const res = await request(app)
@@ -430,7 +430,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     const innerIterTar = await buildTarGz({ "hello.txt": "iter-1 contents" });
     const archive = await buildTarGz({
       "bad-cleanup/run.yaml":
-        "id: bad-cleanup\nscenario:\n  task: t\n  criteria: [1, 2]\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  id: bad-cleanup\n  attemptNumber: 1\n  status: done\n",
+        "_id: bad-cleanup\nscenario:\n  task: t\n  criteria: [1, 2]\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: bad-cleanup\n  attemptNumber: 1\n  status: done\n",
       "bad-cleanup/iteration-1.tar.gz": innerIterTar,
     });
 
@@ -464,7 +464,7 @@ describe("run import/export — validation (POST /api/v1/runs/upload)", () => {
     const replacementIterTar = await buildTarGz({ "evil.txt": "REPLACEMENT bytes" });
     const archive = await buildTarGz({
       "dup-noclob/run.yaml":
-        "id: dup-noclob\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  id: dup-noclob\n  attemptNumber: 1\n  status: done\n",
+        "_id: dup-noclob\nscenario:\n  task: t\n  criteria: []\nworkerType: coder-acp-copilot\ncreatedAt: 2026-01-01T00:00:00Z\nrun:\n  _id: dup-noclob\n  attemptNumber: 1\n  status: done\n",
       "dup-noclob/iteration-1.tar.gz": replacementIterTar,
     });
 
@@ -961,7 +961,7 @@ describe("run import — task-prompt entity creation (#832)", () => {
 
   function makeMinimalUploadYaml(id: string, task: string, taskPromptId?: string) {
     const lines = [
-      `id: ${id}`,
+      `_id: ${id}`,
       `scenario:`,
       `  task: ${JSON.stringify(task)}`,
       `  criteria: []`,
@@ -969,7 +969,7 @@ describe("run import — task-prompt entity creation (#832)", () => {
       `createdAt: 2026-01-01T00:00:00Z`,
       ...(taskPromptId ? [`taskPromptId: ${taskPromptId}`] : []),
       `run:`,
-      `  id: ${id}`,
+      `  _id: ${id}`,
       `  attemptNumber: 1`,
       `  status: done`,
     ];

@@ -265,7 +265,7 @@ describe("API Endpoints", () => {
 
       const res = await request(app)
         .post("/api/v1/agents")
-        .send({ id: "new-agent", name: "New Agent" });
+        .send({ _id: "new-agent", name: "New Agent" });
 
       expect(res.status).toBe(201);
       expect(res.body).toHaveProperty("id", "new-agent");

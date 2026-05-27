@@ -28,7 +28,7 @@ export const UpdateInsightInputSchema = z
 
 export const InsightResponseSchema = z
   .object({
-    id: z.string(),
+    _id: z.string(),
     title: z.string(),
     description: z.string(),
     category: z.string().optional(),

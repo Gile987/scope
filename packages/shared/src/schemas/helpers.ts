@@ -3,9 +3,10 @@
 
 /**
  * Maps a MongoDB document's `_id` field to `id` for API responses.
- * Strips `_id` from the output to ensure only `id` is exposed.
+ * Strips `_id` from the output so only `id` is exposed to clients.
+ * Handles both string _id (common in this codebase) and ObjectId.
  */
-export function mapId<T extends { _id: string }>(doc: T): Omit<T, '_id'> & { id: string } {
+export function mapId<T extends { _id: unknown }>(doc: T): Omit<T, '_id'> & { id: string } {
   const { _id, ...rest } = doc as any;
-  return { id: _id, ...rest };
+  return { id: String(_id), ...rest };
 }

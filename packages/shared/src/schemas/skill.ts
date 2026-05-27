@@ -20,7 +20,7 @@ export const CreateSkillInputSchema = z
 
 export const SkillResponseSchema = z
   .object({
-    id: z.string(),
+    _id: z.string(),
     source: z.string(),
     skillName: z.string(),
     name: z.string(),
@@ -34,7 +34,7 @@ export const SkillResponseSchema = z
 
 export const SkillRevisionResponseSchema = z
   .object({
-    id: z.string(),
+    _id: z.string(),
     ref: z.string(),
     source: z.string(),
     skillName: z.string(),
