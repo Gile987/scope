@@ -42,7 +42,7 @@ import { formatDate, formatId, formatDuration, truncate } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, RunStatus, RunOutcome } from "@/types";
 
-const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo"] as const;
+const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo", "groupBy"] as const;
 
 /** Sentinel value used in multi-value filters to match rows missing the underlying field. */
 const EMPTY_FILTER_VALUE = "__empty__";
@@ -130,6 +130,9 @@ export function RunsList() {
     ],
   });
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  
+  // Get groupBy from URL state
+  const groupBy = (state.getFilter("groupBy") ?? "none") as "none" | "profile" | "task" | "submissionId";
 
   // Cursor pagination — keep a stack of cursors that map a virtual page number
   // to an `after` cursor (page 1 = no cursor, page 2 = stack[0], …).
@@ -157,6 +160,7 @@ export function RunsList() {
         version: state.getFilterList("version"),
         dateFrom: state.getFilter("dateFrom"),
         dateTo: state.getFilter("dateTo"),
+        groupBy: state.getFilter("groupBy"),
         pageSize: state.pageSize,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -269,6 +273,35 @@ export function RunsList() {
     if (state.sortDir === "desc") out.reverse();
     return out;
   }, [filteredRuns, state.sort, state.sortDir]);
+
+  // Group runs by the selected groupBy option
+  const groupedAndDisplayedRuns = useMemo(() => {
+    if (groupBy === "none") return sortedRuns;
+    
+    const groups = new Map<string, Run[]>();
+    for (const run of sortedRuns) {
+      let key = "";
+      switch (groupBy) {
+        case "profile":
+          key = run.profileId ?? "(No Profile)";
+          break;
+        case "task":
+          key = run.scenario?.task ?? "(No Task)";
+          break;
+        case "submissionId":
+          key = run.submissionId ?? "(No Submission)";
+          break;
+      }
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key)!.push(run);
+    }
+    return Array.from(groups.entries()).map(([groupKey, runs]) => ({
+      groupKey,
+      runs,
+    }));
+  }, [sortedRuns, groupBy]);
 
   const handlePageChange = useCallback(
     (next: number) => {
@@ -1184,6 +1217,28 @@ export function RunsList() {
               />
             </FilterSection>
           )}
+          <FilterSection title="Group By" storageKey="runs-groupby" defaultOpen={false}>
+            <div className="space-y-2 px-3 py-2">
+              {[
+                { value: "none", label: "None" },
+                { value: "profile", label: "Profile" },
+                { value: "task", label: "Task" },
+                { value: "submissionId", label: "Submission ID" },
+              ].map((opt) => (
+                <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="groupBy"
+                    value={opt.value}
+                    checked={groupBy === opt.value}
+                    onChange={(e) => state.setFilter("groupBy", e.target.value)}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <span className="text-sm">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </FilterSection>
         </FilterRail>
       }
       detail={detailOutlet}
@@ -1266,27 +1321,64 @@ export function RunsList() {
           </Button>
         </BulkActionBar>
 
-        <DataTable
-          items={sortedRuns}
-          columns={columns}
-          getRowId={(r) => r._id}
-          activeId={activeId}
-          onRowClick={(r) => navigate({ pathname: `/runs/${r._id}/preview`, search: window.location.search })}
-          selection={{
-            selectedIds,
-            onToggle: (id) => toggleRowSelection(id),
-            onToggleAll: (ids) => toggleAllSelection(ids),
-          }}
-          sort={state.sort}
-          sortDir={state.sortDir}
-          onSortChange={state.toggleSort}
-          loading={isLoading}
-          emptyState={
-            state.hasActiveFilters
-              ? "No runs match the current filters."
-              : "No runs yet. Submit one with the New Run button."
-          }
-        />
+        {groupBy === "none" ? (
+          <DataTable
+            items={sortedRuns}
+            columns={columns}
+            getRowId={(r) => r._id}
+            activeId={activeId}
+            onRowClick={(r) => navigate({ pathname: `/runs/${r._id}/preview`, search: window.location.search })}
+            selection={{
+              selectedIds,
+              onToggle: (id) => toggleRowSelection(id),
+              onToggleAll: (ids) => toggleAllSelection(ids),
+            }}
+            sort={state.sort}
+            sortDir={state.sortDir}
+            onSortChange={state.toggleSort}
+            loading={isLoading}
+            emptyState={
+              state.hasActiveFilters
+                ? "No runs match the current filters."
+                : "No runs yet. Submit one with the New Run button."
+            }
+          />
+        ) : (
+          <div className="space-y-4">
+            {(groupedAndDisplayedRuns as Array<{ groupKey: string; runs: Run[] }>).map(({ groupKey, runs }) => (
+              <div key={groupKey} className="rounded-lg border border-border/50 overflow-hidden">
+                <div className="bg-muted/30 px-4 py-3 font-semibold text-sm flex items-center justify-between">
+                  <span>{groupKey}</span>
+                  <span className="text-xs text-muted-foreground font-normal">{runs.length} run{runs.length !== 1 ? "s" : ""}</span>
+                </div>
+                <DataTable
+                  items={runs}
+                  columns={columns}
+                  getRowId={(r) => r._id}
+                  activeId={activeId}
+                  onRowClick={(r) => navigate({ pathname: `/runs/${r._id}/preview`, search: window.location.search })}
+                  selection={{
+                    selectedIds,
+                    onToggle: (id) => toggleRowSelection(id),
+                    onToggleAll: (ids) => toggleAllSelection(ids),
+                  }}
+                  sort={state.sort}
+                  sortDir={state.sortDir}
+                  onSortChange={state.toggleSort}
+                  loading={isLoading}
+                  emptyState=""
+                />
+              </div>
+            ))}
+            {(groupedAndDisplayedRuns as Array<{ groupKey: string; runs: Run[] }>).length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">
+                {state.hasActiveFilters
+                  ? "No runs match the current filters."
+                  : "No runs yet. Submit one with the New Run button."}
+              </div>
+            )}
+          </div>
+        )}
         <Pagination
           page={state.page}
           pageSize={state.pageSize}
