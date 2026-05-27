@@ -116,7 +116,6 @@ export interface RunState {
 
 export interface Run {
   id: string;
-  id: string;
   scenario?: Scenario;
   workerType: string;
   model?: string;
@@ -392,7 +391,6 @@ export interface Reporter {
 
 export interface Report {
   id: string;
-  id: string;
   requestId: string;
   task?: string;
   reporter?: Reporter;
@@ -467,7 +465,6 @@ export interface ReportTemplateSystemPrompt {
 }
 
 export interface ReportTemplate {
-  id: string;
   id: string;
   name: string;
   description?: string;
@@ -724,7 +721,6 @@ export interface InsightReference {
 
 /** Insight entity */
 export interface Insight {
-  id: string;
   id: string;
   title: string;
   /** Markdown-formatted detailed observation */
