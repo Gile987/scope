@@ -33,7 +33,7 @@ export interface JudgeStrategyContext {
 const DEFAULT_JUDGE_TIMEOUT = 480_000;
 
 /** Default number of retries for sendAndWait calls */
-const DEFAULT_JUDGE_RETRIES = 1;
+const DEFAULT_JUDGE_RETRIES = 3;
 
 export abstract class JudgeStrategy {
   protected model: string;

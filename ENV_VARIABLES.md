@@ -158,7 +158,7 @@ Maximum number of criteria to evaluate in parallel when using `independent` stra
 Timeout for each Copilot SDK `sendAndWait` call. If the LLM takes longer than this to complete a response, the call will fail with a timeout error. Increase this if you see `Timeout after Xms waiting for session.idle` errors.
 
 ### JUDGE_RETRIES
-**Default:** `1`
+**Default:** `3`
 **Type:** integer
 
 Number of retry attempts for judge-side LLM calls (`sendAndWait`). When a timeout or transient error occurs, the judge retries with exponential backoff (10s base, 30s max). Set to `0` to disable retries.
