@@ -83,3 +83,4 @@ EXPOSE 80
 ENV PORT=80
 
 CMD ["node", "dist/index.js"]
+# Optimized: uses nx run-many for parallel builds
