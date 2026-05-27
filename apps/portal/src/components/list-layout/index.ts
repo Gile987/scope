@@ -36,3 +36,9 @@ export type {
 export { useListUrlState } from "./useListUrlState";
 export type { ListUrlState, SortDir, UseListUrlStateOptions } from "./useListUrlState";
 export { useSortableFilterSections } from "./useSortableFilterSections";
+export {
+  usePersistentSort,
+  getSavedSortPreference,
+  initSortFromLocalStorage,
+} from "./usePersistentSort";
+export type { UsePersistentSortOptions } from "./usePersistentSort";

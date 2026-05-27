@@ -34,6 +34,8 @@ import {
   DateRangeFilter,
   useHiddenColumns,
   useListUrlState,
+  usePersistentSort,
+  initSortFromLocalStorage,
   type DataTableColumn,
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
@@ -107,6 +109,14 @@ export function RunsList() {
   const isForceRetryModifierActive = useShiftModifier();
 
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
+
+  // Initialize sort preference from localStorage if no sort params in URL
+  useEffect(() => {
+    initSortFromLocalStorage(state, "runs");
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist sort preference to localStorage
+  usePersistentSort(state, { pageKey: "runs" });
 
   // Column visibility — persisted under scope:hidden-columns:runs.
   const columnVisibility = useHiddenColumns({
