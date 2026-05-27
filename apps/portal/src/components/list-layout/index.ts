@@ -35,3 +35,4 @@ export type {
 } from "./useHiddenColumns";
 export { useListUrlState } from "./useListUrlState";
 export type { ListUrlState, SortDir, UseListUrlStateOptions } from "./useListUrlState";
+export { useSortableFilterSections } from "./useSortableFilterSections";

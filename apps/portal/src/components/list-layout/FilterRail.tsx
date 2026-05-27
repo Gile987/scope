@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { type ReactNode } from "react";
+import React, { type ReactNode, useMemo } from "react";
 import { Search, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useSortableFilterSections } from "./useSortableFilterSections";
 
 export interface FilterRailProps {
   /** Search input value. If undefined, the search box is hidden. */
@@ -17,6 +18,10 @@ export interface FilterRailProps {
   children: ReactNode;
   /** Optional footer (e.g. "Clear Filters" link). */
   footer?: ReactNode;
+  /** Optional page key for persisting section order (e.g., "runs"). When provided, sections become sortable. */
+  sortablePageKey?: string;
+  /** Default order of section IDs when sortablePageKey is provided. */
+  defaultSectionOrder?: string[];
   className?: string;
 }
 
@@ -27,8 +32,75 @@ export function FilterRail({
   refreshing,
   children,
   footer,
+  sortablePageKey,
+  defaultSectionOrder = [],
   className,
 }: FilterRailProps) {
+  const sortable = useSortableFilterSections(
+    sortablePageKey || "default",
+    defaultSectionOrder.length > 0 ? defaultSectionOrder : []
+  );
+
+  // Extract children and build a map of sortable IDs to elements
+  const childrenArray = useMemo(() => {
+    const arr: React.ReactElement[] = [];
+    React.Children.forEach(children, (child) => {
+      if (React.isValidElement(child)) {
+        arr.push(child);
+      }
+    });
+    return arr;
+  }, [children]);
+
+  // Create a map of sortable IDs to elements and their indices
+  const childrenBySort = useMemo(() => {
+    if (!sortablePageKey || defaultSectionOrder.length === 0) {
+      return childrenArray;
+    }
+
+    const map = new Map<string, React.ReactElement>();
+    const sortIds = new Set<string>();
+
+    childrenArray.forEach((child) => {
+      const sortableId = child.props?.sortableId;
+      if (sortableId) {
+        map.set(sortableId, child);
+        sortIds.add(sortableId);
+      }
+    });
+
+    // Reorder based on stored order
+    const sorted: React.ReactElement[] = [];
+    sortable.order.forEach((id) => {
+      if (map.has(id)) {
+        sorted.push(map.get(id)!);
+      }
+    });
+
+    // Add any children without sortable IDs at the end
+    childrenArray.forEach((child) => {
+      if (!child.props?.sortableId && !sorted.includes(child)) {
+        sorted.push(child);
+      }
+    });
+
+    return sorted;
+  }, [childrenArray, sortable.order, sortablePageKey, defaultSectionOrder.length]);
+
+  const orderedChildren = useMemo(() => {
+    return childrenBySort.map((child, idx) => {
+      return (
+        <div
+          key={child.props?.sortableId || idx}
+          onDragOver={child.props?.sortableId ? sortable.handleDragOver : undefined}
+          onDrop={child.props?.sortableId ? sortable.handleDrop(child.props.sortableId) : undefined}
+        >
+          {child}
+        </div>
+      );
+    });
+  }, [childrenBySort, sortable]);
+
   return (
     <aside
       className={cn(
@@ -60,7 +132,7 @@ export function FilterRail({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto">{children}</div>
+      <div className="flex-1 overflow-y-auto">{orderedChildren}</div>
 
       {footer && (
         <div className="flex items-center justify-between gap-3 border-t border-border/60 px-3 py-2.5 text-sm">

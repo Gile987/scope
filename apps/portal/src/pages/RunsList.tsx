@@ -1134,6 +1134,8 @@ export function RunsList() {
           onSearchChange={state.setSearch}
           searchPlaceholder="Search runs…"
           refreshing={isRefetching}
+          sortablePageKey="runs"
+          defaultSectionOrder={["created", "worker", "status", "outcome", "model", "profile", "version", "os", "priority", "groupby"]}
           footer={
             <>
               <ClearFiltersLink onClick={state.clearFilters} disabled={!state.hasActiveFilters} />
@@ -1141,7 +1143,7 @@ export function RunsList() {
             </>
           }
         >
-          <FilterSection title="Created" storageKey="runs-created">
+          <FilterSection title="Created" storageKey="runs-created" sortableId="created">
             <DateRangeFilter
               from={dateFrom}
               to={dateTo}
@@ -1151,21 +1153,21 @@ export function RunsList() {
               }}
             />
           </FilterSection>
-          <FilterSection title="Worker" storageKey="runs-worker">
+          <FilterSection title="Worker" storageKey="runs-worker" sortableId="worker">
             <CheckboxFilterGroup
               options={workerOptions}
               selected={workers}
               onToggle={(v) => state.toggleFilterValue("worker", v)}
             />
           </FilterSection>
-          <FilterSection title="Status" storageKey="runs-status">
+          <FilterSection title="Status" storageKey="runs-status" sortableId="status">
             <CheckboxFilterGroup
               options={statusOptions}
               selected={statuses}
               onToggle={(v) => state.toggleFilterValue("status", v)}
             />
           </FilterSection>
-          <FilterSection title="Outcome" storageKey="runs-outcome">
+          <FilterSection title="Outcome" storageKey="runs-outcome" sortableId="outcome">
             <CheckboxFilterGroup
               options={outcomeOptions}
               selected={outcomes}
@@ -1173,7 +1175,7 @@ export function RunsList() {
             />
           </FilterSection>
           {modelOptions.length > 0 && (
-            <FilterSection title="Model" storageKey="runs-model" defaultOpen={false}>
+            <FilterSection title="Model" storageKey="runs-model" defaultOpen={false} sortableId="model">
               <CheckboxFilterGroup
                 options={modelOptions}
                 selected={models}
@@ -1182,7 +1184,7 @@ export function RunsList() {
             </FilterSection>
           )}
           {profileOptions.length > 0 && (
-            <FilterSection title="Profile" storageKey="runs-profile" defaultOpen={false}>
+            <FilterSection title="Profile" storageKey="runs-profile" defaultOpen={false} sortableId="profile">
               <CheckboxFilterGroup
                 options={profileOptions}
                 selected={profiles}
@@ -1191,7 +1193,7 @@ export function RunsList() {
             </FilterSection>
           )}
           {versionOptions.length > 0 && (
-            <FilterSection title="Version" storageKey="runs-version" defaultOpen={false}>
+            <FilterSection title="Version" storageKey="runs-version" defaultOpen={false} sortableId="version">
               <CheckboxFilterGroup
                 options={versionOptions}
                 selected={versions}
@@ -1200,7 +1202,7 @@ export function RunsList() {
             </FilterSection>
           )}
           {osOptions.length > 0 && (
-            <FilterSection title="OS" storageKey="runs-os" defaultOpen={false}>
+            <FilterSection title="OS" storageKey="runs-os" defaultOpen={false} sortableId="os">
               <CheckboxFilterGroup
                 options={osOptions}
                 selected={osList}
@@ -1209,7 +1211,7 @@ export function RunsList() {
             </FilterSection>
           )}
           {priorityOptions.length > 0 && (
-            <FilterSection title="Priority" storageKey="runs-priority" defaultOpen={false}>
+            <FilterSection title="Priority" storageKey="runs-priority" defaultOpen={false} sortableId="priority">
               <CheckboxFilterGroup
                 options={priorityOptions}
                 selected={priorities}
@@ -1217,7 +1219,7 @@ export function RunsList() {
               />
             </FilterSection>
           )}
-          <FilterSection title="Group By" storageKey="runs-groupby" defaultOpen={false}>
+          <FilterSection title="Group By" storageKey="runs-groupby" defaultOpen={false} sortableId="groupby">
             <div className="space-y-2 px-3 py-2">
               {[
                 { value: "none", label: "None" },
