@@ -1321,6 +1321,12 @@ export function RunsList() {
           </Button>
         </BulkActionBar>
 
+        {groupBy !== "none" && (
+          <div className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
+            <span>Grouped by: <span className="font-medium text-foreground capitalize">{groupBy === "submissionId" ? "Submission ID" : groupBy}</span></span>
+          </div>
+        )}
+
         {groupBy === "none" ? (
           <DataTable
             items={sortedRuns}
