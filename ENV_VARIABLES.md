@@ -152,10 +152,28 @@ match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
 Maximum number of criteria to evaluate in parallel when using `independent` strategy.
 
 ### JUDGE_TIMEOUT
-**Default:** `300000` (5 minutes)
+**Default:** `480000` (8 minutes)
 **Type:** integer (milliseconds)
 
 Timeout for each Copilot SDK `sendAndWait` call. If the LLM takes longer than this to complete a response, the call will fail with a timeout error. Increase this if you see `Timeout after Xms waiting for session.idle` errors.
+
+### JUDGE_RETRIES
+**Default:** `3`
+**Type:** integer
+
+Number of retry attempts for judge-side LLM calls (`sendAndWait`). When a timeout or transient error occurs, the judge retries with exponential backoff (10s base, 30s max). Set to `0` to disable retries.
+
+### JUDGE_CLIENT_TIMEOUT
+**Default:** `600000` (10 minutes)
+**Type:** integer (milliseconds)
+
+Timeout for the HTTP request from workers to the judge service (`/api/v1/evaluate`). This covers the full end-to-end evaluation including all criteria. Increase this if you see `The operation was aborted due to timeout` errors in the multi-turn loop.
+
+### JUDGE_CLIENT_RETRIES
+**Default:** `2`
+**Type:** integer
+
+Maximum number of retry attempts when the judge client encounters a timeout or transient network error. Uses exponential backoff (5s base, 30s max). Set to `0` to disable retries.
 
 ## Feedback Configuration
 
