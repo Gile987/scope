@@ -70,7 +70,6 @@ export const UpdateReportTemplateInputSchema = z
 
 export const ReportTemplateResponseSchema = z
   .object({
-    _id: z.string(),
     id: z.string(),
     name: z.string(),
     description: z.string().optional(),

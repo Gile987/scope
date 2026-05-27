@@ -280,7 +280,7 @@ describe("request schemas", () => {
 
   describe("RequestResponseSchema", () => {
     const minimal = {
-      _id: "abc123",
+      id: "abc123",
       scenario: validScenario,
       workerType: "coder-acp-copilot",
       createdAt: NOW,
@@ -288,7 +288,7 @@ describe("request schemas", () => {
 
     it("accepts a minimal valid response", () => {
       const result = RequestResponseSchema.parse(minimal);
-      expect(result._id).toBe("abc123");
+      expect(result.id).toBe("abc123");
       expect(result.createdAt).toBeInstanceOf(Date);
     });
 
@@ -298,8 +298,8 @@ describe("request schemas", () => {
       expect(result.run).toBeUndefined();
     });
 
-    it("rejects missing _id", () => {
-      const { _id: _, ...rest } = minimal;
+    it("rejects missing id", () => {
+      const { id: _, ...rest } = minimal;
       expect(() => RequestResponseSchema.parse(rest)).toThrow();
     });
 
@@ -646,7 +646,7 @@ describe("report schemas", () => {
 
   describe("ReportResponseSchema", () => {
     const minimal = {
-      _id: "rep1",
+      id: "rep1",
       requestId: "req1",
       status: "pending",
       createdAt: NOW,
@@ -654,7 +654,7 @@ describe("report schemas", () => {
 
     it("accepts minimal valid response", () => {
       const result = ReportResponseSchema.parse(minimal);
-      expect(result._id).toBe("rep1");
+      expect(result.id).toBe("rep1");
     });
 
     it("optional fields can be omitted", () => {
@@ -809,13 +809,12 @@ describe("report-template schemas", () => {
   describe("ReportTemplateResponseSchema", () => {
     it("accepts valid response", () => {
       const result = ReportTemplateResponseSchema.parse({
-        _id: "mongo1",
         id: "tmpl1",
         name: "Template",
         userPrompt: "Analyze",
         createdAt: NOW,
       });
-      expect(result._id).toBe("mongo1");
+      expect(result.id).toBe("tmpl1");
     });
   });
 });
@@ -860,7 +859,7 @@ describe("insight schemas", () => {
   describe("InsightResponseSchema", () => {
     it("accepts valid response", () => {
       const result = InsightResponseSchema.parse({
-        _id: "i1",
+        id: "i1",
         title: "Insight",
         description: "desc",
         upvotes: 5,
@@ -876,7 +875,7 @@ describe("insight schemas", () => {
     it("rejects missing upvotes", () => {
       expect(() =>
         InsightResponseSchema.parse({
-          _id: "i1",
+          id: "i1",
           title: "t",
           description: "d",
           downvotes: 0,
@@ -897,16 +896,16 @@ describe("agent schemas", () => {
   describe("CreateAgentInputSchema", () => {
     it("accepts valid input", () => {
       const result = CreateAgentInputSchema.parse({
-        _id: "agent1",
+        id: "agent1",
         name: "Claude Code",
         supportedModels: ["claude-3"],
       });
-      expect(result._id).toBe("agent1");
+      expect(result.id).toBe("agent1");
     });
 
     it("accepts missing supportedModels (optional — registration jobs omit it)", () => {
-      const result = CreateAgentInputSchema.parse({ _id: "a", name: "n" });
-      expect(result._id).toBe("a");
+      const result = CreateAgentInputSchema.parse({ id: "a", name: "n" });
+      expect(result.id).toBe("a");
       expect(result.supportedModels).toBeUndefined();
     });
   });
@@ -914,7 +913,7 @@ describe("agent schemas", () => {
   describe("AgentResponseSchema", () => {
     it("accepts valid response", () => {
       const result = AgentResponseSchema.parse({
-        _id: "a1",
+        id: "a1",
         name: "Agent",
         supportedModels: ["m1"],
         createdAt: NOW,
@@ -978,7 +977,7 @@ describe("model schemas", () => {
   describe("ModelResponseSchema", () => {
     it("accepts valid response", () => {
       const result = ModelResponseSchema.parse({
-        _id: "m1",
+        id: "m1",
         modelId: "gpt-4",
         provider: "openai",
         agentId: "a1",
@@ -990,7 +989,7 @@ describe("model schemas", () => {
 
     it("optional dates can be omitted", () => {
       const result = ModelResponseSchema.parse({
-        _id: "m1",
+        id: "m1",
         modelId: "m",
         provider: "p",
         agentId: "a",
@@ -1066,7 +1065,7 @@ describe("mcp-server schemas", () => {
   describe("McpServerResponseSchema", () => {
     it("accepts valid response", () => {
       const result = McpServerResponseSchema.parse({
-        _id: "ms1",
+        id: "ms1",
         name: "Server",
         type: "http",
         url: "https://example.com",
@@ -1116,7 +1115,7 @@ describe("skill schemas", () => {
   describe("SkillResponseSchema", () => {
     it("accepts valid response", () => {
       const result = SkillResponseSchema.parse({
-        _id: "s1",
+        id: "s1",
         source: "github",
         skillName: "test",
         name: "Test",
@@ -1149,17 +1148,17 @@ describe("extension schemas", () => {
   describe("CreateExtensionInputSchema", () => {
     it("accepts valid input", () => {
       const result = CreateExtensionInputSchema.parse({
-        _id: "ms-python.python",
+        id: "ms-python.python",
         publisher: "ms-python",
         name: "Python",
         origin: "marketplace",
       });
-      expect(result._id).toBe("ms-python.python");
+      expect(result.id).toBe("ms-python.python");
     });
 
     it("accepts input with optional fields", () => {
       const result = CreateExtensionInputSchema.parse({
-        _id: "ms-python.python",
+        id: "ms-python.python",
         publisher: "ms-python",
         name: "Python",
         description: "Python language support",
@@ -1171,7 +1170,7 @@ describe("extension schemas", () => {
     it("rejects invalid extension ID format", () => {
       expect(() =>
         CreateExtensionInputSchema.parse({
-          _id: "invalid",
+          id: "invalid",
           publisher: "p",
           name: "n",
           origin: "manual",
@@ -1182,7 +1181,7 @@ describe("extension schemas", () => {
     it("rejects missing origin", () => {
       expect(() =>
         CreateExtensionInputSchema.parse({
-          _id: "ms-python.python",
+          id: "ms-python.python",
           publisher: "ms-python",
           name: "Python",
         }),
@@ -1193,7 +1192,7 @@ describe("extension schemas", () => {
   describe("ExtensionResponseSchema", () => {
     it("accepts valid response", () => {
       const result = ExtensionResponseSchema.parse({
-        _id: "ms-python.python",
+        id: "ms-python.python",
         publisher: "ms-python",
         name: "Python",
         origin: "marketplace",
@@ -1204,7 +1203,7 @@ describe("extension schemas", () => {
 
     it("accepts response with optional fields", () => {
       const result = ExtensionResponseSchema.parse({
-        _id: "ms-python.python",
+        id: "ms-python.python",
         publisher: "ms-python",
         name: "Python",
         description: "Python lang",

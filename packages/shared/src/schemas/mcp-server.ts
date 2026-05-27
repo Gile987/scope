@@ -51,7 +51,7 @@ export const UpdateMcpServerInputSchema = z
 
 export const McpServerResponseSchema = z
   .object({
-    _id: z.string(),
+    id: z.string(),
     name: z.string(),
     type: McpTransportTypeSchema,
     url: z.string().optional(),

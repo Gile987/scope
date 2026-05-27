@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 export * from "./common.js";
+export * from "./helpers.js";
 export * from "./scenario.js";
 export * from "./request.js";
 export * from "./criteria.js";

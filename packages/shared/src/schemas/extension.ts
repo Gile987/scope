@@ -10,7 +10,7 @@ export const ExtensionOriginSchema = z.enum(["marketplace", "manual"]);
 
 export const CreateExtensionInputSchema = z
   .object({
-    _id: z.string().regex(/^[a-zA-Z0-9-]+\.[a-zA-Z0-9-]+$/),
+    id: z.string().regex(/^[a-zA-Z0-9-]+\.[a-zA-Z0-9-]+$/),
     publisher: z.string(),
     name: z.string(),
     description: z.string().optional(),
@@ -27,7 +27,7 @@ export const UpdateExtensionInputSchema = z
 
 export const ExtensionResponseSchema = z
   .object({
-    _id: z.string(),
+    id: z.string(),
     publisher: z.string(),
     name: z.string(),
     description: z.string().optional(),

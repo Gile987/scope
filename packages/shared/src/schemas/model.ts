@@ -8,7 +8,7 @@ extendZodWithOpenApi(z);
 
 export const ModelResponseSchema = z
   .object({
-    _id: z.string(),
+    id: z.string(),
     modelId: z.string(),
     provider: z.string(),
     agentId: z.string(),

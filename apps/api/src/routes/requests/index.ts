@@ -27,6 +27,7 @@ import {
   RunStateSchema,
   decodeCursor,
   encodeCursor,
+  mapId,
   parseExtensionSpec,
   resolveAgentVersion,
 } from "shared";
@@ -384,20 +385,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       console.log(`Created ${count} ${mode} requests for ${workerType} (priority: ${requestedPriority ?? 0})`);
 
-      res.status(201).json({
-        ids: newIds,
-        count,
-        submissionId,
-        workerType,
-        taskPromptId,
-        ...(model ? { model } : {}),
-        ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
-        status: "pending",
-        mode,
-        message: `${count} requests submitted successfully`,
-        scenario,
-        ...(maxIterations ? { maxIterations } : {}),
-      });
+      res.status(201).json(newDocs.map(mapId));
       return;
     }
 
@@ -436,18 +424,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     console.log(`Created ${mode} request ${requestId} for ${workerType} (priority: ${requestedPriority ?? 0})`);
 
-    res.status(201).json({
-      id: requestId,
-      submissionId,
-      workerType,
-      ...(model ? { model } : {}),
-      ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
-      status: requestDoc.run?.status ?? "pending",
-      mode,
-      message: "Request submitted successfully",
-      scenario,
-      ...(maxIterations ? { maxIterations } : {}),
-    });
+    res.status(201).json(mapId(requestDoc));
   },
 });
 
@@ -479,7 +456,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     // Map _id back to id for API response
-    res.json({ ...resource, id: resource._id });
+    res.json(mapId(resource));
   },
 });
 
@@ -743,7 +720,7 @@ apiRoute(ctx.app, ctx.registry, {
       resources.reverse();
     }
 
-    const data = resources.map((r) => ({ ...r, id: r._id }));
+    const data = resources.map(mapId);
 
     // Enrich `processing` runs with the latest liveness heartbeat from
     // Redis (single MGET; heartbeats live there, not Mongo).
@@ -769,9 +746,9 @@ apiRoute(ctx.app, ctx.registry, {
     const first = data[0];
     const last = data[data.length - 1];
     const firstCreatedAt = new Date(first.createdAt).toISOString();
-    const firstId = String(first._id);
+    const firstId = String(first.id);
     const lastCreatedAt = new Date(last.createdAt).toISOString();
-    const lastId = String(last._id);
+    const lastId = String(last.id);
 
     // Check if there are more results in each direction
     const [hasMoreAfter, hasMoreBefore] = lastParam

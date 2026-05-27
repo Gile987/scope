@@ -15,7 +15,7 @@ export const CreateTaskPromptInputSchema = z
 
 export const TaskPromptResponseSchema = z
   .object({
-    _id: z.string(),
+    id: z.string(),
     text: z.string(),
     features: z.array(PromptFeatureResultSchema).optional(),
     featuresExtractedAt: z.coerce.date().optional(),

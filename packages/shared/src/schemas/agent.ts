@@ -22,7 +22,7 @@ export const AgentVersionSchema = z
 
 export const CreateAgentInputSchema = z
   .object({
-    _id: z.string(),
+    id: z.string(),
     name: z.string(),
     description: z.string().optional(),
     modelProvider: z.string().optional(),
@@ -45,7 +45,7 @@ export const UpdateAgentInputSchema = z
 
 export const AgentResponseSchema = z
   .object({
-    _id: z.string(),
+    id: z.string(),
     name: z.string(),
     description: z.string().optional(),
     modelProvider: z.string().optional(),
