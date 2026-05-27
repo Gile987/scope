@@ -519,7 +519,6 @@ jobs:
       post-processor: ${{ steps.changes.outputs.post-processor }}
       scheduler: ${{ steps.changes.outputs.scheduler }}
       db-migrations: ${{ steps.changes.outputs.db-migrations }}
-      post-processor: ${{ steps.changes.outputs.post-processor }}
       shared: ${{ steps.changes.outputs.shared }}
       gateway: ${{ steps.changes.outputs.gateway }}
       coder-acp-copilot-windows: ${{ steps.changes.outputs.coder-acp-copilot-windows }}
@@ -566,8 +565,6 @@ jobs:
               - 'apps/scheduler/**'
             db-migrations:
               - 'packages/db-migrations/**'
-            post-processor:
-              - 'apps/workers/post-processor/**'
             gateway:
               - 'apps/gateway/**'
             coder-acp-copilot-windows:
@@ -610,7 +607,6 @@ jobs:
           needs.detect-changes.outputs.post-processor == 'true' ||
           needs.detect-changes.outputs.scheduler == 'true' ||
           needs.detect-changes.outputs.db-migrations == 'true' ||
-          needs.detect-changes.outputs.post-processor == 'true' ||
           needs.detect-changes.outputs.gateway == 'true' ||
           needs.detect-changes.outputs.shared == 'true' ||
           needs.detect-changes.outputs.model-scanning == 'true'
@@ -659,9 +655,6 @@ jobs:
           - name: db-migrations
             dockerfile: packages/db-migrations/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
-          - name: post-processor
-            dockerfile: apps/workers/post-processor/Dockerfile
-            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.post-processor == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: gateway
             dockerfile: apps/gateway/Dockerfile
             context: apps/gateway
