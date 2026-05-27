@@ -92,7 +92,7 @@ jobs:
       - name: Compute deps image tag
         id: tags
         run: |
-          HASH=$(cat ${{ env.WORKER_DIR }}/Dockerfile.deps ${{ env.WORKER_DIR }}/versions.env | sha256sum | cut -c1-12)
+          HASH=$(cat ${{ env.WORKER_DIR }}/Dockerfile.deps ${{ env.WORKER_DIR }}/versions.env ${{ env.WORKER_DIR }}/Dockerfile.base | sha256sum | cut -c1-12)
           DEPS_TAG="deps-${HASH}"
           ACR_LOGIN_SERVER=$(az acr show --name "${{ vars.ACR_NAME }}" --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" --query loginServer -o tsv)
           DEPS_IMAGE="${ACR_LOGIN_SERVER}/scoped/coder-acp-copilot-windows-deps:${DEPS_TAG}"
