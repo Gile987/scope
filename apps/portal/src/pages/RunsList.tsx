@@ -218,7 +218,7 @@ export function RunsList() {
   });
   const profileNameMap = useMemo(() => {
     const map = new Map<string, string>();
-    for (const p of profiles) map.set(p._id, p.name);
+    for (const p of profiles) map.set(p.id, p.name);
     return map;
   }, [profiles]);
 
@@ -230,7 +230,7 @@ export function RunsList() {
   };
 
   // Fetch bulk report summary for all visible runs
-  const runIds = useMemo(() => runs.map((r) => r._id), [runs]);
+  const runIds = useMemo(() => runs.map((r) => r.id), [runs]);
   const { data: reportSummaries } = useQuery({
     queryKey: ["report-summaries", runIds],
     queryFn: () => api.bulkReportSummary(runIds),
@@ -259,7 +259,7 @@ export function RunsList() {
 
   // Compute summary of selected runs' values for the resubmit dialog
   const selectedRunsSummary = useMemo(() => {
-    const selected = runs.filter((r) => selectedIds.has(r._id));
+    const selected = runs.filter((r) => selectedIds.has(r.id));
     if (selected.length === 0) return { worker: null, model: null, maxIterations: null, mcpServers: null, profileId: null };
 
     const workers = [...new Set(selected.map((r) => r.workerType))];
@@ -301,7 +301,7 @@ export function RunsList() {
     ? resubmitOverrides.profileId
     : selectedRunsSummary.profileId;
   const activeProfile = useMemo(
-    () => activeProfileId ? profiles.find((p) => p._id === activeProfileId) ?? null : null,
+    () => activeProfileId ? profiles.find((p) => p.id === activeProfileId) ?? null : null,
     [profiles, activeProfileId],
   );
 
@@ -311,7 +311,7 @@ export function RunsList() {
     ? activeProfile.version.workerType
     : (resubmitOverrides.workerType ?? selectedRunsSummary.worker);
   const effectiveAgent = useMemo(
-    () => activeAgents.find((a) => a._id === effectiveWorker),
+    () => activeAgents.find((a) => a.id === effectiveWorker),
     [activeAgents, effectiveWorker],
   );
   const availableModels = effectiveAgent?.supportedModels ?? [];
@@ -518,7 +518,7 @@ export function RunsList() {
   const selectionCaps = useMemo(() => {
     if (groupBy === "none") {
       // Flat list mode — we have full run objects
-      const selected = runs.filter((r) => selectedIds.has(r._id));
+      const selected = runs.filter((r) => selectedIds.has(r.id));
       const status = (r: Run) => r.run?.status ?? "pending";
       const doneRuns = selected.filter((r) => status(r) === "done");
       return {
@@ -566,8 +566,8 @@ export function RunsList() {
     });
   };
 
-  const allSelected = runs.length > 0 && runs.every((r) => selectedIds.has(r._id));
-  const someSelected = runs.some((r) => selectedIds.has(r._id));
+  const allSelected = runs.length > 0 && runs.every((r) => selectedIds.has(r.id));
+  const someSelected = runs.some((r) => selectedIds.has(r.id));
 
   useEffect(() => {
     if (!isJumpingToLast) return;
@@ -583,7 +583,7 @@ export function RunsList() {
     if (allSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(runs.map((r) => r._id)));
+      setSelectedIds(new Set(runs.map((r) => r.id)));
     }
   };
 
@@ -905,7 +905,7 @@ export function RunsList() {
                 disabled={selectionCaps.prioritizable === 0}
                 onClick={() => {
                   // Pre-fill with the common priority of selected prioritizable runs
-                  const prioritizable = runs.filter((r) => selectedIds.has(r._id) && ((r.run?.status ?? "pending") === "pending" || r.run?.status === "paused"));
+                  const prioritizable = runs.filter((r) => selectedIds.has(r.id) && ((r.run?.status ?? "pending") === "pending" || r.run?.status === "paused"));
                   const priorities = new Set(prioritizable.map((r) => r.priority ?? 0));
                   setBulkPriorityValue(priorities.size === 1 ? [...priorities][0] : 0);
                   setPriorityDialogOpen(true);
@@ -1080,7 +1080,7 @@ export function RunsList() {
                     </SelectItem>
                     <SelectItem value="__none__">None (detach profile)</SelectItem>
                     {profiles.map((p) => (
-                      <SelectItem key={p._id} value={p._id}>
+                      <SelectItem key={p.id} value={p.id}>
                         {p.name} <span className="text-muted-foreground">v{p.latestVersion}</span>
                       </SelectItem>
                     ))}
@@ -1131,9 +1131,9 @@ export function RunsList() {
                         : selectedRunsSummary.isMultiWorker ? "Mixed (keep each)" : "—"}
                     </SelectItem>
                     {availableAgents
-                      .filter((a) => a._id !== selectedRunsSummary.worker)
+                      .filter((a) => a.id !== selectedRunsSummary.worker)
                       .map((a) => (
-                        <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
+                        <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
                       ))}
                     {availableAgents.length === 0 && WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
                       <SelectItem key={w} value={w}>{w}</SelectItem>
@@ -1266,17 +1266,17 @@ export function RunsList() {
                   {resubmitOverrides.mcpServers !== undefined && resubmitOverrides.mcpServers !== null && (
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       {mcpServers.map((s) => {
-                        const selected = resubmitOverrides.mcpServers?.includes(s._id) ?? false;
+                        const selected = resubmitOverrides.mcpServers?.includes(s.id) ?? false;
                         return (
                           <Button
-                            key={s._id}
+                            key={s.id}
                             type="button"
                             variant={selected ? "default" : "outline"}
                             size="sm"
                             className="h-7 text-xs"
                             onClick={() => setResubmitOverrides((prev) => {
                               const current = prev.mcpServers ?? [];
-                              const next = selected ? current.filter((id) => id !== s._id) : [...current, s._id];
+                              const next = selected ? current.filter((id) => id !== s.id) : [...current, s.id];
                               return { ...prev, mcpServers: next };
                             })}
                           >
@@ -1343,7 +1343,7 @@ export function RunsList() {
                     // Collect all unique skill revision refs from selected runs
                     const allRefs = [...new Set(
                       runs
-                        .filter((r) => selectedIds.has(r._id))
+                        .filter((r) => selectedIds.has(r.id))
                         .flatMap((r) => r.skillRevisions ?? [])
                     )];
                     return (
@@ -1431,7 +1431,7 @@ export function RunsList() {
                   {resubmitOverrides.extensions !== undefined && resubmitOverrides.extensions !== null && (() => {
                     const allExts = [...new Set(
                       runs
-                        .filter((r) => selectedIds.has(r._id))
+                        .filter((r) => selectedIds.has(r.id))
                         .flatMap((r) => r.extensions ?? [])
                     )];
                     return (
@@ -1639,7 +1639,7 @@ export function RunsList() {
             ) : (
               runs.map((run: Run) => (
                 <RunRow
-                  key={run._id}
+                  key={run.id}
                   run={run}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
@@ -1758,17 +1758,17 @@ function RunRow({
 
   return (
     <>
-    <TableRow data-state={selectedIds.has(run._id) ? "selected" : undefined}>
+    <TableRow data-state={selectedIds.has(run.id) ? "selected" : undefined}>
       <TableCell>
         <Checkbox
-          checked={selectedIds.has(run._id)}
-          onCheckedChange={() => onToggleSelect(run._id)}
-          aria-label={`Select run ${formatId(run._id)}`}
+          checked={selectedIds.has(run.id)}
+          onCheckedChange={() => onToggleSelect(run.id)}
+          aria-label={`Select run ${formatId(run.id)}`}
         />
       </TableCell>
       {isCol("id") && <TableCell className="font-mono text-xs">
-        <Link to={`/runs/${run._id}`} className="text-primary hover:underline">
-          {formatId(run._id)}
+        <Link to={`/runs/${run.id}`} className="text-primary hover:underline">
+          {formatId(run.id)}
         </Link>
       </TableCell>}
       {isCol("submission") && <TableCell className="font-mono text-xs">
@@ -1902,9 +1902,9 @@ function RunRow({
         )}
       </TableCell>}
       {isCol("report") && <TableCell>
-        {reportSummaries?.[run._id] ? (
-          <Link to={`/runs/${run._id}/reports`} className="block">
-            <ReportProgressBar summary={reportSummaries[run._id]} />
+        {reportSummaries?.[run.id] ? (
+          <Link to={`/runs/${run.id}/reports`} className="block">
+            <ReportProgressBar summary={reportSummaries[run.id]} />
           </Link>
         ) : (
           <span className="text-xs text-muted-foreground">–</span>
@@ -1951,7 +1951,7 @@ function RunRow({
       </TableCell>}
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1">
-          <Link to={`/runs/${run._id}`}>
+          <Link to={`/runs/${run.id}`}>
             <Button variant="ghost" size="icon" className="h-8 w-8">
               <Eye className="h-4 w-4" />
             </Button>
@@ -1962,7 +1962,7 @@ function RunRow({
               size="icon"
               className="h-8 w-8"
               title="Download archive"
-              onClick={() => window.open(api.archiveUrl(run._id), "_blank")}
+              onClick={() => window.open(api.archiveUrl(run.id), "_blank")}
             >
               <Download className="h-4 w-4" />
             </Button>
@@ -1973,7 +1973,7 @@ function RunRow({
               size="icon"
               className="h-8 w-8"
               title="Pause"
-              onClick={() => pauseMutation.mutate(run._id)}
+              onClick={() => pauseMutation.mutate(run.id)}
               disabled={pauseMutation.isPending}
             >
               <Pause className="h-4 w-4" />
@@ -1987,7 +1987,7 @@ function RunRow({
               title="Cancel"
               onClick={() => {
                 if (window.confirm("Cancel this run? It will be marked as failed.")) {
-                  cancelMutation.mutate(run._id);
+                  cancelMutation.mutate(run.id);
                 }
               }}
               disabled={cancelMutation.isPending}
@@ -2001,7 +2001,7 @@ function RunRow({
               size="icon"
               className="h-8 w-8"
               title="Resume"
-              onClick={() => resumeMutation.mutate(run._id)}
+              onClick={() => resumeMutation.mutate(run.id)}
               disabled={resumeMutation.isPending}
             >
               <Play className="h-4 w-4" />
@@ -2021,7 +2021,7 @@ function RunRow({
                   <DropdownMenuCheckboxItem
                     key={p}
                     checked={(run.priority ?? 0) === p}
-                    onCheckedChange={() => setPriorityMutation.mutate({ id: run._id, priority: p })}
+                    onCheckedChange={() => setPriorityMutation.mutate({ id: run.id, priority: p })}
                   >
                     {p > 0 ? `+${p}` : p} {p === 0 ? "(default)" : p > 0 ? "(higher)" : "(lower)"}
                   </DropdownMenuCheckboxItem>
@@ -2039,7 +2039,7 @@ function RunRow({
                 if (isSuccessfulCompletedRun) {
                   setRetryConfirmOpen(true);
                 } else {
-                  retryMutation.mutate({ id: run._id, force: false });
+                  retryMutation.mutate({ id: run.id, force: false });
                 }
               }}
               disabled={retryButtonState.disabled}
@@ -2048,8 +2048,8 @@ function RunRow({
             </Button>
           )}
           <DeleteRunButton
-            runId={run._id}
-            onDelete={() => deleteMutation.mutate(run._id)}
+            runId={run.id}
+            onDelete={() => deleteMutation.mutate(run.id)}
             isDeleting={deleteMutation.isPending}
           />
         </div>
@@ -2058,7 +2058,7 @@ function RunRow({
     <RetryConfirmDialog
       open={retryConfirmOpen}
       onOpenChange={setRetryConfirmOpen}
-      onConfirm={() => retryMutation.mutate({ id: run._id, force: true })}
+      onConfirm={() => retryMutation.mutate({ id: run.id, force: true })}
       isPending={retryMutation.isPending}
     />
     </>
@@ -2418,7 +2418,7 @@ function GroupRows({
         ) : (
           expandedRuns.map((run) => (
             <RunRow
-              key={run._id}
+              key={run.id}
               run={run}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}

@@ -31,7 +31,7 @@ export function TaskPromptIdPicker({ selected, onChange }: TaskPromptIdPickerPro
 
   // Filter out already-selected items
   const suggestions = useMemo(() => {
-    return items.filter((tp) => !selected.includes(tp._id));
+    return items.filter((tp) => !selected.includes(tp.id));
   }, [items, selected]);
 
   // Resolve selected IDs to their text (for badge display)
@@ -43,7 +43,7 @@ export function TaskPromptIdPicker({ selected, onChange }: TaskPromptIdPickerPro
   const promptMap = useMemo(() => {
     const map = new Map<string, string>();
     for (const tp of allPrompts?.items ?? []) {
-      map.set(tp._id, tp.text);
+      map.set(tp.id, tp.text);
     }
     return map;
   }, [allPrompts]);
@@ -90,7 +90,7 @@ export function TaskPromptIdPicker({ selected, onChange }: TaskPromptIdPickerPro
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (suggestions[highlightIdx]) {
-        addItem(suggestions[highlightIdx]._id);
+        addItem(suggestions[highlightIdx].id);
       }
     } else if (e.key === "Escape") {
       setOpen(false);
@@ -149,17 +149,17 @@ export function TaskPromptIdPicker({ selected, onChange }: TaskPromptIdPickerPro
           <div className="max-h-48 overflow-y-auto p-1">
             {suggestions.map((tp, idx) => (
               <button
-                key={tp._id}
+                key={tp.id}
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => addItem(tp._id)}
+                onClick={() => addItem(tp.id)}
                 onMouseEnter={() => setHighlightIdx(idx)}
                 className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-sm text-left text-sm transition-colors ${
                   idx === highlightIdx ? "bg-accent text-accent-foreground" : ""
                 }`}
               >
                 <span className="font-mono text-xs text-muted-foreground shrink-0">
-                  {formatId(tp._id)}
+                  {formatId(tp.id)}
                 </span>
                 <span className="text-xs truncate">
                   {truncate(tp.text.replace(/\n/g, " "), 80)}

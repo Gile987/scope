@@ -56,7 +56,7 @@ export function TaskPromptList() {
     onSuccess: (prompt) => {
       queryClient.invalidateQueries({ queryKey: ["task-prompts"] });
       resetDialog();
-      navigate(`/task-prompts/${prompt._id}`);
+      navigate(`/task-prompts/${prompt.id}`);
     },
   });
 
@@ -200,13 +200,13 @@ export function TaskPromptList() {
             </TableHeader>
             <TableBody>
               {items.map((tp) => (
-                <TableRow key={tp._id}>
+                <TableRow key={tp.id}>
                   <TableCell>
                     <Link
-                      to={`/task-prompts/${tp._id}`}
+                      to={`/task-prompts/${tp.id}`}
                       className="font-mono text-xs font-medium hover:underline"
                     >
-                      {formatId(tp._id)}
+                      {formatId(tp.id)}
                     </Link>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground max-w-[400px]">
@@ -226,12 +226,12 @@ export function TaskPromptList() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1 justify-end">
-                      <Link to={`/task-prompts/${tp._id}`}>
+                      <Link to={`/task-prompts/${tp.id}`}>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
                           <Eye className="h-4 w-4" />
                         </Button>
                       </Link>
-                      <Link to={`/runs?taskPromptId=${encodeURIComponent(tp._id)}`}>
+                      <Link to={`/runs?taskPromptId=${encodeURIComponent(tp.id)}`}>
                         <Button variant="ghost" size="icon" className="h-8 w-8" title="View runs for this task prompt">
                           <List className="h-4 w-4" />
                         </Button>
@@ -247,13 +247,13 @@ export function TaskPromptList() {
                             <AlertDialogTitle>Delete task prompt?</AlertDialogTitle>
                             <AlertDialogDescription>
                               This will soft-delete task prompt{" "}
-                              <code className="font-mono">{formatId(tp._id)}</code>.
+                              <code className="font-mono">{formatId(tp.id)}</code>.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
                             <AlertDialogAction
-                              onClick={() => deleteMutation.mutate(tp._id)}
+                              onClick={() => deleteMutation.mutate(tp.id)}
                               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             >
                               Delete

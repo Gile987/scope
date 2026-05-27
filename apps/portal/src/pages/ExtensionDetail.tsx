@@ -99,7 +99,7 @@ export function ExtensionDetail() {
         <CardContent>
           <div className="grid grid-cols-[10rem_1fr] gap-y-3 text-sm">
             <span className="text-muted-foreground">ID</span>
-            <span className="font-mono">{extension._id}</span>
+            <span className="font-mono">{extension.id}</span>
 
             <span className="text-muted-foreground">Publisher</span>
             <span className="font-mono">{extension.publisher}</span>

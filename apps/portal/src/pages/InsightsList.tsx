@@ -107,10 +107,10 @@ export function InsightsList() {
             </TableHeader>
             <TableBody>
               {insights.map((insight) => (
-                <TableRow key={insight._id} className={insight.blocked ? "opacity-50" : ""}>
+                <TableRow key={insight.id} className={insight.blocked ? "opacity-50" : ""}>
                   <TableCell>
                     <Link
-                      to={`/insights/${insight._id}`}
+                      to={`/insights/${insight.id}`}
                       className="text-sm font-medium text-primary hover:underline"
                     >
                       {truncate(insight.title, 80)}
@@ -149,7 +149,7 @@ export function InsightsList() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={() => upvoteMutation.mutate(insight._id)}
+                        onClick={() => upvoteMutation.mutate(insight.id)}
                         disabled={upvoteMutation.isPending}
                       >
                         <ThumbsUp className="h-3.5 w-3.5" />
@@ -161,7 +161,7 @@ export function InsightsList() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={() => downvoteMutation.mutate(insight._id)}
+                        onClick={() => downvoteMutation.mutate(insight.id)}
                         disabled={downvoteMutation.isPending}
                       >
                         <ThumbsDown className="h-3.5 w-3.5" />
@@ -173,7 +173,7 @@ export function InsightsList() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7"
-                      onClick={() => blockMutation.mutate({ id: insight._id, blocked: !insight.blocked })}
+                      onClick={() => blockMutation.mutate({ id: insight.id, blocked: !insight.blocked })}
                       title={insight.blocked ? "Unblock" : "Block"}
                     >
                       {insight.blocked ? (
@@ -203,7 +203,7 @@ export function InsightsList() {
                         <AlertDialogFooter>
                           <AlertDialogCancel>Cancel</AlertDialogCancel>
                           <AlertDialogAction
-                            onClick={() => deleteMutation.mutate(insight._id)}
+                            onClick={() => deleteMutation.mutate(insight.id)}
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                           >
                             Delete

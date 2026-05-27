@@ -124,7 +124,7 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
     const q = query.toLowerCase();
     return activeInternal.filter(
       (s) =>
-        s._id.toLowerCase().includes(q) ||
+        s.id.toLowerCase().includes(q) ||
         s.name.toLowerCase().includes(q) ||
         (s.description?.toLowerCase().includes(q) ?? false),
     );
@@ -132,7 +132,7 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
 
   // ─── Deduplicate external against internal ──────────────────────────
   const internalIds = useMemo(
-    () => new Set(activeInternal.map((s) => s._id)),
+    () => new Set(activeInternal.map((s) => s.id)),
     [activeInternal],
   );
 
@@ -189,7 +189,7 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
       }),
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["skills"] });
-      toast.success(`Skill "${created._id}" imported`);
+      toast.success(`Skill "${created.id}" imported`);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to import skill");
@@ -248,7 +248,7 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
       e.preventDefault();
       const item = items[highlightIdx];
       if (item?.kind === "internal") {
-        toggleItem(item.skill._id);
+        toggleItem(item.skill.id);
       }
       // For external items, Enter does nothing — user must click Import
     } else if (e.key === "Escape") {
@@ -338,13 +338,13 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
                   </div>
                 )}
                 {internalMatches.map((skill, idx) => {
-                  const isSelected = selectedMap.has(skill._id);
+                  const isSelected = selectedMap.has(skill.id);
                   return (
                     <button
-                      key={skill._id}
+                      key={skill.id}
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => toggleItem(skill._id)}
+                      onClick={() => toggleItem(skill.id)}
                       onMouseEnter={() => setHighlightIdx(idx)}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-left text-sm transition-colors ${
                         idx === highlightIdx ? "bg-accent text-accent-foreground" : ""
@@ -358,7 +358,7 @@ export function SkillPicker({ selected, onChange, importOnly = false, disabled =
                         </span>
                       )}
                       <BookOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      <span className="font-mono font-medium shrink-0">{skill._id}</span>
+                      <span className="font-mono font-medium shrink-0">{skill.id}</span>
                       <span className="text-xs text-muted-foreground truncate">
                         {skill.name}{skill.description ? ` — ${skill.description}` : ""}
                       </span>

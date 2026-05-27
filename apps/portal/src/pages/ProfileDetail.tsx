@@ -385,9 +385,9 @@ export function ProfileDetail() {
               <div className="space-y-2">
                 {versions.map((v: ProfileVersionDocument) => (
                   <button
-                    key={v._id}
+                    key={v.id}
                     className={`w-full text-left p-2 rounded-md text-sm hover:bg-muted transition-colors ${
-                      displayVersion?._id === v._id ? "bg-muted font-medium" : ""
+                      displayVersion?.id === v.id ? "bg-muted font-medium" : ""
                     }`}
                     onClick={() => navigate(`/profiles/${profileId}/v/${v.version}`)}
                   >

@@ -230,7 +230,7 @@ describe("Step 2 — Import execution", () => {
   }
 
   it("shows Done button and summary after successful import", async () => {
-    mockCreateSkill.mockResolvedValue({ _id: "test" });
+    mockCreateSkill.mockResolvedValue({ id: "test" });
     await goToStep2AndImport();
     fireEvent.click(screen.getByText("Import 2 skills").closest("button")!);
     await waitFor(() => {
@@ -241,7 +241,7 @@ describe("Step 2 — Import execution", () => {
 
   it("shows Retry failed button when some imports fail", async () => {
     mockCreateSkill
-      .mockResolvedValueOnce({ _id: "ok" })
+      .mockResolvedValueOnce({ id: "ok" })
       .mockRejectedValueOnce(new Error("Server error"));
     await goToStep2AndImport();
     fireEvent.click(screen.getByText("Import 2 skills").closest("button")!);
@@ -264,7 +264,7 @@ describe("Step 2 — Import execution", () => {
   });
 
   it("resets to step 1 when Done is clicked", async () => {
-    mockCreateSkill.mockResolvedValue({ _id: "test" });
+    mockCreateSkill.mockResolvedValue({ id: "test" });
     const onClose = vi.fn();
     const qc = createQueryClient();
     render(

@@ -65,7 +65,7 @@ export function TaskPromptDetail() {
           <ArrowLeft className="h-4 w-4" /> Back to task prompts
         </Link>
         <div className="flex items-center gap-2">
-          <Link to={`/runs?taskPromptId=${encodeURIComponent(taskPrompt._id)}`}>
+          <Link to={`/runs?taskPromptId=${encodeURIComponent(taskPrompt.id)}`}>
             <Button variant="outline" className="gap-1.5">
               <List className="h-4 w-4" /> View Runs
             </Button>
@@ -102,7 +102,7 @@ export function TaskPromptDetail() {
         <CardHeader>
           <CardTitle className="text-lg">Task Prompt</CardTitle>
           <CardDescription className="font-mono text-xs select-all">
-            {taskPrompt._id}
+            {taskPrompt.id}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -138,7 +138,7 @@ export function TaskPromptDetail() {
           <CardTitle className="text-lg">Prompt Features</CardTitle>
         </CardHeader>
         <CardContent>
-          <TaskPromptFeatures taskPromptId={taskPrompt._id} autoExtract />
+          <TaskPromptFeatures taskPromptId={taskPrompt.id} autoExtract />
         </CardContent>
       </Card>
     </div>

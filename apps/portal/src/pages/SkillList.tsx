@@ -89,11 +89,11 @@ export function SkillList() {
             </TableHeader>
             <TableBody>
               {activeSkills.map((skill: SkillDocument) => (
-                <TableRow key={skill._id}>
+                <TableRow key={skill.id}>
                   <TableCell className="font-mono text-xs">
-                    <Link to={`/skills/${skill._id}`} className="flex items-center gap-1.5 hover:underline">
+                    <Link to={`/skills/${skill.id}`} className="flex items-center gap-1.5 hover:underline">
                       <BookOpen className="h-3.5 w-3.5" />
-                      {skill._id}
+                      {skill.id}
                     </Link>
                   </TableCell>
                   <TableCell>{skill.name}</TableCell>
@@ -124,7 +124,7 @@ export function SkillList() {
                         </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => deleteMutation.mutate(skill._id)}>
+                          <AlertDialogAction onClick={() => deleteMutation.mutate(skill.id)}>
                             Delete
                           </AlertDialogAction>
                         </AlertDialogFooter>

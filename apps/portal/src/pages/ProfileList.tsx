@@ -86,9 +86,9 @@ export function ProfileList() {
               ) : (
                 profiles.map((profile: ProfileWithVersion) => (
                   <TableRow
-                    key={profile._id}
+                    key={profile.id}
                     className="cursor-pointer"
-                    onClick={() => navigate(`/profiles/${profile._id}`)}
+                    onClick={() => navigate(`/profiles/${profile.id}`)}
                   >
                     <TableCell className="font-medium">{profile.name}</TableCell>
                     <TableCell><Badge variant="secondary">v{profile.version.version}</Badge></TableCell>
@@ -124,7 +124,7 @@ export function ProfileList() {
                             <AlertDialogAction
                               onClick={(e) => {
                                 e.stopPropagation();
-                                deleteMutation.mutate(profile._id);
+                                deleteMutation.mutate(profile.id);
                               }}
                             >
                               Delete

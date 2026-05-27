@@ -77,10 +77,10 @@ export function AccountList() {
             </TableHeader>
             <TableBody>
               {activeAccounts.map((account: AccountDocument) => (
-                <TableRow key={account._id}>
+                <TableRow key={account.id}>
                   <TableCell className="font-mono text-xs">
-                    <Link to={`/secrets/accounts/${account._id}`} className="hover:underline">
-                      {formatId(account._id)}
+                    <Link to={`/secrets/accounts/${account.id}`} className="hover:underline">
+                      {formatId(account.id)}
                     </Link>
                   </TableCell>
                   <TableCell className="text-sm max-w-[200px] truncate" title={account.comment ?? undefined}>
@@ -101,7 +101,7 @@ export function AccountList() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Link to={`/secrets/accounts/${account._id}`}>
+                      <Link to={`/secrets/accounts/${account.id}`}>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -121,7 +121,7 @@ export function AccountList() {
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => deleteMutation.mutate(account._id)}>
+                            <AlertDialogAction onClick={() => deleteMutation.mutate(account.id)}>
                               Delete
                             </AlertDialogAction>
                           </AlertDialogFooter>

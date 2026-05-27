@@ -958,7 +958,7 @@ export const api = {
   },
 
   /** Import an extension */
-  createExtension: (body: { _id: string; publisher: string; name: string; origin: string; description?: string }): Promise<ExtensionDocument> => {
+  createExtension: (body: { id: string; publisher: string; name: string; origin: string; description?: string }): Promise<ExtensionDocument> => {
     return request("/extensions", {
       method: "POST",
       body: JSON.stringify(body),

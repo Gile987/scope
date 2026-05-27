@@ -129,7 +129,7 @@ export function AgentDetail() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{agent.name}</h1>
-          <p className="text-sm text-muted-foreground font-mono">{agent._id}</p>
+          <p className="text-sm text-muted-foreground font-mono">{agent.id}</p>
         </div>
         <div className="flex items-center gap-2">
           <AlertDialog>

@@ -46,7 +46,7 @@ export function CreateProfile() {
   });
 
   // Find selected agent for model/version lists
-  const selectedAgent = agents.find((a: CodingAgent) => a._id === worker);
+  const selectedAgent = agents.find((a: CodingAgent) => a.id === worker);
   const supportedModels = selectedAgent?.supportedModels ?? [];
   const isVscodeWorker = worker.includes("vscode");
 
@@ -87,7 +87,7 @@ export function CreateProfile() {
       ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
     }),
     onSuccess: (data) => {
-      const profileId = "_id" in data ? data._id : (data as { profileId: string }).profileId;
+      const profileId = "id" in data ? data.id : (data as { profileId: string }).profileId;
       toast.success(`Profile "${name}" created`);
       navigate(`/profiles/${profileId}`);
     },
@@ -215,7 +215,7 @@ export function CreateProfile() {
               </SelectTrigger>
               <SelectContent>
                 {agents.map((a: CodingAgent) => (
-                  <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
+                  <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -267,17 +267,17 @@ export function CreateProfile() {
           <CardContent>
             <div className="space-y-2">
               {mcpServers.map((s: McpServerDocument) => (
-                <div key={s._id} className="flex items-center space-x-2">
+                <div key={s.id} className="flex items-center space-x-2">
                   <Checkbox
-                    id={`mcp-${s._id}`}
-                    checked={selectedMcpServers.includes(s._id)}
+                    id={`mcp-${s.id}`}
+                    checked={selectedMcpServers.includes(s.id)}
                     onCheckedChange={(checked) => {
                       setSelectedMcpServers((prev) =>
-                        checked ? [...prev, s._id] : prev.filter((id) => id !== s._id)
+                        checked ? [...prev, s.id] : prev.filter((id) => id !== s.id)
                       );
                     }}
                   />
-                  <Label htmlFor={`mcp-${s._id}`} className="font-mono text-sm">{s._id}</Label>
+                  <Label htmlFor={`mcp-${s.id}`} className="font-mono text-sm">{s.id}</Label>
                   <span className="text-muted-foreground text-xs">{s.name}</span>
                 </div>
               ))}

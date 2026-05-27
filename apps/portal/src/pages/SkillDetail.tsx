@@ -102,7 +102,7 @@ export function SkillDetail() {
             <Badge variant="outline" className="text-xs">{skill.origin}</Badge>
           </div>
           <div className="flex items-center gap-3 mt-1">
-            <p className="text-sm text-muted-foreground font-mono">{skill._id}</p>
+            <p className="text-sm text-muted-foreground font-mono">{skill.id}</p>
             <a
               href={`https://github.com/${skill.source}`}
               target="_blank"
@@ -277,7 +277,7 @@ export function SkillDetail() {
                 <div className="space-y-1">
                   {revisions.map((rev: SkillRevisionDocument, idx: number) => (
                     <div
-                      key={rev._id}
+                      key={rev.id}
                       className={cn(
                         "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs",
                         idx === 0

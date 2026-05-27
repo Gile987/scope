@@ -218,7 +218,7 @@ export function CreateToken() {
     mutationFn: (body: CreateKeyRequest) => api.createKey(body),
     onSuccess: (data) => {
       toast.success("Key registered successfully");
-      navigate(`/secrets/keys/${data._id}`);
+      navigate(`/secrets/keys/${data.id}`);
     },
     onError: (err: Error) => {
       toast.error(err.message);

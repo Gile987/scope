@@ -145,10 +145,10 @@ export function TokenList() {
             </TableHeader>
             <TableBody>
               {activeTokens.map((token: KeyDocument) => (
-                <TableRow key={token._id}>
+                <TableRow key={token.id}>
                   <TableCell className="font-mono text-xs">
-                    <Link to={`/secrets/keys/${token._id}`} className="hover:underline">
-                      {formatId(token._id)}
+                    <Link to={`/secrets/keys/${token.id}`} className="hover:underline">
+                      {formatId(token.id)}
                     </Link>
                   </TableCell>
                   <TableCell className="text-sm max-w-[200px] truncate" title={token.comment ?? undefined}>
@@ -193,7 +193,7 @@ export function TokenList() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Link to={`/secrets/keys/${token._id}`}>
+                      <Link to={`/secrets/keys/${token.id}`}>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -203,7 +203,7 @@ export function TokenList() {
                         size="icon"
                         className="h-8 w-8"
                         disabled={validateMutation.isPending}
-                        onClick={() => validateMutation.mutate(token._id)}
+                        onClick={() => validateMutation.mutate(token.id)}
                       >
                         <ShieldCheck className="h-4 w-4" />
                       </Button>
@@ -222,7 +222,7 @@ export function TokenList() {
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => deleteMutation.mutate(token._id)}>
+                            <AlertDialogAction onClick={() => deleteMutation.mutate(token.id)}>
                               Delete
                             </AlertDialogAction>
                           </AlertDialogFooter>

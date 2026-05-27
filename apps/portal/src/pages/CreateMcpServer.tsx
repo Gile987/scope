@@ -77,7 +77,7 @@ export function CreateMcpServer() {
     mutationFn: api.createMcpServer,
     onSuccess: (data) => {
       toast.success(`MCP server "${data.name}" created`);
-      navigate(`/mcp-servers/${data._id}`);
+      navigate(`/mcp-servers/${data.id}`);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to create MCP server");
@@ -92,7 +92,7 @@ export function CreateMcpServer() {
 
     if (isStdio) {
       createMutation.mutate({
-        _id: slug,
+        id: slug,
         name,
         type,
         command,
@@ -104,7 +104,7 @@ export function CreateMcpServer() {
       });
     } else {
       createMutation.mutate({
-        _id: slug,
+        id: slug,
         name,
         type,
         url,

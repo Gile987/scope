@@ -103,7 +103,7 @@ export function TaskPromptPicker({ onSelect }: TaskPromptPickerProps) {
             <ul className="py-1">
               {items.map((tp, idx) => (
                 <li
-                  key={tp._id}
+                  key={tp.id}
                   className={`px-3 py-2 cursor-pointer text-sm ${
                     idx === highlightIdx
                       ? "bg-accent text-accent-foreground"
@@ -113,7 +113,7 @@ export function TaskPromptPicker({ onSelect }: TaskPromptPickerProps) {
                   onMouseEnter={() => setHighlightIdx(idx)}
                 >
                   <span className="font-mono text-xs text-muted-foreground mr-2">
-                    {formatId(tp._id)}
+                    {formatId(tp.id)}
                   </span>
                   {truncate(tp.text.replace(/\n/g, " "), 80)}
                 </li>

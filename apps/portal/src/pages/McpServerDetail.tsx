@@ -215,7 +215,7 @@ export function McpServerDetail() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{server.name}</h1>
-          <p className="text-sm text-muted-foreground font-mono">{server._id}</p>
+          <p className="text-sm text-muted-foreground font-mono">{server.id}</p>
         </div>
         <div className="flex items-center gap-2">
           <AlertDialog>

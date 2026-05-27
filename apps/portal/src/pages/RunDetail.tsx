@@ -85,17 +85,17 @@ export function RunDetail() {
     if (!rawAttempts) return rawAttempts;
     const liveRun = run?.run;
     if (!liveRun) return rawAttempts;
-    return rawAttempts.map((a) => (a._id === liveRun._id ? liveRun : a));
+    return rawAttempts.map((a) => (a.id === liveRun.id ? liveRun : a));
   }, [rawAttempts, run?.run]);
 
   // When viewing a historical attempt via ?runId=xxx, use that RunState
   // instead of the current one. The selected attempt may come from the
   // attempts list or fall back to the current run.
   const activeRun: RunState | undefined = useMemo(() => {
-    if (!selectedRunId || selectedRunId === run?.run?._id) return run?.run;
-    return attempts?.find((a) => a._id === selectedRunId) ?? run?.run;
+    if (!selectedRunId || selectedRunId === run?.run?.id) return run?.run;
+    return attempts?.find((a) => a.id === selectedRunId) ?? run?.run;
   }, [selectedRunId, run?.run, attempts]);
-  const isViewingHistorical = !!selectedRunId && selectedRunId !== run?.run?._id;
+  const isViewingHistorical = !!selectedRunId && selectedRunId !== run?.run?.id;
 
   const isActive = activeRun?.status === "pending" || activeRun?.status === "processing";
   // Note: "done" is terminal — not active, no log streaming needed
@@ -106,16 +106,16 @@ export function RunDetail() {
   // When viewing a historical run, use the per-run logs endpoint; otherwise use the
   // default endpoint with attemptNumber for reconnection on retry.
   const logStreamUrlBuilder = useMemo(() => {
-    if (isViewingHistorical && activeRun?._id && run?._id) {
-      const requestId = run._id;
-      const runId = activeRun._id;
+    if (isViewingHistorical && activeRun?.id && run?.id) {
+      const requestId = run.id;
+      const runId = activeRun.id;
       return (_id: string, fromStart: boolean) => api.runLogsUrl(requestId, runId, fromStart);
     }
     return api.logsUrl;
-  }, [isViewingHistorical, activeRun?._id, run?._id]);
+  }, [isViewingHistorical, activeRun?.id, run?.id]);
 
   const logStream = useLogStream({
-    id: run?._id ?? "",
+    id: run?.id ?? "",
     enabled: !!run,
     fromStart: true,
     attemptNumber: activeRun?.attemptNumber,
@@ -159,7 +159,7 @@ export function RunDetail() {
       .slice()
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .filter((r) => {
-        const key = r.templateId ?? r._id; // manual reports always shown
+        const key = r.templateId ?? r.id; // manual reports always shown
         if (seen.has(key)) return false;
         seen.set(key, true);
         return true;
@@ -463,19 +463,19 @@ export function RunDetail() {
                   <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-md border bg-popover shadow-md">
                     <div className="max-h-60 overflow-y-auto divide-y">
                       {attempts.map((attempt) => {
-                        const isCurrent = attempt._id === run.run?._id;
-                        const isSelected = attempt._id === activeRun?._id;
+                        const isCurrent = attempt.id === run.run?.id;
+                        const isSelected = attempt.id === activeRun?.id;
                         const duration = attempt.turns?.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
                         return (
                           <button
-                            key={attempt._id}
+                            key={attempt.id}
                             className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors ${isSelected ? "bg-accent" : ""}`}
                             onClick={() => {
                               setShowAttempts(false);
                               if (isCurrent) {
                                 navigate(`/runs/${id}/${tab ?? ""}`, { replace: true });
                               } else {
-                                navigate(`/runs/${id}/${tab ?? ""}?runId=${attempt._id}`, { replace: true });
+                                navigate(`/runs/${id}/${tab ?? ""}?runId=${attempt.id}`, { replace: true });
                               }
                             }}
                           >
@@ -507,7 +507,7 @@ export function RunDetail() {
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => window.open(isViewingHistorical && activeRun?._id ? api.runArchiveUrl(run._id, activeRun._id) : api.archiveUrl(run._id), "_blank")}
+              onClick={() => window.open(isViewingHistorical && activeRun?.id ? api.runArchiveUrl(run.id, activeRun.id) : api.archiveUrl(run.id), "_blank")}
             >
               <Archive className="h-4 w-4" />
               Download Archive
@@ -639,13 +639,13 @@ export function RunDetail() {
 
         {/* Turns tab */}
         <TabsContent value="turns" className="mt-4">
-          <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+          <TurnTimeline turns={activeRun?.turns ?? []} runId={run.id} attemptRunId={isViewingHistorical ? activeRun?.id : undefined} />
         </TabsContent>
 
         {/* Conversation tab — chat-style view of agent/judge exchanges */}
         {activeRun?.turns && activeRun?.turns.length > 0 && (
           <TabsContent value="conversation" className="mt-4">
-            <ConversationView turns={activeRun?.turns} task={run.scenario?.task} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+            <ConversationView turns={activeRun?.turns} task={run.scenario?.task} runId={run.id} attemptRunId={isViewingHistorical ? activeRun?.id : undefined} />
           </TabsContent>
         )}
 
@@ -654,9 +654,9 @@ export function RunDetail() {
           <TabsContent value="network" className="mt-4">
             {/* If multi-turn, show per-iteration selector; otherwise one viewer */}
             {activeRun?.turns && activeRun?.turns.some(t => t.harUrl) ? (
-              <HarIterationTabs runId={run._id} turns={activeRun?.turns} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+              <HarIterationTabs runId={run.id} turns={activeRun?.turns} attemptRunId={isViewingHistorical ? activeRun?.id : undefined} />
             ) : (
-              <HarNetworkViewer runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+              <HarNetworkViewer runId={run.id} attemptRunId={isViewingHistorical ? activeRun?.id : undefined} />
             )}
           </TabsContent>
         )}
@@ -665,17 +665,17 @@ export function RunDetail() {
         {hasVideoData && (
           <TabsContent value="video" className="mt-4">
             {activeRun?.turns && activeRun?.turns.some(t => t.videoUrls?.length) ? (
-              <VideoIterationTabs runId={run._id} turns={activeRun?.turns} setupVideoUrls={activeRun?.setupVideoUrls} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+              <VideoIterationTabs runId={run.id} turns={activeRun?.turns} setupVideoUrls={activeRun?.setupVideoUrls} attemptRunId={isViewingHistorical ? activeRun?.id : undefined} />
             ) : (
               <div className="space-y-4">
                 {activeRun?.setupVideoUrls && activeRun?.setupVideoUrls.length > 0 && (
                   activeRun?.setupVideoUrls.map((_, i) => (
-                    <VideoPlayer key={`setup-${i}`} src={isViewingHistorical && activeRun?._id ? api.runVideoUrl(run._id, activeRun._id, undefined, i, "setup") : api.videoUrl(run._id, undefined, i, "setup")} label="Setup" />
+                    <VideoPlayer key={`setup-${i}`} src={isViewingHistorical && activeRun?.id ? api.runVideoUrl(run.id, activeRun.id, undefined, i, "setup") : api.videoUrl(run.id, undefined, i, "setup")} label="Setup" />
                   ))
                 )}
                 {activeRun?.videoUrls && activeRun?.videoUrls.length > 0 && (
                   activeRun?.videoUrls.map((_, i) => (
-                    <VideoPlayer key={i} src={isViewingHistorical && activeRun?._id ? api.runVideoUrl(run._id, activeRun._id, undefined, i) : api.videoUrl(run._id, undefined, i)} label={(activeRun?.videoUrls?.length ?? 0) > 1 ? `Video ${i + 1}` : undefined} />
+                    <VideoPlayer key={i} src={isViewingHistorical && activeRun?.id ? api.runVideoUrl(run.id, activeRun.id, undefined, i) : api.videoUrl(run.id, undefined, i)} label={(activeRun?.videoUrls?.length ?? 0) > 1 ? `Video ${i + 1}` : undefined} />
                   ))
                 )}
               </div>
@@ -692,7 +692,7 @@ export function RunDetail() {
             />
           )}
           <LogViewer
-            runId={run._id}
+            runId={run.id}
             enabled={isActive}
             logs={effectiveLogs}
             isConnected={effectiveIsConnected}
@@ -761,8 +761,8 @@ export function RunDetail() {
               <div className="flex flex-wrap gap-4">
                 {filteredReports.map((report) => (
                   <Link
-                    key={report._id}
-                    to={`/reports/${report._id}`}
+                    key={report.id}
+                    to={`/reports/${report.id}`}
                     className="group block"
                   >
                     <div className="flex flex-col items-center gap-2 w-[280px]">
@@ -793,13 +793,13 @@ export function RunDetail() {
             ) : (
               <div className="space-y-3">
                 {filteredReports.map((report) => (
-                  <Card key={report._id}>
+                  <Card key={report.id}>
                     <CardContent className="flex items-center justify-between py-4">
                       <div className="flex items-center gap-4">
                         <FileText className="h-5 w-5 text-muted-foreground" />
                         <div>
                           <Link
-                            to={`/reports/${report._id}`}
+                            to={`/reports/${report.id}`}
                             className="text-sm font-medium text-primary hover:underline"
                           >
                             {report.templateId ? (templateMap.get(report.templateId) ?? report.templateId) : "Manual report"}
@@ -808,7 +808,7 @@ export function RunDetail() {
                             {formatDate(report.createdAt)}
                             {report.reporter?.model && ` · ${report.reporter.model}`}
                             {" · "}
-                            <span className="font-mono">{formatId(report._id)}</span>
+                            <span className="font-mono">{formatId(report.id)}</span>
                           </p>
                         </div>
                       </div>
@@ -1158,7 +1158,7 @@ export function RunDetail() {
         {/* Tool Calls tab — HAR captures & tool calls summary */}
         {hasHarData && (
           <TabsContent value="tool-calls" className="mt-4 space-y-4">
-            <ToolCallsTab runId={run._id} turns={activeRun?.turns} harUrl={activeRun?.harUrl} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+            <ToolCallsTab runId={run.id} turns={activeRun?.turns} harUrl={activeRun?.harUrl} attemptRunId={isViewingHistorical ? activeRun?.id : undefined} />
           </TabsContent>
         )}
       </Tabs>

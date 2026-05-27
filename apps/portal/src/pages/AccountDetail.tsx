@@ -94,7 +94,7 @@ export function AccountDetail() {
         </Button>
         <div className="flex-1">
           <h1 className="text-3xl font-bold tracking-tight">Account Detail</h1>
-          <p className="font-mono text-sm text-muted-foreground">{account._id}</p>
+          <p className="font-mono text-sm text-muted-foreground">{account.id}</p>
         </div>
         <AlertDialog>
           <AlertDialogTrigger asChild>

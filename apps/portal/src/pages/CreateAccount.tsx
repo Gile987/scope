@@ -35,7 +35,7 @@ export function CreateAccount() {
     mutationFn: (body: CreateAccountRequest) => api.createAccount(body),
     onSuccess: (data) => {
       toast.success("Account registered");
-      navigate(`/secrets/accounts/${data._id}`);
+      navigate(`/secrets/accounts/${data.id}`);
     },
     onError: (err: Error) => {
       toast.error(err.message || "Failed to create account");

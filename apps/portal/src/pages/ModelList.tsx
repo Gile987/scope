@@ -50,7 +50,7 @@ export function ModelList() {
       if (statusFilter === "disappeared" && !m.disappearedAt) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
-        if (!m.modelId.toLowerCase().includes(q) && !m._id.toLowerCase().includes(q)) return false;
+        if (!m.modelId.toLowerCase().includes(q) && !m.id.toLowerCase().includes(q)) return false;
       }
       return true;
     });
@@ -146,9 +146,9 @@ export function ModelList() {
             </TableHeader>
             <TableBody>
               {filteredModels.map((model: Model) => (
-                <TableRow key={model._id} className={model.disappearedAt ? "opacity-60" : ""}>
+                <TableRow key={model.id} className={model.disappearedAt ? "opacity-60" : ""}>
                   <TableCell className="font-mono text-xs">
-                    <Link to={`/models/${encodeURIComponent(model._id)}`} className="hover:underline flex items-center gap-1.5">
+                    <Link to={`/models/${encodeURIComponent(model.id)}`} className="hover:underline flex items-center gap-1.5">
                       <Cpu className="h-3.5 w-3.5" />
                       {model.modelId}
                     </Link>
@@ -175,7 +175,7 @@ export function ModelList() {
                       : formatDate(model.lastSeenAt)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Link to={`/models/${encodeURIComponent(model._id)}`}>
+                    <Link to={`/models/${encodeURIComponent(model.id)}`}>
                       <Button variant="ghost" size="icon" className="h-8 w-8">
                         <Eye className="h-4 w-4" />
                       </Button>

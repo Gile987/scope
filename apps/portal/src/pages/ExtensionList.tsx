@@ -86,11 +86,11 @@ export function ExtensionList() {
             </TableHeader>
             <TableBody>
               {activeExtensions.map((ext: ExtensionDocument) => (
-                <TableRow key={ext._id}>
+                <TableRow key={ext.id}>
                   <TableCell className="font-mono text-xs">
-                    <Link to={`/extensions/${ext._id}`} className="flex items-center gap-1.5 hover:underline">
+                    <Link to={`/extensions/${ext.id}`} className="flex items-center gap-1.5 hover:underline">
                       <Puzzle className="h-3.5 w-3.5" />
-                      {ext._id}
+                      {ext.id}
                     </Link>
                   </TableCell>
                   <TableCell>{ext.name}</TableCell>
@@ -121,7 +121,7 @@ export function ExtensionList() {
                         </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => deleteMutation.mutate(ext._id)}>
+                          <AlertDialogAction onClick={() => deleteMutation.mutate(ext.id)}>
                             Delete
                           </AlertDialogAction>
                         </AlertDialogFooter>

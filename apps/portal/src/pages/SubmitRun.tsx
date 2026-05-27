@@ -104,7 +104,7 @@ export function SubmitRun() {
   const applyProfile = (profileId: string | null) => {
     setSelectedProfileId(profileId);
     if (!profileId) return;
-    const p = (profiles as ProfileWithVersion[]).find((p) => p._id === profileId);
+    const p = (profiles as ProfileWithVersion[]).find((p) => p.id === profileId);
     if (!p?.version) return;
     setSelectedProfileVersion(p.version.version);
     applyVersionConfig(p.version);
@@ -141,7 +141,7 @@ export function SubmitRun() {
       toast.success(`Profile "${saveProfileName}" saved`);
       setSaveProfileOpen(false);
       setSaveProfileName("");
-      setSelectedProfileId(data._id);
+      setSelectedProfileId(data.id);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to save profile");
@@ -153,7 +153,7 @@ export function SubmitRun() {
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
   // available defaults to true when undefined (backward compat with agents registered before this field existed)
   const availableAgents = activeAgents.filter((a: CodingAgent) => a.available !== false);
-  const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
+  const selectedAgent = activeAgents.find((a: CodingAgent) => a.id === worker);
   const isVscodeWorker = worker.includes("vscode");
 
   // When agent changes, reset model to the agent's default and clear extensions for non-vscode workers
@@ -228,7 +228,7 @@ export function SubmitRun() {
       const taskPrompt = await api.createTaskPrompt(task.trim());
       return taskPrompt;
     },
-    onSuccess: (data) => setTaskPromptId(data._id),
+    onSuccess: (data) => setTaskPromptId(data.id),
   });
 
   const submitMutation = useMutation({
@@ -271,8 +271,8 @@ export function SubmitRun() {
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
       ...(selectedProfileId ? { profileId: selectedProfileId } : {}),
       ...(selectedProfileId && selectedProfileVersion ? {
-        profileVersionId: profileVersions.find((pv: ProfileVersionDocument) => pv.version === selectedProfileVersion)?._id
-          ?? (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.version?._id,
+        profileVersionId: profileVersions.find((pv: ProfileVersionDocument) => pv.version === selectedProfileVersion)?.id
+          ?? (profiles as ProfileWithVersion[]).find((p) => p.id === selectedProfileId)?.version?.id,
       } : {}),
     });
   };
@@ -480,7 +480,7 @@ export function SubmitRun() {
                   <div className="space-y-3">
                     <div className="flex items-center gap-2">
                       <Badge variant="secondary" className="text-sm">
-                        {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
+                        {(profiles as ProfileWithVersion[]).find((p) => p.id === selectedProfileId)?.name ?? selectedProfileId}
                       </Badge>
                       <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={clearProfile}>
                         <X className="h-3 w-3" />
@@ -504,7 +504,7 @@ export function SubmitRun() {
                               .map((v: ProfileVersionDocument) => (
                                 <SelectItem key={v.version} value={String(v.version)}>
                                   v{v.version}
-                                  {v.version === (profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.latestVersion
+                                  {v.version === (profiles as ProfileWithVersion[]).find((p) => p.id === selectedProfileId)?.latestVersion
                                     ? " (latest)"
                                     : ""}
                                 </SelectItem>
@@ -521,7 +521,7 @@ export function SubmitRun() {
                     </SelectTrigger>
                     <SelectContent>
                       {(profiles as ProfileWithVersion[]).map((p) => (
-                        <SelectItem key={p._id} value={p._id}>
+                        <SelectItem key={p.id} value={p.id}>
                           {p.name} <span className="text-muted-foreground ml-1">v{p.latestVersion}</span>
                         </SelectItem>
                       ))}
@@ -548,7 +548,7 @@ export function SubmitRun() {
                   <SelectContent>
                     {availableAgents.length > 0
                       ? availableAgents.map((a: CodingAgent) => (
-                          <SelectItem key={a._id} value={a._id}>
+                          <SelectItem key={a.id} value={a.id}>
                             {a.name}
                           </SelectItem>
                         ))
@@ -612,23 +612,23 @@ export function SubmitRun() {
                 <div className="space-y-2">
                   {activeMcpServers.map((s: McpServerDocument) => (
                     <label
-                      key={s._id}
+                      key={s.id}
                       className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${profileLocked ? "opacity-60" : "cursor-pointer hover:bg-accent/50"}`}
                     >
                       <Checkbox
-                        checked={selectedMcpServers.includes(s._id)}
+                        checked={selectedMcpServers.includes(s.id)}
                         disabled={profileLocked}
                         onCheckedChange={(checked) => {
                           setSelectedMcpServers(prev =>
                             checked
-                              ? [...prev, s._id]
-                              : prev.filter(id => id !== s._id)
+                              ? [...prev, s.id]
+                              : prev.filter(id => id !== s.id)
                           );
                         }}
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-sm">{s._id}</span>
+                          <span className="font-mono text-sm">{s.id}</span>
                           <Badge variant="outline" className="text-xs uppercase">{s.type}</Badge>
                         </div>
                         <p className="text-xs text-muted-foreground truncate">{s.name}{s.description ? ` — ${s.description}` : ""}</p>
@@ -747,7 +747,7 @@ export function SubmitRun() {
                   <>
                     <span className="text-muted-foreground">Profile</span>
                     <Badge variant="secondary" className="font-mono text-xs w-fit">
-                      {(profiles as ProfileWithVersion[]).find((p) => p._id === selectedProfileId)?.name ?? selectedProfileId}
+                      {(profiles as ProfileWithVersion[]).find((p) => p.id === selectedProfileId)?.name ?? selectedProfileId}
                       {selectedProfileVersion ? ` v${selectedProfileVersion}` : ""}
                     </Badge>
                   </>

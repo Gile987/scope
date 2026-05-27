@@ -75,11 +75,11 @@ export function AgentList() {
             </TableHeader>
             <TableBody>
               {activeAgents.map((agent: CodingAgent) => (
-                <TableRow key={agent._id}>
+                <TableRow key={agent.id}>
                   <TableCell className="font-mono text-xs">
-                    <Link to={`/agents/${agent._id}`} className="hover:underline flex items-center gap-1.5">
+                    <Link to={`/agents/${agent.id}`} className="hover:underline flex items-center gap-1.5">
                       <Bot className="h-3.5 w-3.5" />
-                      {agent._id}
+                      {agent.id}
                     </Link>
                   </TableCell>
                   <TableCell>{agent.name}</TableCell>
@@ -121,7 +121,7 @@ export function AgentList() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Link to={`/agents/${agent._id}`}>
+                      <Link to={`/agents/${agent.id}`}>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -141,7 +141,7 @@ export function AgentList() {
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => deleteMutation.mutate(agent._id)}>
+                            <AlertDialogAction onClick={() => deleteMutation.mutate(agent.id)}>
                               Delete
                             </AlertDialogAction>
                           </AlertDialogFooter>

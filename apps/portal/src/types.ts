@@ -84,7 +84,7 @@ export interface OsInfo {
  * on the parent `Run` are immutable across attempts.
  */
 export interface RunState {
-  _id: string;
+  id: string;
   attemptNumber: number;
   status: RunStatus;
   outcome?: RunOutcome;
@@ -115,7 +115,7 @@ export interface RunState {
 }
 
 export interface Run {
-  _id: string;
+  id: string;
   id: string;
   scenario?: Scenario;
   workerType: string;
@@ -226,7 +226,7 @@ export interface SuggestedPromptFeature {
 }
 
 export interface PromptFeatureExtraction {
-  _id?: string;
+  id?: string;
   taskText: string;
   taskTextHash?: string;
   promptFeatureResults: PromptFeatureResult[];
@@ -238,7 +238,7 @@ export interface PromptFeatureExtraction {
 
 // Task Prompt types (first-class entity for benchmark task texts)
 export interface TaskPrompt {
-  _id: string;                          // UUIDv5 content-addressed ID
+  id: string;                          // UUIDv5 content-addressed ID
   text: string;                         // Full task prompt text
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: string;         // When features were last extracted
@@ -391,7 +391,7 @@ export interface Reporter {
 }
 
 export interface Report {
-  _id: string;
+  id: string;
   id: string;
   requestId: string;
   task?: string;
@@ -467,7 +467,7 @@ export interface ReportTemplateSystemPrompt {
 }
 
 export interface ReportTemplate {
-  _id: string;
+  id: string;
   id: string;
   name: string;
   description?: string;
@@ -499,7 +499,7 @@ export type KeyValidationStatus =
   | "unknown";
 
 export interface KeyDocument {
-  _id: string;
+  id: string;
   type: KeyType;
   capabilities: KeyCapability[];
   secretName: string;
@@ -599,7 +599,7 @@ export const ALL_CAPABILITIES: KeyCapability[] = [
 export type AccountType = "github";
 
 export interface AccountDocument {
-  _id: string;
+  id: string;
   type: AccountType;
   secretName: string;
   enabled: boolean;
@@ -645,7 +645,7 @@ export interface AgentVersion {
 
 // Coding Agent types
 export interface CodingAgent {
-  _id: string;
+  id: string;
   name: string;
   description?: string;
   modelProvider?: string;
@@ -668,7 +668,7 @@ export interface McpServerHeader {
 }
 
 export interface McpServerDocument {
-  _id: string;
+  id: string;
   name: string;
   type: McpTransportType;
   url?: string;
@@ -685,7 +685,7 @@ export interface McpServerDocument {
 }
 
 export interface CreateMcpServerRequest {
-  _id: string;
+  id: string;
   name: string;
   type: McpTransportType;
   url?: string;
@@ -724,7 +724,7 @@ export interface InsightReference {
 
 /** Insight entity */
 export interface Insight {
-  _id: string;
+  id: string;
   id: string;
   title: string;
   /** Markdown-formatted detailed observation */
@@ -754,7 +754,7 @@ export interface InsightWithReference extends Insight {
 
 /** A scanned model tracked across agents and providers */
 export interface Model {
-  _id: string;
+  id: string;
   modelId: string;
   provider: string;
   agentId: string;
@@ -775,7 +775,7 @@ export type SkillOrigin = "skills-sh" | "manual";
 
 /** An imported skill */
 export interface SkillDocument {
-  _id: string;
+  id: string;
   source: string;
   skillName: string;
   name: string;
@@ -788,7 +788,7 @@ export interface SkillDocument {
 
 /** A resolved skill revision (immutable) */
 export interface SkillRevisionDocument {
-  _id: string;
+  id: string;
   ref: string;
   source: string;
   skillName: string;
@@ -835,7 +835,7 @@ export interface SkillDiscoveryResult {
 export type ExtensionOrigin = "marketplace" | "manual";
 
 export interface ExtensionDocument {
-  _id: string;
+  id: string;
   publisher: string;
   name: string;
   description?: string;
@@ -878,7 +878,7 @@ export interface FeatureFlag {
 
 /** Profile identity document (mutable) */
 export interface ProfileDocument {
-  _id: string;
+  id: string;
   name: string;
   description?: string;
   latestVersion: number;
@@ -889,7 +889,7 @@ export interface ProfileDocument {
 
 /** Profile version document (immutable snapshot) */
 export interface ProfileVersionDocument {
-  _id: string;
+  id: string;
   profileId: string;
   version: number;
   workerType: string;

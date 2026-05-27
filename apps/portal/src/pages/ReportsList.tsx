@@ -74,13 +74,13 @@ export function ReportsList() {
           </TableHeader>
           <TableBody>
             {reports.map((report) => (
-              <TableRow key={report._id}>
+              <TableRow key={report.id}>
                 <TableCell>
                   <Link
-                    to={`/reports/${report._id}`}
+                    to={`/reports/${report.id}`}
                     className="font-mono text-xs text-primary hover:underline"
                   >
-                    {formatId(report._id)}
+                    {formatId(report.id)}
                   </Link>
                 </TableCell>
                 <TableCell className="text-sm">

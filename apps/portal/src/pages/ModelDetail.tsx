@@ -56,7 +56,7 @@ export function ModelDetail() {
           <Cpu className="h-5 w-5" />
           <h1 className="text-2xl font-bold tracking-tight">{model.modelId}</h1>
         </div>
-        <p className="text-sm text-muted-foreground font-mono mt-1">{model._id}</p>
+        <p className="text-sm text-muted-foreground font-mono mt-1">{model.id}</p>
       </div>
 
       {/* Overview card */}

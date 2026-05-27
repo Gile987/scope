@@ -45,7 +45,7 @@ export function ReportDetail() {
 
   // The SSE endpoint handles completed reports by replaying blob logs then closing.
   const logStream = useLogStream({
-    id: report?._id ?? "",
+    id: report?.id ?? "",
     enabled: !!report,
     fromStart: true,
     urlBuilder: api.reportLogsUrl,
@@ -221,7 +221,7 @@ export function ReportDetail() {
         {/* Logs tab */}
         <TabsContent value="logs" className="mt-4">
           <LogViewer
-            runId={report._id}
+            runId={report.id}
             enabled={isActive}
             logs={effectiveLogs}
             isConnected={effectiveIsConnected}
@@ -235,12 +235,12 @@ export function ReportDetail() {
           {reportInsights.length > 0 ? (
             <div className="space-y-4">
               {reportInsights.map((insight) => (
-                <Card key={insight._id}>
+                <Card key={insight.id}>
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between">
                       <CardTitle className="text-base">
                         <Link
-                          to={`/insights/${insight._id}`}
+                          to={`/insights/${insight.id}`}
                           className="text-primary hover:underline"
                         >
                           {insight.title}
@@ -323,7 +323,7 @@ export function ReportDetail() {
               <CardContent className="space-y-2 text-sm">
                 <div>
                   <span className="text-muted-foreground">Report ID:</span>{" "}
-                  <span className="font-mono">{report._id}</span>
+                  <span className="font-mono">{report.id}</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Run ID:</span>{" "}

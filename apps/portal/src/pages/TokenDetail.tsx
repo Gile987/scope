@@ -260,7 +260,7 @@ export function TokenDetail() {
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-muted-foreground">ID</span>
-              <p className="font-mono">{token._id}</p>
+              <p className="font-mono">{token.id}</p>
             </div>
             <div>
               <span className="text-muted-foreground">Secret Name</span>

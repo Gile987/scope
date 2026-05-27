@@ -79,11 +79,11 @@ export function McpServerList() {
             </TableHeader>
             <TableBody>
               {activeServers.map((server: McpServerDocument) => (
-                <TableRow key={server._id}>
+                <TableRow key={server.id}>
                   <TableCell className="font-mono text-xs">
-                    <Link to={`/mcp-servers/${server._id}`} className="hover:underline flex items-center gap-1.5">
+                    <Link to={`/mcp-servers/${server.id}`} className="hover:underline flex items-center gap-1.5">
                       <Server className="h-3.5 w-3.5" />
-                      {server._id}
+                      {server.id}
                     </Link>
                   </TableCell>
                   <TableCell>{server.name}</TableCell>
@@ -103,7 +103,7 @@ export function McpServerList() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Link to={`/mcp-servers/${server._id}`}>
+                      <Link to={`/mcp-servers/${server.id}`}>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -123,7 +123,7 @@ export function McpServerList() {
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => deleteMutation.mutate(server._id)}>
+                            <AlertDialogAction onClick={() => deleteMutation.mutate(server.id)}>
                               Delete
                             </AlertDialogAction>
                           </AlertDialogFooter>

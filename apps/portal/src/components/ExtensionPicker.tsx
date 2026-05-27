@@ -122,7 +122,7 @@ export function ExtensionPicker({ selected, onChange, importOnly = false, disabl
     const q = query.toLowerCase();
     return activeInternal.filter(
       (e) =>
-        e._id.toLowerCase().includes(q) ||
+        e.id.toLowerCase().includes(q) ||
         e.name.toLowerCase().includes(q) ||
         e.publisher.toLowerCase().includes(q) ||
         (e.description?.toLowerCase().includes(q) ?? false),
@@ -130,7 +130,7 @@ export function ExtensionPicker({ selected, onChange, importOnly = false, disabl
   }, [activeInternal, query, importOnly]);
 
   const internalIds = useMemo(
-    () => new Set(activeInternal.map((e) => e._id)),
+    () => new Set(activeInternal.map((e) => e.id)),
     [activeInternal],
   );
 
@@ -176,7 +176,7 @@ export function ExtensionPicker({ selected, onChange, importOnly = false, disabl
   const importMutation = useMutation({
     mutationFn: (result: ExtensionSearchResult) =>
       api.createExtension({
-        _id: result.id,
+        id: result.id,
         publisher: result.publisher,
         name: result.name,
         origin: "marketplace",
@@ -184,7 +184,7 @@ export function ExtensionPicker({ selected, onChange, importOnly = false, disabl
       }),
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["extensions"] });
-      toast.success(`Extension "${created._id}" imported`);
+      toast.success(`Extension "${created.id}" imported`);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to import extension");
@@ -241,7 +241,7 @@ export function ExtensionPicker({ selected, onChange, importOnly = false, disabl
       e.preventDefault();
       const item = items[highlightIdx];
       if (item?.kind === "internal") {
-        toggleItem(item.ext._id);
+        toggleItem(item.ext.id);
       }
     } else if (e.key === "Escape") {
       setOpen(false);
@@ -330,13 +330,13 @@ export function ExtensionPicker({ selected, onChange, importOnly = false, disabl
                   </div>
                 )}
                 {internalMatches.map((ext, idx) => {
-                  const isSelected = selectedMap.has(ext._id);
+                  const isSelected = selectedMap.has(ext.id);
                   return (
                     <button
-                      key={ext._id}
+                      key={ext.id}
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => toggleItem(ext._id)}
+                      onClick={() => toggleItem(ext.id)}
                       onMouseEnter={() => setHighlightIdx(idx)}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-left text-sm transition-colors ${
                         idx === highlightIdx ? "bg-accent text-accent-foreground" : ""
@@ -350,7 +350,7 @@ export function ExtensionPicker({ selected, onChange, importOnly = false, disabl
                         </span>
                       )}
                       <Puzzle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      <span className="font-mono font-medium shrink-0">{ext._id}</span>
+                      <span className="font-mono font-medium shrink-0">{ext.id}</span>
                       <span className="text-xs text-muted-foreground truncate">
                         {ext.name}{ext.description ? ` — ${ext.description}` : ""}
                       </span>
