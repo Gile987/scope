@@ -56,7 +56,10 @@ export function useReasoningEffort({
   const supportedEfforts = capabilities?.reasoningEffort ?? [];
 
   useEffect(() => {
-    if (value && !supportedEfforts.includes(value)) {
+    if (supportedEfforts.length === 1 && value !== supportedEfforts[0]) {
+      // Auto-select the only supported effort
+      onChange(supportedEfforts[0]);
+    } else if (value && !supportedEfforts.includes(value)) {
       onChange("");
     }
   }, [model, supportedEfforts, value, onChange]);

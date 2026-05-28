@@ -593,12 +593,6 @@ export function SubmitRun() {
                       />
                     </SelectContent>
                   </Select>
-                  {supportedEfforts.length === 1 && (
-                    <p className="text-xs text-amber-600 flex items-center gap-1">
-                      <Info className="h-3 w-3" />
-                      This model only supports &quot;{supportedEfforts[0]}&quot; reasoning effort. The agent extension may send an incompatible level.
-                    </p>
-                  )}
                 </div>
               )}
               <ReasoningEffortSelect
