@@ -4,7 +4,6 @@
 import { type ReactNode, type Key, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -173,12 +172,10 @@ export function DataTable<T>({
       <div className="hidden rounded-md border lg:block">
       <div className="relative">
       <div
-        ref={(node) => {
-          tableScrollRef.current = node?.querySelector("div") as HTMLDivElement | null;
-        }}
-        className="w-full"
+        ref={tableScrollRef}
+        className="w-full overflow-x-auto"
       >
-      <Table className="min-w-max">
+      <table className="w-full min-w-max caption-bottom text-sm">
         <TableHeader>
           <TableRow>
             {selection && (
@@ -355,7 +352,7 @@ export function DataTable<T>({
             })
           )}
         </TableBody>
-      </Table>
+      </table>
       </div>
       {canScrollLeft && (
         <>

@@ -77,16 +77,6 @@
     --input: 230 14% 32%;                /* ink-300 (dark) */
     --ring: 230 60% 65%;                 /* action (dark) */
 
-    /* Brand — Scope Lens palette (dark) */
-    --brand-50: 180 44% 95%;
-    --brand-300: 179 44% 69%;
-    --brand-500: 179 47% 56%;
-    --brand-700: 179 50% 36%;
-    --brand-900: 179 51% 18%;
-    --brand: var(--brand-500);
-    --brand-hover: var(--brand-700);
-    --brand-foreground: 0 0% 100%;
-
     /* Ink — inverted ramp for dark mode (single-hue 230). */
     --ink-0:   230 18%  7%;    /* Surface       — main background */
     --ink-50:  230 16%  11%;   /* Surface alt   — alternate backgrounds */

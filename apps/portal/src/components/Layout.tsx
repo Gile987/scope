@@ -42,8 +42,6 @@ import {
 import { VersionFooter } from "./VersionFooter";
 import { ThemeToggle } from "./ThemeToggle";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
 
 interface NavItem {
   to: string;
@@ -161,28 +159,6 @@ export function Layout() {
     (item) => !item.featureKey || isFeatureEnabled(item.featureKey),
   );
 
-  // Pulse the logo while any run is pending / queued / processing.
-  // The API filters by a single status at a time, so we run three small
-  // probes in parallel and combine them. Refetches every 10s.
-  const { data: hasActiveRuns = false } = useQuery({
-    queryKey: ["runs", "active-status-probe"],
-    queryFn: async () => {
-      const [pending, queued, processing] = await Promise.all([
-        api.listRuns({ status: "pending", limit: 1 }),
-        api.listRuns({ status: "queued", limit: 1 }),
-        api.listRuns({ status: "processing", limit: 1 }),
-      ]);
-      return (
-        (pending.data?.length ?? 0) +
-          (queued.data?.length ?? 0) +
-          (processing.data?.length ?? 0) >
-        0
-      );
-    },
-    refetchInterval: 10_000,
-    staleTime: 5_000,
-  });
-
   const isFullBleed = useMemo(
     () =>
       FULL_BLEED_ROUTE_PATTERNS.some((pattern) =>
@@ -204,10 +180,7 @@ export function Layout() {
         {/* Top header — logo on the left, controls on the right */}
         <header className="sticky top-0 z-50 flex h-12 shrink-0 items-center justify-between border-b border-border/60 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <Link to="/" className="flex items-center gap-2 font-bold" aria-label="Scope home">
-            <Activity
-              className={cn("h-5 w-5 text-action", hasActiveRuns && "logo-pulse")}
-              aria-label={hasActiveRuns ? "Runs in progress" : undefined}
-            />
+            <Activity className="h-5 w-5 text-action" />
             <span>Scope</span>
           </Link>
           <ThemeToggle />
