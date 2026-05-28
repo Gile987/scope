@@ -102,12 +102,12 @@ export function ModelSelectItems({
               {m === defaultModel ? " (default)" : ""}
               {efforts && efforts.length === 1 && (
                 <Badge variant="secondary" className="text-xs ml-1">
-                  effort: {efforts[0]}
+                  {efforts[0]}
                 </Badge>
               )}
               {efforts && efforts.length > 1 && efforts.length < 4 && (
                 <Badge variant="outline" className="text-xs ml-1">
-                  effort: {efforts.join(", ")}
+                  {efforts.join(", ")}
                 </Badge>
               )}
             </span>
