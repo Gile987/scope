@@ -1220,7 +1220,7 @@ export function RunsList() {
               </div>
 
               {/* Reasoning effort override */}
-              {resubmitSupportedEfforts.length > 1 && (
+              {resubmitSupportedEfforts.length > 0 && (
               <div className="flex items-center gap-4 mb-3">
                 <Label className="text-sm w-32 shrink-0">Reasoning effort</Label>
                 <Select

@@ -142,7 +142,7 @@ export function ReasoningEffortSelect({
   noSelectionLabel = "Default (no override)",
   description,
 }: ReasoningEffortSelectProps) {
-  if (supportedEfforts.length <= 1) return null;
+  if (supportedEfforts.length === 0) return null;
 
   return (
     <div className="space-y-2">
