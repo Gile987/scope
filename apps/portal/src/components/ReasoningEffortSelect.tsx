@@ -90,26 +90,21 @@ export function ModelSelectItems({
     ? models.filter((m) => m !== excludeModel)
     : models;
 
-  return (
+   return (
     <>
       {filtered.map((m) => {
         const caps = capabilitiesMap.get(m);
         const efforts = caps?.reasoningEffort;
         return (
           <SelectItem key={m} value={m}>
-            <span className="flex items-center gap-2">
+            <span className="flex items-center gap-1">
               {m}
               {m === defaultModel ? " (default)" : ""}
-              {efforts && efforts.length === 1 && (
-                <Badge variant="secondary" className="text-xs ml-1">
-                  {efforts[0]}
+              {efforts && efforts.map((e) => (
+                <Badge key={e} variant="secondary" className="text-xs">
+                  {e}
                 </Badge>
-              )}
-              {efforts && efforts.length > 1 && efforts.length < 4 && (
-                <Badge variant="outline" className="text-xs ml-1">
-                  {efforts.join(", ")}
-                </Badge>
-              )}
+              ))}
             </span>
           </SelectItem>
         );
