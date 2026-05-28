@@ -327,6 +327,20 @@ export function RunsList() {
     ? (resubmitModelCapabilitiesMap.get(effectiveModel)?.reasoningEffort ?? [])
     : [];
 
+  // Auto-clear effort override when model changes to one that doesn't support it
+  useEffect(() => {
+    const currentEffort = resubmitOverrides.reasoningEffort;
+    if (currentEffort && currentEffort !== null) {
+      if (resubmitSupportedEfforts.length === 0 || !resubmitSupportedEfforts.includes(currentEffort)) {
+        setResubmitOverrides((prev) => {
+          const next = { ...prev };
+          delete next.reasoningEffort;
+          return next;
+        });
+      }
+    }
+  }, [effectiveModel, resubmitSupportedEfforts]);
+
   const deleteMutation = useMutation({
     mutationFn: api.deleteRun,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
