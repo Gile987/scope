@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -20,6 +20,7 @@ import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { CreateCriterionDialog } from "@/components/CreateCriterionDialog";
 import { SkillPicker, parseSkillSpec } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
+import { useModelCapabilities, useReasoningEffort, ModelSelectItems, ReasoningEffortSelect } from "@/components/ReasoningEffortSelect";
 import { Stepper } from "@/components/Stepper";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
@@ -178,29 +179,18 @@ export function SubmitRun() {
     enabled: !!worker,
   });
 
-  // Fetch model capabilities for selected agent
-  const { data: agentModels = [] } = useQuery({
-    queryKey: ["models", worker],
-    queryFn: () => api.listModels({ agentId: worker }),
-    enabled: !!worker,
-  });
-
-  // Build a map of modelId → capabilities for quick lookup
-  const modelCapabilitiesMap = new Map(
-    agentModels.map((m) => [m.modelId, m.capabilities])
-  );
+  // Model capabilities and effort management
+  const { capabilitiesMap: modelCapabilitiesMap } = useModelCapabilities(worker || undefined);
 
   // Reasoning effort state
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
-  const selectedModelCapabilities = model ? modelCapabilitiesMap.get(model) : undefined;
-  const supportedEfforts = selectedModelCapabilities?.reasoningEffort ?? [];
-
-  // Reset reasoning effort when model changes only if new model doesn't support it
-  useEffect(() => {
-    if (reasoningEffort && !supportedEfforts.includes(reasoningEffort)) {
-      setReasoningEffort("");
-    }
-  }, [model, supportedEfforts, reasoningEffort]);
+  const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
+  const { supportedEfforts } = useReasoningEffort({
+    model,
+    capabilitiesMap: modelCapabilitiesMap,
+    value: reasoningEffort,
+    onChange: onEffortChange,
+  });
 
   // Sort versions by createdAt descending (latest first)
   const sortedVersions = [...agentVersions].sort(
@@ -596,23 +586,11 @@ export function SubmitRun() {
                       <SelectValue placeholder="Select model" />
                     </SelectTrigger>
                     <SelectContent>
-                      {selectedAgent.supportedModels.map((m) => {
-                        const caps = modelCapabilitiesMap.get(m);
-                        const efforts = caps?.reasoningEffort;
-                        return (
-                          <SelectItem key={m} value={m}>
-                            <span className="flex items-center gap-2">
-                              {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
-                              {efforts && efforts.length === 1 && (
-                                <Badge variant="secondary" className="text-xs ml-1">effort: {efforts[0]}</Badge>
-                              )}
-                              {efforts && efforts.length > 1 && efforts.length < 4 && (
-                                <Badge variant="outline" className="text-xs ml-1">effort: {efforts.join(", ")}</Badge>
-                              )}
-                            </span>
-                          </SelectItem>
-                        );
-                      })}
+                      <ModelSelectItems
+                        models={selectedAgent.supportedModels}
+                        capabilitiesMap={modelCapabilitiesMap}
+                        defaultModel={selectedAgent.defaultModel}
+                      />
                     </SelectContent>
                   </Select>
                   {supportedEfforts.length === 1 && (
@@ -623,27 +601,14 @@ export function SubmitRun() {
                   )}
                 </div>
               )}
-              {model && supportedEfforts.length > 1 && (
-                <div className="space-y-2">
-                  <Label htmlFor="reasoningEffort">Reasoning Effort</Label>
-                  <Select value={reasoningEffort || "__none__"} onValueChange={(v) => setReasoningEffort(v === "__none__" ? "" : v)} disabled={profileLocked}>
-                    <SelectTrigger id="reasoningEffort">
-                      <SelectValue placeholder="Any (no preference)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Any (no preference)</SelectItem>
-                      {supportedEfforts.map((level) => (
-                        <SelectItem key={level} value={level}>
-                          {level}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Select a preferred reasoning effort level for this model
-                  </p>
-                </div>
-              )}
+              <ReasoningEffortSelect
+                supportedEfforts={supportedEfforts}
+                value={reasoningEffort}
+                onChange={onEffortChange}
+                disabled={profileLocked}
+                noSelectionLabel="Any (no preference)"
+                description="Select a preferred reasoning effort level for this model"
+              />
               {sortedVersions.length > 0 && (
                 <div className="space-y-2">
                   <Label htmlFor="agentVersion">Agent Version *</Label>

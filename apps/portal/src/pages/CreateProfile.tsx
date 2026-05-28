@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
+import { useModelCapabilities, useReasoningEffort, ReasoningEffortSelect } from "@/components/ReasoningEffortSelect";
 import { ArrowLeft, Loader2, Save, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -51,23 +52,15 @@ export function CreateProfile() {
   const supportedModels = selectedAgent?.supportedModels ?? [];
   const isVscodeWorker = worker.includes("vscode");
 
-  // Fetch model capabilities for effort-aware picker
-  const { data: agentModels = [] } = useQuery({
-    queryKey: ["models", worker],
-    queryFn: () => api.listModels({ agentId: worker }),
-    enabled: !!worker,
+  // Model capabilities and effort management
+  const { capabilitiesMap } = useModelCapabilities(worker || undefined);
+  const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
+  const { supportedEfforts } = useReasoningEffort({
+    model,
+    capabilitiesMap,
+    value: reasoningEffort,
+    onChange: onEffortChange,
   });
-  const modelCapabilitiesMap = new Map(
-    agentModels.map((m) => [m.modelId, m.capabilities])
-  );
-  const supportedEfforts = model ? (modelCapabilitiesMap.get(model)?.reasoningEffort ?? []) : [];
-
-  // Reset reasoning effort when model changes only if new model doesn't support it
-  useEffect(() => {
-    if (reasoningEffort && !supportedEfforts.includes(reasoningEffort)) {
-      setReasoningEffort("");
-    }
-  }, [model, supportedEfforts, reasoningEffort]);
 
   // Clear extensions when the user switches to a non-vscode worker.
   useEffect(() => {
@@ -258,24 +251,11 @@ export function CreateProfile() {
             </div>
           )}
 
-          {model && supportedEfforts.length > 1 && (
-            <div className="space-y-2">
-              <Label htmlFor="reasoningEffort">Reasoning Effort</Label>
-              <Select value={reasoningEffort || "__none__"} onValueChange={(v) => setReasoningEffort(v === "__none__" ? "" : v)}>
-                <SelectTrigger id="reasoningEffort">
-                  <SelectValue placeholder="Default (no override)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Default (no override)</SelectItem>
-                  {supportedEfforts.map((level) => (
-                    <SelectItem key={level} value={level}>
-                      {level}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <ReasoningEffortSelect
+            supportedEfforts={supportedEfforts}
+            value={reasoningEffort}
+            onChange={onEffortChange}
+          />
 
           {sortedVersions.length > 0 && (
             <div className="space-y-2">

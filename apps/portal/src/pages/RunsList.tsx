@@ -29,6 +29,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { EnrichmentBadge } from "@/components/EnrichmentBadge";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
+import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, ChevronsLeft, ChevronsRight, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
@@ -317,16 +318,8 @@ export function RunsList() {
   );
   const availableModels = effectiveAgent?.supportedModels ?? [];
 
-  // Fetch model capabilities for effort-aware resubmit picker
-  const { data: resubmitAgentModels = [] } = useQuery({
-    queryKey: ["models", effectiveWorker],
-    queryFn: () => api.listModels({ agentId: effectiveWorker! }),
-    enabled: !!effectiveWorker,
-  });
-  const resubmitModelCapabilitiesMap = useMemo(
-    () => new Map(resubmitAgentModels.map((m) => [m.modelId, m.capabilities])),
-    [resubmitAgentModels],
-  );
+  // Model capabilities for effort-aware resubmit picker
+  const { capabilitiesMap: resubmitModelCapabilitiesMap } = useModelCapabilities(effectiveWorker || undefined);
   const effectiveModel = activeProfile
     ? activeProfile.version.model
     : (resubmitOverrides.model ?? selectedRunsSummary.model);
@@ -1190,23 +1183,12 @@ export function RunsList() {
                         : selectedRunsSummary.isMultiModel ? "Mixed (keep each)" : "Default"}
                     </SelectItem>
                     <SelectItem value="__clear__">Clear (use default)</SelectItem>
-                    {availableModels.filter((m) => m !== selectedRunsSummary.model).map((m) => {
-                      const caps = resubmitModelCapabilitiesMap.get(m);
-                      const efforts = caps?.reasoningEffort;
-                      return (
-                        <SelectItem key={m} value={m}>
-                          <span className="flex items-center gap-2">
-                            {m}{m === effectiveAgent?.defaultModel ? " (default)" : ""}
-                            {efforts && efforts.length === 1 && (
-                              <Badge variant="secondary" className="text-xs ml-1">effort: {efforts[0]}</Badge>
-                            )}
-                            {efforts && efforts.length > 1 && efforts.length < 4 && (
-                              <Badge variant="outline" className="text-xs ml-1">effort: {efforts.join(", ")}</Badge>
-                            )}
-                          </span>
-                        </SelectItem>
-                      );
-                    })}
+                    <ModelSelectItems
+                      models={availableModels}
+                      capabilitiesMap={resubmitModelCapabilitiesMap}
+                      defaultModel={effectiveAgent?.defaultModel}
+                      excludeModel={selectedRunsSummary.model ?? undefined}
+                    />
                     {!effectiveWorker && (
                       <SelectItem value="__hint__" disabled>
                         Select a worker to see models
