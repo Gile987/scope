@@ -94,6 +94,7 @@ export function SubmitRun() {
   const applyVersionConfig = (v: ProfileVersionDocument) => {
     setWorker(v.workerType);
     setModel(v.model);
+    setReasoningEffort(v.reasoningEffort ?? "");
     setSelectedAgentVersion(v.agentVersion ?? "");
     setSelectedMcpServers(v.mcpServers ?? []);
     setSelectedSkills(v.skillRevisions ?? []);
@@ -132,6 +133,7 @@ export function SubmitRun() {
         name: saveProfileName.trim(),
         workerType: worker,
         model,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
         ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
         ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
