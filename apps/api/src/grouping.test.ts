@@ -69,6 +69,7 @@ describe("buildGroupingPipeline", () => {
     const group = pipeline[1].$group as Record<string, unknown>;
     expect(group._workerTypes).toBeDefined();
     expect(group._models).toBeDefined();
+    expect(group._reasoningEfforts).toBeDefined();
     expect(group._agentVersions).toBeDefined();
     expect(group._platforms).toBeDefined();
     expect(group._statuses).toBeDefined();
@@ -101,5 +102,12 @@ describe("buildGroupingPipeline", () => {
     const aggregates = project.aggregates as Record<string, unknown>;
     expect(aggregates.statusCounts).toEqual({ pending: "$_statusPending", queued: "$_statusQueued", processing: "$_statusProcessing", paused: "$_statusPaused", done: "$_statusDone" });
     expect(aggregates.outcomeCounts).toEqual({ succeeded: "$_outcomeSucceeded", failed: "$_outcomeFailed", finished: "$_outcomeFinished" });
+  });
+
+  it("$project uniform includes reasoningEffort field", () => {
+    const pipeline = buildGroupingPipeline("task");
+    const project = (pipeline[2] as { $project: Record<string, unknown> }).$project;
+    const uniform = project.uniform as Record<string, unknown>;
+    expect(uniform.reasoningEffort).toBeDefined();
   });
 });
