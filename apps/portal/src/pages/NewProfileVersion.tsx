@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -79,12 +79,12 @@ export function NewProfileVersion() {
   const supportedEfforts = model ? (modelCapabilitiesMap.get(model)?.reasoningEffort ?? []) : [];
 
   // Reset reasoning effort when model changes (but not on initial pre-fill)
-  const [modelInitialized, setModelInitialized] = useState(false);
+  const modelInitializedRef = useRef(false);
   useEffect(() => {
-    if (modelInitialized) {
+    if (modelInitializedRef.current) {
       setReasoningEffort("");
     } else if (model) {
-      setModelInitialized(true);
+      modelInitializedRef.current = true;
     }
   }, [model]);
 

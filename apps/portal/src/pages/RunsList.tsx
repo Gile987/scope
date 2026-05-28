@@ -317,6 +317,23 @@ export function RunsList() {
   );
   const availableModels = effectiveAgent?.supportedModels ?? [];
 
+  // Fetch model capabilities for effort-aware resubmit picker
+  const { data: resubmitAgentModels = [] } = useQuery({
+    queryKey: ["models", effectiveWorker],
+    queryFn: () => api.listModels({ agentId: effectiveWorker! }),
+    enabled: !!effectiveWorker,
+  });
+  const resubmitModelCapabilitiesMap = useMemo(
+    () => new Map(resubmitAgentModels.map((m) => [m.modelId, m.capabilities])),
+    [resubmitAgentModels],
+  );
+  const effectiveModel = activeProfile
+    ? activeProfile.version.model
+    : (resubmitOverrides.model ?? selectedRunsSummary.model);
+  const resubmitSupportedEfforts = effectiveModel
+    ? (resubmitModelCapabilitiesMap.get(effectiveModel)?.reasoningEffort ?? [])
+    : [];
+
   const deleteMutation = useMutation({
     mutationFn: api.deleteRun,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
@@ -1189,6 +1206,7 @@ export function RunsList() {
               </div>
 
               {/* Reasoning effort override */}
+              {resubmitSupportedEfforts.length > 1 && (
               <div className="flex items-center gap-4 mb-3">
                 <Label className="text-sm w-32 shrink-0">Reasoning effort</Label>
                 <Select
@@ -1207,12 +1225,13 @@ export function RunsList() {
                   <SelectContent>
                     <SelectItem value="__keep__">Keep original</SelectItem>
                     <SelectItem value="__clear__">Clear (use default)</SelectItem>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
+                    {resubmitSupportedEfforts.map((level) => (
+                      <SelectItem key={level} value={level}>{level}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
+              )}
 
               {/* Max iterations override */}
               <div className="flex items-center gap-4 mb-3">
