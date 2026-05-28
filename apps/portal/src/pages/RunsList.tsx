@@ -1190,11 +1190,23 @@ export function RunsList() {
                         : selectedRunsSummary.isMultiModel ? "Mixed (keep each)" : "Default"}
                     </SelectItem>
                     <SelectItem value="__clear__">Clear (use default)</SelectItem>
-                    {availableModels.filter((m) => m !== selectedRunsSummary.model).map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {m}{m === effectiveAgent?.defaultModel ? " (default)" : ""}
-                      </SelectItem>
-                    ))}
+                    {availableModels.filter((m) => m !== selectedRunsSummary.model).map((m) => {
+                      const caps = resubmitModelCapabilitiesMap.get(m);
+                      const efforts = caps?.reasoningEffort;
+                      return (
+                        <SelectItem key={m} value={m}>
+                          <span className="flex items-center gap-2">
+                            {m}{m === effectiveAgent?.defaultModel ? " (default)" : ""}
+                            {efforts && efforts.length === 1 && (
+                              <Badge variant="secondary" className="text-xs ml-1">effort: {efforts[0]}</Badge>
+                            )}
+                            {efforts && efforts.length > 1 && efforts.length < 4 && (
+                              <Badge variant="outline" className="text-xs ml-1">effort: {efforts.join(", ")}</Badge>
+                            )}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
                     {!effectiveWorker && (
                       <SelectItem value="__hint__" disabled>
                         Select a worker to see models
