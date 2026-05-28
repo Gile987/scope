@@ -67,6 +67,27 @@ export function NewProfileVersion() {
   const supportedModels = selectedAgent?.supportedModels ?? [];
   const isVscodeWorker = worker.includes("vscode");
 
+  // Fetch model capabilities for effort-aware picker
+  const { data: agentModels = [] } = useQuery({
+    queryKey: ["models", worker],
+    queryFn: () => api.listModels({ agentId: worker }),
+    enabled: !!worker,
+  });
+  const modelCapabilitiesMap = new Map(
+    agentModels.map((m) => [m.modelId, m.capabilities])
+  );
+  const supportedEfforts = model ? (modelCapabilitiesMap.get(model)?.reasoningEffort ?? []) : [];
+
+  // Reset reasoning effort when model changes (but not on initial pre-fill)
+  const [modelInitialized, setModelInitialized] = useState(false);
+  useEffect(() => {
+    if (modelInitialized) {
+      setReasoningEffort("");
+    } else if (model) {
+      setModelInitialized(true);
+    }
+  }, [model]);
+
   // Clear extensions when the user switches to a non-vscode worker.
   useEffect(() => {
     if (worker && !isVscodeWorker) {
@@ -189,6 +210,7 @@ export function NewProfileVersion() {
             </div>
           )}
 
+          {model && supportedEfforts.length > 1 && (
           <div className="space-y-2">
             <Label htmlFor="reasoningEffort">Reasoning Effort</Label>
             <Select value={reasoningEffort || "__none__"} onValueChange={(v) => setReasoningEffort(v === "__none__" ? "" : v)}>
@@ -197,12 +219,15 @@ export function NewProfileVersion() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">Default (no override)</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="high">High</SelectItem>
+                {supportedEfforts.map((level) => (
+                  <SelectItem key={level} value={level}>
+                    {level}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+          )}
 
           {sortedVersions.length > 0 && (
             <div className="space-y-2">
