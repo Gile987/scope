@@ -37,7 +37,7 @@ import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "postProcessing" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "effort" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "postProcessing" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
@@ -45,6 +45,7 @@ const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "task", label: "Task" },
   { id: "criteria", label: "Criteria" },
   { id: "worker", label: "Worker" },
+  { id: "effort", label: "Effort" },
   { id: "version", label: "Version" },
   { id: "os", label: "OS" },
   { id: "mcp", label: "MCP" },
@@ -1612,6 +1613,7 @@ export function RunsList() {
               {isCol("task") && <TableHead>Task</TableHead>}
               {isCol("criteria") && <TableHead>Criteria</TableHead>}
               {isCol("worker") && <TableHead className="w-[180px]">Worker</TableHead>}
+              {isCol("effort") && <TableHead className="w-[80px]">Effort</TableHead>}
               {isCol("version") && <TableHead>Version</TableHead>}
               {isCol("os") && <TableHead className="w-[80px]">OS</TableHead>}
               {isCol("mcp") && <TableHead>MCP</TableHead>}
@@ -1835,8 +1837,12 @@ function RunRow({
         {run.model && (
           <span className="block font-mono text-xs text-muted-foreground">{run.model}</span>
         )}
-        {run.reasoningEffort && (
-          <span className="block font-mono text-xs text-muted-foreground">effort: {run.reasoningEffort}</span>
+      </TableCell>}
+      {isCol("effort") && <TableCell>
+        {run.reasoningEffort ? (
+          <span className="font-mono text-xs">{run.reasoningEffort}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
         )}
       </TableCell>}
       {isCol("version") && <TableCell>
@@ -2252,10 +2258,13 @@ function GroupRows({
               {uniform.model && (
                 <span className="block font-mono text-xs text-muted-foreground">{uniform.model}</span>
               )}
-              {uniform.reasoningEffort && (
-                <span className="block font-mono text-xs text-muted-foreground">effort: {uniform.reasoningEffort}</span>
-              )}
             </>
+          ) : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>}
+        {/* Effort */}
+        {isCol("effort") && <TableCell>
+          {uniform.reasoningEffort ? (
+            <span className="font-mono text-xs">{uniform.reasoningEffort}</span>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>}
         {/* Version */}
