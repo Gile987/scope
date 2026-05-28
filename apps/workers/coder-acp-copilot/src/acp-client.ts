@@ -186,7 +186,7 @@ export async function selectModel(
 /**
  * Attempt to set the reasoning effort level via ACP session/set_config_option.
  *
- * Looks for a config option with `category: "thinking"` (the category Copilot CLI
+ * Looks for a config option with `category: "thought_level"` (the category Copilot CLI
  * uses for reasoning effort). If none is found, logs a warning and continues.
  */
 export async function selectReasoningEffort(
@@ -200,12 +200,12 @@ export async function selectReasoningEffort(
     return undefined;
   }
 
-  // Look for a config option with category "thinking" (Copilot CLI's reasoning effort category)
+  // Look for a config option with category "thought_level" (Copilot CLI's reasoning effort category)
   const effortConfigOption = sessionResult.configOptions.find(
-    (o) => o.category === "thinking"
+    (o) => o.category === "thought_level"
   );
   if (!effortConfigOption) {
-    onLog(`Warning: agent does not advertise a "thinking" config option; reasoning effort "${reasoningEffort}" may not be honoured`);
+    onLog(`Warning: agent does not advertise a "thought_level" config option; reasoning effort "${reasoningEffort}" may not be honoured`);
     return undefined;
   }
 
