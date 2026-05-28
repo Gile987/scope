@@ -261,6 +261,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   "null",
                 ],
               },
+              "reasoningEffort": {
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
               "skillRevisions": {
                 "items": {
                   "type": "string",
@@ -555,6 +561,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name": {
             "maxLength": 128,
             "minLength": 1,
+            "type": "string",
+          },
+          "reasoningEffort": {
             "type": "string",
           },
           "skillRevisions": {
@@ -1587,6 +1596,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "profileId": {
+            "type": "string",
+          },
+          "reasoningEffort": {
             "type": "string",
           },
           "skillRevisions": {
@@ -5315,6 +5327,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "type": "array",
                   },
                   "model": {
+                    "type": "string",
+                  },
+                  "reasoningEffort": {
                     "type": "string",
                   },
                   "skillRevisions": {

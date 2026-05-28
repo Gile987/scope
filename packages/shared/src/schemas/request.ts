@@ -296,6 +296,7 @@ export const BulkResubmitInputSchema = z
         profileId: z.string().nullable().optional(),
         workerType: z.string().optional(),
         model: z.string().nullable().optional(),
+        reasoningEffort: z.string().nullable().optional(),
         maxIterations: z.number().nullable().optional(),
         mcpServers: z.array(z.string()).nullable().optional(),
         skillRevisions: z.array(z.string()).nullable().optional(),

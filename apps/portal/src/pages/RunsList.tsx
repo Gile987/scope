@@ -1187,6 +1187,32 @@ export function RunsList() {
                 )}
               </div>
 
+              {/* Reasoning effort override */}
+              <div className="flex items-center gap-4 mb-3">
+                <Label className="text-sm w-32 shrink-0">Reasoning effort</Label>
+                <Select
+                  value={resubmitOverrides.reasoningEffort === null ? "__clear__" : resubmitOverrides.reasoningEffort ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") { delete next.reasoningEffort; }
+                    else if (v === "__clear__") { next.reasoningEffort = null; }
+                    else { next.reasoningEffort = v; }
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">Keep original</SelectItem>
+                    <SelectItem value="__clear__">Clear (use default)</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               {/* Max iterations override */}
               <div className="flex items-center gap-4 mb-3">
                 <Label className="text-sm w-32 shrink-0">Max iterations</Label>

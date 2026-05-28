@@ -24,6 +24,7 @@ export function NewProfileVersion() {
   // Configuration fields
   const [worker, setWorker] = useState("");
   const [model, setModel] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState("");
   const [selectedAgentVersion, setSelectedAgentVersion] = useState("");
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
@@ -53,6 +54,7 @@ export function NewProfileVersion() {
     if (profile?.version) {
       setWorker(profile.version.workerType);
       setModel(profile.version.model);
+      setReasoningEffort(profile.version.reasoningEffort ?? "");
       setSelectedAgentVersion(profile.version.agentVersion ?? "");
       setSelectedMcpServers(profile.version.mcpServers ?? []);
       setSelectedSkills(profile.version.skillRevisions ?? []);
@@ -87,6 +89,7 @@ export function NewProfileVersion() {
     mutationFn: () => api.createProfileVersion(profileId!, {
       workerType: worker,
       model,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
@@ -125,6 +128,7 @@ export function NewProfileVersion() {
   const hasChanges = !!ev && (
     worker !== ev.workerType ||
     model !== ev.model ||
+    (reasoningEffort || "") !== (ev.reasoningEffort || "") ||
     (selectedAgentVersion || "") !== (ev.agentVersion || "") ||
     JSON.stringify([...selectedMcpServers].sort()) !== JSON.stringify([...(ev.mcpServers ?? [])].sort()) ||
     JSON.stringify([...selectedSkills].sort()) !== JSON.stringify([...(ev.skillRevisions ?? [])].sort()) ||
@@ -184,6 +188,21 @@ export function NewProfileVersion() {
               </Select>
             </div>
           )}
+
+          <div className="space-y-2">
+            <Label htmlFor="reasoningEffort">Reasoning Effort</Label>
+            <Select value={reasoningEffort || "__none__"} onValueChange={(v) => setReasoningEffort(v === "__none__" ? "" : v)}>
+              <SelectTrigger id="reasoningEffort">
+                <SelectValue placeholder="Default (no override)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Default (no override)</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
           {sortedVersions.length > 0 && (
             <div className="space-y-2">

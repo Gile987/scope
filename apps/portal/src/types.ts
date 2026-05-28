@@ -365,6 +365,7 @@ export interface BulkResubmitOverrides {
   profileId?: string | null;
   workerType?: string;
   model?: string | null;
+  reasoningEffort?: string | null;
   maxIterations?: number | null;
   mcpServers?: string[] | null;
   skillRevisions?: string[] | null;
@@ -904,6 +905,7 @@ export interface ProfileVersionDocument {
   version: number;
   workerType: string;
   model: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   mcpServers?: string[];
   skillRevisions?: string[];

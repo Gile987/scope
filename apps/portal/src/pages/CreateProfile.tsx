@@ -28,6 +28,7 @@ export function CreateProfile() {
   // Configuration fields
   const [worker, setWorker] = useState("");
   const [model, setModel] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState("");
   const [selectedAgentVersion, setSelectedAgentVersion] = useState("");
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
@@ -81,6 +82,7 @@ export function CreateProfile() {
       ...(description ? { description } : {}),
       workerType: worker,
       model,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
@@ -232,6 +234,23 @@ export function CreateProfile() {
                   {supportedModels.map((m: string) => (
                     <SelectItem key={m} value={m}>{m}</SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {worker && (
+            <div className="space-y-2">
+              <Label htmlFor="reasoningEffort">Reasoning Effort</Label>
+              <Select value={reasoningEffort || "__none__"} onValueChange={(v) => setReasoningEffort(v === "__none__" ? "" : v)}>
+                <SelectTrigger id="reasoningEffort">
+                  <SelectValue placeholder="Default (no override)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Default (no override)</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
                 </SelectContent>
               </Select>
             </div>
