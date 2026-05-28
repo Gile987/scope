@@ -327,10 +327,16 @@ export function RunsList() {
     ? (resubmitModelCapabilitiesMap.get(effectiveModel)?.reasoningEffort ?? [])
     : [];
 
-  // Auto-clear effort override when model changes to one that doesn't support it
+  // Auto-clear effort override when model changes to one that doesn't support it,
+  // and auto-select when only one effort is available.
   useEffect(() => {
     const currentEffort = resubmitOverrides.reasoningEffort;
-    if (currentEffort && currentEffort !== null) {
+    if (resubmitSupportedEfforts.length === 1) {
+      // Auto-select the only supported effort
+      if (currentEffort !== resubmitSupportedEfforts[0]) {
+        setResubmitOverrides((prev) => ({ ...prev, reasoningEffort: resubmitSupportedEfforts[0] }));
+      }
+    } else if (currentEffort && currentEffort !== null) {
       if (resubmitSupportedEfforts.length === 0 || !resubmitSupportedEfforts.includes(currentEffort)) {
         setResubmitOverrides((prev) => {
           const next = { ...prev };
