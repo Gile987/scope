@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
-import { useModelCapabilities, useReasoningEffort, ReasoningEffortSelect } from "@/components/ReasoningEffortSelect";
+import { useModelCapabilities, useReasoningEffort, ReasoningEffortSelect, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { ArrowLeft, Loader2, Save, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -243,9 +243,10 @@ export function CreateProfile() {
                   <SelectValue placeholder="Select a model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {supportedModels.map((m: string) => (
-                    <SelectItem key={m} value={m}>{m}</SelectItem>
-                  ))}
+                  <ModelSelectItems
+                    models={supportedModels}
+                    capabilitiesMap={capabilitiesMap}
+                  />
                 </SelectContent>
               </Select>
             </div>
