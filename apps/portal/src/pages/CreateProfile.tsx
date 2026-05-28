@@ -128,6 +128,10 @@ export function CreateProfile() {
       parts.push(model);
       descParts.push(`model: ${model}`);
     }
+    if (reasoningEffort) {
+      parts.push(`effort:${reasoningEffort}`);
+      descParts.push(`effort: ${reasoningEffort}`);
+    }
     if (selectedMcpServers.length > 0) {
       parts.push(selectedMcpServers.join(", "));
       descParts.push(`MCP: ${selectedMcpServers.join(", ")}`);
