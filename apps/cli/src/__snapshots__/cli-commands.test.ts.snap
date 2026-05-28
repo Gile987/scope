@@ -603,6 +603,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--model",
           "--no-stream",
           "--persona",
+          "--reasoning-effort",
           "--scenario",
           "--skills",
           "--traits",

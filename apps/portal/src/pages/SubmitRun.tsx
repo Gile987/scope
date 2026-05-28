@@ -176,6 +176,28 @@ export function SubmitRun() {
     enabled: !!worker,
   });
 
+  // Fetch model capabilities for selected agent
+  const { data: agentModels = [] } = useQuery({
+    queryKey: ["models", worker],
+    queryFn: () => api.listModels({ agentId: worker }),
+    enabled: !!worker,
+  });
+
+  // Build a map of modelId → capabilities for quick lookup
+  const modelCapabilitiesMap = new Map(
+    agentModels.map((m) => [m.modelId, m.capabilities])
+  );
+
+  // Reasoning effort state
+  const [reasoningEffort, setReasoningEffort] = useState<string>("");
+  const selectedModelCapabilities = model ? modelCapabilitiesMap.get(model) : undefined;
+  const supportedEfforts = selectedModelCapabilities?.reasoningEffort ?? [];
+
+  // Reset reasoning effort when model changes
+  useEffect(() => {
+    setReasoningEffort("");
+  }, [model]);
+
   // Sort versions by createdAt descending (latest first)
   const sortedVersions = [...agentVersions].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -262,6 +284,7 @@ export function SubmitRun() {
       },
       worker,
       ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       maxIterations,
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
@@ -569,13 +592,52 @@ export function SubmitRun() {
                       <SelectValue placeholder="Select model" />
                     </SelectTrigger>
                     <SelectContent>
-                      {selectedAgent.supportedModels.map((m) => (
-                        <SelectItem key={m} value={m}>
-                          {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
+                      {selectedAgent.supportedModels.map((m) => {
+                        const caps = modelCapabilitiesMap.get(m);
+                        const efforts = caps?.reasoningEffort;
+                        return (
+                          <SelectItem key={m} value={m}>
+                            <span className="flex items-center gap-2">
+                              {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
+                              {efforts && efforts.length === 1 && (
+                                <Badge variant="secondary" className="text-xs ml-1">effort: {efforts[0]}</Badge>
+                              )}
+                              {efforts && efforts.length > 1 && efforts.length < 4 && (
+                                <Badge variant="outline" className="text-xs ml-1">effort: {efforts.join(", ")}</Badge>
+                              )}
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  {supportedEfforts.length === 1 && (
+                    <p className="text-xs text-amber-600 flex items-center gap-1">
+                      <Info className="h-3 w-3" />
+                      This model only supports &quot;{supportedEfforts[0]}&quot; reasoning effort. The agent extension may send an incompatible level.
+                    </p>
+                  )}
+                </div>
+              )}
+              {model && supportedEfforts.length > 1 && (
+                <div className="space-y-2">
+                  <Label htmlFor="reasoningEffort">Reasoning Effort</Label>
+                  <Select value={reasoningEffort || "__none__"} onValueChange={(v) => setReasoningEffort(v === "__none__" ? "" : v)} disabled={profileLocked}>
+                    <SelectTrigger id="reasoningEffort">
+                      <SelectValue placeholder="Any (no preference)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Any (no preference)</SelectItem>
+                      {supportedEfforts.map((level) => (
+                        <SelectItem key={level} value={level}>
+                          {level}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Select a preferred reasoning effort level for this model
+                  </p>
                 </div>
               )}
               {sortedVersions.length > 0 && (

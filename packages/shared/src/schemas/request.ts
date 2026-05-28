@@ -90,6 +90,7 @@ export const CreateRequestInputSchema = z
   .object({
     scenario: ScenarioSchema,
     model: z.string().optional(),
+    reasoningEffort: z.string().optional(),
     maxIterations: z.number().optional(),
     personaInstructions: z.string().optional(),
     persona: PersonaSchema.optional(),
@@ -107,6 +108,7 @@ export const RequestResponseSchema = z
     scenario: ScenarioSchema,
     workerType: z.string(),
     model: z.string().optional(),
+    reasoningEffort: z.string().optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     maxIterations: z.number().optional(),

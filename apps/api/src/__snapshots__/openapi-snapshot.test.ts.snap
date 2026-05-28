@@ -671,6 +671,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "profileId": {
             "type": "string",
           },
+          "reasoningEffort": {
+            "type": "string",
+          },
           "scenario": {
             "$ref": "#/components/schemas/Scenario",
           },
@@ -2096,6 +2099,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "profileVersionId": {
+            "type": "string",
+          },
+          "reasoningEffort": {
             "type": "string",
           },
           "run": {

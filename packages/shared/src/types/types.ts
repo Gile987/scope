@@ -149,6 +149,7 @@ export interface RequestDocument {
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
   model?: string;              // Model selected for this run
+  reasoningEffort?: string;    // User-selected reasoning effort level (informational / validated)
   createdAt: Date;
   updatedAt?: Date;
   // Multi-turn fields

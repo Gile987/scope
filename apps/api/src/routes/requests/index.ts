@@ -71,7 +71,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId, priority: requestedPriority } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId, priority: requestedPriority } = req.body;
     let worker = req.query.worker as string;
 
     // --- Profile resolution: if profileId is provided, resolve the version and use its values ---
@@ -245,6 +245,37 @@ apiRoute(ctx.app, ctx.registry, {
       resolvedAgentVersion = versionResult.agentVersion;
     }
 
+    // Validate reasoning effort against model capabilities
+    const warnings: string[] = [];
+    let modelCapabilities: { reasoningEffort?: string[] } | undefined;
+    if (model) {
+      const compoundModelId = `${workerType}:${model}`;
+      const modelDoc = await ctx.modelCollection.findOne({ _id: compoundModelId });
+      if (modelDoc?.capabilities) {
+        modelCapabilities = modelDoc.capabilities;
+        const supportedEfforts = modelDoc.capabilities.reasoningEffort;
+        if (supportedEfforts && supportedEfforts.length > 0) {
+          if (requestedReasoningEffort) {
+            if (!supportedEfforts.includes(requestedReasoningEffort)) {
+              res.status(400).json({
+                error: `Reasoning effort "${requestedReasoningEffort}" is not supported by model "${model}"`,
+                supportedReasoningEfforts: supportedEfforts,
+              });
+              return;
+            }
+          } else if (supportedEfforts.length === 1) {
+            warnings.push(
+              `Model "${model}" only supports reasoning effort "${supportedEfforts[0]}". The agent extension may send an incompatible effort level.`
+            );
+          } else if (supportedEfforts.length < 4) {
+            warnings.push(
+              `Model "${model}" supports limited reasoning efforts: ${supportedEfforts.join(", ")}. The agent extension may send an incompatible effort level.`
+            );
+          }
+        }
+      }
+    }
+
     // Validate MCP server slugs if provided
     let validatedMcpServers: string[] | undefined;
     if (effectiveMcpServers !== undefined) {
@@ -360,6 +391,7 @@ apiRoute(ctx.app, ctx.registry, {
           createdAt: new Date(),
           priority: requestedPriority ?? 0,
           ...(model ? { model } : {}),
+          ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
@@ -391,12 +423,15 @@ apiRoute(ctx.app, ctx.registry, {
         workerType,
         taskPromptId,
         ...(model ? { model } : {}),
+        ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
         ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
         status: "pending",
         mode,
         message: `${count} requests submitted successfully`,
         scenario,
         ...(maxIterations ? { maxIterations } : {}),
+        ...(warnings.length > 0 ? { warnings } : {}),
+        ...(modelCapabilities ? { modelCapabilities } : {}),
       });
       return;
     }
@@ -414,6 +449,7 @@ apiRoute(ctx.app, ctx.registry, {
       createdAt: new Date(),
       priority: requestedPriority ?? 0,
       ...(model ? { model } : {}),
+      ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
@@ -441,12 +477,15 @@ apiRoute(ctx.app, ctx.registry, {
       submissionId,
       workerType,
       ...(model ? { model } : {}),
+      ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
       status: requestDoc.run?.status ?? "pending",
       mode,
       message: "Request submitted successfully",
       scenario,
       ...(maxIterations ? { maxIterations } : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(modelCapabilities ? { modelCapabilities } : {}),
     });
   },
 });
