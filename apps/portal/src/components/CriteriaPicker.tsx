@@ -1,14 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo, useRef, useEffect, useCallback, type KeyboardEvent, type CSSProperties } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, type KeyboardEvent, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { X, Sparkles } from "lucide-react";
+import { Search, X, Sparkles } from "lucide-react";
 
 interface CriteriaPickerProps {
   selected: string[];
@@ -17,9 +17,11 @@ interface CriteriaPickerProps {
   aiSuggested?: string[];
   /** HTML id for the underlying input — enables label-to-control association */
   inputId?: string;
+  /** Optional trailing control rendered on the same row as the search input */
+  trailingAction?: ReactNode;
 }
 
-export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }: CriteriaPickerProps) {
+export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, trailingAction }: CriteriaPickerProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -178,19 +180,23 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId }
       )}
 
       {/* Typeahead input */}
-      <Input
-        ref={inputRef}
-        id={inputId}
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={handleKeyDown}
-        placeholder="Type to search criteria…"
-        className="h-9 font-mono text-sm"
-      />
+      <div className="flex items-center gap-2">
+        <Search className="h-4 w-4 text-muted-foreground" />
+        <Input
+          ref={inputRef}
+          id={inputId}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={handleKeyDown}
+          placeholder="Type to search criteria…"
+          className="h-9 font-mono text-sm"
+        />
+        {trailingAction}
+      </div>
 
       {/* Dropdown suggestions (portal-based to avoid clipping by scroll containers) */}
       {open && suggestions.length > 0 && createPortal(

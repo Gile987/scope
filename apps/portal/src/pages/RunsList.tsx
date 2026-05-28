@@ -121,23 +121,7 @@ export function RunsList() {
   // Column visibility — persisted under scope:hidden-columns:runs.
   const columnVisibility = useHiddenColumns({
     storageKey: "runs",
-    defaultHidden: [
-      "submission",
-      "criteria",
-      "version",
-      "os",
-      "mcp",
-      "skills",
-      "extensions",
-      "profile",
-      "priority",
-      "model",
-      "report",
-      "attempt",
-      "turns",
-      "llmCalls",
-      "tokens",
-    ],
+    defaultHidden: [],
   });
   const [customizeOpen, setCustomizeOpen] = useState(false);
   
@@ -229,10 +213,53 @@ export function RunsList() {
       }),
     refetchInterval: 10_000,
   });
+  const { data: profilesData } = useQuery({
+    queryKey: ["profiles", "runs-list-grouping"],
+    queryFn: () => api.listProfiles(),
+    staleTime: 60_000,
+  });
 
   const allRuns = runsResponse?.data ?? [];
   const cursors = runsResponse?.cursors ?? { next: null, prev: null };
   const estimatedTotal = runsResponse?.estimatedTotal;
+  const profileNameById = useMemo(
+    () => new Map((profilesData ?? []).map((profile) => [profile._id, profile.name])),
+    [profilesData],
+  );
+  const compositionRoleByRunId = useMemo(() => {
+    const bySubmissionId = new Map<string, Run[]>();
+    for (const run of allRuns) {
+      if (!run.submissionId) continue;
+      const submissionRuns = bySubmissionId.get(run.submissionId) ?? [];
+      submissionRuns.push(run);
+      bySubmissionId.set(run.submissionId, submissionRuns);
+    }
+
+    const roleMap = new Map<string, { kind: "base" | "variation"; variationNumber?: number }>();
+    for (const submissionRuns of bySubmissionId.values()) {
+      const sortedRuns = [...submissionRuns].sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      );
+      const orderedProfileIds = Array.from(
+        new Set(sortedRuns.map((run) => run.profileId).filter((profileId): profileId is string => Boolean(profileId))),
+      );
+      if (orderedProfileIds.length <= 1) continue;
+
+      const baseProfileId = orderedProfileIds[0];
+      const variationOrder = new Map(orderedProfileIds.slice(1).map((profileId, idx) => [profileId, idx + 1]));
+
+      for (const run of submissionRuns) {
+        if (!run.profileId) continue;
+        if (run.profileId === baseProfileId) {
+          roleMap.set(run._id, { kind: "base" });
+          continue;
+        }
+        const variationNumber = variationOrder.get(run.profileId);
+        roleMap.set(run._id, { kind: "variation", variationNumber });
+      }
+    }
+    return roleMap;
+  }, [allRuns]);
 
   // Client-side filtering for multi-value selections + search.
   const filteredRuns = useMemo(() => {
@@ -515,10 +542,10 @@ export function RunsList() {
     }
     const opts = [...counts.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([value, count]) => ({ value, label: formatId(value), count }));
+      .map(([value, count]) => ({ value, label: profileNameById.get(value) ?? formatId(value), count }));
     if (emptyCount > 0) opts.push({ value: EMPTY_FILTER_VALUE, label: "(Unknown)", count: emptyCount });
     return opts;
-  }, [allRuns]);
+  }, [allRuns, profileNameById]);
 
   const osOptions = useMemo(() => {
     const counts = new Map<string, number>();
@@ -901,14 +928,35 @@ export function RunsList() {
     {
       id: "profile",
       header: "Profile",
-      width: "140px",
+      width: "220px",
       hidden: columnVisibility.isHidden("profile"),
-      cell: (r) =>
-        r.profileId ? (
-          <span className="font-mono text-xs">{formatId(r.profileId)}</span>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        ),
+      cell: (r) => {
+        if (!r.profileId) return <span className="text-xs text-muted-foreground">—</span>;
+
+        const role = compositionRoleByRunId.get(r._id);
+        const profileLabel = profileNameById.get(r.profileId) ?? formatId(r.profileId);
+
+        return (
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="block min-w-0 truncate text-xs font-medium cursor-default">{profileLabel}</span>
+              </TooltipTrigger>
+              <TooltipContent className="text-xs">{profileLabel}</TooltipContent>
+            </Tooltip>
+            {role?.kind === "base" && (
+              <Badge variant="default" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
+                Base
+              </Badge>
+            )}
+            {role?.kind === "variation" && (
+              <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
+                Var {role.variationNumber ?? "?"}
+              </Badge>
+            )}
+          </div>
+        );
+      },
     },
     {
       id: "priority",
@@ -1365,10 +1413,42 @@ export function RunsList() {
           <div className="space-y-4">
             {(groupedAndDisplayedRuns as Array<{ groupKey: string; runs: Run[] }>).map(({ groupKey, runs }) => {
               const groupLabel = groupBy === "submissionId" ? "Submission ID" : groupBy === "profile" ? "Profile" : "Task";
+              const groupDisplayKey =
+                groupBy === "profile" && groupKey !== "(No Profile)"
+                  ? (profileNameById.get(groupKey) ?? formatId(groupKey))
+                  : groupKey;
+              const hasBaseRole = groupBy === "profile" && runs.some((run) => compositionRoleByRunId.get(run._id)?.kind === "base");
+              const variationNumbers =
+                groupBy === "profile"
+                  ? Array.from(
+                      new Set(
+                        runs
+                          .map((run) => {
+                            const role = compositionRoleByRunId.get(run._id);
+                            return role?.kind === "variation" ? role.variationNumber : undefined;
+                          })
+                          .filter((n): n is number => typeof n === "number"),
+                      ),
+                    ).sort((a, b) => a - b)
+                  : [];
               return (
               <div key={groupKey} className="rounded-lg border border-border/50 overflow-hidden">
                 <div className="bg-muted/30 px-4 py-3 font-semibold text-sm flex items-center justify-between">
-                  <span><span className="text-muted-foreground">{groupLabel}:</span> {groupKey}</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="min-w-0 truncate">
+                      <span className="text-muted-foreground">{groupLabel}:</span> {groupDisplayKey}
+                    </span>
+                    {hasBaseRole && (
+                      <Badge variant="default" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
+                        Base
+                      </Badge>
+                    )}
+                    {variationNumbers.map((variationNumber) => (
+                      <Badge key={`var-${variationNumber}`} variant="secondary" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
+                        Var {variationNumber}
+                      </Badge>
+                    ))}
+                  </div>
                   <span className="text-xs text-muted-foreground font-normal">{runs.length} run{runs.length !== 1 ? "s" : ""}</span>
                 </div>
                 <DataTable

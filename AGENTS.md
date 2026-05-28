@@ -74,6 +74,35 @@ React 19 web UI with Vite, Tailwind CSS, Radix UI (shadcn/ui), TanStack Query, a
 
 > **Storybook**: When adding or modifying portal components, update the corresponding Storybook stories. Use the `storybook` skill for guidance.
 
+#### Portal UX v2 implementation learnings (Runs + Submit Run)
+
+Use these patterns when extending list/detail or run-submission UX:
+
+1. **Keep interaction model consistent across entities.**
+   - Use the same layout contract: central list/table, right filter rail, contextual left detail/settings panel.
+   - Reuse shared list primitives (`ListLayout`, `FilterRail`, `DataTable`, `CustomizeColumnsPanel`, `Pagination`) instead of ad-hoc page layouts.
+
+2. **Prefer in-place creation over navigation breaks.**
+   - For `/runs/new`, create profiles in a dialog and keep users on the page.
+   - Reuse shared forms (e.g. `ProfileCreateForm`) between full-page and modal flows to avoid behavior drift.
+
+3. **Treat action counts as source-of-truth UX.**
+   - Any submit/CTA label must reflect the real backend effect (e.g. expanded run count, not just occurrence count).
+   - If composition/expansion is shown elsewhere on the page, the primary action label must match it exactly.
+
+4. **Composition UIs should make hierarchy explicit.**
+   - Show base profile and variations with distinct visual semantics (badges/labels such as `Base`, `Var N`).
+   - Prefer profile names over IDs in group headers and list cells; use IDs only as fallback.
+   - When grouped by profile, carry base/variation badges into group headers for scanability.
+
+5. **Long forms in dialogs require stable action affordances.**
+   - Use a constrained scroll container with a sticky footer for primary actions.
+   - Ensure dialog structure uses a non-growing shell (`grid-rows-[auto_minmax(0,1fr)]` + `min-h-0`/`overflow-y-auto`) so content scrolls without losing actions.
+
+6. **Inline control rows should align visually and behaviorally.**
+   - Keep `New…` actions on the same row as their picker/search control where possible.
+   - Match control heights and interaction patterns between similar pickers (task/profile/criteria) to reduce cognitive load.
+
 ### CLI (`apps/cli/`)
 
 Command-line interface built with Commander.js and Ink (React for terminals). Used for submitting runs, streaming logs, managing criteria, and CI/CD automation. Run `pnpm cli --help` to discover subcommands.
