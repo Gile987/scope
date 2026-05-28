@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useSortableFilterSections } from "./useSortableFilterSections";
 
+type SortableSectionElement = React.ReactElement<{ sortableId?: string }>;
+
 export interface FilterRailProps {
   /** Search input value. If undefined, the search box is hidden. */
   search?: string;
@@ -43,9 +45,9 @@ export function FilterRail({
 
   // Extract children and build a map of sortable IDs to elements
   const childrenArray = useMemo(() => {
-    const arr: React.ReactElement[] = [];
+    const arr: SortableSectionElement[] = [];
     React.Children.forEach(children, (child) => {
-      if (React.isValidElement(child)) {
+      if (React.isValidElement<{ sortableId?: string }>(child)) {
         arr.push(child);
       }
     });
@@ -58,7 +60,7 @@ export function FilterRail({
       return childrenArray;
     }
 
-    const map = new Map<string, React.ReactElement>();
+    const map = new Map<string, SortableSectionElement>();
     const sortIds = new Set<string>();
 
     childrenArray.forEach((child) => {
@@ -70,7 +72,7 @@ export function FilterRail({
     });
 
     // Reorder based on stored order
-    const sorted: React.ReactElement[] = [];
+    const sorted: SortableSectionElement[] = [];
     sortable.order.forEach((id) => {
       if (map.has(id)) {
         sorted.push(map.get(id)!);
