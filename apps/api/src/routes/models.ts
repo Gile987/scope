@@ -99,9 +99,6 @@ apiRoute(ctx.app, ctx.registry, {
 
       if (existing) {
         const updateFields: Record<string, unknown> = { lastSeenAt: now };
-        if (existing.disappearedAt) {
-          updateFields.disappearedAt = undefined;
-        }
         if (model.providerAvailableFrom) {
           updateFields.providerAvailableFrom = new Date(model.providerAvailableFrom);
         }
