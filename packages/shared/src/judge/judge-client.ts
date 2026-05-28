@@ -132,8 +132,12 @@ export class JudgeClient {
   private maxRetries: number;
 
   constructor(baseUrl: string, options?: JudgeClientOptions) {
-    // Strip trailing slash
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    // Strip trailing slashes
+    let normalizedBaseUrl = baseUrl;
+    while (normalizedBaseUrl.endsWith("/")) {
+      normalizedBaseUrl = normalizedBaseUrl.slice(0, -1);
+    }
+    this.baseUrl = normalizedBaseUrl;
     this.timeoutMs = options?.timeoutMs
       ?? parseInt(process.env.JUDGE_CLIENT_TIMEOUT || String(DEFAULT_JUDGE_CLIENT_TIMEOUT));
     this.maxRetries = options?.maxRetries
