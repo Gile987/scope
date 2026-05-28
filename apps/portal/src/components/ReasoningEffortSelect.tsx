@@ -101,7 +101,7 @@ export function ModelSelectItems({
               {m}
               {m === defaultModel ? " (default)" : ""}
               {efforts && efforts.map((e) => (
-                <Badge key={e} variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                <Badge key={e} variant="outline" className="text-xs font-medium">
                   {e}
                 </Badge>
               ))}
