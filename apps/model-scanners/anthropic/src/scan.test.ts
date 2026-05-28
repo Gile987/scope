@@ -210,4 +210,111 @@ describe("scanAnthropicModels", () => {
       "Network failure",
     );
   });
+
+  it("should extract capabilities from capabilities.effort", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "claude-opus-4-7",
+              capabilities: {
+                effort: {
+                  supported: true,
+                  low: { supported: true },
+                  medium: { supported: true },
+                  high: { supported: true },
+                  max: { supported: true },
+                },
+                thinking: {
+                  supported: true,
+                  types: {
+                    enabled: { supported: false },
+                    adaptive: { supported: true },
+                  },
+                },
+              },
+            },
+          ],
+          has_more: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await scanAnthropicModels("test-key");
+
+    expect(result.models[0].capabilities).toEqual({
+      reasoningEffort: ["low", "medium", "high", "max"],
+      adaptiveThinking: true,
+    });
+  });
+
+  it("should extract partial effort levels", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "claude-haiku-4",
+              capabilities: {
+                effort: {
+                  supported: true,
+                  low: { supported: false },
+                  medium: { supported: true },
+                  high: { supported: true },
+                  max: { supported: false },
+                },
+              },
+            },
+          ],
+          has_more: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await scanAnthropicModels("test-key");
+
+    expect(result.models[0].capabilities?.reasoningEffort).toEqual(["medium", "high"]);
+  });
+
+  it("should not include capabilities when capabilities is absent", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ id: "model-no-caps" }],
+          has_more: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await scanAnthropicModels("test-key");
+
+    expect(result.models[0].capabilities).toBeUndefined();
+  });
+
+  it("should not include effort when effort.supported is false", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "old-model",
+              capabilities: {
+                effort: { supported: false },
+              },
+            },
+          ],
+          has_more: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await scanAnthropicModels("test-key");
+
+    expect(result.models[0].capabilities).toBeUndefined();
+  });
 });
