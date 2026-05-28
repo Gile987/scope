@@ -310,6 +310,8 @@ export const RUN_STATE_FIELD_NAMES = [
 // Options passed to worker processor
 export interface WorkerProcessorOptions {
   model?: string;
+  /** Reasoning effort level to apply (e.g. "low", "medium", "high"). */
+  reasoningEffort?: string;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
   extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation

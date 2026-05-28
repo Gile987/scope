@@ -524,6 +524,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         log,
         personaInstructions: requestDoc.personaInstructions,
         model: requestDoc.model,
+        reasoningEffort: requestDoc.reasoningEffort,
         mcpServerConfigs,
         skillConfigs,
         extensionConfigs,
