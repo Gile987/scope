@@ -195,10 +195,12 @@ export function SubmitRun() {
   const selectedModelCapabilities = model ? modelCapabilitiesMap.get(model) : undefined;
   const supportedEfforts = selectedModelCapabilities?.reasoningEffort ?? [];
 
-  // Reset reasoning effort when model changes
+  // Reset reasoning effort when model changes only if new model doesn't support it
   useEffect(() => {
-    setReasoningEffort("");
-  }, [model]);
+    if (reasoningEffort && !supportedEfforts.includes(reasoningEffort)) {
+      setReasoningEffort("");
+    }
+  }, [model, supportedEfforts, reasoningEffort]);
 
   // Sort versions by createdAt descending (latest first)
   const sortedVersions = [...agentVersions].sort(

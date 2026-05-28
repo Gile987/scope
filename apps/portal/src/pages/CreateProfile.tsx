@@ -62,10 +62,12 @@ export function CreateProfile() {
   );
   const supportedEfforts = model ? (modelCapabilitiesMap.get(model)?.reasoningEffort ?? []) : [];
 
-  // Reset reasoning effort when model changes
+  // Reset reasoning effort when model changes only if new model doesn't support it
   useEffect(() => {
-    setReasoningEffort("");
-  }, [model]);
+    if (reasoningEffort && !supportedEfforts.includes(reasoningEffort)) {
+      setReasoningEffort("");
+    }
+  }, [model, supportedEfforts, reasoningEffort]);
 
   // Clear extensions when the user switches to a non-vscode worker.
   useEffect(() => {

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -78,15 +78,12 @@ export function NewProfileVersion() {
   );
   const supportedEfforts = model ? (modelCapabilitiesMap.get(model)?.reasoningEffort ?? []) : [];
 
-  // Reset reasoning effort when model changes (but not on initial pre-fill)
-  const modelInitializedRef = useRef(false);
+  // Reset reasoning effort when model changes only if new model doesn't support it
   useEffect(() => {
-    if (modelInitializedRef.current) {
+    if (reasoningEffort && !supportedEfforts.includes(reasoningEffort)) {
       setReasoningEffort("");
-    } else if (model) {
-      modelInitializedRef.current = true;
     }
-  }, [model]);
+  }, [model, supportedEfforts, reasoningEffort]);
 
   // Clear extensions when the user switches to a non-vscode worker.
   useEffect(() => {
