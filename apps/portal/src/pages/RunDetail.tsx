@@ -368,6 +368,12 @@ export function RunDetail() {
                   <span className="font-mono">{run.model}</span>
                 </>
               )}
+              {run.reasoningEffort && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <span className="font-mono text-xs">effort: {run.reasoningEffort}</span>
+                </>
+              )}
               {run.agentVersion && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
@@ -977,6 +983,12 @@ export function RunDetail() {
                     <div>
                       <span className="text-muted-foreground">Model:</span>{" "}
                       <span className="font-mono font-medium">{run.model}</span>
+                    </div>
+                  )}
+                  {run.reasoningEffort && (
+                    <div>
+                      <span className="text-muted-foreground">Reasoning Effort:</span>{" "}
+                      <span className="font-mono font-medium">{run.reasoningEffort}</span>
                     </div>
                   )}
                 </CardContent>

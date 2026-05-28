@@ -932,6 +932,7 @@ export interface AggregateStats {
 export interface GroupUniformValues {
   workerType?: string;
   model?: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   platform?: string;
   mcpServers?: string[];

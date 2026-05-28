@@ -1835,6 +1835,9 @@ function RunRow({
         {run.model && (
           <span className="block font-mono text-xs text-muted-foreground">{run.model}</span>
         )}
+        {run.reasoningEffort && (
+          <span className="block font-mono text-xs text-muted-foreground">effort: {run.reasoningEffort}</span>
+        )}
       </TableCell>}
       {isCol("version") && <TableCell>
         {run.agentVersion ? (
@@ -2248,6 +2251,9 @@ function GroupRows({
               <span className="font-mono text-xs">{uniform.workerType}</span>
               {uniform.model && (
                 <span className="block font-mono text-xs text-muted-foreground">{uniform.model}</span>
+              )}
+              {uniform.reasoningEffort && (
+                <span className="block font-mono text-xs text-muted-foreground">effort: {uniform.reasoningEffort}</span>
               )}
             </>
           ) : <span className="text-xs text-muted-foreground">–</span>}
