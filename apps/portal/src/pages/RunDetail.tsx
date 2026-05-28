@@ -365,13 +365,7 @@ export function RunDetail() {
               {run.model && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono">{run.model}</span>
-                </>
-              )}
-              {run.reasoningEffort && (
-                <>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span className="font-mono text-xs">effort: {run.reasoningEffort}</span>
+                  <span className="font-mono">{run.model}{run.reasoningEffort && ` (${run.reasoningEffort})`}</span>
                 </>
               )}
               {run.agentVersion && (
