@@ -120,6 +120,7 @@ export interface Run {
   scenario?: Scenario;
   workerType: string;
   model?: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   /** Per-attempt mutable state for the current attempt. */
   run?: RunState;
