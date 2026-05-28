@@ -139,6 +139,7 @@ export function ModelList() {
                 <TableHead>Provider</TableHead>
                 <TableHead>Agent</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Reasoning Effort</TableHead>
                 <TableHead>First Seen</TableHead>
                 <TableHead>Last Seen</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -165,6 +166,19 @@ export function ModelList() {
                     {model.disappearedAt
                       ? <Badge variant="secondary">Disappeared</Badge>
                       : <Badge variant="default">Active</Badge>}
+                  </TableCell>
+                  <TableCell>
+                    {model.capabilities?.reasoningEffort?.length ? (
+                      <div className="flex flex-wrap gap-1">
+                        {model.capabilities.reasoningEffort.map((level) => (
+                          <Badge key={level} variant="outline" className="text-[10px] px-1.5 py-0">
+                            {level}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatDate(model.firstSeenAt)}

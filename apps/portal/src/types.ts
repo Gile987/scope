@@ -753,6 +753,15 @@ export interface InsightWithReference extends Insight {
 // =============================================================================
 
 /** A scanned model tracked across agents and providers */
+export interface ModelCapabilities {
+  reasoningEffort?: string[];
+  toolCalls?: boolean;
+  vision?: boolean;
+  streaming?: boolean;
+  adaptiveThinking?: boolean;
+  maxThinkingBudget?: number;
+}
+
 export interface Model {
   _id: string;
   modelId: string;
@@ -764,6 +773,7 @@ export interface Model {
   providerAvailableFrom?: string;
   providerEndOfLife?: string;
   metadata?: Record<string, unknown>;
+  capabilities?: ModelCapabilities;
 }
 
 // =============================================================================
