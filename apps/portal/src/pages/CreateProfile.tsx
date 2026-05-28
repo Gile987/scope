@@ -125,12 +125,9 @@ export function CreateProfile() {
       descParts.push(workerLabel);
     }
     if (model) {
-      parts.push(model);
-      descParts.push(`model: ${model}`);
-    }
-    if (reasoningEffort) {
-      parts.push(`effort:${reasoningEffort}`);
-      descParts.push(`effort: ${reasoningEffort}`);
+      const modelLabel = reasoningEffort ? `${model} (${reasoningEffort})` : model;
+      parts.push(modelLabel);
+      descParts.push(`model: ${modelLabel}`);
     }
     if (selectedMcpServers.length > 0) {
       parts.push(selectedMcpServers.join(", "));
