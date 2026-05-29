@@ -29,8 +29,6 @@ export interface PaginationProps {
   hasNext?: boolean;
   /** Force-disable prev button (for cursor pagination). */
   hasPrev?: boolean;
-  /** Hide the first/last buttons (useful for cursor-based pagination). */
-  hideFirstLast?: boolean;
   /** Label for items (e.g. "runs", "reports"). */
   itemLabel?: string;
   className?: string;
@@ -47,7 +45,6 @@ export function Pagination({
   onPageSizeChange,
   hasNext,
   hasPrev,
-  hideFirstLast = false,
   itemLabel = "items",
   className,
 }: PaginationProps) {
@@ -102,18 +99,16 @@ export function Pagination({
         )}
 
         <div className="flex items-center gap-1">
-          {!hideFirstLast && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              disabled={!canPrev}
-              onClick={() => onPageChange(1)}
-              aria-label="First page"
-            >
-              <ChevronsLeft className="h-4 w-4" />
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            disabled={!canPrev}
+            onClick={() => onPageChange(1)}
+            aria-label="First page"
+          >
+            <ChevronsLeft className="h-4 w-4" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -139,12 +134,12 @@ export function Pagination({
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
-          {!hideFirstLast && totalPages !== null && (
+          {totalPages !== null && (
             <Button
               variant="ghost"
               size="icon"
               className="h-8 w-8"
-              disabled={!canNext}
+              disabled={!canNext || page >= totalPages}
               onClick={() => onPageChange(totalPages)}
               aria-label="Last page"
             >

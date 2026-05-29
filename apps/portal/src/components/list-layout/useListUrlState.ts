@@ -19,6 +19,14 @@ export interface ListUrlState {
   setPageSize: (size: number) => void;
   getFilter: (key: string) => string | null;
   setFilter: (key: string, value: string | null | string[]) => void;
+  /**
+   * Update multiple filter keys in a single URL mutation. Use this whenever a
+   * UI control needs to set/clear two or more related filters together (e.g. a
+   * value + its operator). Calling `setFilter` twice in the same handler is
+   * unsafe because react-router's `setSearchParams` doesn't compose functional
+   * updates that run in the same tick — the second navigate wipes the first.
+   */
+  setFilters: (updates: Record<string, string | null | string[]>) => void;
   getFilterList: (key: string) => string[];
   toggleFilterValue: (key: string, value: string) => void;
   clearFilters: () => void;
@@ -154,6 +162,23 @@ export function useListUrlState(options: UseListUrlStateOptions = {}): ListUrlSt
     [update],
   );
 
+  const setFilters = useCallback(
+    (updates: Record<string, string | null | string[]>) =>
+      update((p) => {
+        for (const [key, value] of Object.entries(updates)) {
+          if (value === null || value === "" || (Array.isArray(value) && value.length === 0)) {
+            p.delete(key);
+          } else if (Array.isArray(value)) {
+            p.set(key, value.join(","));
+          } else {
+            p.set(key, value);
+          }
+        }
+        p.delete("page");
+      }),
+    [update],
+  );
+
   const toggleFilterValue = useCallback(
     (key: string, value: string) => {
       const current = (searchParams.get(key) ?? "").split(",").filter(Boolean);
@@ -201,6 +226,7 @@ export function useListUrlState(options: UseListUrlStateOptions = {}): ListUrlSt
     setPageSize,
     getFilter,
     setFilter,
+    setFilters,
     getFilterList,
     toggleFilterValue,
     clearFilters,

@@ -21,6 +21,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import {
   ListLayout,
@@ -44,9 +46,19 @@ import {
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
-import type { Run, RunStatus, RunOutcome } from "@/types";
+import type { Run, RunStatus, RunOutcome, IterationOp } from "@/types";
 
-const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo", "groupBy"] as const;
+const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo", "groupBy", "turns", "turnsOp", "maxIter", "maxIterOp"] as const;
+
+/**
+ * Describes how to fetch a given (1-based) page from the cursor-paginated
+ * runs API. See cursorStack in RunsList for the full model.
+ */
+type RunsPageCursor =
+  | { kind: "first" }
+  | { kind: "after"; cursor: string }
+  | { kind: "before"; cursor: string }
+  | { kind: "last" };
 
 /** Sentinel value used in multi-value filters to match rows missing the underlying field. */
 const EMPTY_FILTER_VALUE = "__empty__";
@@ -249,6 +261,72 @@ function GroupByToggle({
   );
 }
 
+// Sidebar filter widget: pick a comparator (≥ / ≤ / =) and a numeric value.
+// Clearing the input clears both the value and the op from the URL. Used for
+// the Turns and Max iterations filters; mirrors the API contract that accepts
+// `{turns, turnsOp}` / `{maxIterations, maxIterationsOp}` with op ∈ eq|gte|lte.
+const NUMERIC_OPS: ReadonlyArray<{ value: IterationOp; label: string; aria: string }> = [
+  { value: "gte", label: "≥", aria: "greater than or equal to" },
+  { value: "lte", label: "≤", aria: "less than or equal to" },
+  { value: "eq", label: "=", aria: "equal to" },
+];
+
+function NumericComparatorRow({
+  label,
+  ariaLabel,
+  op,
+  value,
+  onChange,
+}: {
+  label: string;
+  ariaLabel: string;
+  op: IterationOp;
+  value: string;
+  onChange: (next: { op: IterationOp; value: string }) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-16 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
+      <Select value={op} onValueChange={(v) => onChange({ op: v as IterationOp, value })}>
+        <SelectTrigger
+          aria-label={`${ariaLabel} comparator`}
+          className="h-8 w-16 px-2 text-xs"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {NUMERIC_OPS.map((o) => (
+            <SelectItem key={o.value} value={o.value} aria-label={o.aria}>
+              <span className="font-mono">{o.label}</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Input
+        type="number"
+        inputMode="numeric"
+        min={0}
+        step={1}
+        placeholder="any"
+        aria-label={ariaLabel}
+        value={value}
+        onChange={(e) => {
+          const raw = e.target.value;
+          // Allow empty (clears) or non-negative integers only.
+          if (raw === "") {
+            onChange({ op, value: "" });
+            return;
+          }
+          const n = Number(raw);
+          if (!Number.isFinite(n) || n < 0) return;
+          onChange({ op, value: String(Math.floor(n)) });
+        }}
+        className="h-8 flex-1 text-xs"
+      />
+    </div>
+  );
+}
+
 export function RunsList() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -301,8 +379,15 @@ export function RunsList() {
   const groupBy = (state.getFilter("groupBy") ?? "none") as "none" | "profile" | "task" | "submissionId";
 
   // Cursor pagination — keep a stack of cursors that map a virtual page number
-  // to an `after` cursor (page 1 = no cursor, page 2 = stack[0], …).
-  const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([undefined]);
+  // to a fetch instruction. Each entry describes how to fetch that page:
+  //   { kind: "first" }                — page 1, no cursor (uses defaults)
+  //   { kind: "after",  cursor: "..." } — page reached by going forward (after)
+  //   { kind: "before", cursor: "..." } — page reached by going backward (before)
+  //   { kind: "last" }                  — fetched via server-side `last=true`
+  // This supports first/last buttons even though the underlying API is cursor
+  // based: "Last" sets {kind:"last"} at the target page; "Prev" from there uses
+  // `cursors.prev` returned with each response to walk backwards.
+  const [cursorStack, setCursorStack] = useState<RunsPageCursor[]>([{ kind: "first" }]);
 
   // Multi-selection state — preserved while the user navigates pages.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -326,6 +411,10 @@ export function RunsList() {
         version: state.getFilterList("version"),
         dateFrom: state.getFilter("dateFrom"),
         dateTo: state.getFilter("dateTo"),
+        turns: state.getFilter("turns"),
+        turnsOp: state.getFilter("turnsOp"),
+        maxIter: state.getFilter("maxIter"),
+        maxIterOp: state.getFilter("maxIterOp"),
         groupBy: state.getFilter("groupBy"),
         pageSize: state.pageSize,
       }),
@@ -337,7 +426,7 @@ export function RunsList() {
     ],
   );
   useEffect(() => {
-    setCursorStack([undefined]);
+    setCursorStack([{ kind: "first" }]);
     setSelectedIds(new Set());
     if (state.page !== 1) state.setPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -361,7 +450,17 @@ export function RunsList() {
   const dateFrom = state.getFilter("dateFrom");
   const dateTo = state.getFilter("dateTo");
 
-  const currentCursor = cursorStack[state.page - 1];
+  // Numeric comparator filters: only sent to the API when value is set.
+  // `*Op` defaults to "gte" (≥) so a value alone yields the most common "at
+  // least N" semantic without forcing the user to pick an operator first.
+  const turnsRaw = state.getFilter("turns") ?? "";
+  const turnsOp = ((state.getFilter("turnsOp") as IterationOp | null) ?? "gte") as IterationOp;
+  const maxIterRaw = state.getFilter("maxIter") ?? "";
+  const maxIterOp = ((state.getFilter("maxIterOp") as IterationOp | null) ?? "gte") as IterationOp;
+  const turnsValue = turnsRaw === "" ? undefined : Number(turnsRaw);
+  const maxIterValue = maxIterRaw === "" ? undefined : Number(maxIterRaw);
+
+  const currentCursor: RunsPageCursor = cursorStack[state.page - 1] ?? { kind: "first" };
 
   // The server only accepts a single explicit value per filter; if multiple values
   // are selected or the special `(Unknown)` sentinel is selected, we fetch the
@@ -373,8 +472,14 @@ export function RunsList() {
   const serverOutcome = singleServerValue(outcomes);
   const serverProfile = singleServerValue(profiles);
 
+  // Serialize cursor into a stable string for the query key.
+  const cursorKey =
+    currentCursor.kind === "first" || currentCursor.kind === "last"
+      ? currentCursor.kind
+      : `${currentCursor.kind}:${currentCursor.cursor}`;
+
   const { data: runsResponse, isLoading, isRefetching } = useQuery({
-    queryKey: ["runs", serverWorker, serverStatus, serverOutcome, taskPromptId, submissionId, criteria, serverProfile, state.pageSize, currentCursor],
+    queryKey: ["runs", serverWorker, serverStatus, serverOutcome, taskPromptId, submissionId, criteria, serverProfile, turnsValue, turnsOp, maxIterValue, maxIterOp, state.pageSize, cursorKey],
     queryFn: () =>
       api.listRuns({
         worker: serverWorker,
@@ -384,8 +489,14 @@ export function RunsList() {
         submissionId,
         criteria,
         profileId: serverProfile,
+        turns: turnsValue,
+        turnsOp: turnsValue !== undefined ? turnsOp : undefined,
+        maxIterations: maxIterValue,
+        maxIterationsOp: maxIterValue !== undefined ? maxIterOp : undefined,
         limit: state.pageSize,
-        after: currentCursor,
+        after: currentCursor.kind === "after" ? currentCursor.cursor : undefined,
+        before: currentCursor.kind === "before" ? currentCursor.cursor : undefined,
+        last: currentCursor.kind === "last" ? true : undefined,
       }),
     refetchInterval: 10_000,
   });
@@ -490,24 +601,67 @@ export function RunsList() {
     [groupedRuns],
   );
 
+  const totalPages = useMemo(() => {
+    if (estimatedTotal == null) return undefined;
+    return Math.max(1, Math.ceil(estimatedTotal / state.pageSize));
+  }, [estimatedTotal, state.pageSize]);
+
   const handlePageChange = useCallback(
     (next: number) => {
       if (next === state.page) return;
+
+      // FIRST page — always available, no cursor.
+      if (next === 1) {
+        setCursorStack((prev) => {
+          const copy = [...prev];
+          copy[0] = { kind: "first" };
+          return copy;
+        });
+        state.setPage(1);
+        return;
+      }
+
+      // LAST page — use server `last=true` to fetch the tail in O(n).
+      if (totalPages != null && next === totalPages) {
+        setCursorStack((prev) => {
+          const copy = [...prev];
+          copy[next - 1] = { kind: "last" };
+          return copy;
+        });
+        state.setPage(next);
+        return;
+      }
+
+      // NEXT — forward one page using `cursors.next` from current response.
       if (next === state.page + 1) {
         if (!cursors.next) return;
         setCursorStack((prev) => {
           const copy = [...prev];
-          copy[next - 1] = cursors.next ?? undefined;
+          copy[next - 1] = { kind: "after", cursor: cursors.next! };
           return copy;
         });
         state.setPage(next);
-      } else if (next === state.page - 1) {
+        return;
+      }
+
+      // PREV — backward one page. If we already have a cursor for the target
+      // page (we walked forward to get here), reuse it. Otherwise use the
+      // current response's `cursors.prev` to walk backwards from a `last` jump.
+      if (next === state.page - 1) {
+        const existing = cursorStack[next - 1];
+        if (!existing) {
+          if (!cursors.prev) return;
+          setCursorStack((prev) => {
+            const copy = [...prev];
+            copy[next - 1] = { kind: "before", cursor: cursors.prev! };
+            return copy;
+          });
+        }
         state.setPage(next);
-      } else if (next === 1) {
-        state.setPage(1);
+        return;
       }
     },
-    [state, cursors.next],
+    [state, cursors.next, cursors.prev, cursorStack, totalPages],
   );
 
   // ---- Bulk action mutations ----
@@ -1328,7 +1482,7 @@ export function RunsList() {
           searchPlaceholder="Search runs…"
           refreshing={isRefetching}
           sortablePageKey="runs"
-          defaultSectionOrder={["created", "worker", "status", "outcome", "model", "profile", "version", "os", "priority", "groupby"]}
+          defaultSectionOrder={["created", "iterations", "worker", "status", "outcome", "model", "profile", "version", "os", "priority", "groupby"]}
           footer={
             <>
               <ClearFiltersLink onClick={state.clearFilters} disabled={!state.hasActiveFilters} />
@@ -1341,10 +1495,37 @@ export function RunsList() {
               from={dateFrom}
               to={dateTo}
               onChange={(f, t) => {
-                state.setFilter("dateFrom", f);
-                state.setFilter("dateTo", t);
+                state.setFilters({ dateFrom: f, dateTo: t });
               }}
             />
+          </FilterSection>
+          <FilterSection title="Iterations" storageKey="runs-iterations" sortableId="iterations">
+            <div className="space-y-2">
+              <NumericComparatorRow
+                label="Turns"
+                ariaLabel="Filter runs by number of turns"
+                op={turnsOp}
+                value={turnsRaw}
+                onChange={({ op, value }) => {
+                  state.setFilters({
+                    turns: value || null,
+                    turnsOp: value ? op : null,
+                  });
+                }}
+              />
+              <NumericComparatorRow
+                label="Max iter"
+                ariaLabel="Filter runs by max iterations"
+                op={maxIterOp}
+                value={maxIterRaw}
+                onChange={({ op, value }) => {
+                  state.setFilters({
+                    maxIter: value || null,
+                    maxIterOp: value ? op : null,
+                  });
+                }}
+              />
+            </div>
           </FilterSection>
           <FilterSection title="Worker" storageKey="runs-worker" sortableId="worker">
             <CheckboxFilterGroup
@@ -1905,7 +2086,6 @@ export function RunsList() {
           onPageSizeChange={state.setPageSize}
           hasNext={!!cursors.next}
           hasPrev={state.page > 1}
-          hideFirstLast
           itemLabel="runs"
         />
       </div>
