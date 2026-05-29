@@ -140,6 +140,23 @@ export function ModelList() {
         ),
     },
     {
+      id: "reasoningEffort",
+      header: "Reasoning Effort",
+      width: "180px",
+      cell: (m) =>
+        m.capabilities?.reasoningEffort?.length ? (
+          <div className="flex flex-wrap gap-1">
+            {m.capabilities.reasoningEffort.map((level) => (
+              <Badge key={level} variant="outline" className="px-1.5 py-0 text-[10px]">
+                {level}
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
       id: "firstSeen",
       header: "First Seen",
       sortable: true,

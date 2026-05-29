@@ -122,6 +122,76 @@ export function ModelDetail() {
           </CardContent>
         </Card>
 
+        {model.capabilities && Object.keys(model.capabilities).length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Capabilities</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {model.capabilities.reasoningEffort && model.capabilities.reasoningEffort.length > 0 && (
+                <div>
+                  <dt className="text-xs text-muted-foreground">Reasoning Effort Levels</dt>
+                  <dd className="mt-1 flex flex-wrap gap-1.5">
+                    {model.capabilities.reasoningEffort.map((level) => (
+                      <Badge key={level} variant="secondary">{level}</Badge>
+                    ))}
+                  </dd>
+                </div>
+              )}
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                {model.capabilities.toolCalls !== undefined && (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Tool Calls</dt>
+                    <dd className="mt-0.5">
+                      <Badge variant={model.capabilities.toolCalls ? "default" : "secondary"}>
+                        {model.capabilities.toolCalls ? "Supported" : "Not supported"}
+                      </Badge>
+                    </dd>
+                  </div>
+                )}
+                {model.capabilities.vision !== undefined && (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Vision</dt>
+                    <dd className="mt-0.5">
+                      <Badge variant={model.capabilities.vision ? "default" : "secondary"}>
+                        {model.capabilities.vision ? "Supported" : "Not supported"}
+                      </Badge>
+                    </dd>
+                  </div>
+                )}
+                {model.capabilities.streaming !== undefined && (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Streaming</dt>
+                    <dd className="mt-0.5">
+                      <Badge variant={model.capabilities.streaming ? "default" : "secondary"}>
+                        {model.capabilities.streaming ? "Supported" : "Not supported"}
+                      </Badge>
+                    </dd>
+                  </div>
+                )}
+                {model.capabilities.adaptiveThinking !== undefined && (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Adaptive Thinking</dt>
+                    <dd className="mt-0.5">
+                      <Badge variant={model.capabilities.adaptiveThinking ? "default" : "secondary"}>
+                        {model.capabilities.adaptiveThinking ? "Supported" : "Not supported"}
+                      </Badge>
+                    </dd>
+                  </div>
+                )}
+                {model.capabilities.maxThinkingBudget !== undefined && (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Max Thinking Budget</dt>
+                    <dd className="mt-0.5 font-mono text-xs">
+                      {model.capabilities.maxThinkingBudget.toLocaleString()} tokens
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </CardContent>
+          </Card>
+        )}
+
         {model.metadata && Object.keys(model.metadata).length > 0 && (
           <Card>
             <CardHeader className="pb-2">

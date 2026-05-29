@@ -1306,6 +1306,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "ModelCapabilities": {
+        "properties": {
+          "adaptiveThinking": {
+            "type": "boolean",
+          },
+          "maxThinkingBudget": {
+            "type": "number",
+          },
+          "reasoningEffort": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "streaming": {
+            "type": "boolean",
+          },
+          "toolCalls": {
+            "type": "boolean",
+          },
+          "vision": {
+            "type": "boolean",
+          },
+        },
+        "type": "object",
+      },
       "ModelResponse": {
         "properties": {
           "_id": {
@@ -1313,6 +1339,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "agentId": {
             "type": "string",
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/ModelCapabilities",
           },
           "disappearedAt": {
             "format": "date-time",
@@ -4993,6 +5022,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   "models": {
                     "items": {
                       "properties": {
+                        "capabilities": {
+                          "properties": {
+                            "adaptiveThinking": {
+                              "type": "boolean",
+                            },
+                            "maxThinkingBudget": {
+                              "type": "number",
+                            },
+                            "reasoningEffort": {
+                              "items": {
+                                "type": "string",
+                              },
+                              "type": "array",
+                            },
+                            "streaming": {
+                              "type": "boolean",
+                            },
+                            "toolCalls": {
+                              "type": "boolean",
+                            },
+                            "vision": {
+                              "type": "boolean",
+                            },
+                          },
+                          "type": "object",
+                        },
                         "id": {
                           "type": "string",
                         },
