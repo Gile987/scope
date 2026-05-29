@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect, useCallback, type Key, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
-import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow } from "lucide-react";
+import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download } from "lucide-react";
 import { FaLinux } from "react-icons/fa";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import {
@@ -393,6 +394,9 @@ export function RunsList() {
   // Multi-selection state — preserved while the user navigates pages.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [priorityDialogOpen, setPriorityDialogOpen] = useState(false);
+  const [bulkPriorityValue, setBulkPriorityValue] = useState<number>(0);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
 
   // Reset stack whenever filters or page size change.
   const filtersKey = useMemo(
@@ -719,6 +723,37 @@ export function RunsList() {
     onError: (err: Error) => toast.error(`Failed to resume: ${err.message}`),
   });
 
+  const bulkSetPriorityMutation = useMutation({
+    mutationFn: ({ ids, priority }: { ids: string[]; priority: number }) =>
+      api.bulkSetPriority(ids, priority),
+    onSuccess: (res, vars) => {
+      toast.success(`Priority updated for ${res.updated} run${res.updated !== 1 ? "s" : ""} (→ ${vars.priority})`);
+      setSelectedIds(new Set());
+      setPriorityDialogOpen(false);
+      invalidateRuns();
+    },
+    onError: (err: Error) => toast.error(`Failed to set priority: ${err.message}`),
+  });
+
+  const bulkReportMutation = useMutation({
+    mutationFn: (ids: string[]) => api.bulkTriggerReports(ids),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["report-statuses"] });
+      toast.success(`Queued ${res.created} report${res.created !== 1 ? "s" : ""} for generation${res.notFound.length ? `, ${res.notFound.length} not found` : ""}`);
+      setSelectedIds(new Set());
+      setReportDialogOpen(false);
+    },
+    onError: (err: Error) => toast.error(`Failed to generate reports: ${err.message}`),
+  });
+
+  const batchDownloadMutation = useMutation({
+    mutationFn: (ids: string[]) => api.batchArchive(ids),
+    onSuccess: (_, ids) => {
+      toast.success(`Downloading ${ids.length} run${ids.length !== 1 ? "s" : ""} as archive`);
+    },
+    onError: (err: Error) => toast.error(`Failed to download archive: ${err.message}`),
+  });
+
   // ---- Selection helpers ----
   const toggleRowSelection = useCallback((id: Key) => {
     setSelectedIds((prev) => {
@@ -763,13 +798,15 @@ export function RunsList() {
     let retryable = 0;
     let pausable = 0;
     let resumable = 0;
+    let prioritizable = 0;
     for (const r of selectedRunsList) {
       const s = r.run?.status;
       if (s === "done") retryable += 1;
       if (s === "pending" || s === "queued" || s === "processing") pausable += 1;
       if (s === "paused") resumable += 1;
+      if (s === "pending" || s === "queued" || s === "paused") prioritizable += 1;
     }
-    return { retryable, pausable, resumable };
+    return { retryable, pausable, resumable, prioritizable };
   }, [selectedRunsList]);
 
   const isBusy =
@@ -777,7 +814,10 @@ export function RunsList() {
     bulkRetryMutation.isPending ||
     bulkResubmitMutation.isPending ||
     bulkPauseMutation.isPending ||
-    bulkResumeMutation.isPending;
+    bulkResumeMutation.isPending ||
+    bulkSetPriorityMutation.isPending ||
+    bulkReportMutation.isPending ||
+    batchDownloadMutation.isPending;
 
   const handleBulkRetry = useCallback(() => {
     if (selectedIds.size === 0) return;
@@ -798,6 +838,23 @@ export function RunsList() {
     if (selectionCaps.resumable === 0) return;
     bulkResumeMutation.mutate([...selectedIds]);
   }, [bulkResumeMutation, selectedIds, selectionCaps.resumable]);
+
+  const openPriorityDialog = useCallback(() => {
+    if (selectionCaps.prioritizable === 0) return;
+    // Pre-fill with the common priority across prioritizable selections.
+    const eligible = selectedRunsList.filter((r) => {
+      const s = r.run?.status;
+      return s === "pending" || s === "queued" || s === "paused";
+    });
+    const priorities = new Set(eligible.map((r) => r.priority ?? 0));
+    setBulkPriorityValue(priorities.size === 1 ? [...priorities][0] : 0);
+    setPriorityDialogOpen(true);
+  }, [selectedRunsList, selectionCaps.prioritizable]);
+
+  const handleBulkDownload = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    batchDownloadMutation.mutate([...selectedIds]);
+  }, [batchDownloadMutation, selectedIds]);
 
   // Filter options derived from current page (counts reflect this page only).
   const workerOptions = useMemo(() => {
@@ -1637,6 +1694,7 @@ export function RunsList() {
           onClear={() => setSelectedIds(new Set())}
           itemLabel="run"
         >
+          <BulkGroupLabel>Scheduling</BulkGroupLabel>
           <Button
             variant="outline"
             size="sm"
@@ -1646,6 +1704,7 @@ export function RunsList() {
             title="Pause pending/queued/processing runs"
           >
             <Pause className="h-3.5 w-3.5" /> Pause
+            {selectionCaps.pausable > 0 ? ` (${selectionCaps.pausable})` : ""}
           </Button>
           <Button
             variant="outline"
@@ -1656,6 +1715,30 @@ export function RunsList() {
             title="Resume paused runs"
           >
             <Play className="h-3.5 w-3.5" /> Resume
+            {selectionCaps.resumable > 0 ? ` (${selectionCaps.resumable})` : ""}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isBusy || selectionCaps.prioritizable === 0}
+            onClick={openPriorityDialog}
+            title="Set priority on pending/queued/paused runs"
+          >
+            <ArrowUpDown className="h-3.5 w-3.5" /> Priority
+            {selectionCaps.prioritizable > 0 ? ` (${selectionCaps.prioritizable})` : ""}
+          </Button>
+
+          <BulkGroupLabel>Runs</BulkGroupLabel>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isBusy || selectedIds.size === 0}
+            onClick={handleBulkResubmit}
+            title="Resubmit selected runs as a new submission"
+          >
+            <Repeat className="h-3.5 w-3.5" /> Re-submit
           </Button>
           <Button
             variant="outline"
@@ -1671,25 +1754,41 @@ export function RunsList() {
           >
             <RotateCcw className="h-3.5 w-3.5" />
             {isForceRetryModifierActive ? "Force Retry" : "Retry"}
+            {selectionCaps.retryable > 0 ? ` (${selectionCaps.retryable})` : ""}
+          </Button>
+
+          <BulkGroupLabel>Export</BulkGroupLabel>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isBusy || selectedIds.size === 0}
+            onClick={() => setReportDialogOpen(true)}
+            title="Generate reports for selected runs"
+          >
+            <FileText className="h-3.5 w-3.5" /> Reports
           </Button>
           <Button
             variant="outline"
             size="sm"
             className="gap-1.5"
             disabled={isBusy || selectedIds.size === 0}
-            onClick={handleBulkResubmit}
-            title="Resubmit selected runs as a new submission"
+            onClick={handleBulkDownload}
+            title="Download selected runs as archive"
           >
-            <Repeat className="h-3.5 w-3.5" /> Resubmit
+            <Download className="h-3.5 w-3.5" />
+            {batchDownloadMutation.isPending ? "Downloading…" : "Download"}
           </Button>
+
           <Button
             variant="destructive"
             size="sm"
-            className="gap-1.5"
+            className="ml-1 gap-1.5"
             disabled={isBusy || selectedIds.size === 0}
             onClick={() => setDeleteDialogOpen(true)}
+            title="Delete selected runs"
           >
-            <Trash2 className="h-3.5 w-3.5" /> Delete
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </BulkActionBar>
 
@@ -2130,8 +2229,128 @@ export function RunsList() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={priorityDialogOpen} onOpenChange={setPriorityDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Set priority on {selectionCaps.prioritizable} run
+              {selectionCaps.prioritizable !== 1 ? "s" : ""}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Only pending, queued, and paused runs accept priority updates. Higher
+              numbers run sooner; lower numbers run later. Range: −100 to 100.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="bulk-priority">Priority</Label>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={() => setBulkPriorityValue((v) => Math.max(-100, v - 5))}
+              >
+                −5
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={() => setBulkPriorityValue((v) => Math.max(-100, v - 1))}
+              >
+                −1
+              </Button>
+              <Input
+                id="bulk-priority"
+                type="number"
+                min={-100}
+                max={100}
+                value={bulkPriorityValue}
+                onChange={(e) =>
+                  setBulkPriorityValue(
+                    Math.max(-100, Math.min(100, parseInt(e.target.value, 10) || 0))
+                  )
+                }
+                className="h-8 text-center"
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={() => setBulkPriorityValue((v) => Math.min(100, v + 1))}
+              >
+                +1
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={() => setBulkPriorityValue((v) => Math.min(100, v + 5))}
+              >
+                +5
+              </Button>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                bulkSetPriorityMutation.mutate({
+                  ids: [...selectedIds],
+                  priority: bulkPriorityValue,
+                });
+              }}
+              disabled={bulkSetPriorityMutation.isPending}
+            >
+              {bulkSetPriorityMutation.isPending ? "Updating…" : "Set priority"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Generate reports for {selectedIds.size} run
+              {selectedIds.size !== 1 ? "s" : ""}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This queues a fresh report for every selected run. Runs that already
+              have a report will get a new one.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                bulkReportMutation.mutate([...selectedIds]);
+              }}
+              disabled={bulkReportMutation.isPending}
+            >
+              {bulkReportMutation.isPending ? "Queuing…" : "Generate"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ListLayout>
     </TooltipProvider>
+  );
+}
+
+/**
+ * Uppercase group label rendered inside the bulk-action toolbar
+ * (e.g. "SCHEDULING", "RUNS", "EXPORT"). Adds breathing room before each
+ * group and hides on narrow viewports so the toolbar stays usable.
+ */
+function BulkGroupLabel({ children }: { children: ReactNode }) {
+  return (
+    <span className="ml-2 hidden text-[10px] font-semibold uppercase tracking-wide text-muted-foreground first:ml-0 xl:inline">
+      {children}
+    </span>
   );
 }
 
