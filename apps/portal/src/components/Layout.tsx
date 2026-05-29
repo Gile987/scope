@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { Link, useLocation, Outlet, matchPath } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
@@ -51,23 +51,60 @@ interface NavItem {
   featureKey?: string;
 }
 
-const navItems: NavItem[] = [
-  { to: "/runs", label: "Runs", icon: List },
-  { to: "/statistics", label: "Statistics", icon: BarChart3 },
-  { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
-  { to: "/reports", label: "Reports", icon: FileText },
-  { to: "/insights", label: "Insights", icon: Lightbulb },
-  { to: "/criteria", label: "Criteria", icon: FlaskConical },
-  { to: "/prompt-features", label: "Features", icon: Tags },
-  { to: "/profiles", label: "Profiles", icon: SlidersHorizontal, featureKey: "profiles" },
-  { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
-  { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
-  { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
-  { to: "/skills", label: "Skills", icon: BookOpen, featureKey: "skills" },
-  { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions" },
-  { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
-  // MDP is a developer/diagnostic view — keep it pinned at the bottom of the
-  // primary nav so it doesn't compete with the day-to-day data pages above.
+interface NavGroup {
+  id: string;
+  /** Human label shown in the mobile sheet and as the tooltip group hint. */
+  label: string;
+  items: NavItem[];
+}
+
+/**
+ * Sidebar nav grouped by domain noun:
+ *   Activity  — what happened (runs and their outputs)
+ *   Library   — content you author (tasks, criteria, profiles, …)
+ *   Resources — infra you wire up (agents, models, secrets, …)
+ *
+ * The dev-only MDP view is pinned separately at the bottom — it's a
+ * diagnostic tool, not part of any of these groups.
+ */
+const navGroups: NavGroup[] = [
+  {
+    id: "activity",
+    label: "Activity",
+    items: [
+      { to: "/runs", label: "Runs", icon: List },
+      { to: "/statistics", label: "Statistics", icon: BarChart3 },
+      { to: "/reports", label: "Reports", icon: FileText },
+      { to: "/insights", label: "Insights", icon: Lightbulb },
+    ],
+  },
+  {
+    id: "library",
+    label: "Library",
+    items: [
+      { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
+      { to: "/criteria", label: "Criteria", icon: FlaskConical },
+      { to: "/prompt-features", label: "Features", icon: Tags },
+      { to: "/profiles", label: "Profiles", icon: SlidersHorizontal, featureKey: "profiles" },
+      { to: "/skills", label: "Skills", icon: BookOpen, featureKey: "skills" },
+    ],
+  },
+  {
+    id: "resources",
+    label: "Resources",
+    items: [
+      { to: "/agents", label: "Agents", icon: Bot, featureKey: "agents" },
+      { to: "/models", label: "Models", icon: Cpu, featureKey: "models" },
+      { to: "/mcp-servers", label: "MCP", icon: Server, featureKey: "mcp" },
+      { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions" },
+      { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
+    ],
+  },
+];
+
+// Dev/diagnostic — pinned at the bottom of the primary nav, kept out of the
+// noun groups above so it doesn't compete with the day-to-day pages.
+const devNavItems: NavItem[] = [
   { to: "/criteria/mdp", label: "MDP", icon: GitBranch },
 ];
 
@@ -157,9 +194,18 @@ export function Layout() {
   const { isFeatureEnabled } = useFeatureFlags();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const visibleNavItems = navItems.filter(
-    (item) => !item.featureKey || isFeatureEnabled(item.featureKey),
+  const filterByFeature = (items: NavItem[]) =>
+    items.filter((item) => !item.featureKey || isFeatureEnabled(item.featureKey));
+
+  const visibleGroups = useMemo(
+    () =>
+      navGroups
+        .map((g) => ({ ...g, items: filterByFeature(g.items) }))
+        .filter((g) => g.items.length > 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isFeatureEnabled],
   );
+  const visibleDevItems = filterByFeature(devNavItems);
 
   const isFullBleed = useMemo(
     () =>
@@ -205,18 +251,46 @@ export function Layout() {
                 emphasized
               />
               <div className="my-1 h-px w-6 bg-border/60" aria-hidden />
-              {visibleNavItems.map((item) => {
-                const isActive = location.pathname.startsWith(item.to);
-                return (
-                  <SidebarIconLink
-                    key={item.to}
-                    to={item.to}
-                    label={item.label}
-                    icon={item.icon}
-                    active={isActive}
-                  />
-                );
-              })}
+              {visibleGroups.map((group, groupIdx) => (
+                <Fragment key={group.id}>
+                  {groupIdx > 0 && (
+                    <div
+                      className="my-1 h-px w-6 bg-border/60"
+                      role="separator"
+                      aria-label={group.label}
+                    />
+                  )}
+                  {group.items.map((item) => {
+                    const isActive = location.pathname.startsWith(item.to);
+                    return (
+                      <SidebarIconLink
+                        key={item.to}
+                        to={item.to}
+                        label={item.label}
+                        icon={item.icon}
+                        active={isActive}
+                      />
+                    );
+                  })}
+                </Fragment>
+              ))}
+              {visibleDevItems.length > 0 && (
+                <>
+                  <div className="my-1 h-px w-6 bg-border/60" aria-hidden />
+                  {visibleDevItems.map((item) => {
+                    const isActive = location.pathname.startsWith(item.to);
+                    return (
+                      <SidebarIconLink
+                        key={item.to}
+                        to={item.to}
+                        label={item.label}
+                        icon={item.icon}
+                        active={isActive}
+                      />
+                    );
+                  })}
+                </>
+              )}
             </nav>
 
             {/* Footer: API docs + Admin — pinned to bottom when there's room, scrolls with content otherwise */}
@@ -251,25 +325,63 @@ export function Layout() {
                 <SheetContent side="left" className="w-64 pt-10">
                   <SheetTitle className="sr-only">Navigation</SheetTitle>
                   <nav className="flex flex-col space-y-1">
-                    {visibleNavItems.map((item) => {
-                      const isActive = location.pathname.startsWith(item.to);
-                      return (
-                        <Link
-                          key={item.to}
-                          to={item.to}
-                          onClick={() => setMobileOpen(false)}
+                    {visibleGroups.map((group, groupIdx) => (
+                      <Fragment key={group.id}>
+                        <div
                           className={cn(
-                            "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                            isActive
-                              ? "bg-accent text-accent-foreground"
-                              : "text-muted-foreground",
+                            "px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground",
+                            groupIdx > 0 && "pt-3",
                           )}
                         >
-                          <item.icon className="h-4 w-4" />
-                          {item.label}
-                        </Link>
-                      );
-                    })}
+                          {group.label}
+                        </div>
+                        {group.items.map((item) => {
+                          const isActive = location.pathname.startsWith(item.to);
+                          return (
+                            <Link
+                              key={item.to}
+                              to={item.to}
+                              onClick={() => setMobileOpen(false)}
+                              className={cn(
+                                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                                isActive
+                                  ? "bg-accent text-accent-foreground"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              <item.icon className="h-4 w-4" />
+                              {item.label}
+                            </Link>
+                          );
+                        })}
+                      </Fragment>
+                    ))}
+                    {visibleDevItems.length > 0 && (
+                      <>
+                        <div className="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Dev
+                        </div>
+                        {visibleDevItems.map((item) => {
+                          const isActive = location.pathname.startsWith(item.to);
+                          return (
+                            <Link
+                              key={item.to}
+                              to={item.to}
+                              onClick={() => setMobileOpen(false)}
+                              className={cn(
+                                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                                isActive
+                                  ? "bg-accent text-accent-foreground"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              <item.icon className="h-4 w-4" />
+                              {item.label}
+                            </Link>
+                          );
+                        })}
+                      </>
+                    )}
                     <div className="my-2 h-px bg-border/60" />
                     <a
                       href="/api-docs"
