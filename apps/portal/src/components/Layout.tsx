@@ -52,8 +52,8 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { to: "/statistics", label: "Statistics", icon: BarChart3 },
   { to: "/runs", label: "Runs", icon: List },
+  { to: "/statistics", label: "Statistics", icon: BarChart3 },
   { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
   { to: "/reports", label: "Reports", icon: FileText },
   { to: "/insights", label: "Insights", icon: Lightbulb },
