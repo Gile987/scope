@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect, useCallback, type Key, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
-import { Plus, Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,7 @@ import {
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
-import { formatDate, formatId, formatDuration, truncate } from "@/lib/utils";
+import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, RunStatus, RunOutcome } from "@/types";
 
@@ -96,6 +96,72 @@ function OverflowBadges({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+    </div>
+  );
+}
+
+/** Small OS-platform icon. Falls back to a text badge for unknown platforms. */
+function OsPlatformIcon({ platform }: { platform: string }) {
+  const p = platform.toLowerCase();
+  const Icon = p === "darwin" || p === "macos"
+    ? Apple
+    : p === "win32" || p === "windows"
+      ? AppWindow
+      : p === "linux"
+        ? Terminal
+        : null;
+  const label = p === "darwin" || p === "macos"
+    ? "macOS"
+    : p === "win32" || p === "windows"
+      ? "Windows"
+      : p === "linux"
+        ? "Linux"
+        : platform;
+  if (!Icon) {
+    return (
+      <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-mono">
+        {platform}
+      </Badge>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground">
+          <Icon className="h-3.5 w-3.5" aria-label={label} />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="text-xs">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * Aggregate progress bar used in grouped rows for the Status and Outcome
+ * columns. Shows `count/total label` with a colored progress track.
+ */
+function AggregateProgress({
+  count,
+  total,
+  label,
+  tone,
+}: {
+  count: number;
+  total: number;
+  label: string;
+  tone: "success" | "destructive";
+}) {
+  if (total === 0) return <span className="text-xs text-muted-foreground">—</span>;
+  const pct = Math.round((count / total) * 100);
+  const barClass = tone === "success" ? "bg-emerald-500" : "bg-destructive";
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-xs font-medium">
+        {count}/{total} {label}
+      </span>
+      <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+        <div className={cn("h-full transition-all", barClass)} style={{ width: `${pct}%` }} />
+      </div>
     </div>
   );
 }
@@ -789,17 +855,19 @@ export function RunsList() {
       hidden: columnVisibility.isHidden("os"),
       cell: (r) => {
         const os = r.run?.os;
-        return os ? (
+        if (!os) return <span className="text-xs text-muted-foreground">—</span>;
+        return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="font-mono text-xs cursor-default">{os.platform}/{os.arch}</span>
+              <span className="inline-flex items-center gap-1.5 cursor-default">
+                <OsPlatformIcon platform={os.platform} />
+                <span className="font-mono text-xs text-muted-foreground">{os.arch}</span>
+              </span>
             </TooltipTrigger>
             <TooltipContent className="text-xs">
               {os.platform} {os.release} ({os.arch})
             </TooltipContent>
           </Tooltip>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
         );
       },
     },
@@ -1459,6 +1527,115 @@ export function RunsList() {
                 },
                 expandedGroupKeys,
                 onToggleGroup: toggleGroupExpansion,
+                renderGroupCell: (column, runs, expanded) => {
+                  const total = runs.length;
+                  if (column.id === "id") {
+                    return (
+                      <div className="flex items-center gap-1.5">
+                        {expanded ? (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                        )}
+                        <span className="text-xs font-semibold">
+                          {total} run{total !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                    );
+                  }
+                  if (column.id === "status") {
+                    const doneCount = runs.filter((r) => r.run?.status === "done").length;
+                    return (
+                      <AggregateProgress
+                        count={doneCount}
+                        total={total}
+                        label="done"
+                        tone="success"
+                      />
+                    );
+                  }
+                  if (column.id === "outcome") {
+                    const passCount = runs.filter((r) => r.run?.outcome === "succeeded").length;
+                    const failedCount = runs.filter((r) => r.run?.outcome === "failed").length;
+                    return (
+                      <AggregateProgress
+                        count={passCount}
+                        total={total}
+                        label="pass"
+                        tone={failedCount > 0 && passCount === 0 ? "destructive" : "success"}
+                      />
+                    );
+                  }
+                  if (column.id === "os") {
+                    const platforms = Array.from(
+                      new Set(
+                        runs
+                          .map((r) => r.run?.os?.platform)
+                          .filter((p): p is string => !!p),
+                      ),
+                    ).sort();
+                    if (platforms.length === 0) {
+                      return <span className="text-xs text-muted-foreground">—</span>;
+                    }
+                    return (
+                      <div className="flex items-center gap-1">
+                        {platforms.map((platform) => (
+                          <OsPlatformIcon key={platform} platform={platform} />
+                        ))}
+                      </div>
+                    );
+                  }
+                  if (column.id === "profile" && groupBy === "profile") {
+                    const groupKey = runs[0]?.profileId ?? "(No Profile)";
+                    const profileLabel =
+                      groupKey !== "(No Profile)"
+                        ? (profileNameById.get(groupKey) ?? formatId(groupKey))
+                        : "—";
+                    const hasBaseRole = runs.some(
+                      (run) => compositionRoleByRunId.get(run._id)?.kind === "base",
+                    );
+                    const variationNumbers = Array.from(
+                      new Set(
+                        runs
+                          .map((run) => {
+                            const role = compositionRoleByRunId.get(run._id);
+                            return role?.kind === "variation" ? role.variationNumber : undefined;
+                          })
+                          .filter((n): n is number => typeof n === "number"),
+                      ),
+                    ).sort((a, b) => a - b);
+                    return (
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="block min-w-0 truncate text-xs font-medium cursor-default">
+                              {profileLabel}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs">{profileLabel}</TooltipContent>
+                        </Tooltip>
+                        {hasBaseRole && (
+                          <Badge variant="default" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
+                            Base
+                          </Badge>
+                        )}
+                        {variationNumbers.map((variationNumber) => (
+                          <Badge
+                            key={`var-${variationNumber}`}
+                            variant="secondary"
+                            className="h-5 px-1.5 text-[10px] uppercase tracking-wide"
+                          >
+                            Var {variationNumber}
+                          </Badge>
+                        ))}
+                      </div>
+                    );
+                  }
+                  // Default: render the first run's cell (most columns are constant
+                  // across grouped runs — e.g. submission/task share when grouped by
+                  // submissionId; worker/version/profile share when grouped by profile).
+                  return runs[0] ? column.cell(runs[0]) : null;
+                },
                 renderGroupHeader: (groupKey, runs, expanded) => {
                   const groupLabel = groupBy === "submissionId" ? "Submission ID" : groupBy === "profile" ? "Profile" : "Task";
                   const groupDisplayKey =

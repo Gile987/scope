@@ -68,6 +68,18 @@ export interface DataTableSelection<T> {
 export interface DataTableGrouping<T> {
   getGroupKey: (item: T) => string;
   renderGroupHeader: (groupKey: string, items: readonly T[], expanded: boolean) => ReactNode;
+  /**
+   * Optional per-column renderer for the group row. When provided, the group
+   * row is rendered as a normal row using the table's columns (sticky/width/
+   * alignment preserved) instead of a single full-width `colSpan` cell.
+   * Return `null` or `undefined` to leave a column blank in the group row.
+   * The provided `renderGroupHeader` is ignored when this is set.
+   */
+  renderGroupCell?: (
+    column: DataTableColumn<T>,
+    items: readonly T[],
+    expanded: boolean,
+  ) => ReactNode;
   expandedGroupKeys: ReadonlySet<string>;
   onToggleGroup: (groupKey: string) => void;
 }
@@ -451,12 +463,80 @@ export function DataTable<T>({
             grouping ? (
               groupedSections.map((section) => {
                 const expanded = grouping.expandedGroupKeys.has(section.key);
+                const useCells = !!grouping.renderGroupCell;
                 return (
                   <Fragment key={`group-${section.key}`}>
-                    <TableRow key={`group-${section.key}`} className="bg-muted/20 hover:bg-muted/30">
-                      <TableCell colSpan={colSpan} className="p-0">
-                        {grouping.renderGroupHeader(section.key, section.items, expanded)}
-                      </TableCell>
+                    <TableRow
+                      key={`group-${section.key}`}
+                      className={cn(
+                        "bg-muted/20 hover:bg-muted/30",
+                        useCells && "cursor-pointer",
+                      )}
+                      onClick={
+                        useCells
+                          ? () => grouping.onToggleGroup(section.key)
+                          : undefined
+                      }
+                      aria-expanded={useCells ? expanded : undefined}
+                    >
+                      {useCells ? (
+                        <>
+                          {selection && (
+                            <TableCell
+                              className={cn(
+                                rowPadY,
+                                "text-center sticky left-0 z-20 bg-muted/20 shadow-sm",
+                              )}
+                              style={{ left: "0px" }}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
+                          {visibleColumns.map((col) => {
+                            const alignClass =
+                              col.align === "right"
+                                ? "text-right"
+                                : col.align === "center"
+                                  ? "text-center"
+                                  : "";
+                            const stickyCellClass =
+                              col.sticky === "left"
+                                ? "sticky z-10 bg-muted/20 border-r shadow-sm"
+                                : col.sticky === "right"
+                                  ? "sticky z-10 bg-muted/20 border-l shadow-sm"
+                                  : "";
+                            const stickyCellStyle =
+                              col.sticky === "left"
+                                ? { left: col.stickyOffset ?? "0px" }
+                                : col.sticky === "right"
+                                  ? { right: col.stickyOffset ?? "0px" }
+                                  : undefined;
+                            return (
+                              <TableCell
+                                key={col.id}
+                                style={{
+                                  ...(col.width ? { width: col.width, maxWidth: col.width } : {}),
+                                  ...(stickyCellStyle ?? {}),
+                                }}
+                                className={cn(
+                                  rowPadY,
+                                  alignClass,
+                                  "overflow-hidden",
+                                  stickyCellClass,
+                                  col.className,
+                                )}
+                              >
+                                <div className="min-w-0">
+                                  {grouping.renderGroupCell!(col, section.items, expanded)}
+                                </div>
+                              </TableCell>
+                            );
+                          })}
+                        </>
+                      ) : (
+                        <TableCell colSpan={colSpan} className="p-0">
+                          {grouping.renderGroupHeader(section.key, section.items, expanded)}
+                        </TableCell>
+                      )}
                     </TableRow>
                     {expanded ? section.items.map((item) => renderDataRow(item)) : null}
                   </Fragment>
