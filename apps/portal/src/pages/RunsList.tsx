@@ -855,26 +855,14 @@ export function RunsList() {
       width: "180px",
       hidden: columnVisibility.isHidden("worker"),
       cell: (r) => (
-        <div className="max-w-[170px] min-w-0">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Badge variant="outline" className="max-w-[120px] min-w-0 font-mono text-xs cursor-default">
-                <span className="block min-w-0 truncate">{truncate(r.workerType, 14)}</span>
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent className="text-xs">{r.workerType}</TooltipContent>
-          </Tooltip>
-          {r.model && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="mt-0.5 block max-w-[120px] truncate font-mono text-xs text-muted-foreground cursor-default">
-                  {truncate(r.model, 14)}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="text-xs">{r.model}</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge variant="outline" className="max-w-[160px] min-w-0 font-mono text-xs cursor-default">
+              <span className="block min-w-0 truncate">{truncate(r.workerType, 18)}</span>
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="text-xs">{r.workerType}</TooltipContent>
+        </Tooltip>
       ),
     },
     {
