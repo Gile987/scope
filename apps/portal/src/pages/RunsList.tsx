@@ -206,8 +206,7 @@ const COLUMN_IDS = COLUMN_OPTIONS.map((o) => o.id);
 
 // Segmented toggle used in the list header for the Group By control. Kept
 // inline because it is only used here.
-const GROUP_BY_OPTIONS: ReadonlyArray<{ value: "none" | "profile" | "task" | "submissionId"; label: string }> = [
-  { value: "none", label: "None" },
+const GROUP_BY_OPTIONS: ReadonlyArray<{ value: "profile" | "task" | "submissionId"; label: string }> = [
   { value: "profile", label: "Profile" },
   { value: "task", label: "Task" },
   { value: "submissionId", label: "Submission" },
@@ -222,20 +221,19 @@ function GroupByToggle({
 }) {
   return (
     <div
-      role="radiogroup"
-      aria-label="Aggregate runs by"
+      role="group"
+      aria-label="Group runs by"
       className="hidden sm:inline-flex h-8 items-center rounded-md border border-border/60 bg-card p-0.5"
     >
-      <span className="px-2 text-xs font-medium text-muted-foreground">Aggregate by</span>
+      <span className="px-2 text-xs font-medium text-muted-foreground">Group by</span>
       {GROUP_BY_OPTIONS.map((opt) => {
         const active = value === opt.value;
         return (
           <button
             key={opt.value}
             type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(opt.value)}
+            aria-pressed={active}
+            onClick={() => onChange(active ? "none" : opt.value)}
             className={
               "h-7 rounded-sm px-2.5 text-xs font-medium transition-colors " +
               (active
