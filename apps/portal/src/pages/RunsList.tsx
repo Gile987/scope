@@ -4,7 +4,8 @@
 import { useMemo, useState, useEffect, useCallback, type Key, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
-import { Plus, Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, Terminal } from "lucide-react";
+import { Plus, Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow } from "lucide-react";
+import { FaLinux } from "react-icons/fa";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ import {
   CustomizeColumnsLink,
   DateRangeFilter,
   useHiddenColumns,
+  useColumnOrder,
   useListUrlState,
   usePersistentSort,
   initSortFromLocalStorage,
@@ -108,7 +110,7 @@ function OsPlatformIcon({ platform }: { platform: string }) {
     : p === "win32" || p === "windows"
       ? AppWindow
       : p === "linux"
-        ? Terminal
+        ? FaLinux
         : null;
   const label = p === "darwin" || p === "macos"
     ? "macOS"
@@ -142,29 +144,65 @@ function OsPlatformIcon({ platform }: { platform: string }) {
  */
 function AggregateProgress({
   count,
+  failedCount = 0,
   total,
   label,
   tone,
 }: {
   count: number;
+  /** Optional failed count rendered as a red segment alongside the success segment. */
+  failedCount?: number;
   total: number;
   label: string;
   tone: "success" | "destructive";
 }) {
   if (total === 0) return <span className="text-xs text-muted-foreground">—</span>;
-  const pct = Math.round((count / total) * 100);
-  const barClass = tone === "success" ? "bg-emerald-500" : "bg-destructive";
+  const successPct = Math.round((count / total) * 100);
+  const failedPct = Math.round((failedCount / total) * 100);
+  const successClass = tone === "success" ? "bg-emerald-500" : "bg-destructive";
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <span className="text-xs font-medium">
         {count}/{total} {label}
       </span>
-      <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full transition-all", barClass)} style={{ width: `${pct}%` }} />
+      <div className="flex h-1 w-full overflow-hidden rounded-full bg-muted">
+        <div className={cn("h-full transition-all", successClass)} style={{ width: `${successPct}%` }} />
+        {failedPct > 0 && (
+          <div className="h-full bg-destructive transition-all" style={{ width: `${failedPct}%` }} />
+        )}
       </div>
     </div>
   );
 }
+
+// All toggleable columns rendered by the customize-columns panel and the
+// DataTable. Lifted to module scope so its identity is stable across renders
+// (used as a dependency by useColumnOrder via the column-id signature).
+const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
+  { id: "id", label: "ID", required: true },
+  { id: "submission", label: "Submission" },
+  { id: "task", label: "Task" },
+  { id: "criteria", label: "Criteria" },
+  { id: "worker", label: "Worker" },
+  { id: "version", label: "Version" },
+  { id: "os", label: "OS" },
+  { id: "mcp", label: "MCP" },
+  { id: "skills", label: "Skills" },
+  { id: "extensions", label: "Extensions" },
+  { id: "profile", label: "Profile" },
+  { id: "priority", label: "Priority" },
+  { id: "model", label: "Model" },
+  { id: "status", label: "Status" },
+  { id: "outcome", label: "Outcome" },
+  { id: "report", label: "Report" },
+  { id: "attempt", label: "Attempt" },
+  { id: "turns", label: "Turns" },
+  { id: "llmCalls", label: "LLM Calls" },
+  { id: "duration", label: "Duration" },
+  { id: "tokens", label: "Tokens" },
+  { id: "created", label: "Created" },
+];
+const COLUMN_IDS = COLUMN_OPTIONS.map((o) => o.id);
 
 export function RunsList() {
   const navigate = useNavigate();
@@ -184,10 +222,32 @@ export function RunsList() {
   // Persist sort preference to localStorage
   usePersistentSort(state, { pageKey: "runs" });
 
-  // Column visibility — persisted under scope:hidden-columns:runs.
+  // Column visibility — persisted under scope:hidden-columns:runs:v2.
+  // The `:v2` suffix forces the new default set to apply for users who had
+  // an older preference stored under the unversioned key.
+  // Default visible: ID, Submission, Task, Criteria, Worker, Version, OS, MCP,
+  // Skills, Extensions, Profile, Priority, Status, Outcome.
+  // Hidden by default (opt-in via Customize columns): Model, Report, Attempt,
+  // Turns, LLM Calls, Duration, Tokens, Created.
   const columnVisibility = useHiddenColumns({
-    storageKey: "runs",
-    defaultHidden: [],
+    storageKey: "runs:v2",
+    defaultHidden: [
+      "model",
+      "report",
+      "attempt",
+      "turns",
+      "llmCalls",
+      "duration",
+      "tokens",
+      "created",
+    ],
+  });
+  // Persisted column order (matches the customize panel). The `id` column is
+  // marked `required` in COLUMN_OPTIONS and is locked from reordering by the
+  // panel; `actions` lives outside COLUMN_OPTIONS and is always pinned right.
+  const columnOrder = useColumnOrder({
+    storageKey: "runs:v2",
+    columnIds: COLUMN_IDS,
   });
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(new Set());
@@ -297,40 +357,6 @@ export function RunsList() {
     () => new Map((profilesData ?? []).map((profile) => [profile._id, profile.name])),
     [profilesData],
   );
-  const compositionRoleByRunId = useMemo(() => {
-    const bySubmissionId = new Map<string, Run[]>();
-    for (const run of allRuns) {
-      if (!run.submissionId) continue;
-      const submissionRuns = bySubmissionId.get(run.submissionId) ?? [];
-      submissionRuns.push(run);
-      bySubmissionId.set(run.submissionId, submissionRuns);
-    }
-
-    const roleMap = new Map<string, { kind: "base" | "variation"; variationNumber?: number }>();
-    for (const submissionRuns of bySubmissionId.values()) {
-      const sortedRuns = [...submissionRuns].sort(
-        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-      );
-      const orderedProfileIds = Array.from(
-        new Set(sortedRuns.map((run) => run.profileId).filter((profileId): profileId is string => Boolean(profileId))),
-      );
-      if (orderedProfileIds.length <= 1) continue;
-
-      const baseProfileId = orderedProfileIds[0];
-      const variationOrder = new Map(orderedProfileIds.slice(1).map((profileId, idx) => [profileId, idx + 1]));
-
-      for (const run of submissionRuns) {
-        if (!run.profileId) continue;
-        if (run.profileId === baseProfileId) {
-          roleMap.set(run._id, { kind: "base" });
-          continue;
-        }
-        const variationNumber = variationOrder.get(run.profileId);
-        roleMap.set(run._id, { kind: "variation", variationNumber });
-      }
-    }
-    return roleMap;
-  }, [allRuns]);
 
   // Client-side filtering for multi-value selections + search.
   const filteredRuns = useMemo(() => {
@@ -695,31 +721,6 @@ export function RunsList() {
     staleTime: 10_000,
   });
 
-  const columnOptions: CustomizeColumnsOption[] = [
-    { id: "id", label: "ID", required: true },
-    { id: "submission", label: "Submission" },
-    { id: "task", label: "Task" },
-    { id: "criteria", label: "Criteria" },
-    { id: "worker", label: "Worker" },
-    { id: "version", label: "Version" },
-    { id: "os", label: "OS" },
-    { id: "mcp", label: "MCP" },
-    { id: "skills", label: "Skills" },
-    { id: "extensions", label: "Extensions" },
-    { id: "profile", label: "Profile" },
-    { id: "priority", label: "Priority" },
-    { id: "model", label: "Model" },
-    { id: "status", label: "Status" },
-    { id: "outcome", label: "Outcome" },
-    { id: "report", label: "Report" },
-    { id: "attempt", label: "Attempt" },
-    { id: "turns", label: "Turns" },
-    { id: "llmCalls", label: "LLM Calls" },
-    { id: "duration", label: "Duration" },
-    { id: "tokens", label: "Tokens" },
-    { id: "created", label: "Created" },
-  ];
-
   const columns: DataTableColumn<Run>[] = [
     {
       id: "id",
@@ -1023,7 +1024,6 @@ export function RunsList() {
       cell: (r) => {
         if (!r.profileId) return <span className="text-xs text-muted-foreground">—</span>;
 
-        const role = compositionRoleByRunId.get(r._id);
         const profileLabel = profileNameById.get(r.profileId) ?? formatId(r.profileId);
 
         return (
@@ -1034,16 +1034,6 @@ export function RunsList() {
               </TooltipTrigger>
               <TooltipContent className="text-xs">{profileLabel}</TooltipContent>
             </Tooltip>
-            {role?.kind === "base" && (
-              <Badge variant="default" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
-                Base
-              </Badge>
-            )}
-            {role?.kind === "variation" && (
-              <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
-                Var {role.variationNumber ?? "?"}
-              </Badge>
-            )}
           </div>
         );
       },
@@ -1259,6 +1249,30 @@ export function RunsList() {
     },
   ];
 
+  // Apply persisted column order. The `id` column is pinned to the left
+  // (sticky) and `actions` is pinned to the right; everything in between is
+  // sorted by the order from `useColumnOrder`. Unknown ids land at the end of
+  // their bucket, which is harmless because the order hook reconciles new ids
+  // into the persisted list automatically.
+  const orderedColumns: DataTableColumn<Run>[] = (() => {
+    const orderIndex = new Map<string, number>();
+    columnOrder.order.forEach((id, idx) => orderIndex.set(id, idx));
+    const idCol = columns.find((c) => c.id === "id");
+    const actionsCol = columns.find((c) => c.id === "actions");
+    const middle = columns
+      .filter((c) => c.id !== "id" && c.id !== "actions")
+      .sort((a, b) => {
+        const ai = orderIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+        const bi = orderIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+        return ai - bi;
+      });
+    return [
+      ...(idCol ? [idCol] : []),
+      ...middle,
+      ...(actionsCol ? [actionsCol] : []),
+    ];
+  })();
+
   return (
     <TooltipProvider delayDuration={200}>
     <ListLayout
@@ -1398,12 +1412,17 @@ export function RunsList() {
       secondaryPanel={
         customizeOpen ? (
           <CustomizeColumnsPanel
-            columns={columnOptions}
+            columns={COLUMN_OPTIONS}
             hidden={columnVisibility.hidden}
             onToggle={columnVisibility.toggle}
             onSetHidden={columnVisibility.setHidden}
-            onReset={columnVisibility.reset}
+            onReset={() => {
+              columnVisibility.reset();
+              columnOrder.reset();
+            }}
             onClose={() => setCustomizeOpen(false)}
+            order={columnOrder.order}
+            onReorder={columnOrder.setOrder}
           />
         ) : null
       }
@@ -1480,7 +1499,7 @@ export function RunsList() {
         {groupBy === "none" ? (
           <DataTable
             items={sortedRuns}
-            columns={columns}
+            columns={orderedColumns}
             getRowId={(r) => r._id}
             activeId={activeId}
             onRowClick={(r) => navigate({ pathname: `/runs/${r._id}/preview`, search: window.location.search })}
@@ -1503,7 +1522,7 @@ export function RunsList() {
           <div className="space-y-4">
             <DataTable
               items={groupedTableItems}
-              columns={columns}
+              columns={orderedColumns}
               getRowId={(r) => r._id}
               activeId={activeId}
               onRowClick={(r) => navigate({ pathname: `/runs/${r._id}/preview`, search: window.location.search })}
@@ -1545,12 +1564,18 @@ export function RunsList() {
                   }
                   if (column.id === "status") {
                     const doneCount = runs.filter((r) => r.run?.status === "done").length;
+                    // A run is considered "failed" at the status level when it
+                    // reached the terminal `done` state with a non-succeeded outcome.
+                    const failedAtStatus = runs.filter(
+                      (r) => r.run?.status === "done" && r.run?.outcome === "failed",
+                    ).length;
                     return (
                       <AggregateProgress
-                        count={doneCount}
+                        count={doneCount - failedAtStatus}
+                        failedCount={failedAtStatus}
                         total={total}
                         label="done"
-                        tone="success"
+                        tone={failedAtStatus > 0 && doneCount === failedAtStatus ? "destructive" : "success"}
                       />
                     );
                   }
@@ -1560,6 +1585,7 @@ export function RunsList() {
                     return (
                       <AggregateProgress
                         count={passCount}
+                        failedCount={failedCount}
                         total={total}
                         label="pass"
                         tone={failedCount > 0 && passCount === 0 ? "destructive" : "success"}
@@ -1591,19 +1617,6 @@ export function RunsList() {
                       groupKey !== "(No Profile)"
                         ? (profileNameById.get(groupKey) ?? formatId(groupKey))
                         : "—";
-                    const hasBaseRole = runs.some(
-                      (run) => compositionRoleByRunId.get(run._id)?.kind === "base",
-                    );
-                    const variationNumbers = Array.from(
-                      new Set(
-                        runs
-                          .map((run) => {
-                            const role = compositionRoleByRunId.get(run._id);
-                            return role?.kind === "variation" ? role.variationNumber : undefined;
-                          })
-                          .filter((n): n is number => typeof n === "number"),
-                      ),
-                    ).sort((a, b) => a - b);
                     return (
                       <div className="flex min-w-0 items-center gap-1.5">
                         <Tooltip>
@@ -1614,26 +1627,221 @@ export function RunsList() {
                           </TooltipTrigger>
                           <TooltipContent className="text-xs">{profileLabel}</TooltipContent>
                         </Tooltip>
-                        {hasBaseRole && (
-                          <Badge variant="default" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
-                            Base
-                          </Badge>
-                        )}
-                        {variationNumbers.map((variationNumber) => (
-                          <Badge
-                            key={`var-${variationNumber}`}
-                            variant="secondary"
-                            className="h-5 px-1.5 text-[10px] uppercase tracking-wide"
-                          >
-                            Var {variationNumber}
-                          </Badge>
-                        ))}
                       </div>
                     );
                   }
-                  // Default: render the first run's cell (most columns are constant
-                  // across grouped runs — e.g. submission/task share when grouped by
-                  // submissionId; worker/version/profile share when grouped by profile).
+
+                  // Distinct-value aggregate: for identifier/categorical columns,
+                  // render the single shared value via the row cell when uniform;
+                  // otherwise show "N distinct" with a tooltip listing the values.
+                  const distinct = (
+                    label: string,
+                    getKey: (r: Run) => string | null | undefined,
+                    renderSingle?: (r: Run) => ReactNode,
+                  ): ReactNode => {
+                    const values = Array.from(
+                      new Set(
+                        runs
+                          .map(getKey)
+                          .filter((v): v is string => v != null && v !== ""),
+                      ),
+                    );
+                    if (values.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                    if (values.length === 1) {
+                      const first = runs.find((r) => getKey(r) === values[0]) ?? runs[0];
+                      return renderSingle ? renderSingle(first) : column.cell(first);
+                    }
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="text-xs font-medium text-muted-foreground cursor-default">
+                            {values.length} {label}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="text-xs max-w-xs">
+                          <div className="flex flex-col gap-0.5 font-mono">
+                            {values.slice(0, 10).map((v) => (
+                              <span key={v}>{v}</span>
+                            ))}
+                            {values.length > 10 && <span>… +{values.length - 10} more</span>}
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  };
+
+                  // Union aggregate: merge all unique items across runs into a single
+                  // representation rendered through the first run's cell. We swap the
+                  // run's value with the union so the existing badges/links keep working.
+                  const numericSum = (getN: (r: Run) => number | null | undefined): ReactNode => {
+                    const values = runs.map(getN).filter((n): n is number => n != null);
+                    if (values.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                    const sum = values.reduce((a, b) => a + b, 0);
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="font-mono text-xs cursor-default">{sum.toLocaleString()}</span>
+                        </TooltipTrigger>
+                        <TooltipContent className="text-xs">
+                          Σ across {values.length} run{values.length !== 1 ? "s" : ""}
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  };
+
+                  switch (column.id) {
+                    case "submission":
+                      return distinct("submissions", (r) => r.submissionId);
+                    case "task":
+                      return distinct("tasks", (r) => r.scenario?.task);
+                    case "worker":
+                      return distinct("workers", (r) => r.workerType);
+                    case "version":
+                      return distinct("versions", (r) => r.agentVersion);
+                    case "model":
+                      return distinct("models", (r) => r.model);
+
+                    case "criteria": {
+                      const union = Array.from(
+                        new Set(runs.flatMap((r) => r.scenario?.criteria ?? [])),
+                      );
+                      if (union.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                      const synthetic = { ...runs[0], scenario: { ...runs[0].scenario, criteria: union } } as Run;
+                      return column.cell(synthetic);
+                    }
+                    case "mcp": {
+                      const union = Array.from(
+                        new Set(runs.flatMap((r) => r.mcpServers ?? [])),
+                      );
+                      if (union.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                      const synthetic = { ...runs[0], mcpServers: union } as Run;
+                      return column.cell(synthetic);
+                    }
+                    case "skills": {
+                      const union = Array.from(
+                        new Set(runs.flatMap((r) => (r.skillRevisions ?? r.skills ?? []) as string[])),
+                      );
+                      if (union.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                      const synthetic = { ...runs[0], skillRevisions: union, skills: union } as Run;
+                      return column.cell(synthetic);
+                    }
+                    case "extensions": {
+                      const union = Array.from(
+                        new Set(runs.flatMap((r) => r.extensions ?? [])),
+                      );
+                      if (union.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                      const synthetic = { ...runs[0], extensions: union } as Run;
+                      return column.cell(synthetic);
+                    }
+
+                    case "priority": {
+                      const values = runs
+                        .map((r) => r.priority)
+                        .filter((p): p is number => p != null);
+                      if (values.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                      const min = Math.min(...values);
+                      const max = Math.max(...values);
+                      return (
+                        <span className="font-mono text-xs">
+                          {min === max ? min : `${min}–${max}`}
+                        </span>
+                      );
+                    }
+
+                    case "attempt": {
+                      const values = runs
+                        .map((r) => r.run?.attemptNumber)
+                        .filter((n): n is number => n != null);
+                      if (values.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                      return (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="font-mono text-xs cursor-default">#{Math.max(...values)}</span>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs">max attempt across group</TooltipContent>
+                        </Tooltip>
+                      );
+                    }
+
+                    case "turns":
+                      return numericSum((r) => r.run?.turns?.length);
+                    case "llmCalls":
+                      return numericSum((r) => r.run?.aiCallCount);
+                    case "tokens":
+                      return numericSum((r) => r.run?.tokenUsage?.totalTokens);
+
+                    case "duration": {
+                      const durations = runs
+                        .map((r) => {
+                          const s = r.run?.startedAt;
+                          const e = r.run?.finishedAt;
+                          if (!s || !e) return null;
+                          return new Date(e).getTime() - new Date(s).getTime();
+                        })
+                        .filter((n): n is number => n != null && n >= 0);
+                      if (durations.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                      const sum = durations.reduce((a, b) => a + b, 0);
+                      return (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="font-mono text-xs cursor-default">{formatDuration(sum)}</span>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs">
+                            Σ across {durations.length} run{durations.length !== 1 ? "s" : ""}
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    }
+
+                    case "created": {
+                      const times = runs.map((r) => new Date(r.createdAt).getTime()).filter((n) => !Number.isNaN(n));
+                      if (times.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                      const earliest = new Date(Math.min(...times)).toISOString();
+                      const latest = new Date(Math.max(...times)).toISOString();
+                      return (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="text-xs text-muted-foreground cursor-default">{formatDate(earliest)}</span>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs">
+                            <div>earliest: {formatDate(earliest)}</div>
+                            <div>latest: {formatDate(latest)}</div>
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    }
+
+                    case "report": {
+                      if (!reportSummary) return <span className="text-xs text-muted-foreground">—</span>;
+                      const totals = runs.reduce(
+                        (acc, r) => {
+                          const s = reportSummary[r._id];
+                          if (!s) return acc;
+                          acc.failed += s.failed;
+                          acc.generating += s.generating;
+                          acc.pending += s.pending;
+                          acc.completed += s.completed;
+                          acc.total += s.total;
+                          return acc;
+                        },
+                        { failed: 0, generating: 0, pending: 0, completed: 0, total: 0 },
+                      );
+                      if (totals.total === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                      if (totals.failed > 0)
+                        return <Badge variant="destructive" className="text-xs">{totals.failed} failed</Badge>;
+                      if (totals.generating > 0)
+                        return <Badge variant="secondary" className="text-xs">generating</Badge>;
+                      if (totals.pending > 0)
+                        return <Badge variant="outline" className="text-xs">{totals.pending} pending</Badge>;
+                      if (totals.completed > 0)
+                        return <Badge variant="default" className="text-xs">{totals.completed} done</Badge>;
+                      return <span className="text-xs text-muted-foreground">—</span>;
+                    }
+                  }
+
+                  // Default: render the first run's cell (works when the column
+                  // value is uniform across the group, e.g. submission/task when
+                  // grouped by submissionId, or profile when grouped by profile).
                   return runs[0] ? column.cell(runs[0]) : null;
                 },
                 renderGroupHeader: (groupKey, runs, expanded) => {
@@ -1642,20 +1850,6 @@ export function RunsList() {
                     groupBy === "profile" && groupKey !== "(No Profile)"
                       ? (profileNameById.get(groupKey) ?? formatId(groupKey))
                       : groupKey;
-                  const hasBaseRole = groupBy === "profile" && runs.some((run) => compositionRoleByRunId.get(run._id)?.kind === "base");
-                  const variationNumbers =
-                    groupBy === "profile"
-                      ? Array.from(
-                          new Set(
-                            runs
-                              .map((run) => {
-                                const role = compositionRoleByRunId.get(run._id);
-                                return role?.kind === "variation" ? role.variationNumber : undefined;
-                              })
-                              .filter((n): n is number => typeof n === "number"),
-                          ),
-                        ).sort((a, b) => a - b)
-                      : [];
                   return (
                     <button
                       type="button"
@@ -1672,16 +1866,6 @@ export function RunsList() {
                         <span className="min-w-0 truncate font-semibold">
                           <span className="text-muted-foreground">{groupLabel}:</span> {groupDisplayKey}
                         </span>
-                        {hasBaseRole && (
-                          <Badge variant="default" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
-                            Base
-                          </Badge>
-                        )}
-                        {variationNumbers.map((variationNumber) => (
-                          <Badge key={`var-${variationNumber}`} variant="secondary" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
-                            Var {variationNumber}
-                          </Badge>
-                        ))}
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
                         <span className="text-xs text-muted-foreground font-normal">

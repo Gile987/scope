@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { X } from "lucide-react";
+import { useState } from "react";
+import { GripVertical, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -11,12 +12,15 @@ export interface CustomizeColumnsOption {
   id: string;
   /** Human-readable label shown in the panel. */
   label: string;
-  /** When true, the column cannot be hidden (e.g. the primary identifier). */
+  /**
+   * When true, the column cannot be hidden (e.g. the primary identifier).
+   * Required columns are also locked from reordering when DnD is enabled.
+   */
   required?: boolean;
 }
 
 export interface CustomizeColumnsPanelProps {
-  /** All toggleable columns, in the order they appear in the table. */
+  /** All toggleable columns, in their natural order. */
   columns: readonly CustomizeColumnsOption[];
   /** Currently hidden column ids. */
   hidden: ReadonlySet<string>;
@@ -34,17 +38,55 @@ export interface CustomizeColumnsPanelProps {
   /** Panel width (default 260px). */
   width?: string;
   className?: string;
+
+  /**
+   * Optional persisted column order. When both `order` and `onReorder` are
+   * provided, the list renders in the given order and each non-required
+   * column shows a drag handle. Required columns stay locked at their
+   * natural index.
+   */
+  order?: readonly string[];
+  /** Commit a new order — non-required ids only; required ones are merged back. */
+  onReorder?: (next: string[]) => void;
+}
+
+/** Compute the rendered order respecting required-column locks. */
+function buildDisplayOrder(
+  columns: readonly CustomizeColumnsOption[],
+  order: readonly string[] | undefined,
+): CustomizeColumnsOption[] {
+  if (!order) return [...columns];
+  const byId = new Map(columns.map((c) => [c.id, c]));
+  const required = columns.filter((c) => c.required);
+  const requiredIds = new Set(required.map((c) => c.id));
+
+  // 1. Start from user-supplied order, filtered to non-required known ids.
+  const userOrdered = order
+    .map((id) => byId.get(id))
+    .filter((c): c is CustomizeColumnsOption => !!c && !requiredIds.has(c.id));
+
+  // 2. Append any toggleable columns missing from `order` (defensive — should
+  // not happen after `useColumnOrder` reconciles, but guards against bad input).
+  for (const c of columns) {
+    if (c.required) continue;
+    if (!userOrdered.some((x) => x.id === c.id)) userOrdered.push(c);
+  }
+
+  // 3. Splice required columns back at their natural index.
+  const result: CustomizeColumnsOption[] = [...userOrdered];
+  for (const req of required) {
+    const naturalIndex = columns.indexOf(req);
+    result.splice(Math.min(naturalIndex, result.length), 0, req);
+  }
+  return result;
 }
 
 /**
- * Slide-in panel for customizing which DataTable columns are visible.
+ * Slide-in panel for customizing which DataTable columns are visible (and,
+ * when DnD is enabled, in what order they appear).
  *
- * Designed to render as a third column inside `ListLayout` (between the filter
- * rail and the main listing) — the parent controls visibility by passing the
- * panel to `ListLayout.secondaryPanel`.
- *
- * Toggles apply live: every checkbox change calls back to the parent so the
- * underlying table updates immediately. **Restore** resets to defaults.
+ * Toggles apply live; reorders are committed on drop. Required columns are
+ * locked from reordering and their checkbox is disabled.
  */
 export function CustomizeColumnsPanel({
   columns,
@@ -55,7 +97,12 @@ export function CustomizeColumnsPanel({
   onClose,
   width = "260px",
   className,
+  order,
+  onReorder,
 }: CustomizeColumnsPanelProps) {
+  const reorderEnabled = !!order && !!onReorder;
+  const displayedColumns = buildDisplayOrder(columns, reorderEnabled ? order : undefined);
+
   const toggleable = columns.filter((c) => !c.required);
   const allVisible = toggleable.every((c) => !hidden.has(c.id));
   const someVisible = toggleable.some((c) => !hidden.has(c.id)) && !allVisible;
@@ -68,6 +115,78 @@ export function CustomizeColumnsPanel({
       for (const c of toggleable) next.delete(c.id);
     }
     onSetHidden(next);
+  };
+
+  // Drag state. `draggingId` is the id being dragged; `dropTargetId` is the
+  // id whose row currently shows the insertion indicator. `dropAtEnd` is true
+  // when the indicator should render below the last row.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [dropAtEnd, setDropAtEnd] = useState(false);
+
+  const clearDragState = () => {
+    setDraggingId(null);
+    setDropTargetId(null);
+    setDropAtEnd(false);
+  };
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    setDraggingId(id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", id);
+  };
+
+  const handleDragOverRow = (e: React.DragEvent, targetId: string) => {
+    if (!draggingId || draggingId === targetId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropTargetId(targetId);
+    setDropAtEnd(false);
+  };
+
+  const handleDragOverEndZone = (e: React.DragEvent) => {
+    if (!draggingId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropTargetId(null);
+    setDropAtEnd(true);
+  };
+
+  const commitDrop = (targetId: string | null, atEnd: boolean) => {
+    if (!draggingId || !reorderEnabled) {
+      clearDragState();
+      return;
+    }
+    // Build the next non-required order from the currently displayed columns.
+    const nonRequiredOrder = displayedColumns.filter((c) => !c.required).map((c) => c.id);
+    const fromIndex = nonRequiredOrder.indexOf(draggingId);
+    if (fromIndex < 0) {
+      clearDragState();
+      return;
+    }
+    nonRequiredOrder.splice(fromIndex, 1);
+    let toIndex: number;
+    if (atEnd) {
+      toIndex = nonRequiredOrder.length;
+    } else if (targetId == null) {
+      toIndex = nonRequiredOrder.length;
+    } else {
+      const idx = nonRequiredOrder.indexOf(targetId);
+      toIndex = idx < 0 ? nonRequiredOrder.length : idx;
+    }
+    nonRequiredOrder.splice(toIndex, 0, draggingId);
+    onReorder?.(nonRequiredOrder);
+    clearDragState();
+  };
+
+  const handleDropOnRow = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    commitDrop(targetId, false);
+  };
+
+  const handleDropOnEndZone = (e: React.DragEvent) => {
+    e.preventDefault();
+    commitDrop(null, true);
   };
 
   return (
@@ -104,30 +223,68 @@ export function CustomizeColumnsPanel({
 
         <div className="my-1 h-px bg-border/60" />
 
-        <ul className="space-y-0.5">
-          {columns.map((col) => {
+        <ul className="space-y-0.5" onDragEnd={clearDragState}>
+          {displayedColumns.map((col) => {
             const visible = !hidden.has(col.id);
+            const draggable = reorderEnabled && !col.required;
+            const isDragging = draggingId === col.id;
+            const showIndicator = reorderEnabled && dropTargetId === col.id && !dropAtEnd;
             return (
-              <li key={col.id}>
+              <li
+                key={col.id}
+                onDragOver={draggable ? (e) => handleDragOverRow(e, col.id) : undefined}
+                onDrop={draggable ? (e) => handleDropOnRow(e, col.id) : undefined}
+                className={cn(
+                  "rounded transition-colors",
+                  showIndicator && "border-t-2 border-primary",
+                  isDragging && "opacity-50",
+                )}
+              >
                 <label
                   className={cn(
-                    "flex items-center gap-2 rounded px-1.5 py-1.5 text-sm",
+                    "flex items-center gap-1 rounded px-1.5 py-1.5 text-sm",
                     col.required
-                      ? "cursor-not-allowed opacity-60"
+                      ? "cursor-not-allowed"
                       : "cursor-pointer hover:bg-accent/50",
                   )}
                 >
+                  {reorderEnabled && (
+                    <span
+                      draggable={draggable}
+                      onDragStart={draggable ? (e) => handleDragStart(e, col.id) : undefined}
+                      className={cn(
+                        "flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground",
+                        draggable ? "cursor-grab active:cursor-grabbing" : "opacity-30",
+                      )}
+                      aria-label={draggable ? `Drag to reorder ${col.label}` : `${col.label} is locked`}
+                      title={draggable ? "Drag to reorder" : "Locked"}
+                    >
+                      <GripVertical className="h-3.5 w-3.5" aria-hidden />
+                    </span>
+                  )}
                   <Checkbox
                     checked={visible}
                     disabled={col.required}
                     onCheckedChange={() => onToggle(col.id)}
                     aria-label={visible ? `Hide ${col.label}` : `Show ${col.label}`}
                   />
-                  <span>{col.label}</span>
+                  <span className={cn(col.required && "opacity-60")}>{col.label}</span>
                 </label>
               </li>
             );
           })}
+
+          {reorderEnabled && (
+            <li
+              onDragOver={handleDragOverEndZone}
+              onDrop={handleDropOnEndZone}
+              className={cn(
+                "h-2 rounded transition-colors",
+                dropAtEnd && "border-t-2 border-primary",
+              )}
+              aria-hidden
+            />
+          )}
         </ul>
       </div>
 

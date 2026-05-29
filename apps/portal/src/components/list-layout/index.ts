@@ -33,6 +33,8 @@ export type {
   UseHiddenColumnsOptions,
   HiddenColumnsState,
 } from "./useHiddenColumns";
+export { useColumnOrder } from "./useColumnOrder";
+export type { UseColumnOrderOptions, ColumnOrderState } from "./useColumnOrder";
 export { useListUrlState } from "./useListUrlState";
 export type { ListUrlState, SortDir, UseListUrlStateOptions } from "./useListUrlState";
 export { useSortableFilterSections } from "./useSortableFilterSections";

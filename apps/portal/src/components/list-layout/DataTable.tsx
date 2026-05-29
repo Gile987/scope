@@ -469,7 +469,7 @@ export function DataTable<T>({
                     <TableRow
                       key={`group-${section.key}`}
                       className={cn(
-                        "bg-muted/20 hover:bg-muted/30",
+                        "bg-muted hover:bg-muted/80",
                         useCells && "cursor-pointer",
                       )}
                       onClick={
@@ -485,7 +485,7 @@ export function DataTable<T>({
                             <TableCell
                               className={cn(
                                 rowPadY,
-                                "text-center sticky left-0 z-20 bg-muted/20 shadow-sm",
+                                "text-center sticky left-0 z-20 bg-muted shadow-sm",
                               )}
                               style={{ left: "0px" }}
                               onClick={(e) => e.stopPropagation()}
@@ -500,9 +500,9 @@ export function DataTable<T>({
                                   : "";
                             const stickyCellClass =
                               col.sticky === "left"
-                                ? "sticky z-10 bg-muted/20 border-r shadow-sm"
+                                ? "sticky z-10 bg-muted border-r shadow-sm"
                                 : col.sticky === "right"
-                                  ? "sticky z-10 bg-muted/20 border-l shadow-sm"
+                                  ? "sticky z-10 bg-muted border-l shadow-sm"
                                   : "";
                             const stickyCellStyle =
                               col.sticky === "left"
