@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect, useCallback, type Key, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
-import { Plus, Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow } from "lucide-react";
+import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow } from "lucide-react";
 import { FaLinux } from "react-icons/fa";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -203,6 +203,53 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "created", label: "Created" },
 ];
 const COLUMN_IDS = COLUMN_OPTIONS.map((o) => o.id);
+
+// Segmented toggle used in the list header for the Group By control. Kept
+// inline because it is only used here.
+const GROUP_BY_OPTIONS: ReadonlyArray<{ value: "none" | "profile" | "task" | "submissionId"; label: string }> = [
+  { value: "none", label: "None" },
+  { value: "profile", label: "Profile" },
+  { value: "task", label: "Task" },
+  { value: "submissionId", label: "Submission" },
+];
+
+function GroupByToggle({
+  value,
+  onChange,
+}: {
+  value: "none" | "profile" | "task" | "submissionId";
+  onChange: (next: "none" | "profile" | "task" | "submissionId") => void;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Aggregate runs by"
+      className="hidden sm:inline-flex h-8 items-center rounded-md border border-border/60 bg-card p-0.5"
+    >
+      <span className="px-2 text-xs font-medium text-muted-foreground">Aggregate by</span>
+      {GROUP_BY_OPTIONS.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(opt.value)}
+            className={
+              "h-7 rounded-sm px-2.5 text-xs font-medium transition-colors " +
+              (active
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground")
+            }
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function RunsList() {
   const navigate = useNavigate();
@@ -1284,11 +1331,10 @@ export function RunsList() {
       }
       railStorageKey="runs"
       actions={
-        <Link to="/runs/new">
-          <Button size="sm" className="gap-1.5">
-            <Plus className="h-4 w-4" /> New Run
-          </Button>
-        </Link>
+        <GroupByToggle
+          value={groupBy}
+          onChange={(next) => state.setFilter("groupBy", next === "none" ? null : next)}
+        />
       }
       filterRail={
         <FilterRail
@@ -1381,28 +1427,6 @@ export function RunsList() {
               />
             </FilterSection>
           )}
-          <FilterSection title="Group By" storageKey="runs-groupby" defaultOpen={false} sortableId="groupby">
-            <div className="space-y-2 px-3 py-2">
-              {[
-                { value: "none", label: "None" },
-                { value: "profile", label: "Profile" },
-                { value: "task", label: "Task" },
-                { value: "submissionId", label: "Submission ID" },
-              ].map((opt) => (
-                <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="groupBy"
-                    value={opt.value}
-                    checked={groupBy === opt.value}
-                    onChange={(e) => state.setFilter("groupBy", e.target.value)}
-                    className="h-4 w-4 rounded border-gray-300"
-                  />
-                  <span className="text-sm">{opt.label}</span>
-                </label>
-              ))}
-            </div>
-          </FilterSection>
         </FilterRail>
       }
       detail={detailOutlet}
@@ -1489,12 +1513,6 @@ export function RunsList() {
             <Trash2 className="h-3.5 w-3.5" /> Delete
           </Button>
         </BulkActionBar>
-
-        {groupBy !== "none" && (
-          <div className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
-            <span>Grouped by: <span className="font-medium text-foreground capitalize">{groupBy === "submissionId" ? "Submission ID" : groupBy}</span></span>
-          </div>
-        )}
 
         {groupBy === "none" ? (
           <DataTable
