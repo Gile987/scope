@@ -184,6 +184,7 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "task", label: "Task" },
   { id: "criteria", label: "Criteria" },
   { id: "worker", label: "Worker" },
+  { id: "model", label: "Model" },
   { id: "version", label: "Version" },
   { id: "os", label: "OS" },
   { id: "mcp", label: "MCP" },
@@ -191,7 +192,6 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "extensions", label: "Extensions" },
   { id: "profile", label: "Profile" },
   { id: "priority", label: "Priority" },
-  { id: "model", label: "Model" },
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
   { id: "report", label: "Report" },
@@ -272,12 +272,12 @@ export function RunsList() {
   // an older preference stored under the unversioned key.
   // Default visible: ID, Submission, Task, Criteria, Worker, Version, OS, MCP,
   // Skills, Extensions, Profile, Priority, Status, Outcome.
-  // Hidden by default (opt-in via Customize columns): Model, Report, Attempt,
-  // Turns, LLM Calls, Duration, Tokens, Created.
+  // Hidden by default (opt-in via Customize columns): Report, Attempt,
+  // Turns, LLM Calls, Duration, Tokens, Created. Model is shown next to
+  // Worker so users can see what model each run used at a glance.
   const columnVisibility = useHiddenColumns({
     storageKey: "runs:v2",
     defaultHidden: [
-      "model",
       "report",
       "attempt",
       "turns",
