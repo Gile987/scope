@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { type ReactNode, type Key, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, type Key, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   TableBody,
@@ -65,6 +65,13 @@ export interface DataTableSelection<T> {
   isDisabled?: (item: T) => boolean;
 }
 
+export interface DataTableGrouping<T> {
+  getGroupKey: (item: T) => string;
+  renderGroupHeader: (groupKey: string, items: readonly T[], expanded: boolean) => ReactNode;
+  expandedGroupKeys: ReadonlySet<string>;
+  onToggleGroup: (groupKey: string) => void;
+}
+
 export interface DataTableProps<T> {
   items: readonly T[];
   columns: readonly DataTableColumn<T>[];
@@ -76,6 +83,8 @@ export interface DataTableProps<T> {
   onRowClick?: (item: T) => void;
   /** Multi-selection support — renders a leading checkbox column. */
   selection?: DataTableSelection<T>;
+  /** Optional inline grouping rendered inside the same table/card list. */
+  grouping?: DataTableGrouping<T>;
   /** Current sort column. */
   sort?: string | null;
   sortDir?: SortDir;
@@ -99,6 +108,7 @@ export function DataTable<T>({
   activeId,
   onRowClick,
   selection,
+  grouping,
   sort,
   sortDir = "asc",
   onSortChange,
@@ -128,6 +138,20 @@ export function DataTable<T>({
 
   const visibleColumns = columns.filter((c) => !c.hidden);
   const rowPadY = density === "compact" ? "py-1.5" : "py-3";
+  const groupedSections = grouping
+    ? items.reduce<Array<{ key: string; items: T[] }>>((sections, item) => {
+        const key = grouping.getGroupKey(item);
+        const current = sections[sections.length - 1];
+        if (current?.key === key) current.items.push(item);
+        else sections.push({ key, items: [item] });
+        return sections;
+      }, [])
+    : [];
+  const visibleItems = grouping
+    ? groupedSections.flatMap((section) =>
+        grouping.expandedGroupKeys.has(section.key) ? section.items : [],
+      )
+    : items;
 
   useEffect(() => {
     const el = tableScrollRef.current;
@@ -151,7 +175,7 @@ export function DataTable<T>({
   }, [updateTableScrollIndicators, visibleColumns.length, items.length, selection]);
 
   const selectableItems = selection
-    ? items.filter((it) => !(selection.isDisabled?.(it) ?? false))
+    ? visibleItems.filter((it) => !(selection.isDisabled?.(it) ?? false))
     : [];
   const selectableIds = selectableItems.map((it) => getRowId(it));
   const selectedVisibleCount = selectableIds.filter((id) => selection?.selectedIds.has(id)).length;
@@ -165,6 +189,157 @@ export function DataTable<T>({
   const cardColumns = visibleColumns.filter((c) => !c.hiddenOnCard);
   const primaryColumn = cardColumns[0];
   const metaColumns = cardColumns.slice(1);
+
+  const renderDataRow = (item: T) => {
+    const rowId = getRowId(item);
+    const isActive = activeId !== undefined && activeId !== null && rowId === activeId;
+    const isSelected = selection?.selectedIds.has(rowId) ?? false;
+    const isSelectionDisabled = selection?.isDisabled?.(item) ?? false;
+    return (
+      <TableRow
+        key={String(rowId)}
+        data-active={isActive ? "true" : undefined}
+        data-selected={isSelected ? "true" : undefined}
+        className={cn(
+          "group",
+          onRowClick && "cursor-pointer",
+          isActive && "bg-accent/60 hover:bg-accent",
+          isSelected && !isActive && "bg-primary/5 hover:bg-primary/10",
+        )}
+        onClick={onRowClick ? () => onRowClick(item) : undefined}
+      >
+        {selection && (
+          <TableCell
+            className={cn(
+              rowPadY,
+              "text-center sticky left-0 z-20 bg-background shadow-sm group-hover:bg-muted group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent",
+            )}
+            style={{ left: "0px" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Checkbox
+              checked={isSelected}
+              disabled={isSelectionDisabled}
+              onCheckedChange={() => selection.onToggle(rowId, item)}
+              aria-label={isSelected ? "Deselect row" : "Select row"}
+            />
+          </TableCell>
+        )}
+        {visibleColumns.map((col) => {
+          const alignClass =
+            col.align === "right"
+              ? "text-right"
+              : col.align === "center"
+                ? "text-center"
+                : "";
+          const stickyCellClass =
+            col.sticky === "left"
+              ? "sticky z-10 bg-background group-hover:bg-muted border-r shadow-sm group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent"
+              : col.sticky === "right"
+                ? "sticky z-10 bg-background group-hover:bg-muted border-l shadow-sm group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent"
+                : "";
+          const stickyCellStyle =
+            col.sticky === "left"
+              ? { left: col.stickyOffset ?? "0px" }
+              : col.sticky === "right"
+                ? { right: col.stickyOffset ?? "0px" }
+                : undefined;
+          return (
+            <TableCell
+              key={col.id}
+              style={{
+                ...(col.width ? { width: col.width, maxWidth: col.width } : {}),
+                ...(stickyCellStyle ?? {}),
+              }}
+              className={cn(
+                rowPadY,
+                alignClass,
+                "overflow-hidden",
+                col.sticky === "left" && "group-hover:bg-muted group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent",
+                stickyCellClass,
+                col.className,
+              )}
+            >
+              <div className="min-w-0">{col.cell(item)}</div>
+            </TableCell>
+          );
+        })}
+      </TableRow>
+    );
+  };
+
+  const renderCard = (item: T) => {
+    const rowId = getRowId(item);
+    const isActive = activeId !== undefined && activeId !== null && rowId === activeId;
+    const isSelected = selection?.selectedIds.has(rowId) ?? false;
+    const isSelectionDisabled = selection?.isDisabled?.(item) ?? false;
+    return (
+      <div
+        key={String(rowId)}
+        role={onRowClick ? "button" : undefined}
+        tabIndex={onRowClick ? 0 : undefined}
+        onClick={onRowClick ? () => onRowClick(item) : undefined}
+        onKeyDown={
+          onRowClick
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onRowClick(item);
+                }
+              }
+            : undefined
+        }
+        data-active={isActive ? "true" : undefined}
+        data-selected={isSelected ? "true" : undefined}
+        className={cn(
+          "group rounded-md border bg-card p-3 transition-colors",
+          onRowClick && "cursor-pointer hover:bg-accent/40",
+          isActive && "border-primary/60 bg-accent/60",
+          isSelected && !isActive && "border-primary/40 bg-primary/5",
+        )}
+      >
+        <div className="flex items-start gap-2">
+          {selection && (
+            <div className="pt-0.5" onClick={(e) => e.stopPropagation()}>
+              <Checkbox
+                checked={isSelected}
+                disabled={isSelectionDisabled}
+                onCheckedChange={() => selection.onToggle(rowId, item)}
+                aria-label={isSelected ? "Deselect item" : "Select item"}
+              />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            {primaryColumn && (
+              <div className="text-sm font-medium leading-tight">
+                {primaryColumn.cell(item)}
+              </div>
+            )}
+            {metaColumns.length > 0 && (
+              <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                {metaColumns.map((col) => {
+                  const label =
+                    col.cardLabel ??
+                    (typeof col.header === "string" ? col.header : col.id);
+                  return (
+                    <div key={col.id} className="contents">
+                      <dt className="truncate text-muted-foreground">{label}</dt>
+                      <dd className="min-w-0 break-words text-foreground">
+                        {col.cell(item)}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            )}
+          </div>
+          {onRowClick && (
+            <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className={cn(className)}>
@@ -273,83 +448,23 @@ export function DataTable<T>({
               </TableCell>
             </TableRow>
           ) : (
-            items.map((item) => {
-              const rowId = getRowId(item);
-              const isActive = activeId !== undefined && activeId !== null && rowId === activeId;
-              const isSelected = selection?.selectedIds.has(rowId) ?? false;
-              const isSelectionDisabled = selection?.isDisabled?.(item) ?? false;
-              return (
-                <TableRow
-                  key={rowId}
-                  data-active={isActive ? "true" : undefined}
-                  data-selected={isSelected ? "true" : undefined}
-                  className={cn(
-                    "group",
-                    onRowClick && "cursor-pointer",
-                    isActive && "bg-accent/60 hover:bg-accent",
-                    isSelected && !isActive && "bg-primary/5 hover:bg-primary/10",
-                  )}
-                  onClick={onRowClick ? () => onRowClick(item) : undefined}
-                >
-                  {selection && (
-                    <TableCell
-                      className={cn(
-                        rowPadY,
-                        "text-center sticky left-0 z-20 bg-background shadow-sm group-hover:bg-muted group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent",
-                      )}
-                      style={{ left: "0px" }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Checkbox
-                        checked={isSelected}
-                        disabled={isSelectionDisabled}
-                        onCheckedChange={() => selection.onToggle(rowId, item)}
-                        aria-label={isSelected ? "Deselect row" : "Select row"}
-                      />
-                    </TableCell>
-                  )}
-                  {visibleColumns.map((col) => {
-                    const alignClass =
-                      col.align === "right"
-                        ? "text-right"
-                        : col.align === "center"
-                          ? "text-center"
-                          : "";
-                    const stickyCellClass =
-                      col.sticky === "left"
-                        ? "sticky z-10 bg-background group-hover:bg-muted border-r shadow-sm group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent"
-                        : col.sticky === "right"
-                          ? "sticky z-10 bg-background group-hover:bg-muted border-l shadow-sm group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent"
-                          : "";
-                    const stickyCellStyle =
-                      col.sticky === "left"
-                        ? { left: col.stickyOffset ?? "0px" }
-                        : col.sticky === "right"
-                          ? { right: col.stickyOffset ?? "0px" }
-                          : undefined;
-                    return (
-                      <TableCell
-                        key={col.id}
-                        style={{
-                          ...(col.width ? { width: col.width, maxWidth: col.width } : {}),
-                          ...(stickyCellStyle ?? {}),
-                        }}
-                        className={cn(
-                          rowPadY,
-                          alignClass,
-                          "overflow-hidden",
-                          col.sticky === "left" && "group-hover:bg-muted group-data-[selected=true]:bg-primary/5 group-data-[active=true]:bg-accent",
-                          stickyCellClass,
-                          col.className,
-                        )}
-                      >
-                        <div className="min-w-0">{col.cell(item)}</div>
+            grouping ? (
+              groupedSections.map((section) => {
+                const expanded = grouping.expandedGroupKeys.has(section.key);
+                return (
+                  <Fragment key={`group-${section.key}`}>
+                    <TableRow key={`group-${section.key}`} className="bg-muted/20 hover:bg-muted/30">
+                      <TableCell colSpan={colSpan} className="p-0">
+                        {grouping.renderGroupHeader(section.key, section.items, expanded)}
                       </TableCell>
-                    );
-                  })}
-                </TableRow>
-              );
-            })
+                    </TableRow>
+                    {expanded ? section.items.map((item) => renderDataRow(item)) : null}
+                  </Fragment>
+                );
+              })
+            ) : (
+              items.map((item) => renderDataRow(item))
+            )
           )}
         </TableBody>
       </table>
@@ -391,81 +506,19 @@ export function DataTable<T>({
             {emptyState ?? "No results"}
           </div>
         ) : (
-          items.map((item) => {
-            const rowId = getRowId(item);
-            const isActive = activeId !== undefined && activeId !== null && rowId === activeId;
-            const isSelected = selection?.selectedIds.has(rowId) ?? false;
-            const isSelectionDisabled = selection?.isDisabled?.(item) ?? false;
-            return (
-              <div
-                key={rowId}
-                role={onRowClick ? "button" : undefined}
-                tabIndex={onRowClick ? 0 : undefined}
-                onClick={onRowClick ? () => onRowClick(item) : undefined}
-                onKeyDown={
-                  onRowClick
-                    ? (e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          onRowClick(item);
-                        }
-                      }
-                    : undefined
-                }
-                data-active={isActive ? "true" : undefined}
-                data-selected={isSelected ? "true" : undefined}
-                className={cn(
-                  "group rounded-md border bg-card p-3 transition-colors",
-                  onRowClick && "cursor-pointer hover:bg-accent/40",
-                  isActive && "border-primary/60 bg-accent/60",
-                  isSelected && !isActive && "border-primary/40 bg-primary/5",
-                )}
-              >
-                <div className="flex items-start gap-2">
-                  {selection && (
-                    <div
-                      className="pt-0.5"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Checkbox
-                        checked={isSelected}
-                        disabled={isSelectionDisabled}
-                        onCheckedChange={() => selection.onToggle(rowId, item)}
-                        aria-label={isSelected ? "Deselect item" : "Select item"}
-                      />
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    {primaryColumn && (
-                      <div className="text-sm font-medium leading-tight">
-                        {primaryColumn.cell(item)}
-                      </div>
-                    )}
-                    {metaColumns.length > 0 && (
-                      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-                        {metaColumns.map((col) => {
-                          const label =
-                            col.cardLabel ??
-                            (typeof col.header === "string" ? col.header : col.id);
-                          return (
-                            <div key={col.id} className="contents">
-                              <dt className="truncate text-muted-foreground">{label}</dt>
-                              <dd className="min-w-0 break-words text-foreground">
-                                {col.cell(item)}
-                              </dd>
-                            </div>
-                          );
-                        })}
-                      </dl>
-                    )}
-                  </div>
-                  {onRowClick && (
-                    <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-                  )}
+          grouping ? (
+            groupedSections.map((section) => {
+              const expanded = grouping.expandedGroupKeys.has(section.key);
+              return (
+                <div key={`group-card-${section.key}`} className="flex flex-col gap-2">
+                  {grouping.renderGroupHeader(section.key, section.items, expanded)}
+                  {expanded ? section.items.map((item) => renderCard(item)) : null}
                 </div>
-              </div>
-            );
-          })
+              );
+            })
+          ) : (
+            items.map((item) => renderCard(item))
+          )
         )}
       </div>
     </div>

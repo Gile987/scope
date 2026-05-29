@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect, useCallback, type Key, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
-import { Plus, Trash2, Repeat, RotateCcw, Pause, Play } from "lucide-react";
+import { Plus, Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -124,6 +124,7 @@ export function RunsList() {
     defaultHidden: [],
   });
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(new Set());
   
   // Get groupBy from URL state
   const groupBy = (state.getFilter("groupBy") ?? "none") as "none" | "profile" | "task" | "submissionId";
@@ -170,6 +171,10 @@ export function RunsList() {
     if (state.page !== 1) state.setPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtersKey]);
+
+  useEffect(() => {
+    setExpandedGroupKeys(new Set());
+  }, [groupBy, filtersKey, state.page]);
 
   const workers = state.getFilterList("worker");
   const statuses = state.getFilterList("status");
@@ -339,6 +344,14 @@ export function RunsList() {
       runs,
     }));
   }, [sortedRuns, groupBy]);
+  const groupedRuns = useMemo(
+    () => (groupBy === "none" ? [] : (groupedAndDisplayedRuns as Array<{ groupKey: string; runs: Run[] }>)),
+    [groupBy, groupedAndDisplayedRuns],
+  );
+  const groupedTableItems = useMemo(
+    () => groupedRuns.flatMap(({ runs }) => runs),
+    [groupedRuns],
+  );
 
   const handlePageChange = useCallback(
     (next: number) => {
@@ -435,6 +448,15 @@ export function RunsList() {
       } else {
         for (const id of stringIds) next.add(id);
       }
+      return next;
+    });
+  }, []);
+
+  const toggleGroupExpansion = useCallback((groupKey: string) => {
+    setExpandedGroupKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
       return next;
     });
   }, []);
@@ -1411,67 +1433,98 @@ export function RunsList() {
           />
         ) : (
           <div className="space-y-4">
-            {(groupedAndDisplayedRuns as Array<{ groupKey: string; runs: Run[] }>).map(({ groupKey, runs }) => {
-              const groupLabel = groupBy === "submissionId" ? "Submission ID" : groupBy === "profile" ? "Profile" : "Task";
-              const groupDisplayKey =
-                groupBy === "profile" && groupKey !== "(No Profile)"
-                  ? (profileNameById.get(groupKey) ?? formatId(groupKey))
-                  : groupKey;
-              const hasBaseRole = groupBy === "profile" && runs.some((run) => compositionRoleByRunId.get(run._id)?.kind === "base");
-              const variationNumbers =
-                groupBy === "profile"
-                  ? Array.from(
-                      new Set(
-                        runs
-                          .map((run) => {
-                            const role = compositionRoleByRunId.get(run._id);
-                            return role?.kind === "variation" ? role.variationNumber : undefined;
-                          })
-                          .filter((n): n is number => typeof n === "number"),
-                      ),
-                    ).sort((a, b) => a - b)
-                  : [];
-              return (
-              <div key={groupKey} className="rounded-lg border border-border/50 overflow-hidden">
-                <div className="bg-muted/30 px-4 py-3 font-semibold text-sm flex items-center justify-between">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="min-w-0 truncate">
-                      <span className="text-muted-foreground">{groupLabel}:</span> {groupDisplayKey}
-                    </span>
-                    {hasBaseRole && (
-                      <Badge variant="default" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
-                        Base
-                      </Badge>
-                    )}
-                    {variationNumbers.map((variationNumber) => (
-                      <Badge key={`var-${variationNumber}`} variant="secondary" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
-                        Var {variationNumber}
-                      </Badge>
-                    ))}
-                  </div>
-                  <span className="text-xs text-muted-foreground font-normal">{runs.length} run{runs.length !== 1 ? "s" : ""}</span>
-                </div>
-                <DataTable
-                  items={runs}
-                  columns={columns}
-                  getRowId={(r) => r._id}
-                  activeId={activeId}
-                  onRowClick={(r) => navigate({ pathname: `/runs/${r._id}/preview`, search: window.location.search })}
-                  selection={{
-                    selectedIds,
-                    onToggle: (id) => toggleRowSelection(id),
-                    onToggleAll: (ids) => toggleAllSelection(ids),
-                  }}
-                  sort={state.sort}
-                  sortDir={state.sortDir}
-                  onSortChange={state.toggleSort}
-                  loading={isLoading}
-                  emptyState=""
-                />
-              </div>
-            );
-            })}
-            {(groupedAndDisplayedRuns as Array<{ groupKey: string; runs: Run[] }>).length === 0 && (
+            <DataTable
+              items={groupedTableItems}
+              columns={columns}
+              getRowId={(r) => r._id}
+              activeId={activeId}
+              onRowClick={(r) => navigate({ pathname: `/runs/${r._id}/preview`, search: window.location.search })}
+              selection={{
+                selectedIds,
+                onToggle: (id) => toggleRowSelection(id),
+                onToggleAll: (ids) => toggleAllSelection(ids),
+              }}
+              grouping={{
+                getGroupKey: (run) => {
+                  switch (groupBy) {
+                    case "profile":
+                      return run.profileId ?? "(No Profile)";
+                    case "task":
+                      return run.scenario?.task ?? "(No Task)";
+                    case "submissionId":
+                      return run.submissionId ?? "(No Submission)";
+                    default:
+                      return "";
+                  }
+                },
+                expandedGroupKeys,
+                onToggleGroup: toggleGroupExpansion,
+                renderGroupHeader: (groupKey, runs, expanded) => {
+                  const groupLabel = groupBy === "submissionId" ? "Submission ID" : groupBy === "profile" ? "Profile" : "Task";
+                  const groupDisplayKey =
+                    groupBy === "profile" && groupKey !== "(No Profile)"
+                      ? (profileNameById.get(groupKey) ?? formatId(groupKey))
+                      : groupKey;
+                  const hasBaseRole = groupBy === "profile" && runs.some((run) => compositionRoleByRunId.get(run._id)?.kind === "base");
+                  const variationNumbers =
+                    groupBy === "profile"
+                      ? Array.from(
+                          new Set(
+                            runs
+                              .map((run) => {
+                                const role = compositionRoleByRunId.get(run._id);
+                                return role?.kind === "variation" ? role.variationNumber : undefined;
+                              })
+                              .filter((n): n is number => typeof n === "number"),
+                          ),
+                        ).sort((a, b) => a - b)
+                      : [];
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => toggleGroupExpansion(groupKey)}
+                      className="w-full bg-muted/30 px-4 py-3 text-sm flex items-center justify-between gap-3 hover:bg-muted/40 transition-colors"
+                      aria-expanded={expanded}
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        {expanded ? (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                        )}
+                        <span className="min-w-0 truncate font-semibold">
+                          <span className="text-muted-foreground">{groupLabel}:</span> {groupDisplayKey}
+                        </span>
+                        {hasBaseRole && (
+                          <Badge variant="default" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
+                            Base
+                          </Badge>
+                        )}
+                        {variationNumbers.map((variationNumber) => (
+                          <Badge key={`var-${variationNumber}`} variant="secondary" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
+                            Var {variationNumber}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <span className="text-xs text-muted-foreground font-normal">
+                          {runs.length} run{runs.length !== 1 ? "s" : ""}
+                        </span>
+                        <span className="text-xs text-muted-foreground font-normal">
+                          {expanded ? "Click to collapse" : "Click to expand"}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                },
+              }}
+              sort={state.sort}
+              sortDir={state.sortDir}
+              onSortChange={state.toggleSort}
+              loading={isLoading}
+              emptyState=""
+            />
+            {groupedRuns.length === 0 && (
               <div className="text-center py-8 text-muted-foreground">
                 {state.hasActiveFilters
                   ? "No runs match the current filters."
