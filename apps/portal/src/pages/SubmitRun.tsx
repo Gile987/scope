@@ -937,7 +937,7 @@ export function SubmitRun() {
 
       <Card className="xl:sticky xl:top-6">
         <CardHeader>
-          <CardTitle>Profile Composition</CardTitle>
+          <CardTitle>Profile Variations</CardTitle>
           <CardDescription>
             Choose a base profile and compose profile variations for comparative runs.
           </CardDescription>
@@ -1221,7 +1221,7 @@ export function SubmitRun() {
           )}
 
           <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Composition:</span>{" "}
+            <span className="font-medium text-foreground">Variations:</span>{" "}
             {compositionProfileCount > 0 ? `${compositionProfileCount} profiles` : "manual mode"} ·{" "}
             {selectedVariationCount} variations · {expandedRunCount} expanded runs
           </div>
