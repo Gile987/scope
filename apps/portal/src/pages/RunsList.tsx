@@ -893,9 +893,8 @@ export function RunsList() {
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="inline-flex items-center gap-1.5 cursor-default">
+              <span className="inline-flex items-center cursor-default">
                 <OsPlatformIcon platform={os.platform} />
-                <span className="font-mono text-xs text-muted-foreground">{os.arch}</span>
               </span>
             </TooltipTrigger>
             <TooltipContent className="text-xs">
