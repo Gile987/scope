@@ -21,3 +21,5 @@
 !documentation/**
 !service-deployment/
 !service-deployment/**
+!vscode-electron-worker/
+!vscode-electron-worker/**

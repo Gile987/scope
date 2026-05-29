@@ -70,7 +70,7 @@
     "github-actions-ctrf": "^0.0.58",
     "tsx": "^4.21.0",
     "vitest": "^4.0.18",
-    "worktree-env": "^0.1.0"
+    "worktree-env": "^0.1.2"
   },
   "keywords": [
     "azure",

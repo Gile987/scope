@@ -30,8 +30,8 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@22.19.10)(happy-dom@20.9.0)(jiti@1.21.7)(msw@2.14.6(@types/node@22.19.10)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.3)
       worktree-env:
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.1.2
+        version: 0.1.2
 
   apps/api:
     dependencies:
@@ -6064,8 +6064,8 @@ packages:
   wordwrap@1.0.0:
     resolution: {integrity: sha512-gvVzJFlPycKc5dZN4yPkP8w7Dc37BtP1yczEneOb4uq34pXZcvrtRTmWV8W+Ume+XCxKgbjM+nevkyFPMybd4Q==}
 
-  worktree-env@0.1.0:
-    resolution: {integrity: sha512-7jqOD0hY6eOcmsaR1AMzbUwe58Et1kUx1/3SiNnsUGCpfORpoaHSDP++cgXlA/GLrs7NMW1/bLrACUCPjbZ4IA==}
+  worktree-env@0.1.2:
+    resolution: {integrity: sha512-ji8tme7yZPqUKrkcH8SuRuNn5PfGTs/e16tTF3uOaPu1qzqJbwzrrjKZjAXmjoFKjfC+VHvtZz0XR4yo0uYflQ==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -11838,7 +11838,7 @@ snapshots:
 
   wordwrap@1.0.0: {}
 
-  worktree-env@0.1.0: {}
+  worktree-env@0.1.2: {}
 
   wrap-ansi@7.0.0:
     dependencies:
