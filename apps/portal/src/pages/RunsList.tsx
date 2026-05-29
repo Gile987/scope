@@ -316,6 +316,17 @@ export function RunsList() {
   );
   const availableModels = effectiveAgent?.supportedModels ?? [];
 
+  // Model compatibility validation for the resubmit dialog
+  // Determine the effective model: explicit override > kept from source runs > cleared (default)
+  const effectiveResubmitModel = resubmitOverrides.model !== undefined
+    ? resubmitOverrides.model  // explicit override (string) or cleared (null)
+    : selectedRunsSummary.model;  // kept from source runs
+  const modelIncompatible = Boolean(
+    effectiveResubmitModel &&  // a model is set (not null/empty)
+    availableModels.length > 0 &&  // the worker defines supported models
+    !availableModels.includes(effectiveResubmitModel),
+  );
+
   const deleteMutation = useMutation({
     mutationFn: api.deleteRun,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
@@ -1185,6 +1196,12 @@ export function RunsList() {
                   </SelectContent>
                 </Select>
                 )}
+                {modelIncompatible && (
+                  <p className="text-sm text-destructive">
+                    Model "{effectiveResubmitModel}" is not supported by this worker.
+                    {availableModels.length > 0 && ` Supported: ${availableModels.join(", ")}`}
+                  </p>
+                )}
               </div>
 
               {/* Max iterations override */}
@@ -1470,7 +1487,7 @@ export function RunsList() {
             <AlertDialogCancel onClick={() => { setResubmitCount(1); setResubmitOverrides({}); }}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => bulkResubmitMutation.mutate({ ids: Array.from(selectedIds), count: resubmitCount, overrides: resubmitOverrides })}
-              disabled={bulkResubmitMutation.isPending}
+              disabled={bulkResubmitMutation.isPending || modelIncompatible}
             >
               {bulkResubmitMutation.isPending ? "Re-submitting…" : "Re-submit"}
             </AlertDialogAction>

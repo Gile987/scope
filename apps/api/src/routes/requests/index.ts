@@ -1026,6 +1026,15 @@ apiRoute(ctx.app, ctx.registry, {
         // Resolve agent version for re-submitted run (latest active for the effective worker)
         let resolvedAgentVersion: string | undefined;
         const agentDoc = await ctx.agentCollection.findOne({ _id: effectiveWorkerType, deletedAt: { $exists: false } });
+        if (agentDoc && agentDoc.supportedModels.length > 0) {
+          if (effectiveModel && !agentDoc.supportedModels.includes(effectiveModel)) {
+            res.status(400).json({
+              error: `Invalid model "${effectiveModel}" for agent "${effectiveWorkerType}"`,
+              supportedModels: agentDoc.supportedModels,
+            });
+            return;
+          }
+        }
         if (agentDoc) {
           const versionResult = resolveAgentVersion(agentDoc.versions, undefined);
           if (!("error" in versionResult)) {
