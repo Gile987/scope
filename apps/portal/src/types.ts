@@ -120,6 +120,7 @@ export interface Run {
   scenario?: Scenario;
   workerType: string;
   model?: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   /** Per-attempt mutable state for the current attempt. */
   run?: RunState;
@@ -366,6 +367,7 @@ export interface BulkResubmitOverrides {
   profileId?: string | null;
   workerType?: string;
   model?: string | null;
+  reasoningEffort?: string | null;
   maxIterations?: number | null;
   mcpServers?: string[] | null;
   skillRevisions?: string[] | null;
@@ -905,6 +907,7 @@ export interface ProfileVersionDocument {
   version: number;
   workerType: string;
   model: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   mcpServers?: string[];
   skillRevisions?: string[];
@@ -931,6 +934,7 @@ export interface AggregateStats {
 export interface GroupUniformValues {
   workerType?: string;
   model?: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   platform?: string;
   mcpServers?: string[];

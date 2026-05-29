@@ -460,6 +460,8 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
     await log("info", `Starting multi-turn processing with ${this.processor.workerName}`, {
       criteria: requestDoc.scenario.criteria,
       maxIterations: requestDoc.maxIterations,
+      ...(requestDoc.model ? { model: requestDoc.model } : {}),
+      ...(requestDoc.reasoningEffort ? { reasoningEffort: requestDoc.reasoningEffort } : {}),
     });
 
     // Only create JudgeClient when criteria exist and judge will actually be called
@@ -524,6 +526,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         log,
         personaInstructions: requestDoc.personaInstructions,
         model: requestDoc.model,
+        reasoningEffort: requestDoc.reasoningEffort,
         mcpServerConfigs,
         skillConfigs,
         extensionConfigs,

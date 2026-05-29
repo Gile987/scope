@@ -261,6 +261,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   "null",
                 ],
               },
+              "reasoningEffort": {
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
               "skillRevisions": {
                 "items": {
                   "type": "string",
@@ -557,6 +563,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "minLength": 1,
             "type": "string",
           },
+          "reasoningEffort": {
+            "type": "string",
+          },
           "skillRevisions": {
             "items": {
               "type": "string",
@@ -669,6 +678,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "integer",
           },
           "profileId": {
+            "type": "string",
+          },
+          "reasoningEffort": {
             "type": "string",
           },
           "scenario": {
@@ -1586,6 +1598,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "profileId": {
             "type": "string",
           },
+          "reasoningEffort": {
+            "type": "string",
+          },
           "skillRevisions": {
             "items": {
               "type": "string",
@@ -2096,6 +2111,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "profileVersionId": {
+            "type": "string",
+          },
+          "reasoningEffort": {
             "type": "string",
           },
           "run": {
@@ -5309,6 +5327,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "type": "array",
                   },
                   "model": {
+                    "type": "string",
+                  },
+                  "reasoningEffort": {
                     "type": "string",
                   },
                   "skillRevisions": {

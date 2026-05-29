@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
+import { useModelCapabilities, useReasoningEffort, ReasoningEffortSelect, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
@@ -24,6 +25,7 @@ export function NewProfileVersion() {
   // Configuration fields
   const [worker, setWorker] = useState("");
   const [model, setModel] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState("");
   const [selectedAgentVersion, setSelectedAgentVersion] = useState("");
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
@@ -53,6 +55,7 @@ export function NewProfileVersion() {
     if (profile?.version) {
       setWorker(profile.version.workerType);
       setModel(profile.version.model);
+      setReasoningEffort(profile.version.reasoningEffort ?? "");
       setSelectedAgentVersion(profile.version.agentVersion ?? "");
       setSelectedMcpServers(profile.version.mcpServers ?? []);
       setSelectedSkills(profile.version.skillRevisions ?? []);
@@ -64,6 +67,16 @@ export function NewProfileVersion() {
   const selectedAgent = agents.find((a: CodingAgent) => a._id === worker);
   const supportedModels = selectedAgent?.supportedModels ?? [];
   const isVscodeWorker = worker.includes("vscode");
+
+  // Model capabilities and effort management
+  const { capabilitiesMap } = useModelCapabilities(worker || undefined);
+  const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
+  const { supportedEfforts } = useReasoningEffort({
+    model,
+    capabilitiesMap,
+    value: reasoningEffort,
+    onChange: onEffortChange,
+  });
 
   // Clear extensions when the user switches to a non-vscode worker.
   useEffect(() => {
@@ -87,6 +100,7 @@ export function NewProfileVersion() {
     mutationFn: () => api.createProfileVersion(profileId!, {
       workerType: worker,
       model,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
@@ -125,6 +139,7 @@ export function NewProfileVersion() {
   const hasChanges = !!ev && (
     worker !== ev.workerType ||
     model !== ev.model ||
+    (reasoningEffort || "") !== (ev.reasoningEffort || "") ||
     (selectedAgentVersion || "") !== (ev.agentVersion || "") ||
     JSON.stringify([...selectedMcpServers].sort()) !== JSON.stringify([...(ev.mcpServers ?? [])].sort()) ||
     JSON.stringify([...selectedSkills].sort()) !== JSON.stringify([...(ev.skillRevisions ?? [])].sort()) ||
@@ -177,13 +192,20 @@ export function NewProfileVersion() {
                   <SelectValue placeholder="Select a model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {supportedModels.map((m: string) => (
-                    <SelectItem key={m} value={m}>{m}</SelectItem>
-                  ))}
+                  <ModelSelectItems
+                    models={supportedModels}
+                    capabilitiesMap={capabilitiesMap}
+                  />
                 </SelectContent>
               </Select>
             </div>
           )}
+
+          <ReasoningEffortSelect
+            supportedEfforts={supportedEfforts}
+            value={reasoningEffort}
+            onChange={onEffortChange}
+          />
 
           {sortedVersions.length > 0 && (
             <div className="space-y-2">

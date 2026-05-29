@@ -29,6 +29,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, OutcomeBadge } from "@/components/StatusBadge";
 import { EnrichmentBadge } from "@/components/EnrichmentBadge";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
+import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { Trash2, Eye, Plus, RefreshCw, Repeat, FileText, X, Download, Archive, ChevronRight, ChevronDown, ChevronLeft, ChevronsLeft, ChevronsRight, Lock, Settings2, RotateCcw, Pause, Play, ArrowUpDown } from "lucide-react";
 import { formatDate, formatId, truncate, formatDuration } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
@@ -37,7 +38,7 @@ import { formatStatRange } from "@/lib/grouping";
 
 // --- Column visibility ---
 // We store *hidden* columns so that newly added columns are visible by default.
-type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "postProcessing" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
+type ColumnId = "id" | "submission" | "task" | "criteria" | "worker" | "effort" | "version" | "os" | "mcp" | "skills" | "extensions" | "profile" | "priority" | "status" | "outcome" | "postProcessing" | "report" | "attempt" | "turns" | "llmCalls" | "duration" | "tokens" | "created";
 
 const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "id", label: "ID" },
@@ -45,6 +46,7 @@ const COLUMN_DEFS: { id: ColumnId; label: string }[] = [
   { id: "task", label: "Task" },
   { id: "criteria", label: "Criteria" },
   { id: "worker", label: "Worker" },
+  { id: "effort", label: "Effort" },
   { id: "version", label: "Version" },
   { id: "os", label: "OS" },
   { id: "mcp", label: "MCP" },
@@ -315,6 +317,35 @@ export function RunsList() {
     [activeAgents, effectiveWorker],
   );
   const availableModels = effectiveAgent?.supportedModels ?? [];
+
+  // Model capabilities for effort-aware resubmit picker
+  const { capabilitiesMap: resubmitModelCapabilitiesMap } = useModelCapabilities(effectiveWorker || undefined);
+  const effectiveModel = activeProfile
+    ? activeProfile.version.model
+    : (resubmitOverrides.model ?? selectedRunsSummary.model);
+  const resubmitSupportedEfforts = effectiveModel
+    ? (resubmitModelCapabilitiesMap.get(effectiveModel)?.reasoningEffort ?? [])
+    : [];
+
+  // Auto-clear effort override when model changes to one that doesn't support it,
+  // and auto-select when only one effort is available.
+  useEffect(() => {
+    const currentEffort = resubmitOverrides.reasoningEffort;
+    if (resubmitSupportedEfforts.length === 1) {
+      // Auto-select the only supported effort
+      if (currentEffort !== resubmitSupportedEfforts[0]) {
+        setResubmitOverrides((prev) => ({ ...prev, reasoningEffort: resubmitSupportedEfforts[0] }));
+      }
+    } else if (currentEffort && currentEffort !== null) {
+      if (resubmitSupportedEfforts.length === 0 || !resubmitSupportedEfforts.includes(currentEffort)) {
+        setResubmitOverrides((prev) => {
+          const next = { ...prev };
+          delete next.reasoningEffort;
+          return next;
+        });
+      }
+    }
+  }, [effectiveModel, resubmitSupportedEfforts]);
 
   const deleteMutation = useMutation({
     mutationFn: api.deleteRun,
@@ -1172,11 +1203,12 @@ export function RunsList() {
                         : selectedRunsSummary.isMultiModel ? "Mixed (keep each)" : "Default"}
                     </SelectItem>
                     <SelectItem value="__clear__">Clear (use default)</SelectItem>
-                    {availableModels.filter((m) => m !== selectedRunsSummary.model).map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {m}{m === effectiveAgent?.defaultModel ? " (default)" : ""}
-                      </SelectItem>
-                    ))}
+                    <ModelSelectItems
+                      models={availableModels}
+                      capabilitiesMap={resubmitModelCapabilitiesMap}
+                      defaultModel={effectiveAgent?.defaultModel}
+                      excludeModel={selectedRunsSummary.model ?? undefined}
+                    />
                     {!effectiveWorker && (
                       <SelectItem value="__hint__" disabled>
                         Select a worker to see models
@@ -1186,6 +1218,34 @@ export function RunsList() {
                 </Select>
                 )}
               </div>
+
+              {/* Reasoning effort override */}
+              {resubmitSupportedEfforts.length > 0 && (
+              <div className="flex items-center gap-4 mb-3">
+                <Label className="text-sm w-32 shrink-0">Reasoning effort</Label>
+                <Select
+                  value={resubmitOverrides.reasoningEffort === null ? "__clear__" : resubmitOverrides.reasoningEffort ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") { delete next.reasoningEffort; }
+                    else if (v === "__clear__") { next.reasoningEffort = null; }
+                    else { next.reasoningEffort = v; }
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">Keep original</SelectItem>
+                    <SelectItem value="__clear__">Clear (use default)</SelectItem>
+                    {resubmitSupportedEfforts.map((level) => (
+                      <SelectItem key={level} value={level}>{level}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              )}
 
               {/* Max iterations override */}
               <div className="flex items-center gap-4 mb-3">
@@ -1586,6 +1646,7 @@ export function RunsList() {
               {isCol("task") && <TableHead>Task</TableHead>}
               {isCol("criteria") && <TableHead>Criteria</TableHead>}
               {isCol("worker") && <TableHead className="w-[180px]">Worker</TableHead>}
+              {isCol("effort") && <TableHead className="w-[80px]">Effort</TableHead>}
               {isCol("version") && <TableHead>Version</TableHead>}
               {isCol("os") && <TableHead className="w-[80px]">OS</TableHead>}
               {isCol("mcp") && <TableHead>MCP</TableHead>}
@@ -1808,6 +1869,13 @@ function RunRow({
         <span className="font-mono text-xs">{run.workerType}</span>
         {run.model && (
           <span className="block font-mono text-xs text-muted-foreground">{run.model}</span>
+        )}
+      </TableCell>}
+      {isCol("effort") && <TableCell>
+        {run.reasoningEffort ? (
+          <span className="font-mono text-xs">{run.reasoningEffort}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
         )}
       </TableCell>}
       {isCol("version") && <TableCell>
@@ -2224,6 +2292,12 @@ function GroupRows({
                 <span className="block font-mono text-xs text-muted-foreground">{uniform.model}</span>
               )}
             </>
+          ) : <span className="text-xs text-muted-foreground">–</span>}
+        </TableCell>}
+        {/* Effort */}
+        {isCol("effort") && <TableCell>
+          {uniform.reasoningEffort ? (
+            <span className="font-mono text-xs">{uniform.reasoningEffort}</span>
           ) : <span className="text-xs text-muted-foreground">–</span>}
         </TableCell>}
         {/* Version */}

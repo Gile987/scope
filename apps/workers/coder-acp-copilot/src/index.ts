@@ -115,6 +115,7 @@ class CopilotProcessor implements WorkerProcessor {
     await log("info", "Starting Copilot ACP processor", {
       inputLength: message.length,
       model: options?.model,
+      reasoningEffort: options?.reasoningEffort,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
@@ -159,6 +160,9 @@ class CopilotProcessor implements WorkerProcessor {
       if (options?.model) {
         args.push("--model", options.model);
       }
+      if (options?.reasoningEffort) {
+        args.push("--reasoning-effort", options.reasoningEffort);
+      }
       // The Copilot CLI does not support MCP servers via ACP newSession.mcpServers
       // (agentCapabilities.mcpCapabilities is undefined). Instead, pass the gateway
       // endpoint via --additional-mcp-config so the CLI initializes it at startup.
@@ -178,6 +182,7 @@ class CopilotProcessor implements WorkerProcessor {
         },
         mcpServers: [],
         model: options?.model,
+        reasoningEffort: options?.reasoningEffort,
       });
 
       await log("info", "Copilot processing complete", { 
