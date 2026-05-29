@@ -325,6 +325,7 @@ export function McpServerList() {
           sortDir={state.sortDir}
           onSortChange={state.toggleSort}
           loading={isLoading}
+          loadingRows={state.pageSize}
           emptyState={
             state.hasActiveFilters
               ? "No MCP servers match your filters"

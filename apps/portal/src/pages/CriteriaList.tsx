@@ -285,6 +285,7 @@ export function CriteriaList() {
           sortDir={state.sortDir}
           onSortChange={state.toggleSort}
           loading={isLoading}
+          loadingRows={state.pageSize}
           emptyState={
             state.search ? "No criteria match your search" : "No criteria defined yet"
           }

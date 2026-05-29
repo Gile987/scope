@@ -164,6 +164,7 @@ export function PromptFeatureList() {
           sortDir={state.sortDir}
           onSortChange={state.toggleSort}
           loading={isLoading}
+          loadingRows={state.pageSize}
           emptyState={
             state.search ? "No prompt features match your search" : "No prompt features defined yet"
           }

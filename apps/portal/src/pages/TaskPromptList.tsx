@@ -405,6 +405,7 @@ export function TaskPromptList() {
           sortDir={state.sortDir}
           onSortChange={state.toggleSort}
           loading={isLoading}
+          loadingRows={state.pageSize}
           emptyState={
             state.search
               ? "No task prompts match your search"

@@ -328,6 +328,7 @@ export function SkillList() {
             sortDir={state.sortDir}
             onSortChange={state.toggleSort}
             loading={isLoading}
+            loadingRows={state.pageSize}
             emptyState={
               state.hasActiveFilters
                 ? "No skills match your filters"

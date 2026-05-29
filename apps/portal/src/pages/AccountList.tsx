@@ -280,6 +280,7 @@ export function AccountList() {
               sortDir={state.sortDir}
               onSortChange={state.toggleSort}
               loading={isLoading}
+              loadingRows={state.pageSize}
               emptyState={
                 state.hasActiveFilters
                   ? "No accounts match your filters"

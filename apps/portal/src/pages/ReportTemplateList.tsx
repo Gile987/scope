@@ -286,6 +286,7 @@ export function ReportTemplateList() {
               sortDir={state.sortDir}
               onSortChange={state.toggleSort}
               loading={isLoading}
+              loadingRows={state.pageSize}
               emptyState={
                 state.hasActiveFilters
                   ? "No templates match your filters"

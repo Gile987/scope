@@ -1696,6 +1696,7 @@ export function RunsList() {
             sortDir={state.sortDir}
             onSortChange={state.toggleSort}
             loading={isLoading}
+            loadingRows={state.pageSize}
             emptyState={
               state.hasActiveFilters
                 ? "No runs match the current filters."
@@ -2067,6 +2068,7 @@ export function RunsList() {
               sortDir={state.sortDir}
               onSortChange={state.toggleSort}
               loading={isLoading}
+              loadingRows={state.pageSize}
               emptyState=""
             />
             {groupedRuns.length === 0 && (

@@ -238,6 +238,7 @@ export function ModelList() {
           sortDir={state.sortDir}
           onSortChange={state.toggleSort}
           loading={isLoading}
+          loadingRows={state.pageSize}
           emptyState={
             models.length === 0
               ? "No models found. Models are discovered automatically by model scanners."

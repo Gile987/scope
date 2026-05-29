@@ -361,6 +361,7 @@ export function InsightsList() {
           sortDir={state.sortDir}
           onSortChange={state.toggleSort}
           loading={isLoading}
+          loadingRows={state.pageSize}
           emptyState={
             state.search ? (
               "No insights match your search"

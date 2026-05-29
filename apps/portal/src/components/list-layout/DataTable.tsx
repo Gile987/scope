@@ -150,6 +150,11 @@ export function DataTable<T>({
 
   const visibleColumns = columns.filter((c) => !c.hidden);
   const rowPadY = density === "compact" ? "py-1.5" : "py-3";
+  // Fixed height for skeleton rows that approximates the rendered height of
+  // real rows for the given density. Without this the table reflows when the
+  // first response arrives (skeleton ≈ 40px → real row ≈ 56px) which is
+  // visually noisy on slower networks.
+  const skeletonRowHeight = density === "compact" ? "h-9" : "h-[3.5rem]";
   const groupedSections = grouping
     ? items.reduce<Array<{ key: string; items: T[] }>>((sections, item) => {
         const key = grouping.getGroupKey(item);
@@ -440,7 +445,7 @@ export function DataTable<T>({
         <TableBody>
           {loading ? (
             Array.from({ length: loadingRows }).map((_, i) => (
-              <TableRow key={`skeleton-${i}`}>
+              <TableRow key={`skeleton-${i}`} className={skeletonRowHeight}>
                 {selection && (
                   <TableCell className={rowPadY}>
                     <Skeleton className="h-4 w-4" />
