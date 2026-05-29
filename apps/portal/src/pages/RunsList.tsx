@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect, useCallback, type Key, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
-import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download } from "lucide-react";
+import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download, Lock } from "lucide-react";
 import { FaLinux } from "react-icons/fa";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -45,9 +45,10 @@ import {
   type CustomizeColumnsOption,
 } from "@/components/list-layout";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
+import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
 import { WORKER_TYPES, STATUS_LIST, OUTCOME_LIST } from "@/types";
-import type { Run, RunStatus, RunOutcome, IterationOp } from "@/types";
+import type { Run, RunStatus, RunOutcome, IterationOp, BulkResubmitOverrides, CodingAgent, McpServerDocument, ProfileWithVersion } from "@/types";
 
 const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo", "groupBy", "turns", "turnsOp", "maxIter", "maxIterOp"] as const;
 
@@ -397,6 +398,9 @@ export function RunsList() {
   const [priorityDialogOpen, setPriorityDialogOpen] = useState(false);
   const [bulkPriorityValue, setBulkPriorityValue] = useState<number>(0);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
+  const [resubmitCount, setResubmitCount] = useState<number>(1);
+  const [resubmitOverrides, setResubmitOverrides] = useState<BulkResubmitOverrides>({});
 
   // Reset stack whenever filters or page size change.
   const filtersKey = useMemo(
@@ -508,6 +512,19 @@ export function RunsList() {
   const { data: profilesData } = useQuery({
     queryKey: ["profiles", "runs-list-grouping"],
     queryFn: () => api.listProfiles(),
+    staleTime: 60_000,
+  });
+  // Lazy queries for the resubmit override dialog.
+  const { data: agentsData = [] } = useQuery({
+    queryKey: ["agents", "runs-list-resubmit"],
+    queryFn: () => api.listAgents(),
+    enabled: resubmitDialogOpen,
+    staleTime: 60_000,
+  });
+  const { data: mcpServersData = [] } = useQuery({
+    queryKey: ["mcp-servers", "runs-list-resubmit"],
+    queryFn: () => api.listMcpServers(),
+    enabled: resubmitDialogOpen,
     staleTime: 60_000,
   });
 
@@ -694,10 +711,14 @@ export function RunsList() {
   });
 
   const bulkResubmitMutation = useMutation({
-    mutationFn: (ids: string[]) => api.bulkResubmitRuns(ids, 1),
+    mutationFn: ({ ids, count, overrides }: { ids: string[]; count?: number; overrides?: BulkResubmitOverrides }) =>
+      api.bulkResubmitRuns(ids, count ?? 1, overrides && Object.keys(overrides).length > 0 ? overrides : undefined),
     onSuccess: (res) => {
       toast.success(`Resubmitted ${res.submitted} run${res.submitted !== 1 ? "s" : ""}${res.failed.length ? `, ${res.failed.length} failed` : ""}`);
       setSelectedIds(new Set());
+      setResubmitDialogOpen(false);
+      setResubmitCount(1);
+      setResubmitOverrides({});
       invalidateRuns();
     },
     onError: (err: Error) => toast.error(`Failed to resubmit: ${err.message}`),
@@ -809,6 +830,120 @@ export function RunsList() {
     return { retryable, pausable, resumable, prioritizable };
   }, [selectedRunsList]);
 
+  // ─── Resubmit-dialog derived state ──────────────────────────────────────
+  // Build a summary of the selected runs: collapses to a single value when
+  // all rows agree, exposes `isMulti*` flags so the dialog can show
+  // "Mixed (keep each)" placeholders.
+  const selectedRunsSummary = useMemo(() => {
+    const sel = selectedRunsList;
+    if (sel.length === 0) {
+      return {
+        worker: null as string | null,
+        model: null as string | null,
+        reasoningEffort: null as string | null,
+        maxIterations: null as number | null,
+        mcpServers: null as string[] | null,
+        skillRevisions: null as string[] | null,
+        extensions: null as string[] | null,
+        profileId: null as string | null,
+        profileVersion: null as number | null,
+        isMultiWorker: false,
+        isMultiModel: false,
+        isMultiEffort: false,
+        isMultiIterations: false,
+        isMultiMcp: false,
+        isMultiSkills: false,
+        isMultiExtensions: false,
+        isMultiProfile: false,
+      };
+    }
+    const uniq = <T,>(xs: T[]) => [...new Set(xs)];
+    const join = (xs?: string[]) => (xs ?? []).slice().sort().join(",");
+    const workers = uniq(sel.map((r) => r.workerType));
+    const models = uniq(sel.map((r) => r.model ?? ""));
+    const efforts = uniq(sel.map((r) => r.reasoningEffort ?? ""));
+    const iterations = uniq(sel.map((r) => r.maxIterations ?? 0));
+    const mcpJoined = uniq(sel.map((r) => join(r.mcpServers)));
+    const skillsJoined = uniq(sel.map((r) => join(r.skillRevisions)));
+    const extsJoined = uniq(sel.map((r) => join(r.extensions)));
+    const profileIds = uniq(sel.map((r) => r.profileId ?? ""));
+    const profileVersions = uniq(sel.map((r) => parseProfileVersion(r.profileVersionId) ?? 0));
+    return {
+      worker: workers.length === 1 ? workers[0] : null,
+      model: models.length === 1 ? (models[0] || null) : null,
+      reasoningEffort: efforts.length === 1 ? (efforts[0] || null) : null,
+      maxIterations: iterations.length === 1 ? (iterations[0] || null) : null,
+      mcpServers: mcpJoined.length === 1 ? (sel[0].mcpServers ?? []) : null,
+      skillRevisions: skillsJoined.length === 1 ? (sel[0].skillRevisions ?? []) : null,
+      extensions: extsJoined.length === 1 ? (sel[0].extensions ?? []) : null,
+      profileId: profileIds.length === 1 ? (profileIds[0] || null) : null,
+      profileVersion: profileVersions.length === 1 ? (profileVersions[0] || null) : null,
+      isMultiWorker: workers.length > 1,
+      isMultiModel: models.length > 1,
+      isMultiEffort: efforts.length > 1,
+      isMultiIterations: iterations.length > 1,
+      isMultiMcp: mcpJoined.length > 1,
+      isMultiSkills: skillsJoined.length > 1,
+      isMultiExtensions: extsJoined.length > 1,
+      isMultiProfile: profileIds.length > 1,
+    };
+  }, [selectedRunsList]);
+
+  // Profile active for the resubmit dialog.
+  // undefined = keep from source; null = detach; string = a specific profileId.
+  const activeProfileId = resubmitOverrides.profileId !== undefined
+    ? resubmitOverrides.profileId
+    : selectedRunsSummary.profileId;
+  const activeProfile = useMemo(
+    () => (activeProfileId
+      ? (profilesData ?? []).find((p) => p._id === activeProfileId) ?? null
+      : null),
+    [profilesData, activeProfileId],
+  );
+
+  const availableAgents = useMemo(
+    () => agentsData.filter((a) => !a.deletedAt && a.available !== false),
+    [agentsData],
+  );
+
+  // When a profile is active, its values take precedence.
+  const effectiveWorker = activeProfile
+    ? activeProfile.version.workerType
+    : (resubmitOverrides.workerType ?? selectedRunsSummary.worker);
+  const effectiveAgent = useMemo(
+    () => availableAgents.find((a) => a._id === effectiveWorker),
+    [availableAgents, effectiveWorker],
+  );
+  const availableModels = effectiveAgent?.supportedModels ?? [];
+
+  // Effort-aware model capabilities for the dialog.
+  const { capabilitiesMap: resubmitCapabilitiesMap } = useModelCapabilities(effectiveWorker || undefined);
+  const effectiveModel = activeProfile
+    ? activeProfile.version.model
+    : (resubmitOverrides.model ?? selectedRunsSummary.model);
+  const resubmitSupportedEfforts = effectiveModel
+    ? (resubmitCapabilitiesMap.get(effectiveModel)?.reasoningEffort ?? [])
+    : [];
+
+  // Auto-clear/auto-select effort when the effective model changes.
+  useEffect(() => {
+    if (!resubmitDialogOpen) return;
+    const current = resubmitOverrides.reasoningEffort;
+    if (resubmitSupportedEfforts.length === 1) {
+      if (current !== resubmitSupportedEfforts[0]) {
+        setResubmitOverrides((prev) => ({ ...prev, reasoningEffort: resubmitSupportedEfforts[0] }));
+      }
+    } else if (current && current !== null) {
+      if (resubmitSupportedEfforts.length === 0 || !resubmitSupportedEfforts.includes(current)) {
+        setResubmitOverrides((prev) => {
+          const next = { ...prev };
+          delete next.reasoningEffort;
+          return next;
+        });
+      }
+    }
+  }, [effectiveModel, resubmitSupportedEfforts, resubmitDialogOpen, resubmitOverrides.reasoningEffort]);
+
   const isBusy =
     bulkDeleteMutation.isPending ||
     bulkRetryMutation.isPending ||
@@ -824,10 +959,22 @@ export function RunsList() {
     bulkRetryMutation.mutate({ ids: [...selectedIds], force: isForceRetryModifierActive });
   }, [bulkRetryMutation, selectedIds, isForceRetryModifierActive]);
 
-  const handleBulkResubmit = useCallback(() => {
+  // Bulk re-submit: opens the override dialog (count + per-field overrides).
+  // The dialog then triggers bulkResubmitMutation with the user's choices.
+  const openResubmitDialog = useCallback(() => {
     if (selectedIds.size === 0) return;
-    bulkResubmitMutation.mutate([...selectedIds]);
-  }, [bulkResubmitMutation, selectedIds]);
+    setResubmitCount(1);
+    setResubmitOverrides({});
+    setResubmitDialogOpen(true);
+  }, [selectedIds.size]);
+
+  // Single-row resubmit (kebab menu / row action) — keeps the simple one-click flow.
+  const handleSingleRowResubmit = useCallback(
+    (id: string) => {
+      bulkResubmitMutation.mutate({ ids: [id], count: 1 });
+    },
+    [bulkResubmitMutation],
+  );
 
   const handleBulkPause = useCallback(() => {
     if (selectionCaps.pausable === 0) return;
@@ -1458,7 +1605,7 @@ export function RunsList() {
             disabled={bulkResubmitMutation.isPending}
             onClick={(e) => {
               e.stopPropagation();
-              bulkResubmitMutation.mutate([r._id]);
+              handleSingleRowResubmit(r._id);
             }}
           >
             <Repeat className="h-3.5 w-3.5" />
@@ -1735,8 +1882,8 @@ export function RunsList() {
             size="sm"
             className="gap-1.5"
             disabled={isBusy || selectedIds.size === 0}
-            onClick={handleBulkResubmit}
-            title="Resubmit selected runs as a new submission"
+            onClick={openResubmitDialog}
+            title="Re-submit selected runs with optional overrides"
           >
             <Repeat className="h-3.5 w-3.5" /> Re-submit
           </Button>
@@ -2204,6 +2351,494 @@ export function RunsList() {
         />
       </div>
 
+      <AlertDialog open={resubmitDialogOpen} onOpenChange={setResubmitDialogOpen}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Re-submit {selectedIds.size} run{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              New runs copy the original scenario and settings. Use overrides below to change specific fields.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-4 py-2 max-h-[65vh] overflow-y-auto pr-1">
+            <div className="flex items-center gap-4">
+              <Label htmlFor="resubmit-count" className="text-sm font-medium w-32 shrink-0">Copies per run</Label>
+              <Input
+                id="resubmit-count"
+                type="number"
+                min={1}
+                max={10}
+                value={resubmitCount}
+                onChange={(e) => setResubmitCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                className="w-24"
+              />
+              <span className="text-xs text-muted-foreground">
+                = {selectedIds.size * resubmitCount} new run{selectedIds.size * resubmitCount !== 1 ? "s" : ""}
+              </span>
+            </div>
+
+            <div className="border-t pt-4">
+              <p className="text-sm font-medium mb-3">Overrides <span className="text-muted-foreground font-normal">(leave unchanged to copy from source)</span></p>
+
+              {/* Profile */}
+              <div className="flex items-center gap-4 mb-3">
+                <Label className="text-sm w-32 shrink-0">Profile</Label>
+                <Select
+                  value={resubmitOverrides.profileId === null ? "__none__" : resubmitOverrides.profileId ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") {
+                      delete next.profileId;
+                    } else if (v === "__none__") {
+                      next.profileId = null;
+                    } else {
+                      next.profileId = v;
+                    }
+                    // Profile values take precedence — clear field overrides it controls.
+                    delete next.workerType;
+                    delete next.model;
+                    delete next.mcpServers;
+                    delete next.skillRevisions;
+                    delete next.extensions;
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">
+                      {selectedRunsSummary.profileId
+                        ? <>
+                            {profileNameById.get(selectedRunsSummary.profileId) ?? formatId(selectedRunsSummary.profileId)}
+                            {selectedRunsSummary.profileVersion && <span className="text-muted-foreground"> v{selectedRunsSummary.profileVersion}</span>}
+                          </>
+                        : selectedRunsSummary.isMultiProfile ? "Mixed (keep each)" : "None"}
+                    </SelectItem>
+                    <SelectItem value="__none__">None (detach profile)</SelectItem>
+                    {(profilesData ?? []).map((p) => (
+                      <SelectItem key={p._id} value={p._id}>
+                        {p.name} <span className="text-muted-foreground">v{p.latestVersion}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {activeProfile && (
+                <div className="flex items-center gap-2 mb-3 px-1 py-1.5 text-xs text-muted-foreground bg-muted/50 rounded">
+                  <Lock className="h-3 w-3 shrink-0" />
+                  Worker, model, MCP servers, skills, and extensions are controlled by the profile
+                </div>
+              )}
+
+              {/* Worker */}
+              <div className="flex items-center gap-4 mb-3" title={activeProfile ? "Controlled by profile" : undefined}>
+                <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
+                  {activeProfile && <Lock className="h-3 w-3 text-muted-foreground" />}
+                  Worker
+                </Label>
+                {activeProfile ? (
+                  <span className="text-sm text-muted-foreground">{activeProfile.version.workerType}</span>
+                ) : (
+                <Select
+                  value={resubmitOverrides.workerType ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") { delete next.workerType; } else { next.workerType = v; }
+                    delete next.model;
+                    const effectiveWorkerType = v === "__keep__" ? selectedRunsSummary.worker : v;
+                    if (effectiveWorkerType && !effectiveWorkerType.includes("vscode")) {
+                      next.extensions = null;
+                    } else {
+                      delete next.extensions;
+                    }
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">
+                      {selectedRunsSummary.worker
+                        ? selectedRunsSummary.worker
+                        : selectedRunsSummary.isMultiWorker ? "Mixed (keep each)" : "—"}
+                    </SelectItem>
+                    {availableAgents
+                      .filter((a) => a._id !== selectedRunsSummary.worker)
+                      .map((a) => (
+                        <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
+                      ))}
+                    {availableAgents.length === 0 && WORKER_TYPES.filter((w) => w !== selectedRunsSummary.worker).map((w) => (
+                      <SelectItem key={w} value={w}>{w}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                )}
+              </div>
+
+              {/* Model */}
+              <div className="flex items-center gap-4 mb-3" title={activeProfile ? "Controlled by profile" : undefined}>
+                <Label className="text-sm w-32 shrink-0 flex items-center gap-1.5">
+                  {activeProfile && <Lock className="h-3 w-3 text-muted-foreground" />}
+                  Model
+                </Label>
+                {activeProfile ? (
+                  <span className="text-sm text-muted-foreground">{activeProfile.version.model}</span>
+                ) : (
+                <Select
+                  value={resubmitOverrides.model === null ? "__clear__" : resubmitOverrides.model ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") { delete next.model; }
+                    else if (v === "__clear__") { next.model = null; }
+                    else { next.model = v; }
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">
+                      {selectedRunsSummary.model
+                        ? selectedRunsSummary.model
+                        : selectedRunsSummary.isMultiModel ? "Mixed (keep each)" : "Default"}
+                    </SelectItem>
+                    <SelectItem value="__clear__">Clear (use default)</SelectItem>
+                    <ModelSelectItems
+                      models={availableModels}
+                      capabilitiesMap={resubmitCapabilitiesMap}
+                      defaultModel={effectiveAgent?.defaultModel}
+                      excludeModel={selectedRunsSummary.model ?? undefined}
+                    />
+                    {!effectiveWorker && (
+                      <SelectItem value="__hint__" disabled>
+                        Select a worker to see models
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+                )}
+              </div>
+
+              {/* Reasoning effort */}
+              {resubmitSupportedEfforts.length > 0 && (
+              <div className="flex items-center gap-4 mb-3">
+                <Label className="text-sm w-32 shrink-0">Reasoning effort</Label>
+                <Select
+                  value={resubmitOverrides.reasoningEffort === null ? "__clear__" : resubmitOverrides.reasoningEffort ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") { delete next.reasoningEffort; }
+                    else if (v === "__clear__") { next.reasoningEffort = null; }
+                    else { next.reasoningEffort = v; }
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">Keep original</SelectItem>
+                    <SelectItem value="__clear__">Clear (use default)</SelectItem>
+                    {resubmitSupportedEfforts.map((level) => (
+                      <SelectItem key={level} value={level}>{level}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              )}
+
+              {/* Max iterations */}
+              <div className="flex items-center gap-4 mb-3">
+                <Label className="text-sm w-32 shrink-0">Max iterations</Label>
+                <Select
+                  value={resubmitOverrides.maxIterations === null ? "__clear__" : resubmitOverrides.maxIterations?.toString() ?? "__keep__"}
+                  onValueChange={(v) => setResubmitOverrides((prev) => {
+                    const next = { ...prev };
+                    if (v === "__keep__") { delete next.maxIterations; }
+                    else if (v === "__clear__") { next.maxIterations = null; }
+                    else { next.maxIterations = parseInt(v); }
+                    return next;
+                  })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__keep__">
+                      {selectedRunsSummary.maxIterations
+                        ? String(selectedRunsSummary.maxIterations)
+                        : selectedRunsSummary.isMultiIterations ? "Mixed (keep each)" : "Default"}
+                    </SelectItem>
+                    <SelectItem value="__clear__">Clear (use default)</SelectItem>
+                    {[1, 2, 3, 5, 10, 15, 20].filter((n) => n !== selectedRunsSummary.maxIterations).map((n) => (
+                      <SelectItem key={n} value={n.toString()}>{n}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* MCP servers */}
+              {activeProfile ? (
+              <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                  <Lock className="h-3 w-3 text-muted-foreground" />MCP Servers
+                </Label>
+                <span className="text-sm text-muted-foreground">
+                  {activeProfile.version.mcpServers?.join(", ") || "None"}
+                </span>
+              </div>
+              ) : (
+              <div className="flex items-start gap-4 mb-3">
+                <Label className="text-sm w-32 shrink-0 pt-2">MCP Servers</Label>
+                <div className="flex-1 space-y-1.5">
+                  <Select
+                    value={resubmitOverrides.mcpServers === null ? "__clear__" : resubmitOverrides.mcpServers !== undefined ? "__custom__" : "__keep__"}
+                    onValueChange={(v) => setResubmitOverrides((prev) => {
+                      const next = { ...prev };
+                      if (v === "__keep__") { delete next.mcpServers; }
+                      else if (v === "__clear__") { next.mcpServers = null; }
+                      else { next.mcpServers = []; }
+                      return next;
+                    })}
+                  >
+                    <SelectTrigger className="w-56">
+                      <SelectValue>
+                        {resubmitOverrides.mcpServers === null
+                          ? "Clear (no MCP servers)"
+                          : resubmitOverrides.mcpServers !== undefined
+                            ? "Choose servers…"
+                            : selectedRunsSummary.mcpServers && selectedRunsSummary.mcpServers.length > 0
+                              ? selectedRunsSummary.mcpServers.join(", ")
+                              : selectedRunsSummary.isMultiMcp ? "Mixed (keep each)" : "None"
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__keep__">
+                        {selectedRunsSummary.mcpServers && selectedRunsSummary.mcpServers.length > 0
+                          ? selectedRunsSummary.mcpServers.join(", ")
+                          : selectedRunsSummary.isMultiMcp ? "Mixed (keep each)" : "None"}
+                      </SelectItem>
+                      <SelectItem value="__clear__">Clear (no MCP servers)</SelectItem>
+                      <SelectItem value="__custom__">Choose servers…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {resubmitOverrides.mcpServers !== undefined && resubmitOverrides.mcpServers !== null && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {mcpServersData.map((s) => {
+                        const selected = resubmitOverrides.mcpServers?.includes(s._id) ?? false;
+                        return (
+                          <Button
+                            key={s._id}
+                            type="button"
+                            variant={selected ? "default" : "outline"}
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => setResubmitOverrides((prev) => {
+                              const current = prev.mcpServers ?? [];
+                              const next = selected ? current.filter((id) => id !== s._id) : [...current, s._id];
+                              return { ...prev, mcpServers: next };
+                            })}
+                          >
+                            {s.name}
+                          </Button>
+                        );
+                      })}
+                      {mcpServersData.length === 0 && (
+                        <span className="text-xs text-muted-foreground italic">No MCP servers configured</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              )}
+
+              {/* Skills */}
+              {activeProfile ? (
+              <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                  <Lock className="h-3 w-3 text-muted-foreground" />Skills
+                </Label>
+                <span className="text-sm text-muted-foreground">
+                  {activeProfile.version.skillRevisions?.map((r) => r.split("@")[0].split("/").pop()).join(", ") || "None"}
+                </span>
+              </div>
+              ) : (
+              <div className="flex items-start gap-4 mb-3">
+                <Label className="text-sm w-32 shrink-0 pt-2">Skills</Label>
+                <div className="flex-1 space-y-1.5">
+                  <Select
+                    value={resubmitOverrides.skillRevisions === null ? "__clear__" : resubmitOverrides.skillRevisions !== undefined ? "__custom__" : "__keep__"}
+                    onValueChange={(v) => setResubmitOverrides((prev) => {
+                      const next = { ...prev };
+                      if (v === "__keep__") { delete next.skillRevisions; }
+                      else if (v === "__clear__") { next.skillRevisions = null; }
+                      else { next.skillRevisions = []; }
+                      return next;
+                    })}
+                  >
+                    <SelectTrigger className="w-56">
+                      <SelectValue>
+                        {resubmitOverrides.skillRevisions === null
+                          ? "Clear (no skills)"
+                          : resubmitOverrides.skillRevisions !== undefined
+                            ? "Choose skills…"
+                            : selectedRunsSummary.skillRevisions && selectedRunsSummary.skillRevisions.length > 0
+                              ? selectedRunsSummary.skillRevisions.map((r) => r.split("@")[0].split("/").pop()).join(", ")
+                              : selectedRunsSummary.isMultiSkills ? "Mixed (keep each)" : "None"
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__keep__">
+                        {selectedRunsSummary.skillRevisions && selectedRunsSummary.skillRevisions.length > 0
+                          ? selectedRunsSummary.skillRevisions.map((r) => r.split("@")[0].split("/").pop()).join(", ")
+                          : selectedRunsSummary.isMultiSkills ? "Mixed (keep each)" : "None"}
+                      </SelectItem>
+                      <SelectItem value="__clear__">Clear (no skills)</SelectItem>
+                      <SelectItem value="__custom__">Choose skills…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {resubmitOverrides.skillRevisions !== undefined && resubmitOverrides.skillRevisions !== null && (() => {
+                    const allRefs = [...new Set(
+                      selectedRunsList.flatMap((r) => r.skillRevisions ?? [])
+                    )];
+                    return (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {allRefs.map((ref) => {
+                          const selected = resubmitOverrides.skillRevisions?.includes(ref) ?? false;
+                          const skillName = ref.split("@")[0].split("/").pop() ?? ref;
+                          return (
+                            <Button
+                              key={ref}
+                              type="button"
+                              variant={selected ? "default" : "outline"}
+                              size="sm"
+                              className="h-7 text-xs"
+                              title={ref}
+                              onClick={() => setResubmitOverrides((prev) => {
+                                const current = prev.skillRevisions ?? [];
+                                const next = selected ? current.filter((r) => r !== ref) : [...current, ref];
+                                return { ...prev, skillRevisions: next };
+                              })}
+                            >
+                              {skillName}
+                            </Button>
+                          );
+                        })}
+                        {allRefs.length === 0 && (
+                          <span className="text-xs text-muted-foreground italic">No skills in selected runs</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+              )}
+
+              {/* Extensions (VS Code workers only) */}
+              {activeProfile ? (
+                effectiveWorker?.includes("vscode") && (
+                <div className="flex items-start gap-4 mb-3" title="Controlled by profile">
+                  <Label className="text-sm w-32 shrink-0 pt-0.5 flex items-center gap-1.5">
+                    <Lock className="h-3 w-3 text-muted-foreground" />Extensions
+                  </Label>
+                  <span className="text-sm text-muted-foreground">
+                    {activeProfile.version.extensions?.join(", ") || "None"}
+                  </span>
+                </div>
+                )
+              ) : (
+              effectiveWorker?.includes("vscode") && (
+              <div className="flex items-start gap-4">
+                <Label className="text-sm w-32 shrink-0 pt-2">Extensions</Label>
+                <div className="flex-1 space-y-1.5">
+                  <Select
+                    value={resubmitOverrides.extensions === null ? "__clear__" : resubmitOverrides.extensions !== undefined ? "__custom__" : "__keep__"}
+                    onValueChange={(v) => setResubmitOverrides((prev) => {
+                      const next = { ...prev };
+                      if (v === "__keep__") { delete next.extensions; }
+                      else if (v === "__clear__") { next.extensions = null; }
+                      else { next.extensions = []; }
+                      return next;
+                    })}
+                  >
+                    <SelectTrigger className="w-56">
+                      <SelectValue>
+                        {resubmitOverrides.extensions === null
+                          ? "Clear (no extensions)"
+                          : resubmitOverrides.extensions !== undefined
+                            ? "Choose extensions…"
+                            : selectedRunsSummary.extensions && selectedRunsSummary.extensions.length > 0
+                              ? selectedRunsSummary.extensions.join(", ")
+                              : selectedRunsSummary.isMultiExtensions ? "Mixed (keep each)" : "None"
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__keep__">
+                        {selectedRunsSummary.extensions && selectedRunsSummary.extensions.length > 0
+                          ? selectedRunsSummary.extensions.join(", ")
+                          : selectedRunsSummary.isMultiExtensions ? "Mixed (keep each)" : "None"}
+                      </SelectItem>
+                      <SelectItem value="__clear__">Clear (no extensions)</SelectItem>
+                      <SelectItem value="__custom__">Choose extensions…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {resubmitOverrides.extensions !== undefined && resubmitOverrides.extensions !== null && (() => {
+                    const allExts = [...new Set(
+                      selectedRunsList.flatMap((r) => r.extensions ?? [])
+                    )];
+                    return (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {allExts.map((ext) => {
+                          const selected = resubmitOverrides.extensions?.includes(ext) ?? false;
+                          return (
+                            <Button
+                              key={ext}
+                              type="button"
+                              variant={selected ? "default" : "outline"}
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => setResubmitOverrides((prev) => {
+                                const current = prev.extensions ?? [];
+                                const next = selected ? current.filter((e) => e !== ext) : [...current, ext];
+                                return { ...prev, extensions: next };
+                              })}
+                            >
+                              {ext}
+                            </Button>
+                          );
+                        })}
+                        {allExts.length === 0 && (
+                          <span className="text-xs text-muted-foreground italic">No extensions in selected runs</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+              ))}
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setResubmitCount(1); setResubmitOverrides({}); }}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                bulkResubmitMutation.mutate({ ids: [...selectedIds], count: resubmitCount, overrides: resubmitOverrides });
+              }}
+              disabled={bulkResubmitMutation.isPending}
+            >
+              {bulkResubmitMutation.isPending ? "Re-submitting…" : "Re-submit"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -2341,17 +2976,20 @@ export function RunsList() {
   );
 }
 
-/**
- * Uppercase group label rendered inside the bulk-action toolbar
- * (e.g. "SCHEDULING", "RUNS", "EXPORT"). Adds breathing room before each
- * group and hides on narrow viewports so the toolbar stays usable.
- */
 function BulkGroupLabel({ children }: { children: ReactNode }) {
   return (
     <span className="ml-2 hidden text-[10px] font-semibold uppercase tracking-wide text-muted-foreground first:ml-0 xl:inline">
       {children}
     </span>
   );
+}
+
+/** Parse version number from a profileVersionId of the form "<profileId>@<version>". */
+function parseProfileVersion(pvId?: string): number | null {
+  if (!pvId) return null;
+  const v = pvId.split("@")[1];
+  const n = v ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
 }
 
 function sortKey(r: Run, col: string): string | number {
