@@ -1,13 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Loader2, Save, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { SkillPicker } from "@/components/SkillPicker";
+import {
+  ModelSelectItems,
+  ReasoningEffortSelect,
+  useModelCapabilities,
+  useReasoningEffort,
+} from "@/components/ReasoningEffortSelect";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -37,6 +43,7 @@ export function ProfileCreateForm({
   const [description, setDescription] = useState("");
   const [worker, setWorker] = useState("");
   const [model, setModel] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState("");
   const [selectedAgentVersion, setSelectedAgentVersion] = useState("");
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
@@ -55,6 +62,15 @@ export function ProfileCreateForm({
   const selectedAgent = agents.find((a: CodingAgent) => a._id === worker);
   const supportedModels = selectedAgent?.supportedModels ?? [];
   const isVscodeWorker = worker.includes("vscode");
+
+  const { capabilitiesMap } = useModelCapabilities(worker || undefined);
+  const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
+  const { supportedEfforts } = useReasoningEffort({
+    model,
+    capabilitiesMap,
+    value: reasoningEffort,
+    onChange: onEffortChange,
+  });
 
   const eligibleAgents = agents.filter(
     (a: CodingAgent) => Array.isArray(a.supportedModels) && a.supportedModels.length > 0,
@@ -89,6 +105,7 @@ export function ProfileCreateForm({
         ...(description ? { description } : {}),
         workerType: worker,
         model,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
         ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
         ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
@@ -114,8 +131,9 @@ export function ProfileCreateForm({
       descParts.push(workerLabel);
     }
     if (model) {
-      parts.push(model);
-      descParts.push(`model: ${model}`);
+      const modelLabel = reasoningEffort ? `${model} (${reasoningEffort})` : model;
+      parts.push(modelLabel);
+      descParts.push(`model: ${modelLabel}`);
     }
     if (selectedMcpServers.length > 0) {
       parts.push(selectedMcpServers.join(", "));
@@ -229,13 +247,20 @@ export function ProfileCreateForm({
                   <SelectValue placeholder="Select a model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {supportedModels.map((m: string) => (
-                    <SelectItem key={m} value={m}>{m}</SelectItem>
-                  ))}
+                  <ModelSelectItems
+                    models={supportedModels}
+                    capabilitiesMap={capabilitiesMap}
+                  />
                 </SelectContent>
               </Select>
             </div>
           )}
+
+          <ReasoningEffortSelect
+            supportedEfforts={supportedEfforts}
+            value={reasoningEffort}
+            onChange={onEffortChange}
+          />
 
           {sortedVersions.length > 0 && (
             <div className="space-y-2">

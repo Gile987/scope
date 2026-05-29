@@ -74,7 +74,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority } = req.body;
     let worker = req.query.worker as string | undefined;
 
     type VariationInput = {
@@ -360,6 +360,9 @@ apiRoute(ctx.app, ctx.registry, {
             createdAt: new Date(),
             priority: requestedPriority ?? 0,
             ...(r.model ? { model: r.model } : {}),
+            ...((r.profileVersion.reasoningEffort ?? requestedReasoningEffort)
+              ? { reasoningEffort: r.profileVersion.reasoningEffort ?? requestedReasoningEffort }
+              : {}),
             ...(maxIterations ? { maxIterations } : {}),
             ...(personaInstructions ? { personaInstructions } : {}),
             ...(personaObj ? { persona: personaObj } : {}),
@@ -477,6 +480,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Effective values: profile overrides client inputs for controlled fields
     const effectiveModel = profileVersion ? profileVersion.model : requestedModel;
+    const effectiveReasoningEffort = profileVersion?.reasoningEffort ? profileVersion.reasoningEffort : requestedReasoningEffort;
     const effectiveMcpServers = profileVersion ? (profileVersion.mcpServers ?? undefined) : mcpServerSlugs;
     const effectiveSkills = profileVersion ? (profileVersion.skillRevisions ?? undefined) : skillSlugs;
     const effectiveExtensions = profileVersion ? (profileVersion.extensions ?? undefined) : extensionIds;
@@ -581,6 +585,37 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       resolvedAgentVersion = versionResult.agentVersion;
+    }
+
+    // Validate reasoning effort against model capabilities
+    const warnings: string[] = [];
+    let modelCapabilities: { reasoningEffort?: string[] } | undefined;
+    if (model) {
+      const compoundModelId = `${workerType}:${model}`;
+      const modelDoc = await ctx.modelCollection.findOne({ _id: compoundModelId });
+      if (modelDoc?.capabilities) {
+        modelCapabilities = modelDoc.capabilities;
+        const supportedEfforts = modelDoc.capabilities.reasoningEffort;
+        if (supportedEfforts && supportedEfforts.length > 0) {
+          if (effectiveReasoningEffort) {
+            if (!supportedEfforts.includes(effectiveReasoningEffort)) {
+              res.status(400).json({
+                error: `Reasoning effort "${effectiveReasoningEffort}" is not supported by model "${model}"`,
+                supportedReasoningEfforts: supportedEfforts,
+              });
+              return;
+            }
+          } else if (supportedEfforts.length === 1) {
+            warnings.push(
+              `Model "${model}" only supports reasoning effort "${supportedEfforts[0]}". The agent extension may send an incompatible effort level.`
+            );
+          } else if (supportedEfforts.length < 4) {
+            warnings.push(
+              `Model "${model}" supports limited reasoning efforts: ${supportedEfforts.join(", ")}. The agent extension may send an incompatible effort level.`
+            );
+          }
+        }
+      }
     }
 
     // Validate MCP server slugs if provided
@@ -698,6 +733,7 @@ apiRoute(ctx.app, ctx.registry, {
           createdAt: new Date(),
           priority: requestedPriority ?? 0,
           ...(model ? { model } : {}),
+          ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
@@ -729,12 +765,15 @@ apiRoute(ctx.app, ctx.registry, {
         workerType,
         taskPromptId,
         ...(model ? { model } : {}),
+        ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
         ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
         status: "pending",
         mode,
         message: `${count} requests submitted successfully`,
         scenario,
         ...(maxIterations ? { maxIterations } : {}),
+        ...(warnings.length > 0 ? { warnings } : {}),
+        ...(modelCapabilities ? { modelCapabilities } : {}),
       });
       return;
     }
@@ -752,6 +791,7 @@ apiRoute(ctx.app, ctx.registry, {
       createdAt: new Date(),
       priority: requestedPriority ?? 0,
       ...(model ? { model } : {}),
+      ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
@@ -779,12 +819,15 @@ apiRoute(ctx.app, ctx.registry, {
       submissionId,
       workerType,
       ...(model ? { model } : {}),
+      ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
       status: requestDoc.run?.status ?? "pending",
       mode,
       message: "Request submitted successfully",
       scenario,
       ...(maxIterations ? { maxIterations } : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(modelCapabilities ? { modelCapabilities } : {}),
     });
   },
 });
@@ -1264,6 +1307,9 @@ apiRoute(ctx.app, ctx.registry, {
       if (overrides?.model !== undefined && overrides.model !== overrideProfileVersion.model) {
         conflicts.push(`model: sent "${overrides.model}", profile requires "${overrideProfileVersion.model}"`);
       }
+      if (overrides?.reasoningEffort !== undefined && overrideProfileVersion.reasoningEffort && overrides.reasoningEffort !== overrideProfileVersion.reasoningEffort) {
+        conflicts.push(`reasoningEffort: sent "${overrides.reasoningEffort}", profile requires "${overrideProfileVersion.reasoningEffort}"`);
+      }
       if (overrides?.mcpServers !== undefined) {
         const profileMcp = overrideProfileVersion.mcpServers ?? [];
         if (JSON.stringify([...overrides.mcpServers!].sort()) !== JSON.stringify([...profileMcp].sort())) {
@@ -1338,6 +1384,9 @@ apiRoute(ctx.app, ctx.registry, {
         const effectiveModel = activeProfileVersion
           ? activeProfileVersion.model
           : (overrides?.model !== undefined ? overrides.model : original.model);
+        const effectiveReasoningEffort = activeProfileVersion?.reasoningEffort
+          ? activeProfileVersion.reasoningEffort
+          : (overrides?.reasoningEffort !== undefined ? overrides.reasoningEffort : original.reasoningEffort);
         const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
         const effectiveMcpServers = activeProfileVersion
           ? (activeProfileVersion.mcpServers ?? null)
@@ -1381,6 +1430,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(original.personaInstructions ? { personaInstructions: original.personaInstructions } : {}),
           ...(original.persona ? { persona: original.persona } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
+          ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),

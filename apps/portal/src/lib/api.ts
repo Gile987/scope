@@ -82,6 +82,7 @@ export const api = {
     scenario: { task: string; criteria: string[]; version?: "v1" | "v2" };
     worker?: string;
     model?: string;
+    reasoningEffort?: string;
     maxIterations?: number;
     personaInstructions?: string;
     persona?: { personality: string; experience: string; verbosity: string; type: string };

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -27,6 +27,12 @@ import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
+import {
+  ModelSelectItems,
+  ReasoningEffortSelect,
+  useModelCapabilities,
+  useReasoningEffort,
+} from "@/components/ReasoningEffortSelect";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
@@ -149,6 +155,7 @@ export function SubmitRun() {
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
   const [worker, setWorker] = useState<string>("coder-acp-copilot");
   const [model, setModel] = useState<string>("");
+  const [reasoningEffort, setReasoningEffort] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<number>(10);
   const [occurrences, setOccurrences] = useState<number>(5);
   const [priority, setPriority] = useState<number>(0);
@@ -257,6 +264,16 @@ export function SubmitRun() {
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 
+  // Model capabilities and reasoning-effort management
+  const { capabilitiesMap: modelCapabilitiesMap } = useModelCapabilities(worker || undefined);
+  const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
+  const { supportedEfforts } = useReasoningEffort({
+    model,
+    capabilitiesMap: modelCapabilitiesMap,
+    value: reasoningEffort,
+    onChange: onEffortChange,
+  });
+
   useEffect(() => {
     if (selectedProfileId) return;
     if (sortedVersions.length > 0) {
@@ -270,6 +287,7 @@ export function SubmitRun() {
   const applyVersionConfig = (v: ProfileVersionDocument) => {
     setWorker(v.workerType);
     setModel(v.model);
+    setReasoningEffort(v.reasoningEffort ?? "");
     setSelectedAgentVersion(v.agentVersion ?? "");
     setSelectedMcpServers(v.mcpServers ?? []);
     setSelectedSkills(v.skillRevisions ?? []);
@@ -406,6 +424,7 @@ export function SubmitRun() {
         name: saveProfileName.trim(),
         workerType: worker,
         model,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
         ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
         ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
@@ -473,6 +492,7 @@ export function SubmitRun() {
       scenario: { task: task.trim(), criteria: pickedCriteria },
       ...(inVariationMode ? {} : { ...(worker ? { worker } : {}) }),
       ...(inVariationMode ? {} : { ...(model ? { model } : {}) }),
+      ...(inVariationMode ? {} : { ...(reasoningEffort ? { reasoningEffort } : {}) }),
       maxIterations,
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
@@ -826,13 +846,24 @@ export function SubmitRun() {
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
                   <SelectContent>
-                    {selectedAgent.supportedModels.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
-                      </SelectItem>
-                    ))}
+                    <ModelSelectItems
+                      models={selectedAgent.supportedModels}
+                      capabilitiesMap={modelCapabilitiesMap}
+                      defaultModel={selectedAgent.defaultModel}
+                    />
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+            {supportedEfforts.length > 0 && (
+              <div className="space-y-2">
+                <ReasoningEffortSelect
+                  supportedEfforts={supportedEfforts}
+                  value={reasoningEffort}
+                  onChange={onEffortChange}
+                  disabled={profileLocked}
+                  noSelectionLabel="Any (no preference)"
+                />
               </div>
             )}
             {sortedVersions.length > 0 && (

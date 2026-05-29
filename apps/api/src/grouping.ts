@@ -119,6 +119,7 @@ export function buildGroupingPipeline(
         // Uniform detection: collect distinct values
         _workerTypes: { $addToSet: "$workerType" },
         _models: { $addToSet: { $ifNull: ["$model", ""] } },
+        _reasoningEfforts: { $addToSet: { $ifNull: ["$reasoningEffort", ""] } },
         _agentVersions: { $addToSet: { $ifNull: ["$agentVersion", ""] } },
         _platforms: { $addToSet: { $ifNull: ["$run.os.platform", ""] } },
         _statuses: { $addToSet: "$run.status" },
@@ -170,6 +171,7 @@ export function buildGroupingPipeline(
         uniform: {
           workerType: { $cond: { if: { $eq: [{ $size: "$_workerTypes" }, 1] }, then: { $arrayElemAt: ["$_workerTypes", 0] }, else: "$$REMOVE" } },
           model: { $cond: { if: { $and: [{ $eq: [{ $size: "$_models" }, 1] }, { $ne: [{ $arrayElemAt: ["$_models", 0] }, ""] }] }, then: { $arrayElemAt: ["$_models", 0] }, else: "$$REMOVE" } },
+          reasoningEffort: { $cond: { if: { $and: [{ $eq: [{ $size: "$_reasoningEfforts" }, 1] }, { $ne: [{ $arrayElemAt: ["$_reasoningEfforts", 0] }, ""] }] }, then: { $arrayElemAt: ["$_reasoningEfforts", 0] }, else: "$$REMOVE" } },
           agentVersion: { $cond: { if: { $and: [{ $eq: [{ $size: "$_agentVersions" }, 1] }, { $ne: [{ $arrayElemAt: ["$_agentVersions", 0] }, ""] }] }, then: { $arrayElemAt: ["$_agentVersions", 0] }, else: "$$REMOVE" } },
           platform: { $cond: { if: { $and: [{ $eq: [{ $size: "$_platforms" }, 1] }, { $ne: [{ $arrayElemAt: ["$_platforms", 0] }, ""] }] }, then: { $arrayElemAt: ["$_platforms", 0] }, else: "$$REMOVE" } },
           status: { $cond: { if: { $eq: [{ $size: "$_statuses" }, 1] }, then: { $arrayElemAt: ["$_statuses", 0] }, else: "$$REMOVE" } },

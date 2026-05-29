@@ -38,6 +38,7 @@ run
   .option("-c, --criteria <criteria...>", "Evaluation criteria (overrides scenario criteria)")
   .option("--max-iterations <number>", "Max judge iterations for multi-turn mode", parseInt)
   .option("--model <model>", "Model to use for the coding agent")
+  .option("--reasoning-effort <level>", "Reasoning effort level (e.g. low, medium, high)")
   .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
@@ -47,7 +48,7 @@ run
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, baseProfile, profileVariationsFile } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, baseProfile, profileVariationsFile } = options;
 
     try {
       // Resolve scenario + persona YAML if provided
@@ -88,6 +89,9 @@ run
       }
       if (model) {
         body.model = model;
+      }
+      if (reasoningEffort) {
+        body.reasoningEffort = reasoningEffort;
       }
       if (personaInstructions) {
         body.personaInstructions = personaInstructions;
@@ -156,9 +160,16 @@ run
       if (result.submissionId) console.log(`${label('Submission:')} ${value(result.submissionId)}`);
       console.log(`${label('Worker:')} ${value(result.workerType)}`);
       if (result.model) console.log(`${label('Model:')} ${value(result.model)}`);
+      if (result.reasoningEffort) console.log(`${label('Reasoning Effort:')} ${value(result.reasoningEffort)}`);
       console.log(`${label('Mode:')} ${value(result.mode || 'one-shot')}`);
       console.log(`${label('Status:')} ${value(result.status)}`);
 
+      // Display warnings (e.g. model effort compatibility)
+      if (result.warnings && Array.isArray(result.warnings)) {
+        for (const warning of result.warnings) {
+          console.log(`${errorText('⚠ Warning:')} ${warning}`);
+        }
+      }
       if (!stream) {
         printFollowUpCommands(result.id);
         return;

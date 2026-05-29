@@ -197,6 +197,7 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "criteria", label: "Criteria" },
   { id: "worker", label: "Worker" },
   { id: "model", label: "Model" },
+  { id: "effort", label: "Effort" },
   { id: "version", label: "Version" },
   { id: "os", label: "OS" },
   { id: "mcp", label: "MCP" },
@@ -1250,6 +1251,18 @@ export function RunsList() {
             </TooltipTrigger>
             <TooltipContent className="text-xs">{r.model}</TooltipContent>
           </Tooltip>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "effort",
+      header: "Effort",
+      width: "100px",
+      hidden: columnVisibility.isHidden("effort"),
+      cell: (r) =>
+        r.reasoningEffort ? (
+          <span className="font-mono text-xs">{r.reasoningEffort}</span>
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         ),

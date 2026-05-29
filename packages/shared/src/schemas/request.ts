@@ -81,7 +81,8 @@ export const RequestOutcomeSchema = z.enum([
 
 export const VALID_WORKERS = [
   "coder-acp-claude-code",
-  "coder-acp-copilot"
+  "coder-acp-copilot",
+  "coder-acp-copilot-windows"
 ] as const;
 
 export const WorkerTypeSchema = z.enum(VALID_WORKERS);
@@ -90,6 +91,7 @@ export const CreateRequestInputSchema = z
   .object({
     scenario: ScenarioSchema,
     model: z.string().optional(),
+    reasoningEffort: z.string().optional(),
     maxIterations: z.number().int().min(1).max(50).optional(),
     personaInstructions: z.string().optional(),
     persona: PersonaSchema.optional(),
@@ -108,6 +110,7 @@ export const RequestResponseSchema = z
     scenario: ScenarioSchema,
     workerType: z.string(),
     model: z.string().optional(),
+    reasoningEffort: z.string().optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     maxIterations: z.number().optional(),
@@ -295,6 +298,7 @@ export const BulkResubmitInputSchema = z
         profileId: z.string().nullable().optional(),
         workerType: z.string().optional(),
         model: z.string().nullable().optional(),
+        reasoningEffort: z.string().nullable().optional(),
         maxIterations: z.number().nullable().optional(),
         mcpServers: z.array(z.string()).nullable().optional(),
         skillRevisions: z.array(z.string()).nullable().optional(),
