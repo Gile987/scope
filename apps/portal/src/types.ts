@@ -154,7 +154,8 @@ export interface CursorPaginatedResponse<T> {
 
 export const WORKER_TYPES = [
   "coder-acp-claude-code",
-  "coder-acp-copilot"
+  "coder-acp-copilot",
+  "coder-acp-copilot-windows"
 ] as const;
 
 export type WorkerType = (typeof WORKER_TYPES)[number];
