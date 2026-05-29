@@ -1,9 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,20 +20,31 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { BarChart3, TrendingUp, CheckCircle, Clock, RefreshCw } from "lucide-react";
+import {
+  BarChart3,
+  CheckCircle2,
+  RefreshCw,
+  Plus,
+  Trophy,
+  AlertTriangle,
+  ArrowRight,
+  Activity,
+  Clock,
+  Repeat,
+} from "lucide-react";
 import { CriteriaFilterBar } from "@/components/CriteriaFilterBar";
-import { formatDuration } from "@/lib/utils";
+import { formatDuration, cn } from "@/lib/utils";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 import type { AnalysisResponse, TaskWorkerGroup } from "@/types";
 
 // Color palette for chart lines (distinct colors for different groups)
 const COLORS = [
-  "hsl(221, 83%, 53%)",   // blue
-  "hsl(142, 71%, 45%)",   // green
-  "hsl(38, 92%, 50%)",    // orange
-  "hsl(262, 83%, 58%)",   // purple
-  "hsl(346, 77%, 50%)",   // red
-  "hsl(199, 89%, 48%)",   // cyan
+  "hsl(221, 83%, 53%)", // blue
+  "hsl(142, 71%, 45%)", // green
+  "hsl(38, 92%, 50%)",  // orange
+  "hsl(262, 83%, 58%)", // purple
+  "hsl(346, 77%, 50%)", // red
+  "hsl(199, 89%, 48%)", // cyan
 ];
 
 function formatPercent(value: number): string {
@@ -51,62 +64,202 @@ function truncateTask(task: string, maxLength = 35): string {
   return task.length > maxLength ? task.substring(0, maxLength - 3) + "..." : task;
 }
 
-// Summary cards showing overall stats
-function SummaryCards({ data }: { data: AnalysisResponse }) {
-  const { summary } = data;
-  
+/** Build a `/runs` URL pre-filtered to a given task / worker pair. */
+function runsLinkFor(group: TaskWorkerGroup, extra?: Record<string, string>): string {
+  const params = new URLSearchParams();
+  params.set("worker", group.workerType);
+  params.set("taskPromptId", group.taskPromptId);
+  for (const [k, v] of Object.entries(extra ?? {})) params.set(k, v);
+  return `/runs?${params.toString()}`;
+}
+
+// ─── Hero KPI grid ──────────────────────────────────────────────────────────
+
+interface DerivedInsights {
+  failedRuns: number;
+  inFlightRuns: number;
+  topPerformer: TaskWorkerGroup | null;
+  needsAttention: TaskWorkerGroup | null;
+  avgDurationMs: number | null;
+}
+
+function deriveInsights(data: AnalysisResponse): DerivedInsights {
+  const { summary, groups } = data;
+  const failedRuns = Math.max(0, summary.completedRuns - summary.passedRuns);
+  const inFlightRuns = Math.max(0, summary.totalRuns - summary.completedRuns);
+
+  // Top performer: highest pass rate among groups with at least 2 completed runs.
+  // Falls back to "any group with completed runs" so small datasets still show
+  // something useful.
+  const ranked = [...groups]
+    .filter((g) => g.completed > 0)
+    .sort((a, b) => {
+      const ra = a.passed / a.completed;
+      const rb = b.passed / b.completed;
+      if (rb !== ra) return rb - ra;
+      return b.completed - a.completed;
+    });
+  const topPerformer =
+    ranked.find((g) => g.completed >= 2) ?? ranked[0] ?? null;
+
+  // Attention: lowest pass rate among groups with at least one failure. Don't
+  // surface this when topPerformer is itself failure-free — there's nothing
+  // to complain about.
+  const failing = [...groups]
+    .filter((g) => g.completed > 0 && g.passed < g.completed)
+    .sort((a, b) => {
+      const ra = a.passed / a.completed;
+      const rb = b.passed / b.completed;
+      if (ra !== rb) return ra - rb;
+      return b.completed - a.completed;
+    });
+  const needsAttention = failing[0] ?? null;
+
+  // Average duration across all groups with duration data, weighted by passed.
+  let totalMs = 0;
+  let n = 0;
+  for (const g of groups) {
+    if (!g.durationStats) continue;
+    totalMs += g.durationStats.mean * g.passed;
+    n += g.passed;
+  }
+  const avgDurationMs = n > 0 ? totalMs / n : null;
+
+  return { failedRuns, inFlightRuns, topPerformer, needsAttention, avgDurationMs };
+}
+
+interface PassRateBarProps {
+  passed: number;
+  failed: number;
+  inFlight: number;
+  total: number;
+}
+
+/** Stacked horizontal bar: green = passed, red = failed, muted = in flight. */
+function PassRateBar({ passed, failed, inFlight, total }: PassRateBarProps) {
+  if (total === 0) return null;
+  const passPct = (passed / total) * 100;
+  const failPct = (failed / total) * 100;
+  const inFlightPct = (inFlight / total) * 100;
   return (
-    <div className="grid gap-4 md:grid-cols-4">
+    <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+      {passPct > 0 && (
+        <div className="h-full bg-emerald-500 transition-all" style={{ width: `${passPct}%` }} />
+      )}
+      {failPct > 0 && (
+        <div className="h-full bg-destructive transition-all" style={{ width: `${failPct}%` }} />
+      )}
+      {inFlightPct > 0 && (
+        <div
+          className="h-full bg-muted-foreground/40 transition-all"
+          style={{ width: `${inFlightPct}%` }}
+        />
+      )}
+    </div>
+  );
+}
+
+function HeroKpis({ data, insights }: { data: AnalysisResponse; insights: DerivedInsights }) {
+  const { summary } = data;
+  const { failedRuns, inFlightRuns, topPerformer, avgDurationMs } = insights;
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+      {/* Pass rate — hero card */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Total Runs</CardTitle>
+          <CardTitle className="text-sm font-medium">Pass rate</CardTitle>
+          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+        </CardHeader>
+        <CardContent className="space-y-2.5">
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold tabular-nums">
+              {summary.completedRuns > 0 ? formatPercent(summary.overallPassRate) : "—"}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {summary.passedRuns}/{summary.completedRuns} passed
+            </span>
+          </div>
+          <PassRateBar
+            passed={summary.passedRuns}
+            failed={failedRuns}
+            inFlight={inFlightRuns}
+            total={summary.totalRuns}
+          />
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" /> {summary.passedRuns} passed
+            </span>
+            {failedRuns > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-destructive" /> {failedRuns} failed
+              </span>
+            )}
+            {inFlightRuns > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-muted-foreground/40" /> {inFlightRuns} in flight
+              </span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Total runs */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Total runs</CardTitle>
           <BarChart3 className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{summary.totalRuns}</div>
+        <CardContent className="space-y-1.5">
+          <div className="text-3xl font-bold tabular-nums">{summary.totalRuns}</div>
           <p className="text-xs text-muted-foreground">
             {summary.completedRuns} completed
+            {inFlightRuns > 0 && (
+              <>
+                {" · "}
+                <span className="text-foreground/80">{inFlightRuns} in flight</span>
+              </>
+            )}
           </p>
+          <Link
+            to="/runs"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80"
+          >
+            View all runs <ArrowRight className="h-3 w-3" />
+          </Link>
         </CardContent>
       </Card>
-      
+
+      {/* Avg iterations */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Pass Rate</CardTitle>
-          <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          <CardTitle className="text-sm font-medium">Avg iterations to pass</CardTitle>
+          <Repeat className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{formatPercent(summary.overallPassRate)}</div>
-          <p className="text-xs text-muted-foreground">
-            {summary.passedRuns} of {summary.completedRuns} passed
-          </p>
-        </CardContent>
-      </Card>
-      
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Avg Iterations</CardTitle>
-          <TrendingUp className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">
+        <CardContent className="space-y-1.5">
+          <div className="text-3xl font-bold tabular-nums">
             {formatNumber(summary.avgIterationsToPass)}
           </div>
           <p className="text-xs text-muted-foreground">
-            to pass (when successful)
+            across {summary.passedRuns} successful run{summary.passedRuns === 1 ? "" : "s"}
           </p>
         </CardContent>
       </Card>
-      
+
+      {/* Avg duration */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Task Groups</CardTitle>
+          <CardTitle className="text-sm font-medium">Avg duration</CardTitle>
           <Clock className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{data.groups.length}</div>
+        <CardContent className="space-y-1.5">
+          <div className="text-3xl font-bold tabular-nums">
+            {avgDurationMs != null ? formatDuration(avgDurationMs) : "—"}
+          </div>
           <p className="text-xs text-muted-foreground">
-            task + worker combinations
+            {topPerformer
+              ? `best: ${truncateTask(topPerformer.task, 22)}`
+              : "no successful runs yet"}
           </p>
         </CardContent>
       </Card>
@@ -114,27 +267,252 @@ function SummaryCards({ data }: { data: AnalysisResponse }) {
   );
 }
 
-// Pass@k table
-function PassAtKTable({ data }: { data: AnalysisResponse }) {
-  const { groups, kValues } = data;
-  
+// ─── Insights row ───────────────────────────────────────────────────────────
+
+function InsightsRow({ insights }: { insights: DerivedInsights }) {
+  const { topPerformer, needsAttention } = insights;
+  if (!topPerformer && !needsAttention) return null;
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      {topPerformer && (
+        <Card className="border-emerald-500/30 bg-emerald-500/[0.03]">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div className="flex items-center gap-2">
+              <Trophy className="h-4 w-4 text-emerald-600" />
+              <CardTitle className="text-sm font-medium">Top performer</CardTitle>
+            </div>
+            <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+              {formatPercent(topPerformer.passed / topPerformer.completed)} pass rate
+            </Badge>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="font-medium leading-tight" title={topPerformer.task}>
+              {truncateTask(topPerformer.task, 48)}
+            </p>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline" className="font-mono text-[10px]">
+                {topPerformer.workerType}
+              </Badge>
+              <span>
+                {topPerformer.passed}/{topPerformer.completed} passed
+              </span>
+              {topPerformer.iterationStats && (
+                <span>
+                  · avg {formatNumber(topPerformer.iterationStats.mean)} iterations
+                </span>
+              )}
+            </div>
+            <Link
+              to={runsLinkFor(topPerformer)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80"
+            >
+              View runs <ArrowRight className="h-3 w-3" />
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
+      {needsAttention && needsAttention !== topPerformer && (
+        <Card className="border-destructive/30 bg-destructive/[0.03]">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              <CardTitle className="text-sm font-medium">Needs attention</CardTitle>
+            </div>
+            <Badge variant="outline" className="border-destructive/40 bg-destructive/10 text-destructive">
+              {formatPercent(needsAttention.passed / needsAttention.completed)} pass rate
+            </Badge>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="font-medium leading-tight" title={needsAttention.task}>
+              {truncateTask(needsAttention.task, 48)}
+            </p>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline" className="font-mono text-[10px]">
+                {needsAttention.workerType}
+              </Badge>
+              <span>
+                {needsAttention.completed - needsAttention.passed}/{needsAttention.completed} failed
+              </span>
+            </div>
+            <Link
+              to={runsLinkFor(needsAttention, { outcome: "failed" })}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80"
+            >
+              View failed runs <ArrowRight className="h-3 w-3" />
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Performance breakdown (merged iteration + duration) ────────────────────
+
+function PerformanceTable({ data }: { data: AnalysisResponse }) {
+  const { groups } = data;
+
   if (groups.length === 0) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Pass@k by Task & Worker</CardTitle>
-          <CardDescription>No completed runs to analyze</CardDescription>
+          <CardTitle className="text-base">Performance by task & worker</CardTitle>
+          <CardDescription>No completed runs to analyze yet.</CardDescription>
         </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+            <Activity className="h-8 w-8 text-muted-foreground/60" />
+            <p className="text-sm text-muted-foreground">
+              Submit a run to start collecting benchmark data.
+            </p>
+            <Link to="/runs/new">
+              <Button size="sm" className="gap-1.5">
+                <Plus className="h-4 w-4" /> Submit Run
+              </Button>
+            </Link>
+          </div>
+        </CardContent>
       </Card>
     );
   }
-  
+
+  // Sort by pass rate desc, then by completed desc (more reliable groups first)
+  const sorted = [...groups].sort((a, b) => {
+    const ra = a.completed > 0 ? a.passed / a.completed : -1;
+    const rb = b.completed > 0 ? b.passed / b.completed : -1;
+    if (rb !== ra) return rb - ra;
+    return b.completed - a.completed;
+  });
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Pass@k by Task & Worker</CardTitle>
+        <CardTitle className="text-base">Performance by task & worker</CardTitle>
         <CardDescription>
-          Probability of at least one correct solution in k attempts
+          Pass rate, iteration distribution, and run duration — sorted by pass rate.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[260px]">Task</TableHead>
+              <TableHead>Worker</TableHead>
+              <TableHead className="text-center">Runs</TableHead>
+              <TableHead className="w-[200px]">Pass rate</TableHead>
+              <TableHead className="text-center">Avg iter</TableHead>
+              <TableHead className="text-center">Avg duration</TableHead>
+              <TableHead className="w-[1%]" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((group) => {
+              const rate = group.completed > 0 ? group.passed / group.completed : 0;
+              const failed = group.completed - group.passed;
+              return (
+                <TableRow key={getGroupKey(group)}>
+                  <TableCell
+                    className="font-medium max-w-[260px] truncate"
+                    title={group.task}
+                  >
+                    {truncateTask(group.task, 36)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="font-mono text-xs">
+                      {group.workerType}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-center tabular-nums">
+                    {group.completed}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span
+                          className={cn(
+                            "font-medium tabular-nums",
+                            rate >= 0.8
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : rate >= 0.5
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-destructive",
+                          )}
+                        >
+                          {formatPercent(rate)}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {group.passed}/{group.completed}
+                        </span>
+                      </div>
+                      <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        {group.passed > 0 && (
+                          <div
+                            className="h-full bg-emerald-500"
+                            style={{ width: `${(group.passed / group.completed) * 100}%` }}
+                          />
+                        )}
+                        {failed > 0 && (
+                          <div
+                            className="h-full bg-destructive"
+                            style={{ width: `${(failed / group.completed) * 100}%` }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-center font-mono tabular-nums text-xs">
+                    {group.iterationStats ? (
+                      <span title={`min ${group.iterationStats.min} · max ${group.iterationStats.max} · σ ${formatNumber(group.iterationStats.stdDev)}`}>
+                        {formatNumber(group.iterationStats.mean)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center font-mono tabular-nums text-xs">
+                    {group.durationStats ? (
+                      <span title={`min ${formatDuration(group.durationStats.min)} · max ${formatDuration(group.durationStats.max)} · σ ${formatDuration(group.durationStats.stdDev)}`}>
+                        {formatDuration(group.durationStats.mean)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Link to={runsLinkFor(group)}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1 px-2 text-xs"
+                        title="View runs for this task / worker"
+                      >
+                        View <ArrowRight className="h-3 w-3" />
+                      </Button>
+                    </Link>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Pass@k table (env-gated) ───────────────────────────────────────────────
+
+function PassAtKTable({ data }: { data: AnalysisResponse }) {
+  const { groups, kValues } = data;
+  if (groups.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Pass@k by task & worker</CardTitle>
+        <CardDescription>
+          Probability of at least one correct solution in k attempts.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -145,15 +523,20 @@ function PassAtKTable({ data }: { data: AnalysisResponse }) {
               <TableHead>Worker</TableHead>
               <TableHead className="text-center">Runs</TableHead>
               <TableHead className="text-center">Passed</TableHead>
-              {kValues.map(k => (
-                <TableHead key={k} className="text-center">pass@{k}</TableHead>
+              {kValues.map((k) => (
+                <TableHead key={k} className="text-center">
+                  pass@{k}
+                </TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
             {groups.map((group) => (
               <TableRow key={getGroupKey(group)}>
-                <TableCell className="font-medium max-w-[200px] truncate" title={group.task}>
+                <TableCell
+                  className="font-medium max-w-[200px] truncate"
+                  title={group.task}
+                >
                   {truncateTask(group.task)}
                 </TableCell>
                 <TableCell>
@@ -163,16 +546,30 @@ function PassAtKTable({ data }: { data: AnalysisResponse }) {
                 </TableCell>
                 <TableCell className="text-center">{group.completed}</TableCell>
                 <TableCell className="text-center">
-                  <span className={group.passed > 0 ? "text-green-600" : "text-muted-foreground"}>
+                  <span
+                    className={
+                      group.passed > 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-muted-foreground"
+                    }
+                  >
                     {group.passed}
                   </span>
                   {group.rejected > 0 && (
-                    <span className="text-red-500 ml-1">/ {group.rejected}</span>
+                    <span className="text-destructive ml-1">/ {group.rejected}</span>
                   )}
                 </TableCell>
-                {kValues.map(k => (
+                {kValues.map((k) => (
                   <TableCell key={k} className="text-center font-mono">
-                    <span className={group.passAtK[k] >= 0.5 ? "text-green-600" : group.passAtK[k] > 0 ? "text-yellow-600" : "text-muted-foreground"}>
+                    <span
+                      className={
+                        group.passAtK[k] >= 0.5
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : group.passAtK[k] > 0
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-muted-foreground"
+                      }
+                    >
                       {formatPercent(group.passAtK[k])}
                     </span>
                   </TableCell>
@@ -186,25 +583,13 @@ function PassAtKTable({ data }: { data: AnalysisResponse }) {
   );
 }
 
-// Success@≤T CDF chart
+// ─── Success@≤T CDF chart (only when there is data) ────────────────────────
+
 function SuccessAtTChart({ data }: { data: AnalysisResponse }) {
   const { groups, maxT } = data;
-  
-  // Filter to only groups with passed runs
-  const groupsWithData = groups.filter(g => g.passed > 0);
-  
-  if (groupsWithData.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Success@≤T (CDF)</CardTitle>
-          <CardDescription>No passed runs to visualize</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
-  
-  // Transform data for recharts: array of { iteration: 1, "group1": 0.3, "group2": 0.5, ... }
+  const groupsWithData = groups.filter((g) => g.passed > 0);
+  if (groupsWithData.length === 0) return null;
+
   const chartData = Array.from({ length: maxT }, (_, i) => {
     const point: Record<string, number | string> = { iteration: i + 1 };
     for (const group of groupsWithData) {
@@ -212,13 +597,13 @@ function SuccessAtTChart({ data }: { data: AnalysisResponse }) {
     }
     return point;
   });
-  
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Success@≤T (CDF)</CardTitle>
+        <CardTitle className="text-base">Success@≤T (CDF)</CardTitle>
         <CardDescription>
-          Probability of successful completion within T iterations
+          Probability of successful completion within T iterations.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -244,7 +629,7 @@ function SuccessAtTChart({ data }: { data: AnalysisResponse }) {
               <Legend
                 wrapperStyle={{ fontSize: 11 }}
                 formatter={(value: string) => {
-                  const group = groupsWithData.find(g => getGroupKey(g) === value);
+                  const group = groupsWithData.find((g) => getGroupKey(g) === value);
                   return group ? `${value} (n=${group.passed})` : value;
                 }}
               />
@@ -267,160 +652,19 @@ function SuccessAtTChart({ data }: { data: AnalysisResponse }) {
   );
 }
 
-// Iteration statistics table
-function IterationStatsTable({ data }: { data: AnalysisResponse }) {
-  const { groups } = data;
-  
-  const groupsWithStats = groups.filter(g => g.iterationStats !== null);
-  
-  if (groupsWithStats.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Iteration Statistics</CardTitle>
-          <CardDescription>No passed runs to analyze</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
-  
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Iteration Statistics</CardTitle>
-        <CardDescription>
-          Distribution of iterations needed to pass (successful runs only)
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="max-w-[200px]">Task</TableHead>
-              <TableHead>Worker</TableHead>
-              <TableHead className="text-center">N</TableHead>
-              <TableHead className="text-center">Mean</TableHead>
-              <TableHead className="text-center">Std Dev</TableHead>
-              <TableHead className="text-center">Min</TableHead>
-              <TableHead className="text-center">Max</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {groupsWithStats.map((group) => (
-              <TableRow key={getGroupKey(group)}>
-                <TableCell className="font-medium max-w-[200px] truncate" title={group.task}>
-                  {truncateTask(group.task)}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="font-mono text-xs">
-                    {group.workerType}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-center font-mono text-muted-foreground">
-                  {group.passed}
-                </TableCell>
-                <TableCell className="text-center font-mono">
-                  {formatNumber(group.iterationStats!.mean)}
-                </TableCell>
-                <TableCell className="text-center font-mono text-muted-foreground">
-                  ±{formatNumber(group.iterationStats!.stdDev)}
-                </TableCell>
-                <TableCell className="text-center font-mono">
-                  {group.iterationStats!.min}
-                </TableCell>
-                <TableCell className="text-center font-mono">
-                  {group.iterationStats!.max}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
-}
+// ─── Loading skeleton ───────────────────────────────────────────────────────
 
-// Duration statistics table
-function DurationStatsTable({ data }: { data: AnalysisResponse }) {
-  const { groups } = data;
-
-  const groupsWithStats = groups.filter(g => g.durationStats !== null);
-
-  if (groupsWithStats.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Duration Statistics</CardTitle>
-          <CardDescription>No duration data available</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Duration Statistics</CardTitle>
-        <CardDescription>
-          Total run duration for successful runs
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="max-w-[200px]">Task</TableHead>
-              <TableHead>Worker</TableHead>
-              <TableHead className="text-center">Mean</TableHead>
-              <TableHead className="text-center">Std Dev</TableHead>
-              <TableHead className="text-center">Min</TableHead>
-              <TableHead className="text-center">Max</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {groupsWithStats.map((group) => (
-              <TableRow key={getGroupKey(group)}>
-                <TableCell className="font-medium max-w-[200px] truncate" title={group.task}>
-                  {truncateTask(group.task)}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="font-mono text-xs">
-                    {group.workerType}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-center font-mono">
-                  {formatDuration(group.durationStats!.mean)}
-                </TableCell>
-                <TableCell className="text-center font-mono text-muted-foreground">
-                  ±{formatDuration(group.durationStats!.stdDev)}
-                </TableCell>
-                <TableCell className="text-center font-mono">
-                  {formatDuration(group.durationStats!.min)}
-                </TableCell>
-                <TableCell className="text-center font-mono">
-                  {formatDuration(group.durationStats!.max)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
-}
-
-// Loading skeleton
 function StatisticsSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i}>
             <CardHeader className="pb-2">
               <Skeleton className="h-4 w-24" />
             </CardHeader>
-            <CardContent>
-              <Skeleton className="h-8 w-16 mb-1" />
+            <CardContent className="space-y-2">
+              <Skeleton className="h-8 w-16" />
               <Skeleton className="h-3 w-32" />
             </CardContent>
           </Card>
@@ -428,7 +672,7 @@ function StatisticsSkeleton() {
       </div>
       <Card>
         <CardHeader>
-          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-5 w-48" />
         </CardHeader>
         <CardContent>
           <Skeleton className="h-[200px] w-full" />
@@ -438,25 +682,58 @@ function StatisticsSkeleton() {
   );
 }
 
+// ─── Empty state (zero runs) ────────────────────────────────────────────────
+
+function ZeroRunsState() {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center gap-4 py-16 text-center">
+        <div className="rounded-full bg-primary/10 p-3">
+          <BarChart3 className="h-8 w-8 text-primary" />
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-lg font-semibold">No benchmark data yet</h3>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            Submit your first benchmark run to start seeing pass rates, performance breakdowns,
+            and insights here.
+          </p>
+        </div>
+        <Link to="/runs/new">
+          <Button size="lg" className="gap-2">
+            <Plus className="h-4 w-4" /> Submit your first run
+          </Button>
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Page ───────────────────────────────────────────────────────────────────
+
 export function Statistics() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { isFeatureEnabled } = useFeatureFlags();
-  
-  // Parse selected criteria from URL
-  const selectedCriteria = searchParams.get("criteria")?.split(",").filter(Boolean) || [];
+
+  const selectedCriteria =
+    searchParams.get("criteria")?.split(",").filter(Boolean) || [];
 
   const { data, isLoading, isRefetching } = useQuery({
     queryKey: ["analysis", selectedCriteria],
-    queryFn: () => api.getAnalysis([1, 2, 5], selectedCriteria.length > 0 ? selectedCriteria : undefined),
-    refetchInterval: 30_000,  // Refresh every 30 seconds
+    queryFn: () =>
+      api.getAnalysis(
+        [1, 2, 5],
+        selectedCriteria.length > 0 ? selectedCriteria : undefined,
+      ),
+    refetchInterval: 30_000,
   });
 
-  // Toggle a criterion in the filter
+  const insights = useMemo(() => (data ? deriveInsights(data) : null), [data]);
+
   const handleToggleCriterion = (id: string) => {
     const newSelected = selectedCriteria.includes(id)
       ? selectedCriteria.filter((c) => c !== id)
       : [...selectedCriteria, id];
-    
+
     if (newSelected.length === 0) {
       searchParams.delete("criteria");
     } else {
@@ -465,40 +742,63 @@ export function Statistics() {
     setSearchParams(searchParams, { replace: true });
   };
 
-  // Clear all criteria filters
   const handleClearCriteria = () => {
     searchParams.delete("criteria");
     setSearchParams(searchParams, { replace: true });
   };
 
+  const hasData = !!data && data.summary.totalRuns > 0;
+  const showPassAtK = import.meta.env.VITE_SHOW_PASS_AT_K === "true";
+
   return (
     <div className="space-y-6">
-      {/* Page header */}
-      <div className="flex items-center justify-between">
-        <div>
+      {/* Page header with primary CTA */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
           <h1 className="text-3xl font-bold tracking-tight">Statistics</h1>
           <p className="text-muted-foreground">
-            Analysis of benchmark runs: pass rates, iterations, and success probability
+            Pass rates, iteration distribution, and performance insights across your benchmark runs.
           </p>
         </div>
-        {isRefetching && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
+        <div className="flex items-center gap-2">
+          {isRefetching && (
+            <span
+              className="flex items-center gap-1 text-xs text-muted-foreground"
+              aria-label="Refreshing"
+            >
+              <RefreshCw className="h-3 w-3 animate-spin" /> Refreshing
+            </span>
+          )}
+          <Link to="/runs/new">
+            <Button size="lg" className="gap-2">
+              <Plus className="h-4 w-4" /> Submit Run
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {isLoading || !data ? (
         <StatisticsSkeleton />
+      ) : !hasData ? (
+        <ZeroRunsState />
       ) : (
         <>
-          <CriteriaFilterBar
-            availableCriteria={data.availableCriteria}
-            selectedCriteria={selectedCriteria}
-            onToggle={handleToggleCriterion}
-            onClear={handleClearCriteria}
-          />
-          <SummaryCards data={data} />
-          {import.meta.env.VITE_SHOW_PASS_AT_K === "true" && <PassAtKTable data={data} />}
+          {/* Success Criteria Filter — kept as the existing component renders its own container */}
+          {data.availableCriteria.length > 0 && (
+            <CriteriaFilterBar
+              availableCriteria={data.availableCriteria}
+              selectedCriteria={selectedCriteria}
+              onToggle={handleToggleCriterion}
+              onClear={handleClearCriteria}
+            />
+          )}
+
+          {insights && <HeroKpis data={data} insights={insights} />}
+          {insights && <InsightsRow insights={insights} />}
+
+          <PerformanceTable data={data} />
           {isFeatureEnabled("statistics-graph") && <SuccessAtTChart data={data} />}
-          <IterationStatsTable data={data} />
-          <DurationStatsTable data={data} />
+          {showPassAtK && <PassAtKTable data={data} />}
         </>
       )}
     </div>
