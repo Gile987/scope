@@ -53,7 +53,6 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { to: "/statistics", label: "Statistics", icon: BarChart3 },
-  { to: "/criteria/mdp", label: "MDP", icon: GitBranch },
   { to: "/task-prompts", label: "Tasks", icon: MessageSquareText },
   { to: "/runs", label: "Runs", icon: List },
   { to: "/reports", label: "Reports", icon: FileText },
@@ -67,6 +66,9 @@ const navItems: NavItem[] = [
   { to: "/skills", label: "Skills", icon: BookOpen, featureKey: "skills" },
   { to: "/extensions", label: "Extensions", icon: Puzzle, featureKey: "extensions" },
   { to: "/secrets", label: "Secrets", icon: KeyRound, featureKey: "tokens" },
+  // MDP is a developer/diagnostic view — keep it pinned at the bottom of the
+  // primary nav so it doesn't compete with the day-to-day data pages above.
+  { to: "/criteria/mdp", label: "MDP", icon: GitBranch },
 ];
 
 /**
