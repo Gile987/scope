@@ -82,6 +82,10 @@ COPY apps/workers/coder-acp-copilot/src ./apps/workers/coder-acp-copilot/src/
 
 RUN pnpm --filter shared build && pnpm --filter coder-acp-copilot build
 
+# Pre-convert agent.yaml to JSON so the registration job doesn't need the yaml package at runtime
+COPY apps/workers/coder-acp-copilot/agent.yaml ./apps/workers/coder-acp-copilot/agent.yaml
+RUN node -e "const{parse}=require(require.resolve('yaml',{paths:['/app/packages/shared']}));const fs=require('fs');fs.writeFileSync('apps/workers/coder-acp-copilot/agent.json',JSON.stringify(parse(fs.readFileSync('apps/workers/coder-acp-copilot/agent.yaml','utf8'))))"
+
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
 ARG COPILOT_CLI_VERSION
@@ -119,6 +123,7 @@ RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/apps/workers/coder-acp-copilot/dist ./apps/workers/coder-acp-copilot/dist/
 COPY apps/workers/coder-acp-copilot/agent.yaml ./apps/workers/coder-acp-copilot/agent.yaml
+COPY --from=builder /app/apps/workers/coder-acp-copilot/agent.json ./apps/workers/coder-acp-copilot/agent.json
 
 # Use existing node user (UID 1000) so coding agents allow bypassPermissions mode
 RUN mkdir -p /workspace && chown node:node /workspace

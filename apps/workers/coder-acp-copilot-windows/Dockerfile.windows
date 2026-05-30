@@ -55,6 +55,12 @@ COPY apps/workers/coder-acp-copilot-windows/src ./apps/workers/coder-acp-copilot
 
 RUN C:\tools\pnpm.exe --filter shared build; C:\tools\pnpm.exe --filter coder-acp-copilot build; C:\tools\pnpm.exe --filter coder-acp-copilot-windows build
 
+# Pre-convert agent.yaml to JSON so the registration job doesn't need the yaml package at runtime
+COPY apps/workers/coder-acp-copilot-windows/agent.yaml ./apps/workers/coder-acp-copilot-windows/agent.yaml
+SHELL ["cmd", "/S", "/C"]
+RUN node -e "const{parse}=require(require.resolve('yaml',{paths:['C:/app/packages/shared']}));const fs=require('fs');fs.writeFileSync('apps/workers/coder-acp-copilot-windows/agent.json',JSON.stringify(parse(fs.readFileSync('apps/workers/coder-acp-copilot-windows/agent.yaml','utf8'))))"
+SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
 # --- Production stage ---
 FROM base AS production
 SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
@@ -72,6 +78,7 @@ COPY --from=builder C:/app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder C:/app/apps/workers/coder-acp-copilot/dist ./apps/workers/coder-acp-copilot/dist/
 COPY --from=builder C:/app/apps/workers/coder-acp-copilot-windows/dist ./apps/workers/coder-acp-copilot-windows/dist/
 COPY apps/workers/coder-acp-copilot-windows/agent.yaml ./apps/workers/coder-acp-copilot-windows/agent.yaml
+COPY --from=builder C:/app/apps/workers/coder-acp-copilot-windows/agent.json ./apps/workers/coder-acp-copilot-windows/agent.json
 
 # Create workspace directory for coding agents
 RUN New-Item -ItemType Directory -Force -Path C:\workspace
