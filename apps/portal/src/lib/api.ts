@@ -82,7 +82,7 @@ export const api = {
     scenario: { task: string; criteria: string[]; version?: "v1" | "v2" };
     worker: string;
     model?: string;
-    reasoningEffort?: string;
+    reasoningEffort: string;
     maxIterations?: number;
     personaInstructions?: string;
     persona?: { personality: string; experience: string; verbosity: string; type: string };
@@ -1008,6 +1008,7 @@ export const api = {
     description?: string;
     workerType: string;
     model: string;
+    reasoningEffort: string;
     agentVersion?: string;
     mcpServers?: string[];
     skillRevisions?: string[];
@@ -1023,6 +1024,7 @@ export const api = {
   createProfileVersion: (profileId: string, body: {
     workerType: string;
     model: string;
+    reasoningEffort: string;
     agentVersion?: string;
     mcpServers?: string[];
     skillRevisions?: string[];

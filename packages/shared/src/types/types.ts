@@ -149,7 +149,7 @@ export interface RequestDocument {
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
   model?: string;              // Model selected for this run
-  reasoningEffort?: string;    // User-selected reasoning effort level (informational / validated)
+  reasoningEffort?: string;    // Reasoning effort level ("low", "medium", "high", "default"); required for new submissions but absent on old documents
   createdAt: Date;
   updatedAt?: Date;
   // Multi-turn fields

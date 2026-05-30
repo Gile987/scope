@@ -91,7 +91,7 @@ export const CreateRequestInputSchema = z
   .object({
     scenario: ScenarioSchema,
     model: z.string().optional(),
-    reasoningEffort: z.string().optional(),
+    reasoningEffort: z.string().describe('Reasoning effort level (e.g. "low", "medium", "high") or "default" for models without configurable effort'),
     maxIterations: z.number().optional(),
     personaInstructions: z.string().optional(),
     persona: PersonaSchema.optional(),

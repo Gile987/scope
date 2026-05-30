@@ -107,6 +107,7 @@ apiRoute(ctx.app, ctx.registry, {
       if (requestedModel && requestedModel !== profileVersion.model) {
         conflicts.push(`model: sent "${requestedModel}", profile requires "${profileVersion.model}"`);
       }
+      // reasoningEffort is always required, so we don't conflict-check it — profile takes precedence silently
       if (mcpServerSlugs !== undefined) {
         const profileMcp = profileVersion.mcpServers ?? [];
         if (JSON.stringify([...mcpServerSlugs].sort()) !== JSON.stringify([...profileMcp].sort())) {
@@ -139,7 +140,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Effective values: profile overrides client inputs for controlled fields
     const effectiveModel = profileVersion ? profileVersion.model : requestedModel;
-    const effectiveReasoningEffort = profileVersion?.reasoningEffort ? profileVersion.reasoningEffort : requestedReasoningEffort;
+    const effectiveReasoningEffort = profileVersion?.reasoningEffort ?? requestedReasoningEffort;
     const effectiveMcpServers = profileVersion ? (profileVersion.mcpServers ?? undefined) : mcpServerSlugs;
     const effectiveSkills = profileVersion ? (profileVersion.skillRevisions ?? undefined) : skillSlugs;
     const effectiveExtensions = profileVersion ? (profileVersion.extensions ?? undefined) : extensionIds;
@@ -256,22 +257,13 @@ apiRoute(ctx.app, ctx.registry, {
         modelCapabilities = modelDoc.capabilities;
         const supportedEfforts = modelDoc.capabilities.reasoningEffort;
         if (supportedEfforts && supportedEfforts.length > 0) {
-          if (effectiveReasoningEffort) {
-            if (!supportedEfforts.includes(effectiveReasoningEffort)) {
-              res.status(400).json({
-                error: `Reasoning effort "${effectiveReasoningEffort}" is not supported by model "${model}"`,
-                supportedReasoningEfforts: supportedEfforts,
-              });
-              return;
-            }
-          } else if (supportedEfforts.length === 1) {
-            warnings.push(
-              `Model "${model}" only supports reasoning effort "${supportedEfforts[0]}". The agent extension may send an incompatible effort level.`
-            );
-          } else if (supportedEfforts.length < 4) {
-            warnings.push(
-              `Model "${model}" supports limited reasoning efforts: ${supportedEfforts.join(", ")}. The agent extension may send an incompatible effort level.`
-            );
+          // Model has known effort capabilities — validate the requested effort
+          if (effectiveReasoningEffort !== "default" && !supportedEfforts.includes(effectiveReasoningEffort)) {
+            res.status(400).json({
+              error: `Reasoning effort "${effectiveReasoningEffort}" is not supported by model "${model}"`,
+              supportedReasoningEfforts: supportedEfforts,
+            });
+            return;
           }
         }
       }
@@ -391,8 +383,8 @@ apiRoute(ctx.app, ctx.registry, {
           taskPromptId,
           createdAt: new Date(),
           priority: requestedPriority ?? 0,
+          reasoningEffort: effectiveReasoningEffort,
           ...(model ? { model } : {}),
-          ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
@@ -424,7 +416,7 @@ apiRoute(ctx.app, ctx.registry, {
         workerType,
         taskPromptId,
         ...(model ? { model } : {}),
-        ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
+        reasoningEffort: effectiveReasoningEffort,
         ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
         status: "pending",
         mode,
@@ -449,8 +441,8 @@ apiRoute(ctx.app, ctx.registry, {
       taskPromptId,
       createdAt: new Date(),
       priority: requestedPriority ?? 0,
+      reasoningEffort: effectiveReasoningEffort,
       ...(model ? { model } : {}),
-      ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
@@ -478,7 +470,7 @@ apiRoute(ctx.app, ctx.registry, {
       submissionId,
       workerType,
       ...(model ? { model } : {}),
-      ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
+      reasoningEffort: effectiveReasoningEffort,
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
       status: requestDoc.run?.status ?? "pending",
       mode,
@@ -1045,7 +1037,9 @@ apiRoute(ctx.app, ctx.registry, {
           : (overrides?.model !== undefined ? overrides.model : original.model);
         const effectiveReasoningEffort = activeProfileVersion?.reasoningEffort
           ? activeProfileVersion.reasoningEffort
-          : (overrides?.reasoningEffort !== undefined ? overrides.reasoningEffort : original.reasoningEffort);
+          : (overrides?.reasoningEffort !== undefined
+            ? (overrides.reasoningEffort ?? "default")  // null override = reset to "default"
+            : original.reasoningEffort);
         const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
         const effectiveMcpServers = activeProfileVersion
           ? (activeProfileVersion.mcpServers ?? null)
@@ -1085,11 +1079,11 @@ apiRoute(ctx.app, ctx.registry, {
           workerType: effectiveWorkerType,
           createdAt: new Date(),
           priority: original.priority ?? 0,
+          reasoningEffort: effectiveReasoningEffort ?? original.reasoningEffort ?? "default",
           ...(effectiveMaxIterations ? { maxIterations: effectiveMaxIterations } : {}),
           ...(original.personaInstructions ? { personaInstructions: original.personaInstructions } : {}),
           ...(original.persona ? { persona: original.persona } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
-          ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),

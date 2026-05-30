@@ -45,6 +45,7 @@ export interface UseReasoningEffortOptions {
 /**
  * Derives supportedEfforts from model capabilities and auto-clears
  * the effort value when the selected model doesn't support it.
+ * Always includes "default" as a fallback option.
  */
 export function useReasoningEffort({
   model,
@@ -54,17 +55,19 @@ export function useReasoningEffort({
 }: UseReasoningEffortOptions) {
   const capabilities = model ? capabilitiesMap.get(model) : undefined;
   const supportedEfforts = capabilities?.reasoningEffort ?? [];
+  // Always include "default" as a valid option (for models without configurable effort)
+  const allEfforts = supportedEfforts.length > 0 ? supportedEfforts : ["default"];
 
   useEffect(() => {
-    if (supportedEfforts.length === 1 && value !== supportedEfforts[0]) {
+    if (allEfforts.length === 1 && value !== allEfforts[0]) {
       // Auto-select the only supported effort
-      onChange(supportedEfforts[0]);
-    } else if (value && !supportedEfforts.includes(value)) {
+      onChange(allEfforts[0]);
+    } else if (value && !allEfforts.includes(value)) {
       onChange("");
     }
-  }, [model, supportedEfforts, value, onChange]);
+  }, [model, allEfforts, value, onChange]);
 
-  return { supportedEfforts, capabilities };
+  return { supportedEfforts: allEfforts, capabilities };
 }
 
 // --- Component: ModelSelectItems ---
@@ -120,38 +123,34 @@ export interface ReasoningEffortSelectProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
-  /** Label for the "no selection" option */
-  noSelectionLabel?: string;
   /** Description text shown below the picker */
   description?: string;
 }
 
 /**
- * Reasoning effort picker. Only renders when supportedEfforts has >1 option.
+ * Reasoning effort picker. Requires a selection — no "none" option.
  */
 export function ReasoningEffortSelect({
   supportedEfforts,
   value,
   onChange,
   disabled,
-  noSelectionLabel = "Default (no override)",
   description,
 }: ReasoningEffortSelectProps) {
   if (supportedEfforts.length === 0) return null;
 
   return (
     <div className="space-y-2">
-      <Label htmlFor="reasoningEffort">Reasoning Effort</Label>
+      <Label htmlFor="reasoningEffort">Reasoning Effort *</Label>
       <Select
-        value={value || "__none__"}
-        onValueChange={(v) => onChange(v === "__none__" ? "" : v)}
+        value={value || ""}
+        onValueChange={(v) => onChange(v)}
         disabled={disabled}
       >
         <SelectTrigger id="reasoningEffort">
-          <SelectValue placeholder={noSelectionLabel} />
+          <SelectValue placeholder="Select reasoning effort" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__none__">{noSelectionLabel}</SelectItem>
           {supportedEfforts.map((level) => (
             <SelectItem key={level} value={level}>
               {level}

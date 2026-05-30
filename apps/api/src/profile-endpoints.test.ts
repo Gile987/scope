@@ -56,6 +56,7 @@ describe("Profile API Endpoints", () => {
           name: "Test Profile",
           workerType: "coder-acp-copilot",
           model: "gpt-4o",
+          reasoningEffort: "default",
         });
 
       expect(res.status).toBe(201);
@@ -88,6 +89,7 @@ describe("Profile API Endpoints", () => {
           name: "With Skills",
           workerType: "coder-acp-copilot",
           model: "gpt-4o",
+          reasoningEffort: "default",
           skillRevisions: ["github/org/my-skill"],
         });
 
@@ -119,6 +121,7 @@ describe("Profile API Endpoints", () => {
           name: "Pinned Skills",
           workerType: "coder-acp-copilot",
           model: "gpt-4o",
+          reasoningEffort: "default",
           skillRevisions: ["github/org/my-skill@abc1234"],
         });
 
@@ -157,6 +160,7 @@ describe("Profile API Endpoints", () => {
           name: "Bad Combo",
           workerType: "coder-acp-copilot",
           model: "gpt-4o",
+          reasoningEffort: "default",
           extensions: ["ms-azuretools.vscode-cosmosdb@0.32.1"],
         });
 
@@ -180,6 +184,7 @@ describe("Profile API Endpoints", () => {
         .send({
           workerType: "coder-acp-copilot",
           model: "gpt-4o",
+          reasoningEffort: "default",
           extensions: ["ms-azuretools.vscode-cosmosdb@0.32.1"],
         });
 

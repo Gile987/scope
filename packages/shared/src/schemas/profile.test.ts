@@ -16,6 +16,7 @@ describe("CreateProfileInputSchema", () => {
       name: "My Profile",
       workerType: "coder-acp-copilot",
       model: "gpt-4o",
+      reasoningEffort: "default",
     };
     const result = CreateProfileInputSchema.safeParse(input);
     expect(result.success).toBe(true);
@@ -27,6 +28,7 @@ describe("CreateProfileInputSchema", () => {
       description: "A comprehensive profile",
       workerType: "coder-acp-copilot",
       model: "gpt-4o",
+      reasoningEffort: "high",
       agentVersion: "copilot-0.0.415",
       mcpServers: ["search", "docs"],
       skillRevisions: ["rev-1", "rev-2"],

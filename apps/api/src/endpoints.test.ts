@@ -952,6 +952,7 @@ describe("API Endpoints", () => {
         .post("/api/v1/requests?worker=coder-acp-copilot")
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
+          reasoningEffort: "medium",
           profileId: "profile-1",
           // Client omits model, mcpServers, skills, extensions — profile provides them
         });
@@ -986,6 +987,7 @@ describe("API Endpoints", () => {
         .post("/api/v1/requests?worker=coder-acp-copilot")
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
+          reasoningEffort: "medium",
           profileId: "profile-1",
           model: "gpt-4o", // conflicts with profile's claude-sonnet-4
         });
@@ -1082,8 +1084,9 @@ describe("API Endpoints", () => {
         .post("/api/v1/requests?worker=coder-acp-copilot")
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
+          reasoningEffort: "medium",
           profileId: "profile-1",
-          // Client does not send reasoningEffort; profile has "low"
+          // Client sends "medium" but profile has "low" — profile takes precedence
         });
 
       expect(res.status).toBe(201);
@@ -1091,7 +1094,7 @@ describe("API Endpoints", () => {
       expect(doc).toHaveProperty("reasoningEffort", "low");
     });
 
-    it("returns warnings for models with limited effort support when no effort is specified", async () => {
+    it("accepts 'default' reasoning effort for models without configurable effort", async () => {
       (mocks.agentCollection.findOne as any).mockResolvedValue({
         _id: "coder-acp-copilot",
         versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
@@ -1107,11 +1110,12 @@ describe("API Endpoints", () => {
         .send({
           scenario: { task: "Build something", criteria: ["works"] },
           model: "claude-haiku",
+          reasoningEffort: "default",
         });
 
       expect(res.status).toBe(201);
-      expect(res.body.warnings).toBeDefined();
-      expect(res.body.warnings.some((w: string) => w.includes("only supports reasoning effort"))).toBe(true);
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc).toHaveProperty("reasoningEffort", "default");
     });
   });
 
@@ -1191,7 +1195,7 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(201);
       const insertCall = (mocks.collection.insertMany as any).mock.calls[0][0];
-      expect(insertCall[0].reasoningEffort).toBeUndefined();
+      expect(insertCall[0].reasoningEffort).toBe("default");
     });
   });
 

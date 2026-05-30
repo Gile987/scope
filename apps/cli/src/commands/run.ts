@@ -38,7 +38,7 @@ run
   .option("-c, --criteria <criteria...>", "Evaluation criteria (overrides scenario criteria)")
   .option("--max-iterations <number>", "Max judge iterations for multi-turn mode", parseInt)
   .option("--model <model>", "Model to use for the coding agent")
-  .option("--reasoning-effort <level>", "Reasoning effort level (e.g. low, medium, high)")
+  .option("--reasoning-effort <level>", "Reasoning effort level (required; e.g. low, medium, high, or \"default\" for models without configurable effort)")
   .option("--mcp-servers <slugs...>", "MCP server slugs to use for this run")
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
@@ -75,21 +75,24 @@ run
         process.exit(1);
       }
 
+      if (!reasoningEffort) {
+        console.error(errorText("Error: --reasoning-effort is required (e.g. low, medium, high, or \"default\")"));
+        process.exit(1);
+      }
+
       // Build request body — scenario is the source of truth
       const body: Record<string, unknown> = {
         scenario: {
           task: message,
           criteria: criteria || [],
         },
+        reasoningEffort,
       };
       if (maxIterations) {
         body.maxIterations = maxIterations;
       }
       if (model) {
         body.model = model;
-      }
-      if (reasoningEffort) {
-        body.reasoningEffort = reasoningEffort;
       }
       if (personaInstructions) {
         body.personaInstructions = personaInstructions;

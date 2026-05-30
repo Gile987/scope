@@ -33,7 +33,7 @@ export interface ProfileVersionDocument {
   version: number;                // Auto-incrementing per profileId (1, 2, 3, …)
   workerType: string;             // FK → CodingAgentDocument._id
   model: string;                  // Model identifier (required)
-  reasoningEffort?: string;       // Reasoning effort level (e.g. "low", "medium", "high")
+  reasoningEffort?: string;       // Reasoning effort level; required for new versions but absent on old ones
   agentVersion?: string;          // Agent version string
   mcpServers?: string[];          // MCP server slugs
   skillRevisions?: string[];      // Pinned skill revision refs (e.g. "source/skillName@commitHash")

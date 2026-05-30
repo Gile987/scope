@@ -564,6 +564,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "reasoningEffort": {
+            "description": "Reasoning effort level (e.g. "low", "medium", "high") or "default" for models without configurable effort",
             "type": "string",
           },
           "skillRevisions": {
@@ -580,6 +581,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name",
           "workerType",
           "model",
+          "reasoningEffort",
         ],
         "type": "object",
       },
@@ -681,6 +683,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "reasoningEffort": {
+            "description": "Reasoning effort level (e.g. "low", "medium", "high") or "default" for models without configurable effort",
             "type": "string",
           },
           "scenario": {
@@ -695,6 +698,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "scenario",
+          "reasoningEffort",
         ],
         "type": "object",
       },
@@ -5330,6 +5334,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "type": "string",
                   },
                   "reasoningEffort": {
+                    "description": "Reasoning effort level (e.g. "low", "medium", "high") or "default" for models without configurable effort",
                     "type": "string",
                   },
                   "skillRevisions": {
@@ -5345,6 +5350,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                 "required": [
                   "workerType",
                   "model",
+                  "reasoningEffort",
                 ],
                 "type": "object",
               },

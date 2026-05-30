@@ -248,7 +248,7 @@ describe("request schemas", () => {
 
   describe("CreateRequestInputSchema", () => {
     it("accepts minimal valid input", () => {
-      const result = CreateRequestInputSchema.parse({ scenario: validScenario });
+      const result = CreateRequestInputSchema.parse({ scenario: validScenario, reasoningEffort: "default" });
       expect(result.scenario.task).toBe("Build it");
     });
 
@@ -257,6 +257,7 @@ describe("request schemas", () => {
         scenario: validScenario,
         model: "gpt-4",
         maxIterations: 5,
+        reasoningEffort: "medium",
         personaInstructions: "be nice",
         persona: { personality: "friendly", experience: "senior", verbosity: "brief", type: "traditional" },
         mcpServers: ["srv1"],

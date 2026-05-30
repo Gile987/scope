@@ -134,7 +134,7 @@ export function SubmitRun() {
         name: saveProfileName.trim(),
         workerType: worker,
         model,
-        ...(reasoningEffort ? { reasoningEffort } : {}),
+        reasoningEffort: reasoningEffort || "default",
         ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
         ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
         ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
@@ -268,6 +268,10 @@ export function SubmitRun() {
 
   const doSubmit = () => {
     if (!task.trim()) return;
+    if (!reasoningEffort) {
+      toast.error("Reasoning effort is required");
+      return;
+    }
 
     const criteria = pickedCriteria;
 
@@ -278,7 +282,7 @@ export function SubmitRun() {
       },
       worker,
       ...(model ? { model } : {}),
-      ...(reasoningEffort ? { reasoningEffort } : {}),
+      reasoningEffort,
       maxIterations,
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
@@ -600,8 +604,7 @@ export function SubmitRun() {
                 value={reasoningEffort}
                 onChange={onEffortChange}
                 disabled={profileLocked}
-                noSelectionLabel="Any (no preference)"
-                description="Select a preferred reasoning effort level for this model"
+                description="Select the reasoning effort level for this run"
               />
               {sortedVersions.length > 0 && (
                 <div className="space-y-2">

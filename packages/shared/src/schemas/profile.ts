@@ -12,7 +12,7 @@ export const CreateProfileInputSchema = z
     description: z.string().max(512).optional(),
     workerType: z.string(),
     model: z.string(),
-    reasoningEffort: z.string().optional(),
+    reasoningEffort: z.string().describe('Reasoning effort level (e.g. "low", "medium", "high") or "default" for models without configurable effort'),
     agentVersion: z.string().optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),

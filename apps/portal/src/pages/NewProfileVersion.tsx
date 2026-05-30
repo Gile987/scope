@@ -100,7 +100,7 @@ export function NewProfileVersion() {
     mutationFn: () => api.createProfileVersion(profileId!, {
       workerType: worker,
       model,
-      ...(reasoningEffort ? { reasoningEffort } : {}),
+      reasoningEffort: reasoningEffort || "default",
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
