@@ -22,6 +22,8 @@ export interface ACPClientOptions {
   cwd: string;
   onLog?: (message: string) => void;
   mcpServers?: McpServerConfig[];
+  /** Reasoning effort level to apply via ACP config option (e.g. "low", "medium", "high"). */
+  reasoningEffort?: string;
 }
 
 export interface ACPSessionResult {
@@ -132,13 +134,53 @@ export class ACPClientHandler implements acp.Client {
 }
 
 /**
+ * Attempt to set the reasoning effort level via ACP session/set_config_option.
+ *
+ * Looks for a config option with `category: "thought_level"` (the category Claude Code
+ * uses for reasoning effort). If none is found, logs a warning and continues.
+ */
+export async function selectReasoningEffort(
+  connection: acp.ClientSideConnection,
+  sessionResult: acp.NewSessionResponse,
+  reasoningEffort: string,
+  onLog: (message: string) => void
+): Promise<string | undefined> {
+  if (!sessionResult.configOptions) {
+    onLog(`Warning: agent does not advertise config options; reasoning effort "${reasoningEffort}" may not be honoured`);
+    return undefined;
+  }
+
+  // Look for a config option with category "thought_level"
+  const effortConfigOption = sessionResult.configOptions.find(
+    (o) => o.category === "thought_level"
+  );
+  if (!effortConfigOption) {
+    onLog(`Warning: agent does not advertise a "thought_level" config option; reasoning effort "${reasoningEffort}" may not be honoured. Available config options: ${sessionResult.configOptions.map((o) => `${o.id} (category: ${o.category ?? "none"})`).join(", ")}`);
+    return undefined;
+  }
+
+  try {
+    await connection.setSessionConfigOption({
+      sessionId: sessionResult.sessionId,
+      configId: effortConfigOption.id,
+      value: reasoningEffort,
+    });
+    onLog(`Reasoning effort set to "${reasoningEffort}" via session/set_config_option (configId: ${effortConfigOption.id})`);
+    return reasoningEffort;
+  } catch (err) {
+    onLog(`Warning: session/set_config_option failed for reasoning effort "${reasoningEffort}": ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  }
+}
+
+/**
  * Run an ACP session with Claude Code
  */
 export async function runACPSession(
   prompt: string,
   options: ACPClientOptions
 ): Promise<ACPSessionResult> {
-  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [] } = options;
+  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [], reasoningEffort } = options;
 
   onLog(`Starting ACP agent: ${command} ${args.join(" ")}`);
 
@@ -227,7 +269,12 @@ export async function runACPSession(
       onLog(`Session meta: ${JSON.stringify(sessionResult._meta)}`);
     }
     if (sessionResult.configOptions) {
-      onLog(`Session config options: ${sessionResult.configOptions.map((o: { configId: string }) => o.configId).join(", ")}`);
+      onLog(`Session config options: ${sessionResult.configOptions.map((o: { configId?: string; id?: string; category?: string }) => `${o.id ?? o.configId}${o.category ? ` (${o.category})` : ""}`).join(", ")}`);
+    }
+
+    // Set reasoning effort if requested
+    if (reasoningEffort) {
+      await selectReasoningEffort(connection, sessionResult, reasoningEffort, onLog);
     }
 
     // Set permission mode to bypass all permission checks (yolo mode).
