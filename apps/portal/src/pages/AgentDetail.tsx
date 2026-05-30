@@ -338,9 +338,10 @@ export function AgentDetail() {
                     {supported ? (
                       <span className="text-green-400">●</span>
                     ) : (
-                      <span className="text-muted-foreground">○</span>
+                      <span className="text-muted-foreground">—</span>
                     )}
                     {label}
+                    {!supported && <span className="text-muted-foreground text-xs">Not supported</span>}
                   </Badge>
                 ))}
               </div>
