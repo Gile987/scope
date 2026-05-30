@@ -154,7 +154,10 @@ function OsPlatformIcon({ platform }: { platform: string }) {
 
 /**
  * Aggregate progress bar used in grouped rows for the Status and Outcome
- * columns. Shows `count/total label` with a colored progress track.
+ * columns. Shows `count/total label` with three explicit segments:
+ *   - success (green or red, depending on tone)
+ *   - failed (always red, if any)
+ *   - pending remainder (gray) — anything not yet in a terminal state
  */
 function AggregateProgress({
   count,
@@ -162,6 +165,7 @@ function AggregateProgress({
   total,
   label,
   tone,
+  pendingLabel = "pending",
 }: {
   count: number;
   /** Optional failed count rendered as a red segment alongside the success segment. */
@@ -169,23 +173,66 @@ function AggregateProgress({
   total: number;
   label: string;
   tone: "success" | "destructive";
+  /** Tooltip label for the gray remainder (default "pending"). */
+  pendingLabel?: string;
 }) {
   if (total === 0) return <span className="text-xs text-muted-foreground">—</span>;
-  const successPct = Math.round((count / total) * 100);
-  const failedPct = Math.round((failedCount / total) * 100);
+  const pendingCount = Math.max(0, total - count - failedCount);
+  const successPct = (count / total) * 100;
+  const failedPct = (failedCount / total) * 100;
+  const pendingPct = (pendingCount / total) * 100;
   const successClass = tone === "success" ? "bg-emerald-500" : "bg-destructive";
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <span className="text-xs font-medium">
-        {count}/{total} {label}
-      </span>
-      <div className="flex h-1 w-full overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full transition-all", successClass)} style={{ width: `${successPct}%` }} />
-        {failedPct > 0 && (
-          <div className="h-full bg-destructive transition-all" style={{ width: `${failedPct}%` }} />
-        )}
-      </div>
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex min-w-0 flex-col gap-1 cursor-default">
+          <span className="text-xs font-medium">
+            {count}/{total} {label}
+          </span>
+          <div className="flex h-1 w-full overflow-hidden rounded-full bg-muted">
+            {successPct > 0 && (
+              <div className={cn("h-full transition-all", successClass)} style={{ width: `${successPct}%` }} />
+            )}
+            {failedPct > 0 && (
+              <div className="h-full bg-destructive transition-all" style={{ width: `${failedPct}%` }} />
+            )}
+            {pendingPct > 0 && (
+              <div
+                className="h-full bg-muted-foreground/30 transition-all"
+                style={{ width: `${pendingPct}%` }}
+              />
+            )}
+          </div>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent className="text-xs">
+        <div className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 font-mono tabular-nums">
+          <span className="inline-flex items-center gap-1.5">
+            <span className={cn("h-2 w-2 rounded-sm", successClass)} />
+            <span className="text-muted-foreground">{label}</span>
+          </span>
+          <span className="text-right">{count}</span>
+          {failedCount > 0 && (
+            <>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-sm bg-destructive" />
+                <span className="text-muted-foreground">failed</span>
+              </span>
+              <span className="text-right">{failedCount}</span>
+            </>
+          )}
+          {pendingCount > 0 && (
+            <>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-sm bg-muted-foreground/40" />
+                <span className="text-muted-foreground">{pendingLabel}</span>
+              </span>
+              <span className="text-right">{pendingCount}</span>
+            </>
+          )}
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -2033,6 +2080,7 @@ export function RunsList() {
                         total={total}
                         label="pass"
                         tone={failedCount > 0 && passCount === 0 ? "destructive" : "success"}
+                        pendingLabel="no outcome"
                       />
                     );
                   }
