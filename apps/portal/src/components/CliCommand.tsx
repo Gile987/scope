@@ -87,7 +87,7 @@ function CommandBlock({
     }
   };
   return (
-    <div className="flex items-stretch gap-2">
+    <div className="flex items-start gap-2">
       <pre className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted/50 px-3 py-2.5 text-xs leading-relaxed">
         <code className="font-mono text-foreground">{display ?? copyValue}</code>
       </pre>
@@ -95,7 +95,7 @@ function CommandBlock({
         type="button"
         variant="outline"
         size="icon"
-        className="h-auto shrink-0"
+        className="shrink-0"
         aria-label="Copy command"
         onClick={copy}
       >
