@@ -299,7 +299,7 @@ function GroupByToggle({
             className={
               "h-7 rounded-sm px-2.5 text-xs font-medium transition-colors " +
               (active
-                ? "bg-accent text-foreground"
+                ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:bg-muted/60 hover:text-foreground")
             }
           >
