@@ -132,14 +132,15 @@ export function CliCommand({
 }: CliCommandProps) {
   const trigger = label ? (
     <Button
+      type="button"
       variant="outline"
       size="sm"
-      className={cn("h-8 gap-1.5", className)}
+      className={cn("gap-1.5", className)}
       aria-label={tooltip}
       disabled={disabled}
     >
-      <Terminal className="h-3.5 w-3.5" />
-      <span className="text-xs font-medium">{label}</span>
+      <Terminal className="h-4 w-4" />
+      {label}
     </Button>
   ) : (
     <Button
