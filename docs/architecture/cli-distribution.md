@@ -114,9 +114,15 @@ Source: `apps/cli/src/utils/update-check.ts`
 
 To reinforce CLI ⇄ Portal parity, the Portal surfaces the exact `scope` command
 equivalent to a user's current view via a terminal-glyph (`>_`) button that
-opens a popover with the command, a copy button, and any parity caveats.
+opens a GitHub-style modal with step-by-step instructions: (1) install the CLI,
+(2) point it at the API, (3) run the generated command — each with its own copy
+button, plus any parity caveats.
 
-- **Component:** `apps/portal/src/components/CliCommand.tsx` (popover + copy + notes).
+- **Component:** `apps/portal/src/components/CliCommand.tsx` — a `Dialog`-based
+  modal mirroring GitHub's "Merging via command line" UX. Renders numbered steps
+  (install one-liner from `cli-distribution.md`, `SCOPE_API_URL` pointing at the
+  current origin, then the generated command) with per-block copy buttons and a
+  notes callout for parity caveats.
 - **Builders:** `apps/portal/src/lib/cli/buildCommand.ts` — pure functions that
   translate Portal state into a command. They only emit flags the CLI actually
   supports; anything the CLI can't express (e.g. Portal-only filters, priority,

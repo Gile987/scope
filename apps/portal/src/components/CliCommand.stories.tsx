@@ -19,7 +19,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Simple single-command popover (e.g. a run detail page). */
+/** Simple single-command modal (e.g. a run detail page). */
 export const RunGet: Story = {
   args: { command: buildRunGet("req_12345") },
   play: async ({ canvas }) => {

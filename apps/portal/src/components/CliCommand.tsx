@@ -5,7 +5,14 @@ import { useState } from "react";
 import { Terminal, Copy, Check, Info } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { CliCommand as CliCommandValue } from "@/lib/cli/buildCommand";
@@ -15,41 +22,95 @@ export interface CliCommandProps {
   command: CliCommandValue;
   /** Optional label shown next to the terminal glyph (e.g. "CLI"). */
   label?: string;
-  /** Popover heading. */
+  /** Modal heading. */
   title?: string;
   /** Tooltip on the trigger. */
   tooltip?: string;
-  /** Popover alignment relative to the trigger. */
-  align?: "start" | "center" | "end";
   className?: string;
+  /**
+   * Kept for backwards compatibility with the previous popover API. No longer
+   * used now that the affordance is a centered modal.
+   */
+  align?: "start" | "center" | "end";
+}
+
+/** The CLI installer one-liner (see docs/architecture/cli-distribution.md). */
+const INSTALL_COMMAND =
+  'gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H "Accept: application/vnd.github.raw" | bash';
+
+function apiUrl(): string {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  return "https://your-scope-api";
+}
+
+/** A single copyable command block with its own copy button (GitHub-style). */
+function CommandBlock({
+  copyValue,
+  display,
+  toastLabel,
+}: {
+  /** Exact string written to the clipboard (single line). */
+  copyValue: string;
+  /** Optional multi-line rendition for display; defaults to copyValue. */
+  display?: string;
+  toastLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(copyValue);
+      setCopied(true);
+      toast.success(toastLabel);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Couldn't copy to clipboard");
+    }
+  };
+  return (
+    <div className="flex items-stretch gap-2">
+      <pre className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted/50 px-3 py-2.5 text-xs leading-relaxed">
+        <code className="font-mono text-foreground">{display ?? copyValue}</code>
+      </pre>
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className="h-auto shrink-0"
+        aria-label="Copy command"
+        onClick={copy}
+      >
+        {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+      </Button>
+    </div>
+  );
+}
+
+/** A numbered step: bold "Step N" lead-in + description, then its content. */
+function Step({ n, label, children }: { n: number; label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-foreground">
+        <span className="font-semibold">Step {n}</span> {label}
+      </p>
+      {children}
+    </div>
+  );
 }
 
 /**
- * "Copy as CLI" affordance: a terminal-glyph button that reveals the exact
- * `scope` command equivalent to the user's current Portal state, with a copy
- * button and any parity caveats. See lib/cli/buildCommand.ts for the builders.
+ * "Copy as CLI" affordance: a terminal-glyph button that opens a GitHub-style
+ * modal with step-by-step instructions to reproduce the user's current Portal
+ * state from the `scope` CLI. See lib/cli/buildCommand.ts for the builders.
  */
 export function CliCommand({
   command,
   label,
   title = "Run this from the CLI",
   tooltip = "Show CLI equivalent",
-  align = "end",
   className,
 }: CliCommandProps) {
-  const [copied, setCopied] = useState(false);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command.command);
-      setCopied(true);
-      toast.success("CLI command copied");
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      toast.error("Couldn't copy to clipboard");
-    }
-  };
-
   const trigger = label ? (
     <Button variant="outline" size="sm" className={cn("h-8 gap-1.5", className)} aria-label={tooltip}>
       <Terminal className="h-3.5 w-3.5" />
@@ -62,40 +123,53 @@ export function CliCommand({
   );
 
   return (
-    <Popover>
+    <Dialog>
       <Tooltip>
         <TooltipTrigger asChild>
-          <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+          <DialogTrigger asChild>{trigger}</DialogTrigger>
         </TooltipTrigger>
         <TooltipContent>{tooltip}</TooltipContent>
       </Tooltip>
-      <PopoverContent align={align} className="w-[26rem] max-w-[calc(100vw-2rem)] p-0">
-        <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-          <span className="text-xs font-semibold text-muted-foreground">{title}</span>
-          <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2" onClick={copy}>
-            {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-            <span className="text-xs">{copied ? "Copied" : "Copy"}</span>
-          </Button>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
+            Reproduce your current selection from the terminal or wire it into CI. Everything below maps to the state
+            you have configured in the Portal.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="min-w-0 space-y-5 py-1">
+          <Step n={1} label="Install the Scope CLI (one-time).">
+            <CommandBlock copyValue={INSTALL_COMMAND} toastLabel="Install command copied" />
+            <p className="text-xs text-muted-foreground">
+              Requires Node.js 20+ and an authenticated <code className="font-mono">gh</code> CLI.
+            </p>
+          </Step>
+
+          <Step n={2} label="Point the CLI at this API.">
+            <CommandBlock copyValue={`export SCOPE_API_URL=${apiUrl()}`} toastLabel="Environment variable copied" />
+            <p className="text-xs text-muted-foreground">
+              Or pass <code className="font-mono">-u {apiUrl()}</code> on any command. Defaults to{" "}
+              <code className="font-mono">http://localhost:3000</code> for local development.
+            </p>
+          </Step>
+
+          <Step n={3} label="Run the command.">
+            <CommandBlock copyValue={command.command} display={command.display} toastLabel="CLI command copied" />
+            {command.notes.length > 0 && (
+              <ul className="space-y-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+                {command.notes.map((note, i) => (
+                  <li key={i} className="flex gap-2 text-xs leading-snug text-muted-foreground">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+                    <span>{note}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Step>
         </div>
-        <pre className="max-h-60 overflow-auto bg-muted/50 px-3 py-2.5 text-xs leading-relaxed">
-          <code className="font-mono text-foreground">{command.display}</code>
-        </pre>
-        {command.notes.length > 0 && (
-          <ul className="space-y-1.5 border-t px-3 py-2">
-            {command.notes.map((note, i) => (
-              <li key={i} className="flex gap-1.5 text-[11px] leading-snug text-muted-foreground">
-                <Info className="mt-0.5 h-3 w-3 shrink-0" />
-                <span>{note}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="border-t px-3 py-2 text-[11px] text-muted-foreground">
-          Not installed? <code className="font-mono">npm i -g @scope/cli</code>. Set{" "}
-          <code className="font-mono">SCOPE_API_URL</code> or pass <code className="font-mono">-u &lt;url&gt;</code> if
-          your API isn't local.
-        </div>
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   );
 }
