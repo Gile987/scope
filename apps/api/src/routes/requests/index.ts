@@ -277,6 +277,13 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
+    // Warn if reasoning effort is requested but the worker doesn't support it
+    if (effectiveReasoningEffort && agentDoc && !agentDoc.capabilities?.supportsReasoningEffort) {
+      warnings.push(
+        `Worker "${workerType}" does not declare support for reasoning effort. The effort setting "${effectiveReasoningEffort}" may be ignored.`
+      );
+    }
+
     // Validate MCP server slugs if provided
     let validatedMcpServers: string[] | undefined;
     if (effectiveMcpServers !== undefined) {

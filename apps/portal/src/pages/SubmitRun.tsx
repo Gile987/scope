@@ -185,11 +185,12 @@ export function SubmitRun() {
   // Reasoning effort state
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
-  const { supportedEfforts } = useReasoningEffort({
+  const { supportedEfforts, workerEffortWarning } = useReasoningEffort({
     model,
     capabilitiesMap: modelCapabilitiesMap,
     value: reasoningEffort,
     onChange: onEffortChange,
+    agentSupportsEffort: selectedAgent?.capabilities?.supportsReasoningEffort,
   });
 
   // Sort versions by createdAt descending (latest first)
@@ -602,6 +603,7 @@ export function SubmitRun() {
                 disabled={profileLocked}
                 noSelectionLabel="Any (no preference)"
                 description="Select a preferred reasoning effort level for this model"
+                workerEffortWarning={workerEffortWarning}
               />
               {sortedVersions.length > 0 && (
                 <div className="space-y-2">

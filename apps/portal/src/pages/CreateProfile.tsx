@@ -55,11 +55,12 @@ export function CreateProfile() {
   // Model capabilities and effort management
   const { capabilitiesMap } = useModelCapabilities(worker || undefined);
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
-  const { supportedEfforts } = useReasoningEffort({
+  const { supportedEfforts, workerEffortWarning } = useReasoningEffort({
     model,
     capabilitiesMap,
     value: reasoningEffort,
     onChange: onEffortChange,
+    agentSupportsEffort: selectedAgent?.capabilities?.supportsReasoningEffort,
   });
 
   // Clear extensions when the user switches to a non-vscode worker.
@@ -256,6 +257,7 @@ export function CreateProfile() {
             supportedEfforts={supportedEfforts}
             value={reasoningEffort}
             onChange={onEffortChange}
+            workerEffortWarning={workerEffortWarning}
           />
 
           {sortedVersions.length > 0 && (

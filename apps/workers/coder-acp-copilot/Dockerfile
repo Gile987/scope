@@ -118,6 +118,7 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/apps/workers/coder-acp-copilot/dist ./apps/workers/coder-acp-copilot/dist/
+COPY apps/workers/coder-acp-copilot/agent.yaml ./apps/workers/coder-acp-copilot/agent.yaml
 
 # Use existing node user (UID 1000) so coding agents allow bypassPermissions mode
 RUN mkdir -p /workspace && chown node:node /workspace
