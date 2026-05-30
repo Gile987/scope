@@ -122,19 +122,7 @@ The HAR plugin detects WebSocket exchanges (status 101 + `Upgrade: websocket`) a
 
 ## Cross-Cutting Feature Parity
 
-The WebSocket path supports all protocol-agnostic features available on the HTTPS and SSE paths:
-
-| Feature | HTTPS/SSE | WebSocket | Notes |
-|---------|:---------:|:---------:|-------|
-| Session validation (`InFlightGuard`) | ✅ | ✅ | Guard held for entire WS connection lifetime |
-| `on_request` plugin hook (header mutation, token injection) | ✅ | ✅ | Called before upstream WS handshake |
-| `on_exchange` plugin hook (HAR recording, custom plugins) | ✅ | ✅ | Called after WS close with all recorded messages |
-| Iteration tracking | ✅ | ✅ | Iteration read at exchange report time |
-| Session touch (prevents idle reaping) | ✅ | ✅ | Periodic 30s touch during long-lived WS connections |
-| `InFlightGuard` drop (re-enables reaping) | ✅ | ✅ | Dropped after `on_exchange` notification |
-| Upstream TLS (real cert validation) | ✅ | ✅ | Same `upstream_tls_config` used for WS connections |
-| Timing (`started_at`, `wait_ms`, `elapsed_ms`) | ✅ | ✅ | `elapsed_ms` = total WS connection lifetime |
-| URL pattern matching (passthrough) | ✅ | ✅ | Handled at CONNECT level, before protocol detection |
+The WebSocket path supports all protocol-agnostic features available on the HTTPS and SSE paths. See the [cross-cutting feature table in the main gateway docs](./ai-gateway.md#proxy-data-plane) for the full comparison.
 
 The only addition specific to WebSocket is the **periodic 30s session touch** during the relay loop, since WS connections are long-lived whereas HTTP responses complete quickly enough that a single touch on completion suffices.
 
