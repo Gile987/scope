@@ -320,6 +320,30 @@ export function AgentDetail() {
         </CardContent>
       </Card>
 
+      {/* Capabilities card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Capabilities</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {(() => {
+            const caps = agent.capabilities;
+            const entries: { label: string; supported: boolean }[] = [
+              { label: "Reasoning Effort", supported: !!caps?.supportsReasoningEffort },
+            ];
+            return (
+              <div className="flex flex-wrap gap-2">
+                {entries.map(({ label, supported }) => (
+                  <Badge key={label} variant={supported ? "default" : "secondary"} className="gap-1">
+                    {supported ? "✓" : "✗"} {label}
+                  </Badge>
+                ))}
+              </div>
+            );
+          })()}
+        </CardContent>
+      </Card>
+
       {/* Versions card */}
       <Card>
         <CardHeader>
