@@ -38,11 +38,28 @@ export interface CliCommandProps {
 const INSTALL_COMMAND =
   'gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H "Accept: application/vnd.github.raw" | bash';
 
+/** The CLI's own default API base when SCOPE_API_URL is unset (apps/cli/src/utils/shared.ts). */
+const CLI_DEFAULT_API_URL = "http://localhost:3100";
+
+/**
+ * The API base URL to suggest for `SCOPE_API_URL`.
+ *
+ * Deployed environments (integration / preview / prod) serve the API on the
+ * same origin as the Portal — `src/lib/api.ts` calls it via the relative
+ * `/api/v1` base — so `window.location.origin` is the correct, environment-
+ * specific value with no hardcoding.
+ *
+ * Local dev is the exception: the Vite dev server (e.g. :5106) proxies `/api`
+ * to the real API (:3100), so the browser origin is NOT the API. In that case
+ * we fall back to the CLI's own default so the command is actually runnable.
+ */
 function apiUrl(): string {
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return window.location.origin;
+  if (typeof window === "undefined" || !window.location?.origin) {
+    return CLI_DEFAULT_API_URL;
   }
-  return "https://your-scope-api";
+  const { origin, hostname } = window.location;
+  const isLocalDev = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0";
+  return isLocalDev ? CLI_DEFAULT_API_URL : origin;
 }
 
 /** A single copyable command block with its own copy button (GitHub-style). */
@@ -150,8 +167,9 @@ export function CliCommand({
           <Step n={2} label="Point the CLI at this API.">
             <CommandBlock copyValue={`export SCOPE_API_URL=${apiUrl()}`} toastLabel="Environment variable copied" />
             <p className="text-xs text-muted-foreground">
-              Or pass <code className="font-mono">-u {apiUrl()}</code> on any command. Defaults to{" "}
-              <code className="font-mono">http://localhost:3000</code> for local development.
+              Pre-filled for this environment. Once deployed, the Portal and API share an origin, so this matches
+              wherever you're viewing from. Or pass <code className="font-mono">--url {apiUrl()}</code> on any command
+              instead of exporting.
             </p>
           </Step>
 
