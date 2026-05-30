@@ -37,6 +37,8 @@ import { toast } from "sonner";
 import type { RunState } from "@/types";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { getRetryButtonState } from "@/components/RetryButton";
+import { CliCommand } from "@/components/CliCommand";
+import { buildRunGet } from "@/lib/cli/buildCommand";
 
 export function RunDetail() {
   const { id, tab } = useParams<{ id: string; tab?: string }>();
@@ -351,6 +353,7 @@ export function RunDetail() {
               >
                 {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
               </button>
+              <CliCommand command={buildRunGet(id ?? "")} align="start" />
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <StatusBadge

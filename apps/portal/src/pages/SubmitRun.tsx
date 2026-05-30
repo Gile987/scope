@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -36,6 +36,8 @@ import {
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { KbdBadge } from "@/components/KbdBadge";
+import { CliCommand } from "@/components/CliCommand";
+import { buildRunSubmit } from "@/lib/cli/buildCommand";
 import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
@@ -527,6 +529,36 @@ export function SubmitRun() {
   const expandedRunCount = compositionProfileCount > 0 ? compositionProfileCount * occurrences : occurrences;
   const submitRunCount = expandedRunCount;
   const lastVariationDraft = variationDrafts.length > 0 ? variationDrafts[variationDrafts.length - 1] : null;
+
+  // Equivalent `scope run submit` command for the "Copy as CLI" affordance.
+  const submitCli = useMemo(() => {
+    const inVariationMode = !!selectedProfileId && selectedVariationCount > 0;
+    const baseProfileSpec = selectedProfileId
+      ? selectedProfileVersion
+        ? `${selectedProfileId}@${selectedProfileVersion}`
+        : selectedProfileId
+      : null;
+    return buildRunSubmit({
+      task,
+      criteria: pickedCriteria,
+      worker,
+      model,
+      reasoningEffort,
+      maxIterations,
+      mcpServers: selectedMcpServers,
+      skills: selectedSkills,
+      extensions: selectedExtensions,
+      agentVersion: selectedAgentVersion || undefined,
+      baseProfileId: baseProfileSpec,
+      occurrences,
+      priority,
+      variationMode: inVariationMode,
+    });
+  }, [
+    task, pickedCriteria, worker, model, reasoningEffort, maxIterations,
+    selectedMcpServers, selectedSkills, selectedExtensions, selectedAgentVersion,
+    selectedProfileId, selectedProfileVersion, occurrences, priority, selectedVariationCount,
+  ]);
   const lastVariationName = lastVariationDraft
     ? profileList.find((p) => p._id === lastVariationDraft.profileId)?.name
     : null;
@@ -1341,6 +1373,7 @@ export function SubmitRun() {
                 </DialogContent>
               </Dialog>
             )}
+            <CliCommand command={submitCli} label="CLI" title="Submit from the CLI" align="end" />
             <Button type="submit" disabled={!canSubmit} className="gap-1.5">
               {submitMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
