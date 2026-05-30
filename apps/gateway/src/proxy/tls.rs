@@ -297,10 +297,7 @@ async fn handle_websocket_in_tls(
             .unwrap_or("/")
     );
 
-    info!(
-        "WebSocket upgrade: {} session={}",
-        uri_str, session_id
-    );
+    info!("WebSocket upgrade: {} session={}", uri_str, session_id);
 
     // Give plugins a chance to mutate headers (e.g. refresh auth tokens)
     let upstream_uri: hyper::Uri = uri_str.parse()?;
@@ -351,9 +348,9 @@ async fn handle_websocket_in_tls(
     let request_instant = std::time::Instant::now();
 
     // Perform the WebSocket handshake with upstream
-    let (upstream_ws, _ws_response) =
-        tokio_tungstenite::client_async(ws_request, upstream_tls).await
-            .map_err(|e| anyhow::anyhow!("WebSocket upstream handshake failed: {}", e))?;
+    let (upstream_ws, _ws_response) = tokio_tungstenite::client_async(ws_request, upstream_tls)
+        .await
+        .map_err(|e| anyhow::anyhow!("WebSocket upstream handshake failed: {}", e))?;
 
     let wait_ms = request_instant.elapsed().as_millis() as u64;
 

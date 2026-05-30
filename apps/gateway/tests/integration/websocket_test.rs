@@ -74,9 +74,7 @@ async fn connect_ws_through_proxy(
     gw: &TestGateway,
     session_id: &str,
     backend_port: u16,
-) -> tokio_tungstenite::WebSocketStream<
-    tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
-> {
+) -> tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let proxy_addr = gw.proxy_addr;
@@ -247,17 +245,11 @@ async fn websocket_intercept_captures_har() {
     );
 
     // Step 4: Exchange some messages
-    ws_stream
-        .send(Message::Text("Hello".into()))
-        .await
-        .unwrap();
+    ws_stream.send(Message::Text("Hello".into())).await.unwrap();
     let echo1 = ws_stream.next().await.unwrap().unwrap();
     assert_eq!(echo1, Message::Text("Hello".into()));
 
-    ws_stream
-        .send(Message::Text("World".into()))
-        .await
-        .unwrap();
+    ws_stream.send(Message::Text("World".into())).await.unwrap();
     let echo2 = ws_stream.next().await.unwrap().unwrap();
     assert_eq!(echo2, Message::Text("World".into()));
 
@@ -325,8 +317,7 @@ async fn websocket_binary_frames_captured_as_base64() {
     let api_client = reqwest::Client::new();
     let session_id = create_session(&api_client, &gw).await;
 
-    let mut ws_stream =
-        connect_ws_through_proxy(&gw, &session_id, backend.addr.port()).await;
+    let mut ws_stream = connect_ws_through_proxy(&gw, &session_id, backend.addr.port()).await;
 
     // Send binary data
     let binary_data: Vec<u8> = vec![0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD];
@@ -354,10 +345,8 @@ async fn websocket_binary_frames_captured_as_base64() {
     // Sent binary message
     assert_eq!(ws_messages[0]["type"], "send");
     assert_eq!(ws_messages[0]["opcode"], 2);
-    let expected_b64 = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        &binary_data,
-    );
+    let expected_b64 =
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &binary_data);
     assert_eq!(ws_messages[0]["data"], expected_b64);
 
     // Received echo
@@ -382,14 +371,10 @@ async fn websocket_upstream_disconnect_still_captures_har() {
     let api_client = reqwest::Client::new();
     let session_id = create_session(&api_client, &gw).await;
 
-    let mut ws_stream =
-        connect_ws_through_proxy(&gw, &session_id, backend.addr.port()).await;
+    let mut ws_stream = connect_ws_through_proxy(&gw, &session_id, backend.addr.port()).await;
 
     // Send a message — the server will echo it then drop the connection
-    ws_stream
-        .send(Message::Text("hello".into()))
-        .await
-        .unwrap();
+    ws_stream.send(Message::Text("hello".into())).await.unwrap();
 
     // Read the echo
     let echo = ws_stream.next().await.unwrap().unwrap();

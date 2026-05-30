@@ -435,11 +435,10 @@ impl TestWebSocketBackend {
                     };
 
                     // Accept WebSocket upgrade over the TLS stream.
-                    let ws_stream =
-                        match tokio_tungstenite::accept_async(tls_stream).await {
-                            Ok(ws) => ws,
-                            Err(_) => return,
-                        };
+                    let ws_stream = match tokio_tungstenite::accept_async(tls_stream).await {
+                        Ok(ws) => ws,
+                        Err(_) => return,
+                    };
 
                     let (mut sink, mut stream) = ws_stream.split();
 
@@ -449,9 +448,7 @@ impl TestWebSocketBackend {
                             let _ = sink.send(msg).await;
                             break;
                         }
-                        if (msg.is_text() || msg.is_binary())
-                            && sink.send(msg).await.is_err()
-                        {
+                        if (msg.is_text() || msg.is_binary()) && sink.send(msg).await.is_err() {
                             break;
                         }
                     }
@@ -491,11 +488,10 @@ impl TestWebSocketDropBackend {
                         return;
                     };
 
-                    let ws_stream =
-                        match tokio_tungstenite::accept_async(tls_stream).await {
-                            Ok(ws) => ws,
-                            Err(_) => return,
-                        };
+                    let ws_stream = match tokio_tungstenite::accept_async(tls_stream).await {
+                        Ok(ws) => ws,
+                        Err(_) => return,
+                    };
 
                     let (mut sink, mut stream) = ws_stream.split();
 

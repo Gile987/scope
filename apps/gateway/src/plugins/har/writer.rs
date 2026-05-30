@@ -117,13 +117,21 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
             cookies: vec![],
             headers: response_headers,
             content: HarContent {
-                size: if is_websocket { 0 } else { resp.body.len() as i64 },
+                size: if is_websocket {
+                    0
+                } else {
+                    resp.body.len() as i64
+                },
                 mime_type: content_type,
                 text: resp_text,
                 encoding: resp_encoding,
             },
             headers_size: -1,
-            body_size: if is_websocket { 0 } else { resp.body.len() as i64 },
+            body_size: if is_websocket {
+                0
+            } else {
+                resp.body.len() as i64
+            },
             redirect_url: String::new(),
         },
         cache: HarCache::default(),
