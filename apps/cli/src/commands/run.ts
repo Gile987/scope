@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import EventSource from "eventsource";
 import { execSync } from "child_process";
 import { mkdtempSync, mkdirSync, createWriteStream, rmSync, readFileSync, readdirSync, existsSync, statSync } from "fs";
@@ -43,12 +43,16 @@ run
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
-  .option("--base-profile <id>", "Base profile ID used for profile variation fan-out")
+  .option("--profile <id>", "Saved profile to apply (supplies worker, model, extensions, etc.)")
+  .addOption(new Option("--base-profile <id>", "Deprecated alias for --profile.").hideHelp())
   .option("--profile-variations-file <path>", "Path to JSON file containing profile variation entries")
   .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
   .action(async (options, command) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, baseProfile, profileVariationsFile } = options;
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile } = options;
+    // `--profile` is the documented flag; `--base-profile` is kept as a hidden
+    // back-compat alias. Both resolve to the same request `profileId`.
+    const profileId = profile ?? baseProfile;
 
     try {
       // Resolve scenario + persona YAML if provided
@@ -111,13 +115,13 @@ run
       if (agentVersion) {
         body.agentVersion = agentVersion;
       }
-      if (baseProfile) {
-        body.profileId = baseProfile;
+      if (profileId) {
+        body.profileId = profileId;
       }
 
       if (profileVariationsFile) {
-        if (!baseProfile) {
-          console.error(errorText("Error: --base-profile is required when --profile-variations-file is provided"));
+        if (!profileId) {
+          console.error(errorText("Error: --profile is required when --profile-variations-file is provided"));
           process.exit(1);
         }
 

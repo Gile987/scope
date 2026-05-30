@@ -128,7 +128,7 @@ export function buildRunSubmit(state: RunSubmitState): CliCommand {
     tokens.push(...variadicFlag("--extensions", state.extensions));
     tokens.push(...flag("--agent-version", state.agentVersion));
   }
-  tokens.push(...flag("--base-profile", state.baseProfileId ?? undefined));
+  tokens.push(...flag("--profile", state.baseProfileId ?? undefined));
 
   const notes: string[] = [];
   if (state.occurrences !== undefined && state.occurrences > 1) {

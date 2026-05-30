@@ -60,7 +60,7 @@ describe("buildRunSubmit", () => {
       "scope run submit -m task -c has-tests compiles -w coder-acp-claude-code " +
         "--model claude-sonnet-4.5 --reasoning-effort high --max-iterations 20 " +
         "--mcp-servers github --skills a/b/c --extensions ms-python.python " +
-        "--agent-version copilot-0.0.415 --base-profile prof_1",
+        "--agent-version copilot-0.0.415 --profile prof_1",
     );
   });
 
@@ -78,9 +78,9 @@ describe("buildRunSubmit", () => {
     expect(notes[2]).toContain("profile-variations-file");
   });
 
-  it("includes the profile version in --base-profile when selected", () => {
+  it("includes the profile version in --profile when selected", () => {
     const { command } = buildRunSubmit({ task: "t", baseProfileId: "prof_1@3" });
-    expect(command).toBe("scope run submit -m t --base-profile prof_1@3");
+    expect(command).toBe("scope run submit -m t --profile prof_1@3");
   });
 
   it("suppresses per-run worker/model/tool fields in variation mode", () => {
@@ -97,7 +97,7 @@ describe("buildRunSubmit", () => {
       variationMode: true,
     });
     // Only task, base profile remain; the profiles supply the rest.
-    expect(command).toBe("scope run submit -m t --base-profile prof_1@2");
+    expect(command).toBe("scope run submit -m t --profile prof_1@2");
   });
 });
 

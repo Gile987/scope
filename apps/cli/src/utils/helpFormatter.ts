@@ -69,7 +69,7 @@ function getAllCommands(cmd: Command, prefix = ''): Array<{ name: string; descri
 
   for (const subCmd of cmd.commands) {
     const fullName = prefix ? `${prefix} ${subCmd.name()}` : subCmd.name();
-    const options = subCmd.options.map(opt => `${opt.flags} - ${opt.description}`);
+    const options = subCmd.options.filter((opt) => !opt.hidden).map(opt => `${opt.flags} - ${opt.description}`);
     const args = subCmd.registeredArguments.map(
       (arg) => `<${arg.name()}>${arg.required ? '' : '?'} - ${arg.description}`
     );
@@ -119,9 +119,10 @@ export function configureHelp(program: Command): void {
       output += '  ' + helper.commandUsage(cmd) + '\n\n';
 
       // Global options
-      if (cmd.options.length > 0) {
+      const visibleGlobalOptions = cmd.options.filter((option) => !option.hidden);
+      if (visibleGlobalOptions.length > 0) {
         output += styleText('bold', 'Global Options:') + '\n';
-        for (const option of cmd.options) {
+        for (const option of visibleGlobalOptions) {
           const term = helper.optionTerm(option);
           const desc = helper.optionDescription(option);
           output += '  ' + styleText('green', term.padEnd(termWidth)) + '  ' + desc + '\n';
