@@ -117,6 +117,7 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/apps/workers/coder-acp-claude-code/dist ./apps/workers/coder-acp-claude-code/dist/
+COPY apps/workers/coder-acp-claude-code/agent.yaml ./apps/workers/coder-acp-claude-code/agent.yaml
 
 # Use existing node user (UID 1000) so claude-code-acp allows bypassPermissions mode
 RUN mkdir -p /workspace && chown node:node /workspace

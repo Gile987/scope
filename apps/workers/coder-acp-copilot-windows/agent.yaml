@@ -1,0 +1,6 @@
+_id: coder-acp-copilot-windows
+name: GitHub Copilot CLI (Windows)
+description: GitHub Copilot coding agent via ACP protocol on Windows
+available: true
+capabilities:
+  supportsReasoningEffort: true
