@@ -82,7 +82,7 @@ RUN pnpm --filter shared build && pnpm --filter coder-acp-claude-code build
 
 # Pre-convert agent.yaml to JSON so the registration job doesn't need the yaml package at runtime
 COPY apps/workers/coder-acp-claude-code/agent.yaml ./apps/workers/coder-acp-claude-code/agent.yaml
-RUN node -e "const{parse}=require('yaml');const fs=require('fs');fs.writeFileSync('apps/workers/coder-acp-claude-code/agent.json',JSON.stringify(parse(fs.readFileSync('apps/workers/coder-acp-claude-code/agent.yaml','utf8'))))"
+RUN node -e "const{parse}=require(require.resolve('yaml',{paths:['/app/packages/shared']}));const fs=require('fs');fs.writeFileSync('apps/workers/coder-acp-claude-code/agent.json',JSON.stringify(parse(fs.readFileSync('apps/workers/coder-acp-claude-code/agent.yaml','utf8'))))"
 
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
