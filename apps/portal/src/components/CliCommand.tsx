@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { useState } from "react";
-import { Terminal, Copy, Check, Info } from "lucide-react";
+import { Terminal, Copy, Check, Info, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +28,11 @@ export interface CliCommandProps {
   tooltip?: string;
   className?: string;
   /**
+   * When true, the trigger is disabled and the modal cannot be opened. Use this
+   * when the equivalent action (e.g. the Submit form) is not yet valid.
+   */
+  disabled?: boolean;
+  /**
    * Kept for backwards compatibility with the previous popover API. No longer
    * used now that the affordance is a centered modal.
    */
@@ -38,28 +43,24 @@ export interface CliCommandProps {
 const INSTALL_COMMAND =
   'gh api repos/growth-ecosystems/scope-doc/contents/install-cli.sh -H "Accept: application/vnd.github.raw" | bash';
 
-/** The CLI's own default API base when SCOPE_API_URL is unset (apps/cli/src/utils/shared.ts). */
-const CLI_DEFAULT_API_URL = "http://localhost:3100";
+/** Public documentation home for the Scope CLI. */
+const DOCS_URL = "https://aka.ms/projectscope/doc";
 
 /**
  * The API base URL to suggest for `SCOPE_API_URL`.
  *
- * Deployed environments (integration / preview / prod) serve the API on the
- * same origin as the Portal — `src/lib/api.ts` calls it via the relative
- * `/api/v1` base — so `window.location.origin` is the correct, environment-
- * specific value with no hardcoding.
- *
- * Local dev is the exception: the Vite dev server (e.g. :5106) proxies `/api`
- * to the real API (:3100), so the browser origin is NOT the API. In that case
- * we fall back to the CLI's own default so the command is actually runnable.
+ * Every supported deployment fronts the API on the same origin as the Portal:
+ * nginx proxies `/api/*` in production, and the Vite dev server proxies `/api`
+ * in local dev (`src/lib/api.ts` calls it via the relative `/api/v1` base).
+ * Because the CLI requests `${SCOPE_API_URL}/api/v1/...`, the current browser
+ * origin is the correct, environment-specific value in every case — no
+ * hardcoding or per-environment branching needed.
  */
 function apiUrl(): string {
   if (typeof window === "undefined" || !window.location?.origin) {
-    return CLI_DEFAULT_API_URL;
+    return "http://localhost:5106";
   }
-  const { origin, hostname } = window.location;
-  const isLocalDev = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0";
-  return isLocalDev ? CLI_DEFAULT_API_URL : origin;
+  return window.location.origin;
 }
 
 /** A single copyable command block with its own copy button (GitHub-style). */
@@ -127,14 +128,27 @@ export function CliCommand({
   title = "Run this from the CLI",
   tooltip = "Show CLI equivalent",
   className,
+  disabled = false,
 }: CliCommandProps) {
   const trigger = label ? (
-    <Button variant="outline" size="sm" className={cn("h-8 gap-1.5", className)} aria-label={tooltip}>
+    <Button
+      variant="outline"
+      size="sm"
+      className={cn("h-8 gap-1.5", className)}
+      aria-label={tooltip}
+      disabled={disabled}
+    >
       <Terminal className="h-3.5 w-3.5" />
       <span className="text-xs font-medium">{label}</span>
     </Button>
   ) : (
-    <Button variant="ghost" size="icon" className={cn("h-8 w-8 text-muted-foreground", className)} aria-label={tooltip}>
+    <Button
+      variant="ghost"
+      size="icon"
+      className={cn("h-8 w-8 text-muted-foreground", className)}
+      aria-label={tooltip}
+      disabled={disabled}
+    >
       <Terminal className="h-4 w-4" />
     </Button>
   );
@@ -166,11 +180,6 @@ export function CliCommand({
 
           <Step n={2} label="Point the CLI at this API.">
             <CommandBlock copyValue={`export SCOPE_API_URL=${apiUrl()}`} toastLabel="Environment variable copied" />
-            <p className="text-xs text-muted-foreground">
-              Pre-filled for this environment. Once deployed, the Portal and API share an origin, so this matches
-              wherever you're viewing from. Or pass <code className="font-mono">--url {apiUrl()}</code> on any command
-              instead of exporting.
-            </p>
           </Step>
 
           <Step n={3} label="Run the command.">
@@ -186,6 +195,18 @@ export function CliCommand({
               </ul>
             )}
           </Step>
+
+          <div className="border-t pt-3">
+            <a
+              href={DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Read the CLI documentation
+            </a>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

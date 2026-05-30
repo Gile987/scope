@@ -642,6 +642,9 @@ export function SubmitRun() {
           <h1 className="text-3xl font-bold tracking-tight">New Run</h1>
           <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
         </div>
+        <div className="ml-auto">
+          <CliCommand command={submitCli} label="CLI" title="Submit from the CLI" disabled={!canSubmit} />
+        </div>
       </div>
 
       {/* Quick Start gallery (collapsible, default closed) */}
@@ -1373,7 +1376,6 @@ export function SubmitRun() {
                 </DialogContent>
               </Dialog>
             )}
-            <CliCommand command={submitCli} label="CLI" title="Submit from the CLI" align="end" />
             <Button type="submit" disabled={!canSubmit} className="gap-1.5">
               {submitMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
