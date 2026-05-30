@@ -7,3 +7,4 @@ mod helpers;
 mod plugin_test;
 mod proxy_test;
 mod tls_test;
+mod websocket_test;
