@@ -463,3 +463,54 @@ impl TestWebSocketBackend {
         TestWebSocketBackend { addr }
     }
 }
+
+/// A WebSocket backend that echoes one message then drops the connection.
+/// Used to test the gateway's handling of upstream disconnects.
+pub struct TestWebSocketDropBackend {
+    pub addr: SocketAddr,
+}
+
+impl TestWebSocketDropBackend {
+    /// Start a TLS WebSocket server that echoes a single message then closes abruptly.
+    pub async fn start(ca: &Arc<CertificateAuthority>) -> Self {
+        let server_config = ca.server_config_for_domain("localhost").unwrap();
+        let tls_acceptor = TlsAcceptor::from(server_config);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let acceptor = tls_acceptor.clone();
+
+                tokio::spawn(async move {
+                    let Ok(tls_stream) = acceptor.accept(stream).await else {
+                        return;
+                    };
+
+                    let ws_stream =
+                        match tokio_tungstenite::accept_async(tls_stream).await {
+                            Ok(ws) => ws,
+                            Err(_) => return,
+                        };
+
+                    let (mut sink, mut stream) = ws_stream.split();
+
+                    // Echo exactly one message, then drop (no close frame).
+                    if let Some(Ok(msg)) = stream.next().await {
+                        if msg.is_text() || msg.is_binary() {
+                            let _ = sink.send(msg).await;
+                        }
+                    }
+                    // Drop sink + stream — abrupt disconnect, no close handshake
+                });
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        TestWebSocketDropBackend { addr }
+    }
+}
