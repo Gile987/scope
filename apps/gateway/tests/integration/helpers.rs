@@ -449,10 +449,10 @@ impl TestWebSocketBackend {
                             let _ = sink.send(msg).await;
                             break;
                         }
-                        if msg.is_text() || msg.is_binary() {
-                            if sink.send(msg).await.is_err() {
-                                break;
-                            }
+                        if (msg.is_text() || msg.is_binary())
+                            && sink.send(msg).await.is_err()
+                        {
+                            break;
                         }
                     }
                 });

@@ -14,6 +14,7 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -77,15 +78,12 @@ fn message_to_record(msg: &Message, direction: &str) -> Option<WsMessage> {
             opcode: 1,
             data: text.to_string(),
         }),
-        Message::Binary(data) => {
-            use base64::Engine;
-            Some(WsMessage {
-                direction: direction.to_string(),
-                time: unix_timestamp_secs(),
-                opcode: 2,
-                data: base64::engine::general_purpose::STANDARD.encode(data),
-            })
-        }
+        Message::Binary(data) => Some(WsMessage {
+            direction: direction.to_string(),
+            time: unix_timestamp_secs(),
+            opcode: 2,
+            data: base64::engine::general_purpose::STANDARD.encode(data),
+        }),
         Message::Close(_) | Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => None,
     }
 }
