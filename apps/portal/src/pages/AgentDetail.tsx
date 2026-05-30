@@ -331,11 +331,15 @@ export function AgentDetail() {
             const entries: { label: string; supported: boolean }[] = [
               { label: "Reasoning Effort", supported: !!caps?.supportsReasoningEffort },
             ];
+            const supported = entries.filter((e) => e.supported);
+            if (supported.length === 0) {
+              return <p className="text-sm text-muted-foreground">No capabilities declared.</p>;
+            }
             return (
               <div className="flex flex-wrap gap-2">
-                {entries.map(({ label, supported }) => (
-                  <Badge key={label} variant={supported ? "default" : "secondary"} className="gap-1">
-                    {supported ? "✓" : "✗"} {label}
+                {supported.map(({ label }) => (
+                  <Badge key={label} variant="default" className="gap-1">
+                    ✓ {label}
                   </Badge>
                 ))}
               </div>
