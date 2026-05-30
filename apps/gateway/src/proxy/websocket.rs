@@ -4,11 +4,8 @@
 //! WebSocket upgrade detection, bidirectional frame relay, and message recording.
 //!
 //! When the TLS interception layer detects an HTTP `Upgrade: websocket` request,
-//! this module takes over:
-//!   1. Forwards the upgrade request to the upstream server
-//!   2. If upstream responds with 101 Switching Protocols, completes the upgrade
-//!   3. Relays WebSocket frames bidirectionally between client and upstream
-//!   4. Records all messages for plugin notification (HAR `_webSocketMessages`)
+//! it delegates to `handle_websocket_in_tls()` (in `tls.rs`) which uses this module's
+//! `relay_websocket_bidirectional()` to relay frames while recording messages.
 //!
 //! The recording format follows Chrome DevTools' convention: each WebSocket
 //! connection produces a single HAR entry with the upgrade handshake as
@@ -17,20 +14,14 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
-use http_body_util::Full;
-use hyper::body::Incoming;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
-use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::WebSocketStream;
-use tracing::{debug, info};
+use tracing::debug;
 
-use crate::plugin::{ExchangeRequest, ExchangeResponse, HttpExchange, SessionId};
+use crate::plugin::SessionId;
 use crate::proxy::handler::ProxyState;
-use crate::session::InFlightGuard;
 
 /// A recorded WebSocket message, following Chrome's `_webSocketMessages` format.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -48,7 +39,6 @@ pub struct WsMessage {
 
 /// Returns true if the request is a WebSocket upgrade request.
 pub fn is_websocket_upgrade<B>(req: &hyper::Request<B>) -> bool {
-    let start = std::time::Instant::now();
     let has_upgrade = req
         .headers()
         .get(http::header::UPGRADE)
@@ -66,188 +56,7 @@ pub fn is_websocket_upgrade<B>(req: &hyper::Request<B>) -> bool {
         })
         .unwrap_or(false);
 
-    let result = has_upgrade && has_connection;
-    if result {
-        debug!(
-            "WebSocket upgrade detected in {:?}",
-            start.elapsed()
-        );
-    }
-    result
-}
-
-/// Handle a WebSocket upgrade: forward the handshake to upstream, then relay
-/// frames bidirectionally while recording messages for HAR.
-///
-/// This function takes ownership of the hyper request (which must be an upgrade
-/// request) and the raw client IO (obtained after the HTTP layer yields via upgrade).
-/// It connects to upstream, performs the WebSocket handshake, and relays until close.
-pub async fn handle_websocket_upgrade(
-    req: hyper::Request<Incoming>,
-    domain: &str,
-    port: u16,
-    session_id: &SessionId,
-    state: &Arc<ProxyState>,
-) -> anyhow::Result<hyper::Response<Full<Bytes>>> {
-    let started_at = chrono::Utc::now();
-
-    // Keep the session alive for the entire WebSocket connection duration.
-    let in_flight_guard =
-        InFlightGuard::begin(state.session_manager.clone(), session_id.clone());
-    if in_flight_guard.is_none() {
-        anyhow::bail!("session {} no longer exists", session_id);
-    }
-
-    // Capture request metadata before consuming
-    let (parts, _body) = req.into_parts();
-    let req_method = parts.method.clone();
-    let req_uri = parts.uri.clone();
-    let mut req_headers = parts.headers.clone();
-
-    // Build the full URI for logging
-    let uri_str = format!(
-        "https://{}:{}{}",
-        domain,
-        port,
-        parts
-            .uri
-            .path_and_query()
-            .map(|pq| pq.as_str())
-            .unwrap_or("/")
-    );
-
-    info!(
-        "WebSocket upgrade: {} session={}",
-        uri_str, session_id
-    );
-
-    // Give plugins a chance to mutate headers (e.g. refresh auth tokens)
-    let upstream_uri: hyper::Uri = uri_str.parse()?;
-    state
-        .registry
-        .on_request(session_id, &upstream_uri, &mut req_headers)
-        .await?;
-
-    // Connect to upstream via TLS
-    let upstream_tcp = TcpStream::connect(format!("{}:{}", domain, port)).await?;
-    let connector = TlsConnector::from(state.upstream_tls_config.clone());
-    let server_name = rustls::pki_types::ServerName::try_from(domain.to_string())?;
-    let upstream_tls = connector.connect(server_name, upstream_tcp).await?;
-
-    // Build the WebSocket upgrade request for upstream.
-    // Use tokio-tungstenite's client handshake with the existing TLS stream.
-    let ws_uri = format!(
-        "wss://{}:{}{}",
-        domain,
-        port,
-        parts
-            .uri
-            .path_and_query()
-            .map(|pq| pq.as_str())
-            .unwrap_or("/")
-    );
-
-    // Build a tungstenite request with the original headers (auth, extensions, etc.)
-    let mut ws_request = tokio_tungstenite::tungstenite::http::Request::builder()
-        .method("GET")
-        .uri(&ws_uri);
-
-    for (key, value) in &req_headers {
-        // Skip hop-by-hop headers that tungstenite manages itself
-        let name = key.as_str().to_lowercase();
-        if name == "host" || name == "sec-websocket-key" || name == "sec-websocket-version" {
-            continue;
-        }
-        ws_request = ws_request.header(key, value);
-    }
-
-    let ws_request = ws_request
-        .body(())
-        .map_err(|e| anyhow::anyhow!("Failed to build WS request: {}", e))?;
-
-    let request_instant = std::time::Instant::now();
-
-    // Perform the WebSocket handshake with upstream
-    let (upstream_ws, _response) =
-        tokio_tungstenite::client_async(ws_request, upstream_tls).await?;
-
-    let wait_ms = request_instant.elapsed().as_millis() as u64;
-
-    debug!(
-        "WebSocket handshake complete with upstream {} in {}ms",
-        domain, wait_ms
-    );
-
-    // Build the 101 response to send back to the client.
-    // The actual HTTP upgrade on the client side is handled by hyper's upgrade mechanism
-    // in tls.rs — here we just return the response that indicates success.
-    let resp = hyper::Response::builder()
-        .status(http::StatusCode::SWITCHING_PROTOCOLS)
-        .header(http::header::UPGRADE, "websocket")
-        .header(http::header::CONNECTION, "Upgrade")
-        .body(Full::new(Bytes::new()))?;
-
-    // Spawn the frame relay task. It will run until the WebSocket connection closes.
-    let session_id_owned = session_id.clone();
-    let state_owned = state.clone();
-    let domain_owned = domain.to_string();
-
-    tokio::spawn(async move {
-        let messages = relay_frames(upstream_ws, &domain_owned, &session_id_owned, &state_owned).await;
-
-        let elapsed_ms = request_instant.elapsed().as_millis() as u64;
-
-        // Serialize messages as the response body for the plugin exchange
-        let messages_json = serde_json::to_vec(&messages).unwrap_or_default();
-
-        // Build response headers matching 101 Switching Protocols
-        let mut resp_headers = http::HeaderMap::new();
-        resp_headers.insert(http::header::UPGRADE, "websocket".parse().unwrap());
-        resp_headers.insert(http::header::CONNECTION, "Upgrade".parse().unwrap());
-
-        let exchange = HttpExchange {
-            request: ExchangeRequest {
-                method: req_method,
-                uri: req_uri,
-                headers: req_headers,
-                body: Bytes::new(),
-            },
-            response: ExchangeResponse {
-                status: http::StatusCode::SWITCHING_PROTOCOLS,
-                headers: resp_headers,
-                body: Bytes::from(messages_json),
-            },
-            started_at,
-            wait_ms,
-            elapsed_ms,
-        };
-
-        // Read iteration from session manager before notifying plugins.
-        let iteration = state_owned
-            .session_manager
-            .get_iteration(&session_id_owned)
-            .await
-            .unwrap_or(None)
-            .unwrap_or(0);
-
-        state_owned
-            .registry
-            .on_exchange(&session_id_owned, &exchange, iteration)
-            .await;
-
-        // Drop in-flight guard last to allow reaper to consider the session again.
-        drop(in_flight_guard);
-
-        info!(
-            "WebSocket connection closed: {} session={} messages={} elapsed={}ms",
-            domain_owned,
-            session_id_owned,
-            messages.len(),
-            elapsed_ms
-        );
-    });
-
-    Ok(resp)
+    has_upgrade && has_connection
 }
 
 /// Current Unix timestamp as f64 seconds with millisecond precision.
@@ -256,48 +65,6 @@ fn unix_timestamp_secs() -> f64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs_f64()
-}
-
-/// Relay WebSocket frames bidirectionally between client and upstream,
-/// recording all messages. Returns the recorded messages when the connection closes.
-///
-/// Note: The `client_ws` parameter will be added when we wire this up with the
-/// actual client IO from hyper's upgrade mechanism. For now, this function only
-/// handles the upstream side — the client-side wiring happens in tls.rs.
-async fn relay_frames<S>(
-    upstream_ws: WebSocketStream<S>,
-    domain: &str,
-    session_id: &SessionId,
-    state: &Arc<ProxyState>,
-) -> Vec<WsMessage>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let _ = (domain, session_id, state);
-
-    let (_upstream_sink, mut upstream_stream) = upstream_ws.split();
-    let mut messages = Vec::new();
-
-    // For now, just drain the upstream until it closes.
-    // Full bidirectional relay with client IO will be wired in the tls.rs integration.
-    while let Some(msg_result) = upstream_stream.next().await {
-        match msg_result {
-            Ok(msg) => {
-                if let Some(ws_msg) = message_to_record(&msg, "receive") {
-                    messages.push(ws_msg);
-                }
-                if msg.is_close() {
-                    break;
-                }
-            }
-            Err(e) => {
-                debug!("WebSocket upstream error for {}: {}", domain, e);
-                break;
-            }
-        }
-    }
-
-    messages
 }
 
 /// Convert a tungstenite Message to a recorded WsMessage.
