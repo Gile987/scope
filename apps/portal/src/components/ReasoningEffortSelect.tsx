@@ -40,6 +40,8 @@ export interface UseReasoningEffortOptions {
   capabilitiesMap: Map<string, ModelCapabilities>;
   value: string;
   onChange: (value: string) => void;
+  /** Whether the selected worker supports reasoning effort (undefined = unknown/not checked) */
+  agentSupportsEffort?: boolean;
 }
 
 /**
@@ -51,6 +53,7 @@ export function useReasoningEffort({
   capabilitiesMap,
   value,
   onChange,
+  agentSupportsEffort,
 }: UseReasoningEffortOptions) {
   const capabilities = model ? capabilitiesMap.get(model) : undefined;
   const supportedEfforts = capabilities?.reasoningEffort ?? [];
@@ -64,7 +67,10 @@ export function useReasoningEffort({
     }
   }, [model, supportedEfforts, value, onChange]);
 
-  return { supportedEfforts, capabilities };
+  // Worker doesn't support effort but model does
+  const workerEffortWarning = supportedEfforts.length > 0 && agentSupportsEffort === false;
+
+  return { supportedEfforts, capabilities, workerEffortWarning };
 }
 
 // --- Component: ModelSelectItems ---
@@ -124,6 +130,8 @@ export interface ReasoningEffortSelectProps {
   noSelectionLabel?: string;
   /** Description text shown below the picker */
   description?: string;
+  /** Show a warning that the worker doesn't support effort */
+  workerEffortWarning?: boolean;
 }
 
 /**
@@ -136,6 +144,7 @@ export function ReasoningEffortSelect({
   disabled,
   noSelectionLabel = "Default (no override)",
   description,
+  workerEffortWarning,
 }: ReasoningEffortSelectProps) {
   if (supportedEfforts.length === 0) return null;
 
@@ -159,6 +168,11 @@ export function ReasoningEffortSelect({
           ))}
         </SelectContent>
       </Select>
+      {workerEffortWarning && (
+        <p className="text-xs text-amber-600">
+          ⚠ The selected worker does not support reasoning effort selection. This setting may be ignored.
+        </p>
+      )}
       {description && (
         <p className="text-xs text-muted-foreground">{description}</p>
       )}
