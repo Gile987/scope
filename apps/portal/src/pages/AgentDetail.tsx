@@ -335,11 +335,7 @@ export function AgentDetail() {
               <div className="flex flex-wrap gap-2">
                 {entries.map(({ label, supported }) => (
                   <Badge key={label} variant={supported ? "default" : "outline"} className="gap-1.5">
-                    {supported ? (
-                      <span className="text-green-400">●</span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+                    {!supported && <span className="text-muted-foreground">—</span>}
                     {label}
                     {!supported && <span className="text-muted-foreground text-xs">Not supported</span>}
                   </Badge>
