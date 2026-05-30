@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo, useState, useEffect, useCallback, type Key, type ReactNode } from "react";
+import { useMemo, useState, useEffect, useCallback, Fragment, type Key, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
 import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download, Lock } from "lucide-react";
@@ -2114,20 +2114,75 @@ export function RunsList() {
                     );
                   };
 
-                  // Union aggregate: merge all unique items across runs into a single
-                  // representation rendered through the first run's cell. We swap the
-                  // run's value with the union so the existing badges/links keep working.
-                  const numericSum = (getN: (r: Run) => number | null | undefined): ReactNode => {
-                    const values = runs.map(getN).filter((n): n is number => n != null);
+                  // Numeric stats over a population of run values. Sums + central
+                  // tendency + spread so reviewers can spot skew without leaving the row.
+                  const computeNumericStats = (values: number[]) => {
+                    const sorted = [...values].sort((a, b) => a - b);
+                    const n = sorted.length;
+                    const sum = sorted.reduce((a, b) => a + b, 0);
+                    const min = sorted[0];
+                    const max = sorted[n - 1];
+                    const mean = sum / n;
+                    const median = n % 2 === 1 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+                    return { n, sum, min, max, mean, median };
+                  };
+
+                  // Compact stats popover content. Always shows the same five
+                  // aggregates so the layout stays predictable across columns.
+                  const renderStatsTooltip = (
+                    values: number[],
+                    formatValue: (n: number) => string,
+                  ): ReactNode => {
+                    const s = computeNumericStats(values);
+                    const rows: Array<[string, string]> = [
+                      ["Sum", formatValue(s.sum)],
+                      ["Min", formatValue(s.min)],
+                      ["Mean", formatValue(s.mean)],
+                      ["Median", formatValue(s.median)],
+                      ["Max", formatValue(s.max)],
+                    ];
+                    return (
+                      <div className="text-xs">
+                        <div className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {s.n} run{s.n !== 1 ? "s" : ""}
+                        </div>
+                        <div className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 font-mono">
+                          {rows.map(([label, val]) => (
+                            <Fragment key={label}>
+                              <span className="text-muted-foreground">{label}</span>
+                              <span className="text-right tabular-nums">{val}</span>
+                            </Fragment>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  // Numeric aggregate: primary value in the cell (default: sum),
+                  // full min/mean/median/max breakdown in the tooltip.
+                  const numericAggregate = (
+                    getN: (r: Run) => number | null | undefined,
+                    options?: {
+                      formatValue?: (n: number) => string;
+                      primary?: "sum" | "max" | "mean";
+                    },
+                  ): ReactNode => {
+                    const values = runs.map(getN).filter((n): n is number => n != null && !Number.isNaN(n));
                     if (values.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
-                    const sum = values.reduce((a, b) => a + b, 0);
+                    const formatValue = options?.formatValue ?? ((n: number) => Math.round(n).toLocaleString());
+                    const stats = computeNumericStats(values);
+                    const primaryKey = options?.primary ?? "sum";
+                    const primaryValue =
+                      primaryKey === "max" ? stats.max : primaryKey === "mean" ? stats.mean : stats.sum;
                     return (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className="font-mono text-xs cursor-default">{sum.toLocaleString()}</span>
+                          <span className="font-mono text-xs cursor-default tabular-nums underline decoration-dotted decoration-muted-foreground/40 underline-offset-2">
+                            {formatValue(primaryValue)}
+                          </span>
                         </TooltipTrigger>
                         <TooltipContent className="text-xs">
-                          Σ across {values.length} run{values.length !== 1 ? "s" : ""}
+                          {renderStatsTooltip(values, formatValue)}
                         </TooltipContent>
                       </Tooltip>
                     );
@@ -2183,57 +2238,47 @@ export function RunsList() {
                         .map((r) => r.priority)
                         .filter((p): p is number => p != null);
                       if (values.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
-                      const min = Math.min(...values);
-                      const max = Math.max(...values);
+                      const stats = computeNumericStats(values);
+                      const label =
+                        stats.min === stats.max ? `${stats.min}` : `${stats.min}–${stats.max}`;
                       return (
-                        <span className="font-mono text-xs">
-                          {min === max ? min : `${min}–${max}`}
-                        </span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="font-mono text-xs cursor-default tabular-nums underline decoration-dotted decoration-muted-foreground/40 underline-offset-2">
+                              {label}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs">
+                            {renderStatsTooltip(values, (n) => Math.round(n).toLocaleString())}
+                          </TooltipContent>
+                        </Tooltip>
                       );
                     }
 
                     case "attempt": {
-                      const values = runs
-                        .map((r) => r.run?.attemptNumber)
-                        .filter((n): n is number => n != null);
-                      if (values.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
-                      return (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="font-mono text-xs cursor-default">#{Math.max(...values)}</span>
-                          </TooltipTrigger>
-                          <TooltipContent className="text-xs">max attempt across group</TooltipContent>
-                        </Tooltip>
-                      );
+                      return numericAggregate((r) => r.run?.attemptNumber, {
+                        primary: "max",
+                        formatValue: (n) => `#${Math.round(n).toLocaleString()}`,
+                      });
                     }
 
                     case "turns":
-                      return numericSum((r) => r.run?.turns?.length);
+                      return numericAggregate((r) => r.run?.turns?.length);
                     case "llmCalls":
-                      return numericSum((r) => r.run?.aiCallCount);
+                      return numericAggregate((r) => r.run?.aiCallCount);
                     case "tokens":
-                      return numericSum((r) => r.run?.tokenUsage?.totalTokens);
+                      return numericAggregate((r) => r.run?.tokenUsage?.totalTokens);
 
                     case "duration": {
-                      const durations = runs
-                        .map((r) => {
+                      return numericAggregate(
+                        (r) => {
                           const s = r.run?.startedAt;
                           const e = r.run?.finishedAt;
                           if (!s || !e) return null;
-                          return new Date(e).getTime() - new Date(s).getTime();
-                        })
-                        .filter((n): n is number => n != null && n >= 0);
-                      if (durations.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
-                      const sum = durations.reduce((a, b) => a + b, 0);
-                      return (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="font-mono text-xs cursor-default">{formatDuration(sum)}</span>
-                          </TooltipTrigger>
-                          <TooltipContent className="text-xs">
-                            Σ across {durations.length} run{durations.length !== 1 ? "s" : ""}
-                          </TooltipContent>
-                        </Tooltip>
+                          const ms = new Date(e).getTime() - new Date(s).getTime();
+                          return ms >= 0 ? ms : null;
+                        },
+                        { formatValue: (n) => formatDuration(Math.round(n)) },
                       );
                     }
 
