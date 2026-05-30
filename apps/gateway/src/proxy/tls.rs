@@ -14,6 +14,9 @@
 //! request/response pairs for plugin notification. Response bodies are streamed
 //! frame-by-frame to the client (important for SSE) while a background task
 //! accumulates a copy for HAR recording.
+//!
+//! WebSocket upgrades are detected and handled by the `websocket` module, which
+//! performs a full bidirectional frame relay with message recording.
 
 use std::sync::Arc;
 
@@ -26,13 +29,14 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::plugin::SessionId;
 use crate::proxy::body::{
     spawn_stream_and_record, streaming_response, ExchangeContext, StreamingBody,
 };
 use crate::proxy::handler::ProxyState;
+use crate::proxy::websocket;
 
 /// Intercept a TLS connection: MITM with forged cert, relay, and notify plugins.
 pub async fn intercept_tls<S>(
@@ -81,6 +85,7 @@ where
                 async move { relay_request(req, &domain, port_owned, &sid, &state).await }
             }),
         )
+        .with_upgrades()
         .await?;
 
     Ok(())
@@ -116,6 +121,11 @@ async fn relay_request_inner(
     session_id: &SessionId,
     state: &Arc<ProxyState>,
 ) -> anyhow::Result<hyper::Response<StreamingBody>> {
+    // Detect WebSocket upgrade requests and handle them separately.
+    if websocket::is_websocket_upgrade(&req) {
+        return handle_websocket_in_tls(req, domain, port, session_id, state).await;
+    }
+
     let started_at = chrono::Utc::now();
 
     // Mark this request as in flight on the session. The guard's drop
@@ -246,4 +256,221 @@ async fn relay_request_inner(
     );
 
     streaming_response(resp_status, &resp_headers, rx)
+}
+
+/// Handle a WebSocket upgrade request within the TLS interception layer.
+///
+/// Flow:
+/// 1. Connect to upstream via TLS and perform WebSocket handshake
+/// 2. Return 101 to client (triggers hyper's upgrade mechanism)
+/// 3. After upgrade, get raw client IO and wrap it as WebSocket
+/// 4. Relay frames bidirectionally while recording messages
+/// 5. On close, notify plugins with the recorded exchange
+async fn handle_websocket_in_tls(
+    req: hyper::Request<Incoming>,
+    domain: &str,
+    port: u16,
+    session_id: &SessionId,
+    state: &Arc<ProxyState>,
+) -> anyhow::Result<hyper::Response<StreamingBody>> {
+    let started_at = chrono::Utc::now();
+
+    // Keep the session alive for the entire WebSocket connection duration.
+    let in_flight_guard =
+        crate::session::InFlightGuard::begin(state.session_manager.clone(), session_id.clone());
+    if in_flight_guard.is_none() {
+        anyhow::bail!("session {} no longer exists", session_id);
+    }
+
+    // Capture request metadata
+    let req_method = req.method().clone();
+    let req_uri = req.uri().clone();
+    let mut req_headers = req.headers().clone();
+
+    let uri_str = format!(
+        "https://{}:{}{}",
+        domain,
+        port,
+        req.uri()
+            .path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or("/")
+    );
+
+    info!(
+        "WebSocket upgrade: {} session={}",
+        uri_str, session_id
+    );
+
+    // Give plugins a chance to mutate headers (e.g. refresh auth tokens)
+    let upstream_uri: hyper::Uri = uri_str.parse()?;
+    state
+        .registry
+        .on_request(session_id, &upstream_uri, &mut req_headers)
+        .await?;
+
+    // Connect to upstream via TLS
+    let upstream_tcp = TcpStream::connect(format!("{}:{}", domain, port)).await?;
+    let connector = TlsConnector::from(state.upstream_tls_config.clone());
+    let server_name = rustls::pki_types::ServerName::try_from(domain.to_string())?;
+    let upstream_tls = connector.connect(server_name, upstream_tcp).await?;
+
+    // Build the WebSocket URI for the upstream connection
+    let ws_uri = format!(
+        "wss://{}:{}{}",
+        domain,
+        port,
+        req.uri()
+            .path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or("/")
+    );
+
+    // Use tungstenite's IntoClientRequest which generates proper WS handshake headers.
+    // Then add any custom headers from the original request (e.g. auth tokens).
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let mut ws_request = ws_uri.into_client_request()?;
+
+    for (key, value) in &req_headers {
+        // Skip headers that tungstenite already set for the WS handshake
+        let name = key.as_str().to_lowercase();
+        if matches!(
+            name.as_str(),
+            "sec-websocket-key"
+                | "sec-websocket-version"
+                | "sec-websocket-extensions"
+                | "upgrade"
+                | "connection"
+                | "host"
+        ) {
+            continue;
+        }
+        ws_request.headers_mut().insert(key.clone(), value.clone());
+    }
+
+    let request_instant = std::time::Instant::now();
+
+    // Perform the WebSocket handshake with upstream
+    let (upstream_ws, _ws_response) =
+        tokio_tungstenite::client_async(ws_request, upstream_tls).await
+            .map_err(|e| anyhow::anyhow!("WebSocket upstream handshake failed: {}", e))?;
+
+    let wait_ms = request_instant.elapsed().as_millis() as u64;
+
+    debug!(
+        "WebSocket handshake complete with upstream {} in {}ms",
+        domain, wait_ms
+    );
+
+    // Return 101 to the client. hyper will trigger the upgrade mechanism,
+    // giving us access to the raw client IO afterward.
+    let resp = hyper::Response::builder()
+        .status(http::StatusCode::SWITCHING_PROTOCOLS)
+        .header(http::header::UPGRADE, "websocket")
+        .header(http::header::CONNECTION, "Upgrade")
+        // Sec-WebSocket-Accept is required for a valid WS handshake response.
+        // Compute it from the client's Sec-WebSocket-Key.
+        .header(
+            "Sec-WebSocket-Accept",
+            compute_websocket_accept(
+                req.headers()
+                    .get("Sec-WebSocket-Key")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or(""),
+            ),
+        )
+        .body(StreamingBody::Buffered(Full::new(Bytes::new())))?;
+
+    // Spawn a task that waits for the upgrade, then relays WebSocket frames.
+    let session_id_owned = session_id.clone();
+    let state_owned = state.clone();
+    let domain_owned = domain.to_string();
+
+    tokio::spawn(async move {
+        // Wait for hyper to complete the upgrade and give us raw client IO.
+        let upgraded = match hyper::upgrade::on(req).await {
+            Ok(upgraded) => upgraded,
+            Err(e) => {
+                warn!("WebSocket client upgrade failed: {}", e);
+                return;
+            }
+        };
+
+        // Wrap the client's raw IO as a WebSocket stream (server role — no masking).
+        let client_ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
+            hyper_util::rt::TokioIo::new(upgraded),
+            tokio_tungstenite::tungstenite::protocol::Role::Server,
+            None,
+        )
+        .await;
+
+        // Relay frames bidirectionally, recording all messages.
+        let messages = websocket::relay_websocket_bidirectional(
+            client_ws,
+            upstream_ws,
+            &domain_owned,
+            &session_id_owned,
+            &state_owned,
+        )
+        .await;
+
+        let elapsed_ms = request_instant.elapsed().as_millis() as u64;
+
+        // Serialize messages as the response body for the plugin exchange
+        let messages_json = serde_json::to_vec(&messages).unwrap_or_default();
+
+        // Build response headers matching 101 Switching Protocols
+        let mut resp_headers = http::HeaderMap::new();
+        resp_headers.insert(http::header::UPGRADE, "websocket".parse().unwrap());
+        resp_headers.insert(http::header::CONNECTION, "Upgrade".parse().unwrap());
+
+        let exchange = crate::plugin::HttpExchange {
+            request: crate::plugin::ExchangeRequest {
+                method: req_method,
+                uri: req_uri,
+                headers: req_headers,
+                body: Bytes::new(),
+            },
+            response: crate::plugin::ExchangeResponse {
+                status: http::StatusCode::SWITCHING_PROTOCOLS,
+                headers: resp_headers,
+                body: Bytes::from(messages_json),
+            },
+            started_at,
+            wait_ms,
+            elapsed_ms,
+        };
+
+        // Read iteration from session manager before notifying plugins.
+        let iteration = state_owned
+            .session_manager
+            .get_iteration(&session_id_owned)
+            .await
+            .unwrap_or(None)
+            .unwrap_or(0);
+
+        state_owned
+            .registry
+            .on_exchange(&session_id_owned, &exchange, iteration)
+            .await;
+
+        // Drop in-flight guard last to allow reaper to consider the session again.
+        drop(in_flight_guard);
+
+        info!(
+            "WebSocket closed: {} session={} messages={} elapsed={}ms",
+            domain_owned,
+            session_id_owned,
+            messages.len(),
+            elapsed_ms
+        );
+    });
+
+    Ok(resp)
+}
+
+/// Compute the Sec-WebSocket-Accept value from a Sec-WebSocket-Key.
+/// Per RFC 6455: concatenate key + GUID, SHA-1 hash, base64 encode.
+fn compute_websocket_accept(key: &str) -> String {
+    tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_bytes())
 }

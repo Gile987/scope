@@ -400,3 +400,66 @@ impl TestHttpBackend {
         TestHttpBackend { addr }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Test WebSocket echo backend — TLS, echoes messages back
+// ---------------------------------------------------------------------------
+
+use futures_util::{SinkExt, StreamExt};
+
+/// A mock TLS WebSocket echo server for end-to-end tests.
+/// Accepts WebSocket upgrades and echoes back text/binary messages.
+pub struct TestWebSocketBackend {
+    pub addr: SocketAddr,
+}
+
+impl TestWebSocketBackend {
+    /// Start a TLS WebSocket echo server signed by the gateway's CA.
+    pub async fn start(ca: &Arc<CertificateAuthority>) -> Self {
+        let server_config = ca.server_config_for_domain("localhost").unwrap();
+        let tls_acceptor = TlsAcceptor::from(server_config);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let acceptor = tls_acceptor.clone();
+
+                tokio::spawn(async move {
+                    let Ok(tls_stream) = acceptor.accept(stream).await else {
+                        return;
+                    };
+
+                    // Accept WebSocket upgrade over the TLS stream.
+                    let ws_stream =
+                        match tokio_tungstenite::accept_async(tls_stream).await {
+                            Ok(ws) => ws,
+                            Err(_) => return,
+                        };
+
+                    let (mut sink, mut stream) = ws_stream.split();
+
+                    // Echo all messages back.
+                    while let Some(Ok(msg)) = stream.next().await {
+                        if msg.is_close() {
+                            let _ = sink.send(msg).await;
+                            break;
+                        }
+                        if msg.is_text() || msg.is_binary() {
+                            if sink.send(msg).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        TestWebSocketBackend { addr }
+    }
+}
