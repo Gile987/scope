@@ -29,7 +29,7 @@ This produces `apps/cli/dist/scope.mjs` (~1MB minified).
 | Define | Source | Purpose |
 |--------|--------|---------|
 | `process.env.SCOPE_CLI_VERSION` | `apps/cli/package.json` version | Reported by `--version` |
-| `process.env.SCOPE_DEFAULT_API_URL` | `SCOPE_DEFAULT_API_URL` env var or `http://scope.eastus2.cloudapp.azure.com` | Default API URL in bundled builds |
+| `process.env.SCOPE_DEFAULT_API_URL` | `SCOPE_DEFAULT_API_URL` env var or `https://msscope.azurewebsites.net` | Default API URL in bundled builds |
 
 In dev mode (`pnpm cli` via tsx), these defines are not applied — the CLI falls back to `http://localhost:3100`.
 
@@ -105,7 +105,7 @@ Source: `apps/cli/src/utils/update-check.ts`
 | Aspect | Dev (`pnpm cli`) | Bundled (`scope`) |
 |--------|-------------------|-------------------|
 | Runner | tsx (TypeScript direct) | Node.js (single .mjs) |
-| API default | `http://localhost:3100` | `http://scope.eastus2.cloudapp.azure.com` |
+| API default | `http://localhost:3100` | `https://msscope.azurewebsites.net` |
 | Version | `0.1.0-dev` | Actual semver from CI bump |
 | Command name | `pnpm cli` | `scope` |
 | Update check | Disabled | Enabled |
