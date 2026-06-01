@@ -1,8 +1,8 @@
 # Scope Core
 
-> **Measure the agentic coding experience. Across agents. At scale.**
+> **Measure the agentic coding experience. Across agents. Across product surfaces. At scale.**
 
-**Scope Core** is a self-service, Kubernetes-native platform for measuring the agentic experience of AI coding agents. Any team member can submit runs, manage criteria, and inspect results through the Portal or CLI without operator involvement. It orchestrates coding tasks across multiple agent workers (GitHub Copilot, Claude Code, VS Code Electron), evaluates results using a criteria DAG, captures upstream AI traffic through a Rust TLS-intercepting gateway, and streams logs in real time — all backed by MongoDB (CosmosDB-compatible), Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
+**Scope Core** measures the agentic experience of AI agents on Microsoft product surfaces at scale and drives their optimization, delivered as a self‑service, Kubernetes‑native platform supporting surfaces such as Skills, MCP, VS Code Extensions, and MS Learn, and observed across VS Code Copilot, GitHub Copilot CLI, and Claude Code CLI.
 
 ## Key Features
 
