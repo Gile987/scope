@@ -4,3 +4,4 @@
 pub(crate) mod body;
 pub mod handler;
 pub mod tls;
+pub mod websocket;

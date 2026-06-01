@@ -53,6 +53,7 @@ import {
   CreateAgentInputSchema,
   AgentResponseSchema,
   AgentVersionSchema,
+  AgentCapabilitiesSchema,
   RegisterAgentVersionInputSchema,
   PatchAgentVersionInputSchema,
   // model
@@ -967,6 +968,62 @@ describe("agent schemas", () => {
 
     it("rejects 'deprecated'", () => {
       expect(() => PatchAgentVersionInputSchema.parse({ status: "deprecated" })).toThrow();
+    });
+  });
+
+  describe("AgentCapabilitiesSchema", () => {
+    it("accepts supportsReasoningEffort: true", () => {
+      const result = AgentCapabilitiesSchema.parse({ supportsReasoningEffort: true });
+      expect(result.supportsReasoningEffort).toBe(true);
+    });
+
+    it("accepts supportsReasoningEffort: false", () => {
+      const result = AgentCapabilitiesSchema.parse({ supportsReasoningEffort: false });
+      expect(result.supportsReasoningEffort).toBe(false);
+    });
+
+    it("accepts empty object (all fields optional)", () => {
+      const result = AgentCapabilitiesSchema.parse({});
+      expect(result.supportsReasoningEffort).toBeUndefined();
+    });
+  });
+
+  describe("CreateAgentInputSchema with capabilities", () => {
+    it("accepts capabilities with supportsReasoningEffort", () => {
+      const result = CreateAgentInputSchema.parse({
+        _id: "agent1",
+        name: "Copilot",
+        capabilities: { supportsReasoningEffort: true },
+      });
+      expect(result.capabilities?.supportsReasoningEffort).toBe(true);
+    });
+
+    it("accepts agent without capabilities (backwards-compatible)", () => {
+      const result = CreateAgentInputSchema.parse({ _id: "a", name: "n" });
+      expect(result.capabilities).toBeUndefined();
+    });
+  });
+
+  describe("AgentResponseSchema with capabilities", () => {
+    it("includes capabilities in response", () => {
+      const result = AgentResponseSchema.parse({
+        _id: "a1",
+        name: "Copilot",
+        supportedModels: ["m1"],
+        createdAt: NOW,
+        capabilities: { supportsReasoningEffort: true },
+      });
+      expect(result.capabilities?.supportsReasoningEffort).toBe(true);
+    });
+
+    it("works without capabilities (backwards-compatible)", () => {
+      const result = AgentResponseSchema.parse({
+        _id: "a1",
+        name: "Agent",
+        supportedModels: [],
+        createdAt: NOW,
+      });
+      expect(result.capabilities).toBeUndefined();
     });
   });
 });

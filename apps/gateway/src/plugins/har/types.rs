@@ -39,6 +39,12 @@ pub struct HarEntry {
     pub response: HarResponse,
     pub cache: HarCache,
     pub timings: HarTimings,
+    /// Chrome extension: resource type hint (e.g. "websocket")
+    #[serde(rename = "_resourceType", skip_serializing_if = "Option::is_none")]
+    pub resource_type: Option<String>,
+    /// Chrome extension: WebSocket messages recorded during the connection
+    #[serde(rename = "_webSocketMessages", skip_serializing_if = "Option::is_none")]
+    pub websocket_messages: Option<Vec<HarWebSocketMessage>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -130,6 +136,20 @@ pub struct HarTimings {
     pub ssl: f64,
 }
 
+/// Chrome-style WebSocket message entry for `_webSocketMessages`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct HarWebSocketMessage {
+    /// Direction: "send" (client→server) or "receive" (server→client)
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    /// Unix timestamp in seconds with millisecond precision
+    pub time: f64,
+    /// WebSocket frame opcode: 1 = text, 2 = binary
+    pub opcode: u8,
+    /// Message payload (text for opcode 1, base64 for opcode 2)
+    pub data: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +209,8 @@ mod tests {
                         receive: 0.0,
                         ssl: -1.0,
                     },
+                    resource_type: None,
+                    websocket_messages: None,
                 }],
             },
         };

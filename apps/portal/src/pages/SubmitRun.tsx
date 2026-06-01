@@ -269,11 +269,12 @@ export function SubmitRun() {
   // Model capabilities and reasoning-effort management
   const { capabilitiesMap: modelCapabilitiesMap } = useModelCapabilities(worker || undefined);
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
-  const { supportedEfforts } = useReasoningEffort({
+  const { supportedEfforts, workerEffortWarning } = useReasoningEffort({
     model,
     capabilitiesMap: modelCapabilitiesMap,
     value: reasoningEffort,
     onChange: onEffortChange,
+    agentSupportsEffort: selectedAgent?.capabilities?.supportsReasoningEffort,
   });
 
   useEffect(() => {
@@ -895,6 +896,7 @@ export function SubmitRun() {
                   onChange={onEffortChange}
                   disabled={profileLocked}
                   noSelectionLabel="Any (no preference)"
+                  workerEffortWarning={workerEffortWarning}
                 />
               </div>
             )}

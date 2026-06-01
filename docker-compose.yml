@@ -210,15 +210,19 @@ services:
       db-migrate:
         condition: service_completed_successfully
   register-agents:
-    image: curlimages/curl:latest
+    image: alpine:3.21
     depends_on:
       api:
         condition: service_started
+    volumes:
+      - ./apps/workers:/workers:ro
     restart: "no"
     entrypoint:
       - /bin/sh
       - -c
       - |
+        apk add --no-cache curl yq > /dev/null 2>&1
+
         API_URL="http://api:80"
 
         # Retry wrapper: retries a curl up to 10 times with 3s delay
@@ -234,6 +238,13 @@ services:
           return 1
         }
 
+        # Register agent from its agent.yaml file
+        register_agent() {
+          WORKER_NAME="$$1"
+          AGENT_JSON=$$(yq -o=json /workers/$$WORKER_NAME/agent.yaml)
+          post "/api/v1/agents" "$$AGENT_JSON"
+        }
+
         echo "Waiting for API to be ready..."
         until curl -sf "$$API_URL/health" > /dev/null 2>&1; do
           echo "API not ready, retrying in 3s..."
@@ -241,21 +252,13 @@ services:
         done
         echo "API healthy, registering agents..."
 
+        # Upsert agents from agent.yaml files
+        register_agent "coder-acp-copilot"
+        register_agent "coder-acp-claude-code"
 
-
-        # Upsert agent: coder-acp-copilot
-        post "/api/v1/agents" '{"_id":"coder-acp-copilot","name":"GitHub Copilot CLI","description":"GitHub Copilot coding agent via ACP protocol","modelProvider":"github-copilot"}'
-
-        # Register dev version: coder-acp-copilot
+        # Register dev versions
         post "/api/v1/agents/coder-acp-copilot/versions" '{"agentVersion":"copilot-dev","workerVersion":"copilot-dev-local-dev","components":{"COPILOT_CLI_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-copilot"}'
-
-        # Upsert agent: coder-acp-claude-code
-        post "/api/v1/agents" '{"_id":"coder-acp-claude-code","name":"Claude Code CLI","description":"Anthropic Claude Code coding agent via ACP protocol","modelProvider":"anthropic"}'
-
-        # Register dev version: coder-acp-claude-code
         post "/api/v1/agents/coder-acp-claude-code/versions" '{"agentVersion":"claude-agent-acp-dev-sdk-dev","workerVersion":"claude-agent-acp-dev-sdk-dev-local-dev","components":{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-claude-code"}'
-
-
 
         echo ""
         echo "All agents and dev versions registered."
