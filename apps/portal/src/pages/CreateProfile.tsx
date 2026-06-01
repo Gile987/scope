@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { SkillPicker } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
+import { useModelCapabilities, useReasoningEffort, ReasoningEffortSelect, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { ArrowLeft, Loader2, Save, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,6 +29,7 @@ export function CreateProfile() {
   // Configuration fields
   const [worker, setWorker] = useState("");
   const [model, setModel] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState("");
   const [selectedAgentVersion, setSelectedAgentVersion] = useState("");
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
@@ -49,6 +51,17 @@ export function CreateProfile() {
   const selectedAgent = agents.find((a: CodingAgent) => a._id === worker);
   const supportedModels = selectedAgent?.supportedModels ?? [];
   const isVscodeWorker = worker.includes("vscode");
+
+  // Model capabilities and effort management
+  const { capabilitiesMap } = useModelCapabilities(worker || undefined);
+  const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
+  const { supportedEfforts, workerEffortWarning } = useReasoningEffort({
+    model,
+    capabilitiesMap,
+    value: reasoningEffort,
+    onChange: onEffortChange,
+    agentSupportsEffort: selectedAgent?.capabilities?.supportsReasoningEffort,
+  });
 
   // Clear extensions when the user switches to a non-vscode worker.
   useEffect(() => {
@@ -81,6 +94,7 @@ export function CreateProfile() {
       ...(description ? { description } : {}),
       workerType: worker,
       model,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
       ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
       ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
@@ -107,8 +121,9 @@ export function CreateProfile() {
       descParts.push(workerLabel);
     }
     if (model) {
-      parts.push(model);
-      descParts.push(`model: ${model}`);
+      const modelLabel = reasoningEffort ? `${model} (${reasoningEffort})` : model;
+      parts.push(modelLabel);
+      descParts.push(`model: ${modelLabel}`);
     }
     if (selectedMcpServers.length > 0) {
       parts.push(selectedMcpServers.join(", "));
@@ -229,13 +244,21 @@ export function CreateProfile() {
                   <SelectValue placeholder="Select a model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {supportedModels.map((m: string) => (
-                    <SelectItem key={m} value={m}>{m}</SelectItem>
-                  ))}
+                  <ModelSelectItems
+                    models={supportedModels}
+                    capabilitiesMap={capabilitiesMap}
+                  />
                 </SelectContent>
               </Select>
             </div>
           )}
+
+          <ReasoningEffortSelect
+            supportedEfforts={supportedEfforts}
+            value={reasoningEffort}
+            onChange={onEffortChange}
+            workerEffortWarning={workerEffortWarning}
+          />
 
           {sortedVersions.length > 0 && (
             <div className="space-y-2">

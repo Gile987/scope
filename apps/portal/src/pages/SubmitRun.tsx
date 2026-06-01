@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -20,6 +20,7 @@ import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { CreateCriterionDialog } from "@/components/CreateCriterionDialog";
 import { SkillPicker, parseSkillSpec } from "@/components/SkillPicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
+import { useModelCapabilities, useReasoningEffort, ModelSelectItems, ReasoningEffortSelect } from "@/components/ReasoningEffortSelect";
 import { Stepper } from "@/components/Stepper";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { TaskPromptFeatures } from "@/components/TaskPromptFeatures";
@@ -94,6 +95,7 @@ export function SubmitRun() {
   const applyVersionConfig = (v: ProfileVersionDocument) => {
     setWorker(v.workerType);
     setModel(v.model);
+    setReasoningEffort(v.reasoningEffort ?? "");
     setSelectedAgentVersion(v.agentVersion ?? "");
     setSelectedMcpServers(v.mcpServers ?? []);
     setSelectedSkills(v.skillRevisions ?? []);
@@ -132,6 +134,7 @@ export function SubmitRun() {
         name: saveProfileName.trim(),
         workerType: worker,
         model,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
         ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
         ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
@@ -174,6 +177,20 @@ export function SubmitRun() {
     queryKey: ["agent-versions", worker],
     queryFn: () => api.listAgentVersions(worker, "active"),
     enabled: !!worker,
+  });
+
+  // Model capabilities and effort management
+  const { capabilitiesMap: modelCapabilitiesMap } = useModelCapabilities(worker || undefined);
+
+  // Reasoning effort state
+  const [reasoningEffort, setReasoningEffort] = useState<string>("");
+  const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
+  const { supportedEfforts, workerEffortWarning } = useReasoningEffort({
+    model,
+    capabilitiesMap: modelCapabilitiesMap,
+    value: reasoningEffort,
+    onChange: onEffortChange,
+    agentSupportsEffort: selectedAgent?.capabilities?.supportsReasoningEffort,
   });
 
   // Sort versions by createdAt descending (latest first)
@@ -262,6 +279,7 @@ export function SubmitRun() {
       },
       worker,
       ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       maxIterations,
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
@@ -569,15 +587,24 @@ export function SubmitRun() {
                       <SelectValue placeholder="Select model" />
                     </SelectTrigger>
                     <SelectContent>
-                      {selectedAgent.supportedModels.map((m) => (
-                        <SelectItem key={m} value={m}>
-                          {m}{m === selectedAgent.defaultModel ? " (default)" : ""}
-                        </SelectItem>
-                      ))}
+                      <ModelSelectItems
+                        models={selectedAgent.supportedModels}
+                        capabilitiesMap={modelCapabilitiesMap}
+                        defaultModel={selectedAgent.defaultModel}
+                      />
                     </SelectContent>
                   </Select>
                 </div>
               )}
+              <ReasoningEffortSelect
+                supportedEfforts={supportedEfforts}
+                value={reasoningEffort}
+                onChange={onEffortChange}
+                disabled={profileLocked}
+                noSelectionLabel="Any (no preference)"
+                description="Select a preferred reasoning effort level for this model"
+                workerEffortWarning={workerEffortWarning}
+              />
               {sortedVersions.length > 0 && (
                 <div className="space-y-2">
                   <Label htmlFor="agentVersion">Agent Version *</Label>

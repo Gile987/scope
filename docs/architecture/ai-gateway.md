@@ -138,6 +138,29 @@ The proxy runs on port **18000** and handles three types of traffic:
 3. **Plain HTTP forwarding** — for unencrypted HTTP requests (rare in production).
 4. **407 Proxy Authentication Required** — proxy requests without a valid `Proxy-Authorization` header receive a 407 challenge. Chromium/Electron resends with credentials; Node.js (undici) sends preemptively.
 
+Within intercepted TLS connections, the gateway detects and handles three protocols:
+
+| Protocol | Detection | Handling |
+|----------|-----------|----------|
+| **HTTPS request/response** | Any non-upgrade HTTP request | Buffer request, forward to upstream, stream response, record exchange |
+| **SSE streaming** | `Content-Type: text/event-stream` in response | Same as HTTPS but body is streamed frame-by-frame to client |
+| **WebSocket** | `Connection: Upgrade` + `Upgrade: websocket` headers | Forward upgrade, bidirectional frame relay, record `_webSocketMessages` |
+
+All three protocols share the same cross-cutting features:
+
+| Feature | HTTPS/SSE | WebSocket | Notes |
+|---------|:---------:|:---------:|-------|
+| Session validation (`InFlightGuard`) | ✅ | ✅ | Guard held for entire WS connection lifetime |
+| `on_request` plugin hook (header mutation, token injection) | ✅ | ✅ | Called before upstream WS handshake |
+| `on_exchange` plugin hook (HAR recording, custom plugins) | ✅ | ✅ | Called after WS close with all recorded messages |
+| Iteration tracking | ✅ | ✅ | Iteration read at exchange report time |
+| Session touch (prevents idle reaping) | ✅ | ✅ | Periodic 30s touch during long-lived WS connections |
+| Upstream TLS (real cert validation) | ✅ | ✅ | Same `upstream_tls_config` for all protocols |
+| Timing (`started_at`, `wait_ms`, `elapsed_ms`) | ✅ | ✅ | `elapsed_ms` = total WS connection lifetime |
+| URL pattern matching (passthrough) | ✅ | ✅ | Handled at CONNECT level, before protocol detection |
+
+See [`gateway-websocket.md`](./gateway-websocket.md) for full details on WebSocket HAR format and implementation.
+
 ```mermaid
 flowchart LR
     A["Client CONNECT"] --> AA{"Proxy-Authorization?"}

@@ -33,7 +33,7 @@ apiRoute(ctx.app, ctx.registry, {
   response: ProfileWithVersionResponseSchema,
   handler: async (req, res, next) => {
     try {
-      const { name, description, workerType, model, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
+      const { name, description, workerType, model, reasoningEffort, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
 
       // Extensions are only supported by VS Code workers
       if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
@@ -91,6 +91,7 @@ apiRoute(ctx.app, ctx.registry, {
         version: 1,
         workerType,
         model,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(agentVersion ? { agentVersion } : {}),
         ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
         ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
@@ -245,7 +246,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
 
-      const { workerType, model, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
+      const { workerType, model, reasoningEffort, agentVersion, mcpServers, skillRevisions, extensions } = req.body;
 
       // Extensions are only supported by VS Code workers
       if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
@@ -295,6 +296,7 @@ apiRoute(ctx.app, ctx.registry, {
         version: newVersion,
         workerType,
         model,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(agentVersion ? { agentVersion } : {}),
         ...(mcpServers && mcpServers.length > 0 ? { mcpServers } : {}),
         ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),

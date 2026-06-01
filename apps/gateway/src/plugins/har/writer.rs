@@ -35,14 +35,45 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
     let request_headers = headers_to_har(&req.headers, redact);
     let response_headers = headers_to_har(&resp.headers, redact);
 
+    // Detect WebSocket exchanges (101 Switching Protocols + Upgrade: websocket)
+    let is_websocket = resp.status == http::StatusCode::SWITCHING_PROTOCOLS
+        && resp
+            .headers
+            .get(http::header::UPGRADE)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.eq_ignore_ascii_case("websocket"))
+            .unwrap_or(false);
+
+    let (resp_text, resp_encoding, resource_type, websocket_messages) = if is_websocket {
+        // For WebSocket, the response body contains the JSON-serialized messages array.
+        // Parse it into HarWebSocketMessage entries.
+        let ws_messages: Option<Vec<HarWebSocketMessage>> = if !resp.body.is_empty() {
+            serde_json::from_slice(&resp.body).ok()
+        } else {
+            Some(vec![])
+        };
+        (None, None, Some("websocket".to_string()), ws_messages)
+    } else {
+        let content_type = resp
+            .headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
+        let (text, encoding) = encode_body(&resp.body, &content_type);
+        (text, encoding, None, None)
+    };
+
     let content_type = resp
         .headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/octet-stream")
+        .unwrap_or(if is_websocket {
+            "x-unknown"
+        } else {
+            "application/octet-stream"
+        })
         .to_string();
-
-    let (resp_text, resp_encoding) = encode_body(&resp.body, &content_type);
 
     let post_data = if !req.body.is_empty() {
         let req_content_type = req
@@ -59,8 +90,6 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
     };
 
     // HAR 1.2 timing breakdown: send + wait + receive = total time.
-    // We set send=0 because we can't measure serialization time separately.
-    // blocked/dns/connect/ssl are -1 (not applicable) since we reuse connections.
     let send_ms = 0.0_f64;
     let wait_ms = exchange.wait_ms as f64;
     let receive_ms = (exchange.elapsed_ms as f64 - wait_ms).max(0.0);
@@ -88,13 +117,21 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
             cookies: vec![],
             headers: response_headers,
             content: HarContent {
-                size: resp.body.len() as i64,
+                size: if is_websocket {
+                    0
+                } else {
+                    resp.body.len() as i64
+                },
                 mime_type: content_type,
                 text: resp_text,
                 encoding: resp_encoding,
             },
             headers_size: -1,
-            body_size: resp.body.len() as i64,
+            body_size: if is_websocket {
+                0
+            } else {
+                resp.body.len() as i64
+            },
             redirect_url: String::new(),
         },
         cache: HarCache::default(),
@@ -107,6 +144,8 @@ pub fn exchange_to_har_entry(exchange: &HttpExchange, redact: bool) -> HarEntry 
             receive: receive_ms,
             ssl: -1.0,
         },
+        resource_type,
+        websocket_messages,
     }
 }
 
