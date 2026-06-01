@@ -5,6 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Scope</title>
+    <script>
+      // Apply the persisted theme before React mounts to avoid a light/dark flash.
+      (function () {
+        try {
+          var stored = localStorage.getItem('scope:theme');
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = stored === 'light' || stored === 'dark' ? stored : (prefersDark ? 'dark' : 'light');
+          if (theme === 'dark') document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = theme;
+        } catch (_) { /* ignore */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

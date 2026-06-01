@@ -9,48 +9,83 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    /* shadcn semantic tokens — mapped onto the Ink/Action palette
+       (see docs/design/palette.md for token roles) */
+    --background: 0 0% 100%;            /* ink-0 */
+    --foreground: 230 43% 14%;          /* ink-900 */
+    --card: 0 0% 100%;                  /* ink-0 */
+    --card-foreground: 230 43% 14%;     /* ink-900 */
+    --popover: 0 0% 100%;               /* ink-0 */
+    --popover-foreground: 230 43% 14%;  /* ink-900 */
+    --primary: 230 58% 52%;             /* action */
+    --primary-foreground: 0 0% 100%;    /* action-foreground */
+    --secondary: 230 33% 97%;           /* ink-50 */
+    --secondary-foreground: 230 43% 14%;/* ink-900 */
+    --muted: 230 33% 97%;               /* ink-50 */
+    --muted-foreground: 230 18% 38%;    /* ink-500 */
+    --accent: 230 33% 97%;              /* ink-50 */
+    --accent-foreground: 230 43% 14%;   /* ink-900 */
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 230 49% 90%;              /* ink-100 (decorative dividers) */
+    --input: 230 16% 59%;               /* ink-300 (perceivable form outlines) */
+    --ring: 230 58% 52%;                /* action */
     --radius: 0.5rem;
+
+    /* Brand — Scope Lens palette */
+    --brand-50: 180 44% 95%;
+    --brand-300: 179 44% 69%;
+    --brand-500: 179 47% 56%;
+    --brand-700: 179 50% 36%;
+    --brand-900: 179 51% 18%;
+    --brand: var(--brand-500);
+    --brand-hover: var(--brand-700);
+    --brand-foreground: 0 0% 100%;
+
+    /* Ink — single-hue (230) neutral ramp.
+       Each token is paired with the ONLY role it should fill.
+       See docs/design/palette.md for usage rules. */
+    --ink-0:   0   0%   100%;  /* Surface       — main background           (#FFFFFF) */
+    --ink-50:  230 33%  97%;   /* Surface alt   — alternate backgrounds     (#F5F6FA) */
+    --ink-100: 230 49%  90%;   /* Border decor. — decorative borders only   (#DADEF2) */
+    --ink-300: 230 16%  59%;   /* Border        — non-decorative borders    (#878CA8) */
+    --ink-500: 230 18%  38%;   /* Text 2°       — secondary text            (#505673) */
+    --ink-900: 230 43%  14%;   /* Text 1°       — heading text              (#141A33) */
+    --action:  230 58%  52%;   /* Action        — primary CTA / interactive (#3D55CC) */
+    --action-foreground: 0 0% 100%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    /* shadcn semantic tokens — mapped onto the inverted Ink/Action palette */
+    --background: 230 18% 7%;            /* ink-0 (dark) */
+    --foreground: 230 33% 93%;           /* ink-900 (dark) */
+    --card: 230 18% 9%;                  /* slightly lifted */
+    --card-foreground: 230 33% 93%;
+    --popover: 230 18% 9%;
+    --popover-foreground: 230 33% 93%;
+    --primary: 230 60% 65%;              /* action (dark) — lifted */
+    --primary-foreground: 230 43% 14%;
+    --secondary: 230 16% 14%;            /* ink-50 (dark) */
+    --secondary-foreground: 230 33% 93%;
+    --muted: 230 16% 14%;
+    --muted-foreground: 230 14% 64%;     /* ink-500 (dark) */
+    --accent: 230 16% 14%;
+    --accent-foreground: 230 33% 93%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --border: 230 14% 19%;               /* ink-100 (dark) */
+    --input: 230 14% 32%;                /* ink-300 (dark) */
+    --ring: 230 60% 65%;                 /* action (dark) */
+
+    /* Ink — inverted ramp for dark mode (single-hue 230). */
+    --ink-0:   230 18%  7%;    /* Surface       — main background */
+    --ink-50:  230 16%  11%;   /* Surface alt   — alternate backgrounds */
+    --ink-100: 230 14%  19%;   /* Border decor. — decorative borders only */
+    --ink-300: 230 14%  32%;   /* Border        — non-decorative borders */
+    --ink-500: 230 14%  64%;   /* Text 2°       — secondary text */
+    --ink-900: 230 33%  93%;   /* Text 1°       — heading text */
+    --action:  230 60%  65%;   /* Action        — primary CTA (lifted for dark bg) */
+    --action-foreground: 230 43% 14%;
   }
 }
 
@@ -60,6 +95,45 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Animated logo — gentle ECG-style pulse on the existing Activity <path>.
+   Targets the path inside an SVG marked .logo-pulse so the icon component
+   itself (lucide-react Activity) is not replaced. */
+@keyframes logo-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  20% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  80% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+}
+
+.logo-pulse > * {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: logo-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logo-pulse > * {
+    animation: none;
   }
 }
 

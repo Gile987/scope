@@ -23,7 +23,7 @@ Benchmark runs — the core entity. Each document represents a single coding age
 | `deletedAt` | `{ deletedAt: 1 }` | | 009 |
 | `profileId` | `{ profileId: 1 }` | sparse | 010 |
 
-Key fields: `status`, `outcome`, `workerType`, `taskPromptId`, `submissionId`, `profileId`, `scenario.task`, `turns[]`, `tokenUsage`, `model`, `agentVersion`, `os.platform`, `mcpServers[]`, `skillRevisions[]`, `deletedAt`, `createdAt`.
+Key fields: `status`, `outcome`, `workerType`, `taskPromptId`, `submissionId`, `profileId`, `profileVersionId`, `profileVariation`, `scenario.task`, `turns[]`, `tokenUsage`, `model`, `agentVersion`, `os.platform`, `mcpServers[]`, `skillRevisions[]`, `deletedAt`, `createdAt`.
 
 ### `task-prompts`
 

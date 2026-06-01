@@ -16,10 +16,11 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Trash2, Loader2, Save, Plus, X, Star } from "lucide-react";
+import { Trash2, Loader2, Save, Plus, X, Star } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
+import { DetailPanel } from "@/components/list-layout";
 
 export function AgentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -49,7 +50,7 @@ export function AgentDetail() {
   }, [agent]);
 
   const updateMutation = useMutation({
-    mutationFn: (body: Partial<Pick<CodingAgent, 'name' | 'description' | 'supportedModels' | 'defaultModel'>>) =>
+    mutationFn: (body: Partial<Pick<CodingAgent, "name" | "description" | "supportedModels" | "defaultModel">>) =>
       api.updateAgent(id!, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agent", id] });
@@ -67,14 +68,15 @@ export function AgentDetail() {
     },
   });
 
+  const closePanel = () => navigate("/agents");
+
   const handleSave = () => {
-    const body: Partial<Pick<CodingAgent, 'name' | 'description' | 'supportedModels' | 'defaultModel'>> = {
+    updateMutation.mutate({
       name,
       description: description.trim() || undefined,
       supportedModels: models,
       defaultModel: defaultModel || undefined,
-    };
-    updateMutation.mutate(body);
+    });
   };
 
   const handleAddModel = () => {
@@ -98,44 +100,36 @@ export function AgentDetail() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4 max-w-2xl">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-64 w-full" />
-      </div>
+      <DetailPanel title="Loading…" onClose={closePanel}>
+        <div className="space-y-3">
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </DetailPanel>
     );
   }
 
   if (error || !agent) {
     return (
-      <div className="space-y-4 max-w-2xl">
-        <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/agents")}>
-          <ArrowLeft className="h-4 w-4" /> Back to Agents
-        </Button>
-        <div className="text-center py-12 text-muted-foreground">
-          Agent not found
-        </div>
-      </div>
+      <DetailPanel title="Not found" onClose={closePanel}>
+        <p className="text-sm text-muted-foreground">Agent not found.</p>
+      </DetailPanel>
     );
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      {/* Back link */}
-      <Button variant="ghost" className="gap-1.5" onClick={() => navigate("/agents")}>
-        <ArrowLeft className="h-4 w-4" /> Back to Agents
-      </Button>
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{agent.name}</h1>
-          <p className="text-sm text-muted-foreground font-mono">{agent._id}</p>
-        </div>
-        <div className="flex items-center gap-2">
+    <DetailPanel
+      title={agent.name}
+      subtitle={<span className="font-mono">{agent._id}</span>}
+      onClose={closePanel}
+    >
+      <div className="space-y-4">
+        <div className="flex items-center justify-end gap-2">
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="destructive" className="gap-1.5">
-                <Trash2 className="h-4 w-4" /> Delete
+              <Button variant="destructive" size="sm" className="gap-1.5">
+                <Trash2 className="h-3.5 w-3.5" /> Delete
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
@@ -154,239 +148,239 @@ export function AgentDetail() {
             </AlertDialogContent>
           </AlertDialog>
         </div>
-      </div>
 
-      {/* Models card */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Supported Models</CardTitle>
-          {!editing ? (
-            <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-          ) : (
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => {
-                setEditing(false);
-                // Reset to server state
-                if (agent) {
-                  setName(agent.name);
-                  setDescription(agent.description ?? "");
-                  setModels([...agent.supportedModels]);
-                  setDefaultModel(agent.defaultModel ?? "");
-                }
-              }}>
-                Cancel
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm">Supported Models</CardTitle>
+            {!editing ? (
+              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                Edit
               </Button>
-              <Button size="sm" className="gap-1" onClick={handleSave} disabled={updateMutation.isPending}>
-                {updateMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                Save
-              </Button>
-            </div>
-          )}
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {editing ? (
-            <>
-              {/* Model list with remove buttons */}
-              <div className="space-y-2">
-                {models.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No models configured. Model selection will be disabled.</p>
-                )}
-                {models.map((m) => (
-                  <div key={m} className="flex items-center gap-2">
-                    <Badge variant={m === defaultModel ? "default" : "secondary"} className="text-xs">
-                      {m}
-                    </Badge>
-                    {m === defaultModel && (
-                      <span className="text-xs text-muted-foreground">(default)</span>
-                    )}
-                    {m !== defaultModel && (
+            ) : (
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setEditing(false);
+                    if (agent) {
+                      setName(agent.name);
+                      setDescription(agent.description ?? "");
+                      setModels([...agent.supportedModels]);
+                      setDefaultModel(agent.defaultModel ?? "");
+                    }
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button size="sm" className="gap-1" onClick={handleSave} disabled={updateMutation.isPending}>
+                  {updateMutation.isPending ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Save className="h-3 w-3" />
+                  )}
+                  Save
+                </Button>
+              </div>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {editing ? (
+              <>
+                <div className="space-y-2">
+                  {models.length === 0 && (
+                    <p className="text-sm text-muted-foreground">No models configured.</p>
+                  )}
+                  {models.map((m) => (
+                    <div key={m} className="flex items-center gap-2">
+                      <Badge variant={m === defaultModel ? "default" : "secondary"} className="text-xs">
+                        {m}
+                      </Badge>
+                      {m === defaultModel && (
+                        <span className="text-xs text-muted-foreground">(default)</span>
+                      )}
+                      {m !== defaultModel && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          title="Set as default"
+                          onClick={() => setDefaultModel(m)}
+                        >
+                          <Star className="h-3 w-3" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6"
-                        title="Set as default"
-                        onClick={() => setDefaultModel(m)}
+                        className="h-6 w-6 text-destructive"
+                        onClick={() => handleRemoveModel(m)}
                       >
-                        <Star className="h-3 w-3" />
+                        <X className="h-3 w-3" />
                       </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-destructive"
-                      onClick={() => handleRemoveModel(m)}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              {/* Add model */}
-              <div className="flex items-center gap-2">
-                <Input
-                  placeholder="e.g. gpt-4.1"
-                  value={newModel}
-                  onChange={(e) => setNewModel(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAddModel();
-                    }
-                  }}
-                  className="max-w-xs"
-                />
-                <Button variant="outline" size="sm" className="gap-1" onClick={handleAddModel}>
-                  <Plus className="h-3 w-3" /> Add
-                </Button>
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {agent.supportedModels.length > 0 ? (
-                agent.supportedModels.map((m) => (
-                  <Badge key={m} variant={m === agent.defaultModel ? "default" : "secondary"}>
-                    {m}
-                    {m === agent.defaultModel && (
-                      <Star className="ml-1 h-3 w-3 fill-current" />
-                    )}
-                  </Badge>
-                ))
-              ) : (
-                <span className="text-sm text-muted-foreground">No models configured — model selection disabled</span>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Metadata card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {editing ? (
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label>Name</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Description</Label>
-                <Textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Optional description"
-                  rows={2}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">Name</span>
-                <p>{agent.name}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Availability</span>
-                <div className="mt-1">
-                  {agent.available === false ? (
-                    <Badge variant="secondary">Unavailable</Badge>
-                  ) : (
-                    <Badge variant="default">Available</Badge>
-                  )}
+                    </div>
+                  ))}
                 </div>
-              </div>
-              {agent.description && (
-                <div className="col-span-2">
-                  <span className="text-muted-foreground">Description</span>
-                  <p>{agent.description}</p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="e.g. gpt-4.1"
+                    value={newModel}
+                    onChange={(e) => setNewModel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddModel();
+                      }
+                    }}
+                    className="max-w-xs"
+                  />
+                  <Button variant="outline" size="sm" className="gap-1" onClick={handleAddModel}>
+                    <Plus className="h-3 w-3" /> Add
+                  </Button>
                 </div>
-              )}
-              <div>
-                <span className="text-muted-foreground">Created</span>
-                <p>{formatDate(agent.createdAt)}</p>
-              </div>
-              {agent.updatedAt && (
-                <div>
-                  <span className="text-muted-foreground">Updated</span>
-                  <p>{formatDate(agent.updatedAt)}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Capabilities card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Capabilities</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {(() => {
-            const caps = agent.capabilities;
-            const entries: { label: string; supported: boolean }[] = [
-              { label: "Reasoning Effort", supported: !!caps?.supportsReasoningEffort },
-            ];
-            return (
+              </>
+            ) : (
               <div className="flex flex-wrap gap-2">
-                {entries.map(({ label, supported }) => (
-                  <Badge key={label} variant={supported ? "default" : "outline"} className="gap-1.5">
-                    {!supported && <span className="text-muted-foreground">—</span>}
-                    {label}
-                    {!supported && <span className="text-muted-foreground text-xs">Not supported</span>}
-                  </Badge>
-                ))}
-              </div>
-            );
-          })()}
-        </CardContent>
-      </Card>
-
-      {/* Versions card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Deployed Versions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {(() => {
-            const versions = agent.versions ?? [];
-            if (versions.length === 0) {
-              return <p className="text-sm text-muted-foreground">No versions registered yet.</p>;
-            }
-
-            const active = versions.filter((v) => v.status === "active");
-            const retired = versions.filter((v) => v.status === "retired");
-
-            return (
-              <div className="space-y-3">
-                {active.map((v) => (
-                  <VersionEntry key={v.agentVersion} version={v} />
-                ))}
-                {retired.length > 0 && (
-                  <div className="space-y-2 opacity-50">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Retired</p>
-                    {retired.map((v) => (
-                      <VersionEntry key={v.agentVersion} version={v} />
-                    ))}
-                  </div>
+                {agent.supportedModels.length > 0 ? (
+                  agent.supportedModels.map((m) => (
+                    <Badge key={m} variant={m === agent.defaultModel ? "default" : "secondary"}>
+                      {m}
+                      {m === agent.defaultModel && (
+                        <Star className="ml-1 h-3 w-3 fill-current" />
+                      )}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-sm text-muted-foreground">No models configured</span>
                 )}
               </div>
-            );
-          })()}
-        </CardContent>
-      </Card>
-    </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Details</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {editing ? (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label>Name</Label>
+                  <Input value={name} onChange={(e) => setName(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Description</Label>
+                  <Textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Optional description"
+                    rows={2}
+                  />
+                </div>
+              </div>
+            ) : (
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Name</dt>
+                  <dd>{agent.name}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Availability</dt>
+                  <dd className="mt-0.5">
+                    {agent.available === false ? (
+                      <Badge variant="secondary">Unavailable</Badge>
+                    ) : (
+                      <Badge variant="default">Available</Badge>
+                    )}
+                  </dd>
+                </div>
+                {agent.description && (
+                  <div className="col-span-2">
+                    <dt className="text-xs text-muted-foreground">Description</dt>
+                    <dd>{agent.description}</dd>
+                  </div>
+                )}
+                <div>
+                  <dt className="text-xs text-muted-foreground">Created</dt>
+                  <dd>{formatDate(agent.createdAt)}</dd>
+                </div>
+                {agent.updatedAt && (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Updated</dt>
+                    <dd>{formatDate(agent.updatedAt)}</dd>
+                  </div>
+                )}
+              </dl>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Capabilities</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(() => {
+              const caps = agent.capabilities;
+              const entries: { label: string; supported: boolean }[] = [
+                { label: "Reasoning Effort", supported: !!caps?.supportsReasoningEffort },
+              ];
+              return (
+                <div className="flex flex-wrap gap-2">
+                  {entries.map(({ label, supported }) => (
+                    <Badge key={label} variant={supported ? "default" : "outline"} className="gap-1.5">
+                      {!supported && <span className="text-muted-foreground">—</span>}
+                      {label}
+                      {!supported && <span className="text-muted-foreground text-xs">Not supported</span>}
+                    </Badge>
+                  ))}
+                </div>
+              );
+            })()}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Deployed Versions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(() => {
+              const versions = agent.versions ?? [];
+              if (versions.length === 0) {
+                return <p className="text-sm text-muted-foreground">No versions registered yet.</p>;
+              }
+
+              const active = versions.filter((v) => v.status === "active");
+              const retired = versions.filter((v) => v.status === "retired");
+
+              return (
+                <div className="space-y-3">
+                  {active.map((v) => (
+                    <VersionEntry key={v.agentVersion} version={v} />
+                  ))}
+                  {retired.length > 0 && (
+                    <div className="space-y-2 opacity-50">
+                      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Retired</p>
+                      {retired.map((v) => (
+                        <VersionEntry key={v.agentVersion} version={v} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </CardContent>
+        </Card>
+      </div>
+    </DetailPanel>
   );
 }
 
 function VersionEntry({ version }: { version: AgentVersion }) {
   const componentDisplay = Object.entries(version.components)
     .map(([key, val]) => {
-      // Convert env var names to readable labels
       const label = key
         .replace(/_VERSION$/, "")
         .replace(/_/g, " ")
@@ -396,23 +390,21 @@ function VersionEntry({ version }: { version: AgentVersion }) {
     .join(", ");
 
   return (
-    <div className="flex items-start justify-between rounded-md border p-3">
-      <div className="space-y-1">
+    <div className="flex items-start justify-between gap-2 rounded-md border p-3">
+      <div className="min-w-0 space-y-1">
         <div className="flex items-center gap-2">
           <span className="font-mono text-sm font-medium">{version.agentVersion}</span>
           <Badge variant={version.status === "active" ? "default" : "secondary"} className="text-xs">
             {version.status}
           </Badge>
         </div>
-        <p className="text-xs text-muted-foreground">{componentDisplay}</p>
-        <p className="text-xs text-muted-foreground font-mono">
+        <p className="break-all text-xs text-muted-foreground">{componentDisplay}</p>
+        <p className="break-all font-mono text-xs text-muted-foreground">
           Build: {version.gitCommit} · {version.buildTime}
         </p>
-        <p className="text-xs text-muted-foreground font-mono">
-          Queue: {version.queueName}
-        </p>
+        <p className="break-all font-mono text-xs text-muted-foreground">Queue: {version.queueName}</p>
       </div>
-      <span className="text-xs text-muted-foreground">{formatDate(version.createdAt)}</span>
+      <span className="shrink-0 text-xs text-muted-foreground">{formatDate(version.createdAt)}</span>
     </div>
   );
 }

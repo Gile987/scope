@@ -13,13 +13,15 @@ export function truncate(str: string, len: number): string {
 }
 
 export function formatDate(date: string | Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(date));
+  const d = new Date(date);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const MM = pad(d.getMonth() + 1);
+  const DD = pad(d.getDate());
+  const YY = pad(d.getFullYear() % 100);
+  const HH = pad(d.getHours());
+  const mm = pad(d.getMinutes());
+  const ss = pad(d.getSeconds());
+  return `${MM}/${DD}/${YY} ${HH}:${mm}:${ss}`;
 }
 
 export function formatId(id: string): string {

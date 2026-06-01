@@ -13,7 +13,7 @@ export function CreatePromptFeature() {
   const initialPrompt = searchParams.get("prompt") ?? "";
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl">
       <PromptFeatureWizard
         initialBehavior={initialBehavior}
         initialId={initialId}
