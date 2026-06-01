@@ -188,6 +188,8 @@ pnpm test:coverage                # With coverage report
 pnpm test:integration             # Integration tests (requires .env + Docker)
 ```
 
+> **Portal Storybook stories run under Vitest**: `apps/portal/src/components/ui/stories.play.test.tsx` composes the `ui/*` stories and executes their `play` (interaction) functions inside the regular Vitest suite (no `@storybook/addon-vitest` required). It binds a Testing Library `canvas` to the rendered container, so story `play` functions must keep depending only on `canvas` plus values imported directly from `storybook/test` (`userEvent`, `screen`, `expect`). When you add a new `ui/*` story with a `play` function, register its module in that harness so it's covered.
+
 ## Documentation Workflow
 
 **Before starting any task**, read the docs relevant to the components you will be working on (see the table below). Understanding the existing design, data models, and patterns prevents regressions and duplicated work.
