@@ -3,9 +3,12 @@
 
 import { DequeuedMessageItem } from "@azure/storage-queue";
 import { CopilotClient, SessionEvent } from "@github/copilot-sdk";
-import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
+import { mkdirSync, rmSync, existsSync, readFileSync, createWriteStream, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { pipeline } from "stream/promises";
+import { Readable } from "stream";
+import { execSync } from "child_process";
 import {
   BaseQueueProcessor,
   BaseQueueProcessorConfig,
@@ -63,22 +66,12 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
 
     await log("info", `Starting report generation for run ${requestId}`);
 
-    // --- Prepare snapshots temp directory ---
-    const snapshotsDir = join(tmpdir(), `report-${reportId}`);
-    mkdirSync(snapshotsDir, { recursive: true });
+    // --- Prepare working directory ---
+    const workDir = join(tmpdir(), `report-${reportId}`);
+    mkdirSync(workDir, { recursive: true });
 
     try {
-      // --- Create Copilot SDK tools ---
-      const tools = createReportTools(
-        this.reportConfig.apiBaseUrl,
-        requestId,
-        snapshotsDir,
-        reportId
-      );
-
-      await log("info", "Initialized tools, starting Copilot SDK session");
-
-      // --- Resolve report template ---
+      // --- Resolve report template (cheap check before expensive download) ---
       if (!doc.templateId) {
         throw new Error(`Report ${reportId} has no templateId — reports without a template are no longer supported`);
       }
@@ -89,6 +82,20 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       }
 
       await log("info", `Using report template '${template.id}' (${template.name})`);
+
+      // --- Download and extract run archive to disk ---
+      await log("info", `Downloading archive for run ${requestId}`);
+      const archiveDir = await this.downloadAndExtractArchive(requestId, workDir, log);
+      await log("info", `Archive extracted to ${archiveDir}`);
+
+      // --- Create Copilot SDK tools (file-based only) ---
+      const tools = createReportTools({
+        archiveDir,
+        apiBaseUrl: this.reportConfig.apiBaseUrl,
+        reportId,
+      });
+
+      await log("info", "Initialized tools, starting Copilot SDK session");
 
       // Resolve model: template override → global config fallback
       const resolvedModel = template.model ?? this.reportConfig.reportModel;
@@ -157,12 +164,12 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
 
       await log("info", `Report completed (${content.length} chars)`, { final: true });
     } finally {
-      // Clean up extracted snapshot files
-      if (existsSync(snapshotsDir)) {
+      // Clean up working directory
+      if (existsSync(workDir)) {
         try {
-          rmSync(snapshotsDir, { recursive: true, force: true });
+          rmSync(workDir, { recursive: true, force: true });
         } catch (err) {
-          console.warn(`[report-generator] Failed to clean up snapshots dir: ${err}`);
+          console.warn(`[report-generator] Failed to clean up work dir: ${err}`);
         }
       }
     }
@@ -337,5 +344,88 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       console.warn(`[report-generator] Error fetching template '${templateId}': ${error}`);
       return null;
     }
+  }
+
+  /**
+   * Download the run archive from the API and extract it to disk.
+   * Streams the tar.gz response directly to a file, then extracts it.
+   * Also extracts nested iteration snapshot tar.gz files into a snapshots/ subdirectory.
+   *
+   * @returns Path to the extracted archive root directory.
+   */
+  private async downloadAndExtractArchive(
+    requestId: string,
+    workDir: string,
+    log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
+  ): Promise<string> {
+    const archivePath = join(workDir, "archive.tar.gz");
+    const archiveDir = join(workDir, "archive");
+    mkdirSync(archiveDir, { recursive: true });
+
+    // Stream-download the archive to disk
+    const response = await fetch(
+      `${this.reportConfig.apiBaseUrl}/api/v1/requests/${requestId}/archive`
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Failed to download archive for run ${requestId}: ${response.status} ${response.statusText}`
+      );
+    }
+    if (!response.body) {
+      throw new Error("Archive response has no body");
+    }
+
+    // Stream response body to file (avoids buffering in memory)
+    const fileStream = createWriteStream(archivePath);
+    await pipeline(Readable.fromWeb(response.body as any), fileStream);
+
+    await log("info", "Archive downloaded, extracting...");
+
+    // Extract the tar.gz archive
+    execSync(`tar -xzf "${archivePath}" -C "${archiveDir}"`, { timeout: 120_000 });
+
+    // The archive contains files under a {requestId}/ subdirectory
+    // Detect the actual root (may be nested one level)
+    let effectiveRoot = archiveDir;
+    const topEntries = readdirSync(archiveDir);
+    if (topEntries.length === 1) {
+      const singleEntry = join(archiveDir, topEntries[0]);
+      if (existsSync(singleEntry) && statSync(singleEntry).isDirectory()) {
+        effectiveRoot = singleEntry;
+      }
+    }
+
+    // Extract nested iteration snapshot tar.gz files into a snapshots/ subdirectory
+    const snapshotsDir = join(effectiveRoot, "snapshots");
+    const entries = readdirSync(effectiveRoot);
+    const snapshotArchives = entries.filter(
+      (f) => f.match(/^iteration-\d+\.tar\.gz$/)
+    );
+
+    if (snapshotArchives.length > 0) {
+      mkdirSync(snapshotsDir, { recursive: true });
+      for (const snapshotFile of snapshotArchives) {
+        const match = snapshotFile.match(/^iteration-(\d+)\.tar\.gz$/);
+        if (!match) continue;
+        const iterNum = match[1];
+        const iterDir = join(snapshotsDir, `iteration-${iterNum}`);
+        mkdirSync(iterDir, { recursive: true });
+        try {
+          execSync(`tar -xzf "${join(effectiveRoot, snapshotFile)}" -C "${iterDir}"`, {
+            timeout: 60_000,
+          });
+        } catch (err) {
+          await log("warn", `Failed to extract snapshot ${snapshotFile}: ${err}`);
+        }
+      }
+      await log("info", `Extracted ${snapshotArchives.length} iteration snapshot(s)`);
+    }
+
+    // Clean up the compressed archive file to save disk space
+    try {
+      execSync(`rm -f "${archivePath}"`);
+    } catch { /* best effort */ }
+
+    return effectiveRoot;
   }
 }

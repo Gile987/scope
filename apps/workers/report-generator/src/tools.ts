@@ -3,262 +3,75 @@
 
 import { defineTool } from "@github/copilot-sdk";
 import { readFileSync, readdirSync, statSync, existsSync } from "fs";
-import { join } from "path";
+import { join, relative } from "path";
 import { execSync } from "child_process";
-import type { RequestDocument } from "shared";
 
 /**
- * Create tools for the report agent to access run data via the REST API
- * and inspect workspace snapshots extracted to a local temp directory.
+ * Options for creating report tools.
  */
-export function createReportTools(
-  apiBaseUrl: string,
-  requestId: string,
-  snapshotsDir: string,
-  reportId: string
-) {
-  const getRunSummary = defineTool("get_run_summary", {
-    description:
-      "Get the summary of the benchmark run including scenario, worker type, persona, status, iteration count, and criteria list.",
-    parameters: {
-      type: "object",
-      properties: {},
-    },
-    handler: async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/v1/requests/${requestId}`);
-        if (!response.ok) {
-          return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
-        }
-        const request: RequestDocument = await response.json();
-        const run = request.run;
-        return {
-          id: request._id,
-          task: request.scenario?.task,
-          criteria: request.scenario?.criteria,
-          workerType: request.workerType,
-          status: run?.status,
-          outcome: run?.outcome,
-          persona: request.persona,
-          personaInstructions: request.personaInstructions,
-          maxIterations: request.maxIterations,
-          turnCount: run?.turns?.length || 0,
-          createdAt: request.createdAt,
-          updatedAt: request.updatedAt,
-          error: run?.error,
-        };
-      } catch (err) {
-        return { error: `Failed to fetch run summary: ${err}` };
-      }
-    },
-  });
+export interface CreateReportToolsOptions {
+  /** Root directory of the extracted archive (contains run.yaml, iteration files, snapshots/) */
+  archiveDir: string;
+  /** Base URL of the scope-mt API (for insight CRUD only) */
+  apiBaseUrl: string;
+  /** Report ID for linking insights */
+  reportId: string;
+}
 
-  const listTurns = defineTool("list_turns", {
-    description:
-      "List all turns in the run with their iteration number, pass/fail status, and criteria results summary.",
-    parameters: {
-      type: "object",
-      properties: {},
-    },
-    handler: async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/v1/requests/${requestId}`);
-        if (!response.ok) {
-          return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
-        }
-        const request: RequestDocument = await response.json();
-        const run = request.run;
-        const turns = (run?.turns || []).map((turn: any) => ({
-          iteration: turn.iteration,
-          passed: turn.passed,
-          timestamp: turn.timestamp,
-          startedAt: turn.startedAt,
-          durationMs: turn.durationMs,
-          criteriaResults: (turn.criteriaResults || []).map((cr: any) => ({
-            criterionId: cr.criterionId,
-            passed: cr.passed,
-            evaluated: cr.evaluated,
-          })),
-          hasSnapshot: !!turn.snapshotUrl,
-        }));
-        return { turns, total: turns.length };
-      } catch (err) {
-        return { error: `Failed to list turns: ${err}` };
-      }
-    },
-  });
-
-  const getTurnDetail = defineTool("get_turn_detail", {
-    description:
-      "Get full details for a specific turn including the coding agent's response, judge feedback, and per-criterion results with feedback.",
-    parameters: {
-      type: "object",
-      properties: {
-        iteration: {
-          type: "number",
-          description: "The iteration number (1-based) of the turn to inspect.",
-        },
-      },
-      required: ["iteration"],
-    },
-    handler: async (args: { iteration: number }) => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/v1/requests/${requestId}`);
-        if (!response.ok) {
-          return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
-        }
-        const request: RequestDocument = await response.json();
-        const run = request.run;
-        const turn = (run?.turns || []).find((t: any) => t.iteration === args.iteration);
-        if (!turn) {
-          return { error: `Turn ${args.iteration} not found` };
-        }
-        return {
-          iteration: turn.iteration,
-          passed: turn.passed,
-          timestamp: turn.timestamp,
-          startedAt: turn.startedAt,
-          durationMs: turn.durationMs,
-          codingAgentResponse: turn.codingAgentResponse,
-          judgeFeedback: turn.judgeFeedback,
-          criteriaResults: turn.criteriaResults || [],
-          hasSnapshot: !!turn.snapshotUrl,
-        };
-      } catch (err) {
-        return { error: `Failed to get turn detail: ${err}` };
-      }
-    },
-  });
-
-  const getCriteriaTrajectory = defineTool("get_criteria_trajectory", {
-    description:
-      "Get the pass/fail trajectory for each criterion across all turns, including iteration duration. Useful for spotting regressions and flip-flops.",
-    parameters: {
-      type: "object",
-      properties: {},
-    },
-    handler: async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/v1/requests/${requestId}`);
-        if (!response.ok) {
-          return { error: `Failed to fetch run: ${response.status} ${response.statusText}` };
-        }
-        const request: RequestDocument = await response.json();
-        const run = request.run;
-        const turns = run?.turns || [];
-
-        // Collect all criterion IDs
-        const criterionIds = new Set<string>();
-        for (const turn of turns) {
-          for (const cr of turn.criteriaResults || []) {
-            criterionIds.add(cr.criterionId);
-          }
-        }
-
-        // Build trajectory per criterion
-        const trajectory: Record<string, { iteration: number; passed: boolean; evaluated: boolean; durationMs?: number }[]> = {};
-        for (const id of criterionIds) {
-          trajectory[id] = turns.map((turn: any) => {
-            const cr = (turn.criteriaResults || []).find((c: any) => c.criterionId === id);
-            return {
-              iteration: turn.iteration,
-              passed: cr?.passed ?? false,
-              evaluated: cr?.evaluated ?? false,
-              durationMs: turn.durationMs,
-            };
-          });
-        }
-
-        return { trajectory, criterionIds: [...criterionIds] };
-      } catch (err) {
-        return { error: `Failed to compute criteria trajectory: ${err}` };
-      }
-    },
-  });
-
-  const extractSnapshot = defineTool("extract_snapshot", {
-    description:
-      "Download and extract a workspace snapshot for a specific iteration to a local directory. " +
-      "After extraction, use read_file, list_directory, and search_files to inspect the workspace contents. " +
-      "Returns the path to the extracted directory.",
-    parameters: {
-      type: "object",
-      properties: {
-        iteration: {
-          type: "number",
-          description: "The iteration number (1-based) to download the snapshot for.",
-        },
-      },
-      required: ["iteration"],
-    },
-    handler: async (args: { iteration: number }) => {
-      const iterDir = join(snapshotsDir, `iteration-${args.iteration}`);
-      
-      // Check if already extracted
-      if (existsSync(iterDir)) {
-        return { path: iterDir, cached: true };
-      }
-
-      try {
-        const response = await fetch(
-          `${apiBaseUrl}/api/v1/requests/${requestId}/snapshots/${args.iteration}`
-        );
-        if (!response.ok) {
-          return { error: `Failed to download snapshot: ${response.status} ${response.statusText}` };
-        }
-
-        const { mkdirSync } = await import("fs");
-        mkdirSync(iterDir, { recursive: true });
-
-        // Write tar.gz to temp file and extract
-        const buffer = Buffer.from(await response.arrayBuffer());
-        const tarPath = join(snapshotsDir, `iteration-${args.iteration}.tar.gz`);
-        const { writeFileSync } = await import("fs");
-        writeFileSync(tarPath, buffer);
-
-        execSync(`tar -xzf "${tarPath}" -C "${iterDir}"`, { timeout: 30000 });
-
-        // Clean up tar file
-        const { unlinkSync } = await import("fs");
-        unlinkSync(tarPath);
-
-        return { path: iterDir, cached: false };
-      } catch (err) {
-        return { error: `Failed to extract snapshot: ${err}` };
-      }
-    },
-  });
+/**
+ * Create file-based tools for the report agent.
+ *
+ * All run data is pre-extracted to disk before the Copilot SDK session starts.
+ * The agent only needs file manipulation tools to explore the archive contents,
+ * plus insight tools for creating/referencing insights via the API.
+ */
+export function createReportTools(options: CreateReportToolsOptions) {
+  const { archiveDir, apiBaseUrl, reportId } = options;
 
   const readFile = defineTool("read_file", {
     description:
-      "Read a file from an extracted snapshot directory. Use after extract_snapshot to inspect workspace contents.",
+      "Read a file from the extracted run archive. The archive root contains:\n" +
+      "- run.yaml: Full run metadata (scenario, persona, criteria, turns with results)\n" +
+      "- iteration-N.har: HTTP archive for iteration N\n" +
+      "- iteration-N.tool-calls.jsonl: Tool calls made during iteration N\n" +
+      "- iteration-N.atif.trajectory.json: ATIF trajectory for iteration N\n" +
+      "- iteration-N.chat-export.json: Raw chat export for iteration N\n" +
+      "- iteration-N.chat-result.json: Agent result envelope for iteration N\n" +
+      "- logs.jsonl: Run log events\n" +
+      "- snapshots/iteration-N/: Extracted workspace snapshot for iteration N\n" +
+      "Use a relative path from the archive root.",
     parameters: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Absolute path to the file (within an extracted snapshot directory).",
+          description:
+            "Path relative to the archive root (e.g., 'run.yaml', 'iteration-1.tool-calls.jsonl', 'snapshots/iteration-1/src/index.ts').",
         },
       },
       required: ["path"],
     },
     handler: async (args: { path: string }) => {
-      if (!args.path.startsWith(snapshotsDir)) {
-        return { error: "Path must be within the snapshots directory" };
+      const resolvedPath = join(archiveDir, args.path);
+
+      // Security: prevent path traversal
+      const rel = relative(archiveDir, resolvedPath);
+      if (rel.startsWith("..") || rel.startsWith("/")) {
+        return { error: "Path must be within the archive directory" };
       }
-      if (!existsSync(args.path)) {
+      if (!existsSync(resolvedPath)) {
         return { error: `File not found: ${args.path}` };
       }
       try {
-        const stat = statSync(args.path);
+        const stat = statSync(resolvedPath);
         if (stat.isDirectory()) {
-          return { error: `${args.path} is a directory, use list_directory instead` };
+          return { error: `'${args.path}' is a directory, use list_directory instead` };
         }
         if (stat.size > 100_000) {
-          const content = readFileSync(args.path, "utf-8").substring(0, 100_000);
+          const content = readFileSync(resolvedPath, "utf-8").substring(0, 100_000);
           return { content, truncated: true, totalSize: stat.size };
         }
-        return { content: readFileSync(args.path, "utf-8") };
+        return { content: readFileSync(resolvedPath, "utf-8") };
       } catch (err) {
         return { error: `Failed to read file: ${err}` };
       }
@@ -267,30 +80,37 @@ export function createReportTools(
 
   const listDirectory = defineTool("list_directory", {
     description:
-      "List directory contents within an extracted snapshot. Use after extract_snapshot.",
+      "List directory contents within the extracted run archive. Use relative paths from the archive root. " +
+      "Use '.' or '' to list the archive root.",
     parameters: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Absolute path to the directory (within an extracted snapshot directory).",
+          description: "Path relative to the archive root (e.g., '.', 'snapshots/iteration-1', 'snapshots/iteration-1/src').",
         },
       },
       required: ["path"],
     },
     handler: async (args: { path: string }) => {
-      if (!args.path.startsWith(snapshotsDir)) {
-        return { error: "Path must be within the snapshots directory" };
+      const resolvedPath = args.path === "." || args.path === ""
+        ? archiveDir
+        : join(archiveDir, args.path);
+
+      // Security: prevent path traversal
+      const rel = relative(archiveDir, resolvedPath);
+      if (rel.startsWith("..")) {
+        return { error: "Path must be within the archive directory" };
       }
-      if (!existsSync(args.path)) {
+      if (!existsSync(resolvedPath)) {
         return { error: `Directory not found: ${args.path}` };
       }
       try {
-        const entries = readdirSync(args.path, { withFileTypes: true });
+        const entries = readdirSync(resolvedPath, { withFileTypes: true });
         const items = entries
           .filter((e) => !e.name.startsWith(".") && e.name !== "node_modules")
           .map((entry) => {
-            const entryPath = join(args.path, entry.name);
+            const entryPath = join(resolvedPath, entry.name);
             try {
               const stat = statSync(entryPath);
               return {
@@ -302,7 +122,7 @@ export function createReportTools(
               return { name: entry.name, type: "unknown" };
             }
           });
-        return { path: args.path, entries: items };
+        return { path: args.path || ".", entries: items };
       } catch (err) {
         return { error: `Failed to list directory: ${err}` };
       }
@@ -311,7 +131,8 @@ export function createReportTools(
 
   const searchFiles = defineTool("search_files", {
     description:
-      "Search for text patterns in files within an extracted snapshot using grep.",
+      "Search for text patterns in files within the extracted run archive using grep. " +
+      "Use to find specific content across snapshots, logs, or tool call records.",
     parameters: {
       type: "object",
       properties: {
@@ -321,62 +142,42 @@ export function createReportTools(
         },
         path: {
           type: "string",
-          description: "Absolute path to search in (within an extracted snapshot directory).",
+          description: "Relative path to search within (e.g., '.', 'snapshots/iteration-1', 'snapshots/iteration-1/src'). Defaults to archive root.",
         },
         filePattern: {
           type: "string",
-          description: "Glob pattern to filter files (e.g., '*.ts'). Optional.",
+          description: "Glob pattern to filter files (e.g., '*.ts', '*.jsonl'). Optional.",
         },
       },
-      required: ["pattern", "path"],
+      required: ["pattern"],
     },
-    handler: async (args: { pattern: string; path: string; filePattern?: string }) => {
-      if (!args.path.startsWith(snapshotsDir)) {
-        return { error: "Path must be within the snapshots directory" };
+    handler: async (args: { pattern: string; path?: string; filePattern?: string }) => {
+      const searchPath = args.path && args.path !== "."
+        ? join(archiveDir, args.path)
+        : archiveDir;
+
+      // Security: prevent path traversal
+      const rel = relative(archiveDir, searchPath);
+      if (rel.startsWith("..")) {
+        return { error: "Path must be within the archive directory" };
       }
       try {
-        const cmd = `grep -rn --include='${args.filePattern || "*"}' "${args.pattern.replace(/"/g, '\\"')}" "${args.path}" 2>/dev/null | head -50`;
+        const includeFlag = args.filePattern ? `--include='${args.filePattern}'` : "";
+        const cmd = `grep -rn ${includeFlag} "${args.pattern.replace(/"/g, '\\"')}" "${searchPath}" 2>/dev/null | head -50`;
         const output = execSync(cmd, { encoding: "utf-8", timeout: 10000 }).trim();
         if (!output) {
           return { matches: [], message: "No matches found" };
         }
-        return { matches: output.split("\n") };
+        // Make paths relative to archiveDir for readability
+        const matches = output.split("\n").map((line) => {
+          if (line.startsWith(archiveDir)) {
+            return line.substring(archiveDir.length + 1);
+          }
+          return line;
+        });
+        return { matches };
       } catch {
         return { matches: [], message: "No matches found or search error" };
-      }
-    },
-  });
-
-  const getAtifTrajectory = defineTool("get_atif_trajectory", {
-    description:
-      "Get the ATIF (AI Task Interchange Format) trajectory for a specific iteration or the latest one. " +
-      "Returns the full structured trajectory including events, tool calls, and agent actions. " +
-      "Use this to analyze the agent's step-by-step behavior during an iteration.",
-    parameters: {
-      type: "object",
-      properties: {
-        iteration: {
-          type: "number",
-          description:
-            "The iteration number (1-based) to fetch the ATIF trajectory for.",
-        },
-      },
-      required: ["iteration"],
-    },
-    handler: async (args: { iteration: number }) => {
-      try {
-        const url = `${apiBaseUrl}/api/v1/requests/${requestId}/atif?iteration=${args.iteration}`;
-        const response = await fetch(url);
-        if (!response.ok) {
-          if (response.status === 404) {
-            return { error: "No ATIF trajectory available for this iteration" };
-          }
-          return { error: `Failed to fetch ATIF: ${response.status} ${response.statusText}` };
-        }
-        const trajectory = await response.json();
-        return { trajectory, iteration: args.iteration };
-      } catch (err) {
-        return { error: `Failed to fetch ATIF trajectory: ${err}` };
       }
     },
   });
@@ -447,7 +248,6 @@ export function createReportTools(
     },
     handler: async (args: { title: string; description: string; category?: string; tags?: string[] }) => {
       try {
-        // Create the insight
         const createResponse = await fetch(`${apiBaseUrl}/api/v1/insights`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -465,7 +265,6 @@ export function createReportTools(
         }
         const insight = await createResponse.json();
 
-        // Reference the insight from this report
         const refResponse = await fetch(`${apiBaseUrl}/api/v1/reports/${reportId}/insights`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -514,12 +313,6 @@ export function createReportTools(
   });
 
   return [
-    getRunSummary,
-    listTurns,
-    getTurnDetail,
-    getCriteriaTrajectory,
-    getAtifTrajectory,
-    extractSnapshot,
     readFile,
     listDirectory,
     searchFiles,
