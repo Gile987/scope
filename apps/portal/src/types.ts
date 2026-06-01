@@ -646,6 +646,11 @@ export interface AgentVersion {
   createdAt: string;
 }
 
+// Agent capabilities declared at the worker level
+export interface AgentCapabilities {
+  supportsReasoningEffort?: boolean;
+}
+
 // Coding Agent types
 export interface CodingAgent {
   _id: string;
@@ -655,6 +660,7 @@ export interface CodingAgent {
   supportedModels: string[];
   defaultModel?: string;
   available?: boolean;
+  capabilities?: AgentCapabilities;
   versions?: AgentVersion[];
   createdAt: string;
   updatedAt?: string;

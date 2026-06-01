@@ -72,6 +72,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
       model: options?.model,
+      reasoningEffort: options?.reasoningEffort,
       mcpServerCount: this.mcpConfigs.length,
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
@@ -151,6 +152,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         mcpServers: this.gateway && this.mcpConfigs.length > 0
           ? [{ type: "http" as const, slug: "mcp-gateway", name: "mcp-gateway", url: this.gateway.mcpEndpoint }]
           : [],
+        reasoningEffort: options?.reasoningEffort,
       });
 
       await log("info", "Claude Code processing complete", { 

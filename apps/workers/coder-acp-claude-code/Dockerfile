@@ -80,6 +80,10 @@ COPY apps/workers/coder-acp-claude-code/src ./apps/workers/coder-acp-claude-code
 
 RUN pnpm --filter shared build && pnpm --filter coder-acp-claude-code build
 
+# Pre-convert agent.yaml to JSON so the registration job doesn't need the yaml package at runtime
+COPY apps/workers/coder-acp-claude-code/agent.yaml ./apps/workers/coder-acp-claude-code/agent.yaml
+RUN node -e "const{parse}=require(require.resolve('yaml',{paths:['/app/packages/shared']}));const fs=require('fs');fs.writeFileSync('apps/workers/coder-acp-claude-code/agent.json',JSON.stringify(parse(fs.readFileSync('apps/workers/coder-acp-claude-code/agent.yaml','utf8'))))"
+
 # --- Dev stage: hot reload with tsx watch ---
 FROM builder AS dev
 ARG CLAUDE_CODE_ACP_VERSION
@@ -117,6 +121,8 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/apps/workers/coder-acp-claude-code/dist ./apps/workers/coder-acp-claude-code/dist/
+COPY apps/workers/coder-acp-claude-code/agent.yaml ./apps/workers/coder-acp-claude-code/agent.yaml
+COPY --from=builder /app/apps/workers/coder-acp-claude-code/agent.json ./apps/workers/coder-acp-claude-code/agent.json
 
 # Use existing node user (UID 1000) so claude-code-acp allows bypassPermissions mode
 RUN mkdir -p /workspace && chown node:node /workspace
