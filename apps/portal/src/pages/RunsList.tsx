@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect, useCallback, Fragment, type Key, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
-import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download, Lock } from "lucide-react";
+import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download, Lock, Eye } from "lucide-react";
 import { FaLinux } from "react-icons/fa";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -1685,10 +1685,38 @@ export function RunsList() {
     {
       id: "actions",
       header: "",
-      width: "100px",
+      width: "152px",
       sticky: "right",
       cell: (r) => (
         <div className="flex items-center justify-end gap-0.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            title="View run"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/runs/${r._id}`);
+            }}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            <span className="sr-only">View</span>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            title="Download archive"
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(api.archiveUrl(r._id), "_blank");
+            }}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span className="sr-only">Download</span>
+          </Button>
           <Button
             type="button"
             variant="ghost"
