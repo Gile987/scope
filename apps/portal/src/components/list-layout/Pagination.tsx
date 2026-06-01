@@ -84,7 +84,7 @@ export function Pagination({
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground">Rows per page</span>
             <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
-              <SelectTrigger className="h-8 w-[72px]">
+              <SelectTrigger className="h-8 w-[72px]" aria-label="Rows per page">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

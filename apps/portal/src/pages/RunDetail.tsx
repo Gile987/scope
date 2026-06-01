@@ -378,9 +378,11 @@ export function RunDetail() {
               <button
                 onClick={copyId}
                 className="text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Copy run ID"
                 title="Copy run ID"
               >
                 {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                <span className="sr-only">Copy run ID</span>
               </button>
               <CliCommand command={buildRunGet(id ?? "")} align="start" />
             </div>
