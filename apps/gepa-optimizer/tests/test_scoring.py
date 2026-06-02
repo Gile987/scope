@@ -14,9 +14,21 @@ def test_non_done_status_scores_zero():
     assert compute_run_score(run, ["a"]) == 0.0
 
 
-def test_non_succeeded_outcome_scores_zero():
+def test_failed_outcome_scores_zero():
     run = {"status": "done", "outcome": "failed", "turns": [_turn(0, [_r("a", True)])]}
     assert compute_run_score(run, ["a"]) == 0.0
+
+
+def test_finished_outcome_scores_partial_credit():
+    # A run that ran to completion but did not pass every criterion has
+    # outcome "finished" — it must still earn its criteria fraction, not 0.0,
+    # otherwise GEPA loses its gradient.
+    run = {
+        "status": "done",
+        "outcome": "finished",
+        "turns": [_turn(0, [_r("a", True), _r("b", True), _r("c", True), _r("d", False)])],
+    }
+    assert compute_run_score(run, ["a", "b", "c", "d"]) == 0.75
 
 
 def test_no_turns_scores_zero():
