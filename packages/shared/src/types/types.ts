@@ -165,6 +165,26 @@ export interface RequestDocument {
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → TaskPromptDocument._id)
   promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
+  /**
+   * Optional grouping id tying together all requests of one experiment
+   * (e.g. a single GEPA optimization run: the seed request plus every
+   * candidate-evaluation request). Free-form, supplied by the client.
+   */
+  experimentId?: string;
+  /**
+   * FK → TaskPromptDocument._id of an AGENTS.md-typed prompt to deliver into
+   * the agent's workspace for this run. When set, the worker writes the
+   * resolved content to `<workspace>/AGENTS.md` before the run starts.
+   */
+  agentsMdPromptId?: string;
+  /**
+   * Lineage edges for the AGENTS.md candidate: the parent AGENTS.md prompt ids
+   * this candidate was derived from. Empty/absent = root (seed); one entry =
+   * reflective mutation; two entries = merge (GEPA's lineage is a multi-parent
+   * DAG). Recorded on the request so the experiment's full DAG can be
+   * reconstructed by querying its requests.
+   */
+  agentsMdParentIds?: string[];
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
   extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
@@ -406,7 +426,7 @@ export interface QueueProcessorConfig extends BaseQueueProcessorConfig {
 
 // --- Runs grouping types (shared between API and portal) ---
 
-export type GroupByKey = "none" | "task" | "submissionId" | "profile";
+export type GroupByKey = "none" | "task" | "submissionId" | "profile" | "experiment";
 
 export interface AggregateStats {
   min: number;
@@ -610,10 +630,28 @@ export interface InsightDocument {
 // Task prompts are immutable, content-addressed entities identified by UUIDv5(text, namespace).
 // Runs reference task prompts via a materialized taskPromptId derived from scenario.task.
 
+/** Prompt type. `task` (default) = a task/scenario prompt; `agents.md` = an
+ *  AGENTS.md system-style prompt delivered into the agent workspace. */
+export type TaskPromptType = 'task' | 'agents.md';
+
 /** Task prompt document stored in MongoDB. Immutable — text cannot be changed after creation. */
 export interface TaskPromptDocument {
   _id: string;                          // UUIDv5 of text.trim() (content-addressed)
-  text: string;                         // Full task prompt text
+  /**
+   * Inline prompt body. Present when the body is small enough to store in
+   * Mongo (≤ PROMPT_INLINE_MAX_BYTES). Mutually exclusive with
+   * `contentBlobUrl` — exactly one is set. Optional so large bodies can live
+   * in blob storage instead.
+   */
+  text?: string;
+  /**
+   * Blob reference to the prompt body when it exceeds the inline size
+   * threshold. Mutually exclusive with `text`. The body is fetched via
+   * `resolvePromptText` server-side.
+   */
+  contentBlobUrl?: string;
+  /** Prompt type. Absent ⇒ `'task'` (backward compatible). */
+  type?: TaskPromptType;
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: Date;           // When features were last extracted
   createdAt: Date;
@@ -628,6 +666,12 @@ export interface TaskPromptDocument {
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
+  /**
+   * Which prompt type this feature applies to. Absent ⇒ `'task'` (backward
+   * compatible). Feature extraction only considers features whose `type`
+   * matches the prompt being extracted.
+   */
+  type?: TaskPromptType;
 }
 
 /** Prompt feature document stored in MongoDB (extends PromptFeatureConfig with DB metadata) */
