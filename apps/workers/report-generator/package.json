@@ -10,10 +10,10 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "shared": "workspace:*",
     "@azure/storage-queue": "^12.25.0",
-    "@github/copilot-sdk": "^0.1.17",
-    "dotenv": "^16.4.5"
+    "@github/copilot-sdk": "1.0.0-beta.12",
+    "dotenv": "^16.4.5",
+    "shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
