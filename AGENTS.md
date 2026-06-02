@@ -22,6 +22,7 @@ apps/
   model-scanners/               # Feature detection for Copilot and Anthropic models
   version-checkers/             # Poll for new agent/tool releases
   key-updaters/                 # GitHub auth cookie management for VS Code Web
+  gepa-optimizer/               # Python+uv GEPA driver — optimizes AGENTS.md via Scope runs
 packages/
   shared/                       # Monorepo foundation — types, DB models, queue/blob/redis clients
   db-migrations/                # MongoDB migration framework (mongo-migrate-ts)
@@ -116,6 +117,19 @@ Command-line interface built with Commander.js and Ink (React for terminals). Us
 Express service for centralized token storage, validation, and round-robin distribution. Integrates with Azure Key Vault (Lowkey Vault locally). Uses `packages/github-auth/` for GitHub OAuth/device-code auth.
 
 - Architecture: [docs/architecture/token-manager.md](docs/architecture/token-manager.md)
+
+### GEPA Optimizer (`apps/gepa-optimizer/`)
+
+Python + uv app (outside the pnpm workspace, like the Rust `apps/gateway`) that
+runs the [GEPA](https://github.com/gepa-ai/gepa) reflective prompt-optimization
+algorithm to optimize an **AGENTS.md** file. Each candidate is scored by a real
+Scope run (Copilot CLI worker + Claude Haiku 4.5) via a custom `ScopeAdapter`:
+submit a request with `agentsMd` + `experimentId`, poll to completion, and score
+from the run's `criteriaResults`. Scoring is derived, never persisted. Run tests
+with `pnpm test:gepa` (`uv run pytest`); CI runs `uv sync --locked && uv run pytest`.
+
+- README: [apps/gepa-optimizer/README.md](apps/gepa-optimizer/README.md)
+- Data-model impact (experimentId, typed prompts, AGENTS.md delivery): [docs/architecture/app-design.md](docs/architecture/app-design.md)
 
 ### Shared Package (`packages/shared/`)
 

@@ -136,6 +136,20 @@ Model name / deployment name used by both backends. For Foundry, this must
 match the deployment name on the Foundry resource. Examples: `gpt-4.1`,
 `gpt-4o`, `gpt-4.1-mini`. Put in `.env.local` (see note above).
 
+## Prompt Storage Configuration
+
+### PROMPT_INLINE_MAX_BYTES
+**Default:** `16384` (16 KB)
+**Type:** integer (UTF-8 byte length)
+**Used by:** API (`apps/api`)
+
+Threshold deciding where a task/AGENTS.md prompt body is stored. A body whose
+UTF-8 byte length is at/under this value is stored **inline** in Mongo (`text`);
+a larger body is uploaded to blob storage (`prompts/{promptId}.txt`) and the doc
+references it via `contentBlobUrl` with no inline `text`. The decision is purely
+size-based — independent of the prompt's `type`. Small task prompts stay inline
+(today's behavior); large AGENTS.md bodies go to blob automatically.
+
 ## Judge Strategy Configuration
 
 ### JUDGE_STRATEGY
@@ -384,3 +398,60 @@ Directory where DevProxy writes HAR files. Shared between the DevProxy process a
 **Type:** integer (Docker Compose only)
 
 Host port mapping for the Copilot DevProxy REST API in Docker Compose.
+
+## GEPA Optimizer Configuration (`apps/gepa-optimizer`)
+
+Python + uv app that optimizes an AGENTS.md file via GEPA, scoring each candidate
+with a real Scope run. Configured via `apps/gepa-optimizer/.env` (see `.env.example`).
+
+### SCOPE_API_URL
+**Default:** `http://localhost:3100`
+
+Base URL of the Scope REST API the optimizer submits requests to.
+
+### SCOPE_WORKER
+**Default:** `coder-acp-copilot`
+
+Worker used to evaluate each candidate.
+
+### SCOPE_MODEL
+**Default:** `claude-haiku-4.5`
+
+Model the worker runs under test.
+
+### SCOPE_MAX_CONCURRENCY
+**Default:** `10`
+**Type:** integer
+
+Max number of Scope runs kept in-flight at once. Defaults to the Linux
+`coder-acp-copilot` KEDA ceiling (`maxReplicaCount: 10`); submitting more is
+harmless but yields no speedup.
+
+### SCOPE_RUN_TIMEOUT_SECONDS / SCOPE_POLL_INTERVAL_SECONDS
+**Defaults:** `1800` / `15`
+
+How long to wait for a run to reach `status=done`, and how often to poll.
+
+### SCOPE_MAX_ITERATIONS
+**Default:** `10`
+
+Multi-turn iterations per Scope run.
+
+### SCOPE_SCORE_STRATEGY
+**Default:** `mean`
+**Options:** `mean` | `final` | `weighted`
+
+How a run's per-turn scores aggregate into one score. `mean` averages all turns;
+`final` uses the last turn; `weighted` is `0.8*final + 0.2*mean`.
+
+### GEPA_MAX_METRIC_CALLS / GEPA_REFLECTION_MINIBATCH_SIZE
+**Defaults:** `12` / `2`
+
+GEPA budget. Each metric call is one full (slow) Scope agent run — keep small.
+
+### GEPA_REFLECTION_LM
+**Default:** `azure/gpt-5.5`
+
+litellm model string for the reflection LM that rewrites the AGENTS.md (not the
+agent under test). Azure credentials (`AZURE_API_KEY`, `AZURE_API_BASE`,
+`AZURE_API_VERSION`) are read by litellm.

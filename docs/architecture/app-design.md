@@ -49,6 +49,53 @@ erDiagram
 - **Criterion** — An evaluation check (e.g., "has a working Express server"). Criteria form a DAG (directed acyclic graph) with dependencies.
 - **CriterionResult** — Pass/fail result of evaluating a criterion against a specific iteration
 
+### Typed prompts, AGENTS.md, and size-based storage
+
+Task prompts live in a single `task-prompts` collection that is now **typed** and
+shared by two prompt kinds:
+
+- `TaskPromptDocument.type?: 'task' | 'agents.md'` — absent ⇒ `'task'` (backward
+  compatible; existing docs are untouched).
+- **`_id` is the content hash.** `computeTaskPromptId(text, type?)` hashes the
+  trimmed text for `task` (or absent) — identical to the legacy hash, so every
+  existing task prompt keeps its `_id` — and namespaces non-task types as
+  `hash(type + '\n' + text)` so an AGENTS.md prompt never collides with a task
+  prompt of the same text. `findOrCreate` deduplicates on this hash.
+- **Body storage is decided by size, not type.** A prompt body at/under
+  `PROMPT_INLINE_MAX_BYTES` (default 16 KB, UTF-8) is stored inline as `text`;
+  larger bodies are uploaded to blob (`prompts/{promptId}.txt`) and the doc carries
+  `contentBlobUrl` with no inline `text`. Exactly one of `text` / `contentBlobUrl`
+  is set. `resolvePromptText(doc)` returns the inline body or downloads the blob, so
+  callers (feature extraction, the worker text endpoint) get plain text regardless
+  of location.
+- **Prompt features are typed the same way.** `PromptFeatureDocument.type?:
+  'task' | 'agents.md'` (absent ⇒ `'task'`); feature extraction selects only
+  features of the prompt's type.
+
+### Experiment grouping and AGENTS.md delivery
+
+To support GEPA-style optimization (see `apps/gepa-optimizer`), the request carries:
+
+- `RequestDocument.experimentId?: string` — groups the seed request and every
+  candidate request of one optimization run. Filterable (`?experimentId=`) and
+  groupable (`groupBy=experiment`). A sparse index on `requests.experimentId`
+  serves both grouping and lineage queries.
+- `RequestDocument.agentsMdPromptId?: string` — set when the create-request body
+  includes `agentsMd` (raw text); the API `findOrCreate`s an `agents.md`-typed
+  prompt and stores its id. Before the run starts, the shared queue-processor
+  resolves the text (downloading from blob if needed) and writes
+  `<workspace>/AGENTS.md` once (constant for the whole run). It **fails the run**
+  if the prompt id is set but cannot be resolved — never silently runs the baseline.
+- `RequestDocument.agentsMdParentIds?: string[]` — best-effort lineage edges
+  (`[]`/absent = root, `[p]` = mutation, `[i, j]` = merge) for callers that know
+  parentage at submit time. The GEPA optimizer instead reconstructs lineage
+  post-hoc from the engine's parent indices.
+
+**Scoring is not persisted.** The GEPA metric (fraction of criteria passed,
+aggregated across turns) is derived by the optimizer from `run.turns[].criteriaResults`
+and never stored in Scope — it is algorithm-specific. If ever persisted it would be
+named (e.g. `metrics.gepaCriteriaPassRateMeanTurns`) and live on `RunState`.
+
 ## Judge Pipeline
 
 The judge evaluates coding agent output against criteria. Two strategies are supported:
