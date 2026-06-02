@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptType, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, CursorPaginatedResponse, IterationOp } from "@/types";
 
 import { qs } from "./url";
 import { recordServerDate } from "./serverClock";
@@ -31,7 +31,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   /** List runs with cursor-based pagination */
-  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; profileId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {
+  listRuns: (opts?: { worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; experimentId?: string; profileId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<Run>> => {
     return request(`/requests${qs({
       worker: opts?.worker,
       taskPromptId: opts?.taskPromptId,
@@ -39,6 +39,7 @@ export const api = {
       outcome: opts?.outcome,
       criteria: opts?.criteria,
       submissionId: opts?.submissionId,
+      experimentId: opts?.experimentId,
       profileId: opts?.profileId,
       turns: opts?.turns !== undefined ? String(opts.turns) : undefined,
       turnsOp: opts?.turns !== undefined ? opts?.turnsOp : undefined,
@@ -52,7 +53,7 @@ export const api = {
   },
 
   /** List runs grouped by task or submissionId, with cursor-based pagination */
-  listRunGroups: (opts: { groupBy: "task" | "submissionId" | "profile"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
+  listRunGroups: (opts: { groupBy: "task" | "submissionId" | "profile" | "experiment"; worker?: string; taskPromptId?: string; status?: string; outcome?: string; criteria?: string; submissionId?: string; experimentId?: string; turns?: number; turnsOp?: IterationOp; maxIterations?: number; maxIterationsOp?: IterationOp; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
     return request(`/requests${qs({
       groupBy: opts.groupBy,
       worker: opts.worker,
@@ -61,6 +62,7 @@ export const api = {
       outcome: opts.outcome,
       criteria: opts.criteria,
       submissionId: opts.submissionId,
+      experimentId: opts.experimentId,
       turns: opts.turns !== undefined ? String(opts.turns) : undefined,
       turnsOp: opts.turns !== undefined ? opts.turnsOp : undefined,
       maxIterations: opts.maxIterations !== undefined ? String(opts.maxIterations) : undefined,
@@ -92,6 +94,9 @@ export const api = {
     agentVersion?: string;
     profileId?: string;
     profileVariations?: string[];
+    agentsMd?: string;
+    experimentId?: string;
+    agentsMdParentIds?: string[];
   }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
     const { worker, ...payload } = body;
     const url = worker ? `/requests?worker=${encodeURIComponent(worker)}` : `/requests`;
@@ -346,9 +351,10 @@ export const api = {
   // ─── Prompt Features ───────────────────────────────────────────────────────
 
   /** List all prompt features, optionally filtered by search query */
-  listPromptFeatures: (q?: string): Promise<PromptFeatureDocument[]> => {
+  listPromptFeatures: (q?: string, type?: TaskPromptType): Promise<PromptFeatureDocument[]> => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
+    if (type) params.set("type", type);
     const qs = params.toString();
     return request(`/prompt-features${qs ? `?${qs}` : ""}`);
   },
@@ -359,7 +365,7 @@ export const api = {
   },
 
   /** Create a new prompt feature */
-  createPromptFeature: (body: { id: string; prompt: string }): Promise<PromptFeatureDocument> => {
+  createPromptFeature: (body: { id: string; prompt: string; type?: TaskPromptType }): Promise<PromptFeatureDocument> => {
     return request("/prompt-features", {
       method: "POST",
       body: JSON.stringify(body),
@@ -389,12 +395,13 @@ export const api = {
 
   // ─── Task Prompts ──────────────────────────────────────────────────────────
 
-  /** List all task prompts (paginated, optional search) */
-  listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string }): Promise<{ items: TaskPrompt[]; total: number }> => {
+  /** List all task prompts (paginated, optional search + type filter) */
+  listTaskPrompts: (opts?: { limit?: number; offset?: number; search?: string; type?: TaskPromptType }): Promise<{ items: TaskPrompt[]; total: number }> => {
     const params = new URLSearchParams();
     if (opts?.limit) params.set("limit", String(opts.limit));
     if (opts?.offset) params.set("offset", String(opts.offset));
     if (opts?.search) params.set("search", opts.search);
+    if (opts?.type) params.set("type", opts.type);
     const qs = params.toString();
     return request(`/task-prompts${qs ? `?${qs}` : ""}`);
   },
@@ -404,11 +411,16 @@ export const api = {
     return request(`/task-prompts/${encodeURIComponent(id)}`);
   },
 
+  /** Resolve a task/AGENTS.md prompt's plain text (downloads blob if blob-backed) */
+  getTaskPromptContent: (id: string): Promise<{ id: string; text: string }> => {
+    return request(`/task-prompts/${encodeURIComponent(id)}/content`);
+  },
+
   /** Create (or find existing) task prompt — idempotent */
-  createTaskPrompt: (text: string): Promise<TaskPrompt> => {
+  createTaskPrompt: (text: string, type?: TaskPromptType): Promise<TaskPrompt> => {
     return request("/task-prompts", {
       method: "POST",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, ...(type && { type }) }),
     });
   },
 

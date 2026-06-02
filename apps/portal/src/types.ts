@@ -141,6 +141,12 @@ export interface Run {
   submissionId?: string;
   profileId?: string;
   profileVersionId?: string;
+  /** GEPA experiment grouping — links a seed request and its follow-ups. */
+  experimentId?: string;
+  /** Resolved AGENTS.md prompt id when an AGENTS.md was supplied. */
+  agentsMdPromptId?: string;
+  /** Parent AGENTS.md prompt ids forming GEPA lineage (mutation/merge edges). */
+  agentsMdParentIds?: string[];
 }
 
 export interface CursorPaginatedResponse<T> {
@@ -204,9 +210,13 @@ export interface GeneratePromptResponse {
 }
 
 // Prompt Feature types
+export type TaskPromptType = "task" | "agents.md";
+
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
+  /** Prompt type this feature applies to (absent ⇒ "task"). */
+  type?: TaskPromptType;
 }
 
 export interface PromptFeatureDocument extends PromptFeatureConfig {
@@ -241,7 +251,9 @@ export interface PromptFeatureExtraction {
 // Task Prompt types (first-class entity for benchmark task texts)
 export interface TaskPrompt {
   _id: string;                          // UUIDv5 content-addressed ID
-  text: string;                         // Full task prompt text
+  text?: string;                        // Full task prompt text (absent when blob-backed)
+  type?: TaskPromptType;                // "task" (default) | "agents.md"
+  contentBlobUrl?: string;              // Blob reference when body is over the inline threshold
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: string;         // When features were last extracted
   createdAt: string;
@@ -928,7 +940,7 @@ export interface ProfileWithVersion extends ProfileDocument {
 
 // --- Runs grouping types (mirrored from shared) ---
 
-export type GroupByKey = "none" | "task" | "submissionId" | "profile";
+export type GroupByKey = "none" | "task" | "submissionId" | "profile" | "experiment";
 
 export interface AggregateStats {
   min: number;
@@ -948,6 +960,7 @@ export interface GroupUniformValues {
   extensions?: string[];
   status?: RunStatus;
   submissionId?: string;
+  experimentId?: string;
   task?: string;
 }
 

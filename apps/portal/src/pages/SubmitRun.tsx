@@ -159,6 +159,8 @@ export function SubmitRun() {
   const [maxIterations, setMaxIterations] = useState<number>(10);
   const [occurrences, setOccurrences] = useState<number>(5);
   const [priority, setPriority] = useState<number>(0);
+  const [agentsMd, setAgentsMd] = useState<string>("");
+  const [experimentId, setExperimentId] = useState<string>("");
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -497,6 +499,8 @@ export function SubmitRun() {
       maxIterations,
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
+      ...(agentsMd.trim() ? { agentsMd: agentsMd } : {}),
+      ...(experimentId.trim() ? { experimentId: experimentId.trim() } : {}),
       ...(inVariationMode ? {} : { ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}) }),
@@ -807,6 +811,31 @@ export function SubmitRun() {
                 onChange={(e) => setOccurrences(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
               />
             </div>
+          </div>
+
+          {/* ─── Advanced: AGENTS.md + experiment grouping ──────────────── */}
+          <div className="space-y-2">
+            <Label htmlFor="agentsMd">AGENTS.md (optional)</Label>
+            <Textarea
+              id="agentsMd"
+              rows={6}
+              placeholder="# AGENTS.md&#10;Project-level instructions written to the workspace root before the run."
+              value={agentsMd}
+              onChange={(e) => setAgentsMd(e.target.value)}
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Stored as an <code>agents.md</code> prompt and written to <code>&lt;workspace&gt;/AGENTS.md</code> before the run. Leave empty to omit.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="experimentId">Experiment ID (optional)</Label>
+            <Input
+              id="experimentId"
+              placeholder="Group related requests (e.g. a GEPA run)"
+              value={experimentId}
+              onChange={(e) => setExperimentId(e.target.value)}
+            />
           </div>
         </CardContent>
       </Card>

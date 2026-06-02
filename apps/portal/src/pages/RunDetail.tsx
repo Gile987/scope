@@ -165,6 +165,15 @@ export function RunDetail() {
     enabled: !!taskPromptId,
   });
 
+  // Fetch the AGENTS.md body (if this run supplied one) for Markdown rendering.
+  // Uses the /content endpoint so blob-backed bodies resolve to plain text.
+  const agentsMdPromptId = run?.agentsMdPromptId;
+  const { data: agentsMdContent } = useQuery({
+    queryKey: ["task-prompt-content", agentsMdPromptId],
+    queryFn: () => api.getTaskPromptContent(agentsMdPromptId!),
+    enabled: !!agentsMdPromptId,
+  });
+
   // Fetch reports for this run
   const { data: reports, refetch: refetchReports } = useQuery({
     queryKey: ["run-reports", id],
@@ -1094,6 +1103,39 @@ export function RunDetail() {
                       </Link>
                     ))}
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* AGENTS.md card (if this run supplied one) */}
+            {run.agentsMdPromptId && (
+              <Card className="md:col-span-2">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <FileText className="h-4 w-4" /> AGENTS.md
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Link to={`/task-prompts/${run.agentsMdPromptId}`} className="font-mono hover:underline">
+                      {formatId(run.agentsMdPromptId)}
+                    </Link>
+                    {run.experimentId && (
+                      <Badge variant="outline" className="font-mono">experiment: {run.experimentId}</Badge>
+                    )}
+                    {run.agentsMdParentIds && run.agentsMdParentIds.length > 0 && (
+                      <Badge variant="secondary" className="font-mono">
+                        {run.agentsMdParentIds.length === 1 ? "mutation" : "merge"} · {run.agentsMdParentIds.length} parent{run.agentsMdParentIds.length === 1 ? "" : "s"}
+                      </Badge>
+                    )}
+                  </div>
+                  {agentsMdContent ? (
+                    <div className="rounded-md border bg-muted/30 p-3 max-h-96 overflow-auto">
+                      <MarkdownRenderer>{agentsMdContent.text}</MarkdownRenderer>
+                    </div>
+                  ) : (
+                    <Skeleton className="h-24 w-full" />
+                  )}
                 </CardContent>
               </Card>
             )}

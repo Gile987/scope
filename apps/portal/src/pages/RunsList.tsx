@@ -268,18 +268,19 @@ const COLUMN_IDS = COLUMN_OPTIONS.map((o) => o.id);
 
 // Segmented toggle used in the list header for the Group By control. Kept
 // inline because it is only used here.
-const GROUP_BY_OPTIONS: ReadonlyArray<{ value: "profile" | "task" | "submissionId"; label: string }> = [
+const GROUP_BY_OPTIONS: ReadonlyArray<{ value: "profile" | "task" | "submissionId" | "experiment"; label: string }> = [
   { value: "profile", label: "Profile" },
   { value: "task", label: "Task" },
   { value: "submissionId", label: "Submission" },
+  { value: "experiment", label: "Experiment" },
 ];
 
 function GroupByToggle({
   value,
   onChange,
 }: {
-  value: "none" | "profile" | "task" | "submissionId";
-  onChange: (next: "none" | "profile" | "task" | "submissionId") => void;
+  value: "none" | "profile" | "task" | "submissionId" | "experiment";
+  onChange: (next: "none" | "profile" | "task" | "submissionId" | "experiment") => void;
 }) {
   return (
     <div
@@ -426,7 +427,7 @@ export function RunsList() {
   const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(new Set());
   
   // Get groupBy from URL state
-  const groupBy = (state.getFilter("groupBy") ?? "none") as "none" | "profile" | "task" | "submissionId";
+  const groupBy = (state.getFilter("groupBy") ?? "none") as "none" | "profile" | "task" | "submissionId" | "experiment";
 
   // Cursor pagination — keep a stack of cursors that map a virtual page number
   // to a fetch instruction. Each entry describes how to fetch that page:
@@ -649,6 +650,9 @@ export function RunsList() {
           break;
         case "submissionId":
           key = run.submissionId ?? "(No Submission)";
+          break;
+        case "experiment":
+          key = run.experimentId ?? "(No Experiment)";
           break;
       }
       if (!groups.has(key)) {
@@ -2412,7 +2416,7 @@ export function RunsList() {
                   return runs[0] ? column.cell(runs[0]) : null;
                 },
                 renderGroupHeader: (groupKey, runs, expanded) => {
-                  const groupLabel = groupBy === "submissionId" ? "Submission ID" : groupBy === "profile" ? "Profile" : "Task";
+                  const groupLabel = groupBy === "submissionId" ? "Submission ID" : groupBy === "profile" ? "Profile" : groupBy === "experiment" ? "Experiment" : "Task";
                   const groupDisplayKey =
                     groupBy === "profile" && groupKey !== "(No Profile)"
                       ? (profileNameById.get(groupKey) ?? formatId(groupKey))
