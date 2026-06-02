@@ -242,6 +242,7 @@ function AggregateProgress({
 const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   { id: "id", label: "ID", required: true },
   { id: "submission", label: "Submission" },
+  { id: "experiment", label: "Experiment" },
   { id: "task", label: "Task" },
   { id: "criteria", label: "Criteria" },
   { id: "worker", label: "Worker" },
@@ -1199,6 +1200,25 @@ export function RunsList() {
         ),
     },
     {
+      id: "experiment",
+      header: "Experiment",
+      width: "140px",
+      hidden: columnVisibility.isHidden("experiment"),
+      cell: (r) =>
+        r.experimentId ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="font-mono text-xs cursor-default">
+                {formatId(r.experimentId.replace(/^gepa-/, ""))}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="font-mono text-xs">{r.experimentId}</TooltipContent>
+          </Tooltip>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
       id: "task",
       header: "Task",
       hidden: columnVisibility.isHidden("task"),
@@ -2065,6 +2085,8 @@ export function RunsList() {
                       return run.scenario?.task ?? "(No Task)";
                     case "submissionId":
                       return run.submissionId ?? "(No Submission)";
+                    case "experiment":
+                      return run.experimentId ?? "(No Experiment)";
                     default:
                       return "";
                   }
