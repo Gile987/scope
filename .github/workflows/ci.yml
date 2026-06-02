@@ -501,6 +501,31 @@ jobs:
           name: ctrf-test-results-gateway
           path: ctrf/
 
+  gepa:
+    name: "GEPA optimizer: test"
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.gepa == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.6"
+
+      - name: Sync dependencies (locked)
+        working-directory: apps/gepa-optimizer
+        run: uv sync --locked
+
+      - name: Run tests
+        working-directory: apps/gepa-optimizer
+        run: uv run pytest -q
+
   # ---------------------------------------------------------------------------
   # Detect which images changed (runs in parallel with CI jobs)
   # ---------------------------------------------------------------------------
@@ -521,6 +546,7 @@ jobs:
       db-migrations: ${{ steps.changes.outputs.db-migrations }}
       shared: ${{ steps.changes.outputs.shared }}
       gateway: ${{ steps.changes.outputs.gateway }}
+      gepa: ${{ steps.changes.outputs.gepa }}
       coder-acp-copilot-windows: ${{ steps.changes.outputs.coder-acp-copilot-windows }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
       typescript: ${{ steps.changes.outputs.typescript }}
@@ -567,12 +593,15 @@ jobs:
               - 'packages/db-migrations/**'
             gateway:
               - 'apps/gateway/**'
+            gepa:
+              - 'apps/gepa-optimizer/**'
             coder-acp-copilot-windows:
               - 'apps/workers/coder-acp-copilot-windows/**'
               - 'apps/workers/coder-acp-copilot/versions.env'
             typescript:
               - 'apps/**'
               - '!apps/gateway/**'
+              - '!apps/gepa-optimizer/**'
               - 'packages/**'
               - 'package.json'
               - 'pnpm-lock.yaml'
@@ -864,7 +893,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [test, integration-test, lint, build, cli-bundle-test, gateway]
+    needs: [test, integration-test, lint, build, cli-bundle-test, gateway, gepa]
     if: always()
 
     steps:
@@ -875,7 +904,8 @@ jobs:
              [ "${{ needs.lint.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ] && \
              [ "${{ needs.cli-bundle-test.result }}" = "success" -o "${{ needs.cli-bundle-test.result }}" = "skipped" ] && \
-             [ "${{ needs.gateway.result }}" = "success" -o "${{ needs.gateway.result }}" = "skipped" ]; then
+             [ "${{ needs.gateway.result }}" = "success" -o "${{ needs.gateway.result }}" = "skipped" ] && \
+             [ "${{ needs.gepa.result }}" = "success" -o "${{ needs.gepa.result }}" = "skipped" ]; then
             echo "✅ All checks passed!"
             exit 0
           else
@@ -886,5 +916,6 @@ jobs:
             echo "  Build: ${{ needs.build.result }}"
             echo "  CLI Bundle Tests: ${{ needs.cli-bundle-test.result }}"
             echo "  Gateway: ${{ needs.gateway.result }}"
+            echo "  GEPA: ${{ needs.gepa.result }}"
             exit 1
           fi

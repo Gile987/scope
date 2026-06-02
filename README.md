@@ -25,6 +25,7 @@
 | **Portal** (`apps/portal`) | React 19 + Vite web UI for managing runs and editing the criteria DAG |
 | **CLI** (`apps/cli`) | Commander + Ink TUI for submitting runs, streaming logs, and CI/CD automation |
 | **AI Gateway** (`apps/gateway`) | Rust TLS-intercepting HTTP proxy with a plugin architecture — captures HAR traffic from Electron-based agents to upstream AI providers |
+| **GEPA Optimizer** (`apps/gepa-optimizer`) | Python + uv app that runs the [GEPA](https://github.com/gepa-ai/gepa) reflective prompt-optimization algorithm to optimize an `AGENTS.md` file, scoring each candidate with a real Scope run (Copilot CLI worker + Claude Haiku 4.5) |
 | **MCP Gateway** | Per-worker [MCPJungle](https://github.com/mcpjungle/MCPJungle) sidecar that aggregates stdio + remote MCP servers behind a single streamable HTTP endpoint, enabling ACP workers to use stdio-only servers (see [docs/architecture/mcp-gateway.md](docs/architecture/mcp-gateway.md)) |
 | **Scheduler** (`apps/scheduler`) | Per-worker-type queue depth scheduler that drips requests from MongoDB into Azure Storage Queues |
 | **Token Manager** (`apps/token-manager`) | Centralized GitHub token storage, validation, and round-robin distribution (Azure Key Vault / Lowkey Vault) |
