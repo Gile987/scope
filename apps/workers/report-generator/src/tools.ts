@@ -27,6 +27,7 @@ export function createReportTools(options: CreateReportToolsOptions) {
   const searchInsights = defineTool("search_insights", {
     description:
       "Search existing insights by keyword query. Use this to check if a similar insight already exists before creating a new one. Returns matching insights sorted by reference count.",
+    skipPermission: true,
     parameters: {
       type: "object",
       properties: {
@@ -65,6 +66,7 @@ export function createReportTools(options: CreateReportToolsOptions) {
   const createInsight = defineTool("create_insight", {
     description:
       "Create a brand-new insight. Only use this when search_insights confirms no similar insight exists. The description should be markdown-formatted.",
+    skipPermission: true,
     parameters: {
       type: "object",
       properties: {
@@ -126,6 +128,7 @@ export function createReportTools(options: CreateReportToolsOptions) {
   const referenceInsight = defineTool("reference_insight", {
     description:
       "Reference an existing insight from this report. Use this when search_insights found a matching insight.",
+    skipPermission: true,
     parameters: {
       type: "object",
       properties: {

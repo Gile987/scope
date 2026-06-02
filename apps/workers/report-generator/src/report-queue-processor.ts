@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { DequeuedMessageItem } from "@azure/storage-queue";
-import { CopilotClient, SessionEvent } from "@github/copilot-sdk";
+import { CopilotClient, SessionEvent, approveAll } from "@github/copilot-sdk";
 import { mkdirSync, rmSync, existsSync, readFileSync, createWriteStream, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -214,29 +214,42 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         streaming: true,
         tools,
         workingDirectory,
-        availableTools: [
-          // File reading (built-in, scoped to workingDirectory)
-          "view",
-          "grep",
-          "glob",
-          // Shell (scoped to workingDirectory)
-          "bash",
-          // Network (fetch documentation/reference material)
-          "web_fetch",
-          // Orchestration
-          "task",
-          "read_agent",
-          "write_agent",
-          "list_agents",
-          "skill",
-          "exit_plan_mode",
-          "report_intent",
-          "task_complete",
-          // Custom insight tools are included automatically
-          "search_insights",
-          "create_insight",
-          "reference_insight",
+        excludedTools: [
+          // Write tools -- agent shouldn't see these in a read-only analysis session
+          "edit",
+          "create",
+          "write_file",
+          "delete_file",
+          // Interactive tools -- no user available
+          "ask_user",
+          // Platform tools -- not relevant for report generation
+          "powershell",
+          "sql",
+          "web_search",
+          "render_widget",
+          "discover_widgets",
+          "clear_widget",
+          "annotate_diff_line",
+          "add_pr_review_comment",
+          "rename_session",
+          "rename_branch",
+          "create_issue",
+          "create_pull_request",
         ],
+        onPermissionRequest: approveAll,
+        hooks: {
+          onPreToolUse: async (input) => {
+            // Enforce timeout on bash commands
+            if (input.toolName === "bash") {
+              const args = input.toolArgs as Record<string, unknown>;
+              return {
+                permissionDecision: "allow" as const,
+                modifiedArgs: { ...args, timeout: (args.timeout as number | undefined) ?? 30000 },
+              };
+            }
+            return { permissionDecision: "allow" as const };
+          },
+        },
         systemMessage: { mode: "replace", content: systemPrompt },
       });
 

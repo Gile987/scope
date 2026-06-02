@@ -27,7 +27,8 @@ vi.mock("@github/copilot-sdk", () => {
     createSession = mockCreateSession;
     stop = mockClientStop;
   }
-  return { CopilotClient: StubCopilotClient };
+  const approveAll = vi.fn();
+  return { CopilotClient: StubCopilotClient, approveAll };
 });
 
 vi.mock("shared", () => {
