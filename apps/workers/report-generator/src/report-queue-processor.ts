@@ -238,15 +238,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         ],
         onPermissionRequest: approveAll,
         hooks: {
-          onPreToolUse: async (input) => {
-            // Enforce timeout on bash commands
-            if (input.toolName === "bash") {
-              const args = input.toolArgs as Record<string, unknown>;
-              return {
-                permissionDecision: "allow" as const,
-                modifiedArgs: { ...args, timeout: (args.timeout as number | undefined) ?? 30000 },
-              };
-            }
+          onPreToolUse: async () => {
             return { permissionDecision: "allow" as const };
           },
         },
