@@ -28,6 +28,7 @@ taskPrompt
   .command("list")
   .description("List all task prompts")
   .option("-s, --search <search>", "Filter by text content")
+  .option("--type <type>", "Filter by prompt type ('task' or 'agents.md')")
   .option("-l, --limit <n>", "Maximum number of results", "50")
   .option("--offset <n>", "Number of results to skip", "0")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
@@ -37,6 +38,7 @@ taskPrompt
     try {
       const params = new URLSearchParams();
       if (options.search) params.set("search", options.search);
+      if (options.type) params.set("type", options.type);
       if (options.limit) params.set("limit", options.limit);
       if (options.offset) params.set("offset", options.offset);
       const qs = params.toString();
@@ -63,11 +65,15 @@ taskPrompt
           formatter: (tp: any) => tp._id.substring(0, 8) + '…',
           tableFormatter: (tp: any) => value(tp._id.substring(0, 8) + '…'),
         },
+        { key: 'type', label: 'Type', formatter: (tp: any) => tp.type ?? 'task',
+          tableFormatter: (tp: any) => value(tp.type ?? 'task') },
         { key: 'text', label: 'Text', formatter: (tp: any) => {
-          const text = tp.text.replace(/\n/g, ' ');
+          const text = (tp.text ?? '').replace(/\n/g, ' ');
+          if (!text) return tp.contentBlobUrl ? '(blob)' : '';
           return text.length > 60 ? text.substring(0, 60) + '…' : text;
         }, tableFormatter: (tp: any) => {
-          const text = tp.text.replace(/\n/g, ' ');
+          const text = (tp.text ?? '').replace(/\n/g, ' ');
+          if (!text) return dimTimestamp(tp.contentBlobUrl ? '(blob)' : '');
           const truncated = text.length > 60 ? text.substring(0, 60) + '…' : text;
           return dimTimestamp(truncated);
         }},
@@ -105,7 +111,7 @@ taskPrompt
       }
 
       const tp = await response.json() as {
-        _id: string; text: string;
+        _id: string; text?: string; type?: string; contentBlobUrl?: string;
         features?: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
         featuresExtractedAt?: string;
         createdAt: string; deletedAt?: string;
@@ -129,11 +135,16 @@ taskPrompt
       }
 
       console.log(`${label('ID:')}        ${value(tp._id)}`);
+      console.log(`${label('Type:')}      ${value(tp.type ?? 'task')}`);
       console.log(`${label('Created:')}   ${value(tp.createdAt)}`);
       if (tp.deletedAt) console.log(`${label('Deleted:')}   ${value(tp.deletedAt)}`);
       console.log(`${label('Text:')}`);
-      for (const line of tp.text.trim().split('\n')) {
-        console.log(`  ${line}`);
+      if (tp.text) {
+        for (const line of tp.text.trim().split('\n')) {
+          console.log(`  ${line}`);
+        }
+      } else {
+        console.log(`  ${dimTimestamp('(stored in blob — fetch via /api/v1/task-prompts/:id/content)')}`);
       }
 
       if (tp.features && tp.features.length > 0) {
@@ -172,6 +183,7 @@ taskPrompt
   .description("Register a task prompt (idempotent — same text returns existing entity)")
   .option("-t, --text <text>", "Task prompt text")
   .option("-f, --file <path>", "Read task prompt text from file")
+  .option("--type <type>", "Prompt type ('task' default, or 'agents.md')")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
@@ -192,7 +204,7 @@ taskPrompt
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(options.type ? { text, type: options.type } : { text }),
       });
 
       if (!response.ok) {
@@ -201,9 +213,10 @@ taskPrompt
         process.exit(1);
       }
 
-      const tp = await response.json() as { _id: string; text: string; createdAt: string };
+      const tp = await response.json() as { _id: string; text?: string; type?: string; createdAt: string };
       console.log(successText(`Task prompt registered.`));
       console.log(`${label('ID:')}      ${value(tp._id)}`);
+      if (tp.type) console.log(`${label('Type:')}    ${value(tp.type)}`);
       console.log(`${label('Created:')} ${value(tp.createdAt)}`);
     } catch (error) {
       console.error(errorText("Error:"), error instanceof Error ? error.message : error);

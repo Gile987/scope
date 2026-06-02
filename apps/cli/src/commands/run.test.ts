@@ -155,6 +155,78 @@ describe("run list", () => {
     expect(output).toContain("status: done");
     expect(output).not.toContain("Found 1 request(s):");
   });
+
+  it("passes --experiment-id and --group-by through as query params", async () => {
+    mockFetchWith({ data: [], pageInfo: { hasNextPage: false, hasPreviousPage: false } });
+
+    await runListAndCaptureOutput(["--experiment-id", "exp-42", "--group-by", "experiment"]);
+
+    const calledUrl = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(calledUrl).toContain("experimentId=exp-42");
+    expect(calledUrl).toContain("groupBy=experiment");
+  });
+});
+
+describe("run submit", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function captureSubmit(args: string[]): { url: string; body: Record<string, unknown> } {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [url, init] = fetchMock.mock.calls[0];
+    return { url: url as string, body: JSON.parse((init as { body: string }).body) };
+  }
+
+  it("includes experimentId and agentsMd in the submit body", async () => {
+    mockFetchWith({ id: "req-submit-1", workerType: "coder-acp-copilot", status: "queued" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        [
+          "run", "submit",
+          "-m", "do the thing",
+          "--experiment-id", "exp-99",
+          "--agents-md", "# Be helpful",
+          "--no-stream",
+          "-u", "http://localhost:3100",
+        ],
+        { from: "user" },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const { url, body } = captureSubmit([]);
+    expect(url).toContain("/api/v1/requests?worker=coder-acp-copilot");
+    expect(body.experimentId).toBe("exp-99");
+    expect(body.agentsMd).toBe("# Be helpful");
+  });
+
+  it("omits agentsMd and experimentId when not provided", async () => {
+    mockFetchWith({ id: "req-submit-2", workerType: "coder-acp-copilot", status: "queued" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        ["run", "submit", "-m", "plain task", "--no-stream", "-u", "http://localhost:3100"],
+        { from: "user" },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const { body } = captureSubmit([]);
+    expect(body).not.toHaveProperty("agentsMd");
+    expect(body).not.toHaveProperty("experimentId");
+  });
 });
 
 describe("run retry", () => {
