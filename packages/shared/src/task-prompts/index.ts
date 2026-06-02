@@ -3,3 +3,4 @@
 
 export * from "./task-prompt-id.js";
 export * from "./task-prompt-store.js";
+export * from "./prompt-client.js";
