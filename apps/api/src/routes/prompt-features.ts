@@ -110,6 +110,7 @@ apiRoute(ctx.app, ctx.registry, {
             $setOnInsert: {
               id: trimmedId,
               prompt: config.prompt.trim(),
+              ...(config.type ? { type: config.type } : {}),
               createdAt: new Date(),
             },
           },
@@ -134,6 +135,7 @@ apiRoute(ctx.app, ctx.registry, {
   body: z.object({
     text: z.string(),
     model: z.string().optional(),
+    type: z.enum(["task", "agents.md"]).optional(),
   }),
   response: z.object({
     features: z.array(PromptFeatureResultSchema),
@@ -145,7 +147,7 @@ apiRoute(ctx.app, ctx.registry, {
     503: { description: "LLM not configured" },
   },
   handler: async (req, res, next) => {
-    const { text, model } = req.body;
+    const { text, model, type } = req.body;
     if (!text || typeof text !== "string" || !text.trim()) {
       res.status(400).json({ error: "Body must contain a non-empty 'text' string" });
       return;
@@ -156,8 +158,15 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    // Scope candidate features to the requested type (default = task,
+    // including legacy features with no `type`).
+    const promptType = type ?? "task";
+    const typeFilter: Record<string, unknown> =
+      promptType === "task"
+        ? { $or: [{ type: "task" }, { type: { $exists: false } }] }
+        : { type: promptType };
     const allFeatures = await ctx.promptFeatureCollection
-      .find({ deletedAt: { $exists: false } })
+      .find({ deletedAt: { $exists: false }, ...typeFilter })
       .toArray();
 
     const featureConfigs = allFeatures.map(f => ({ id: f.id, prompt: f.prompt }));
@@ -185,16 +194,30 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/prompt-features",
   tags: ["Prompt Features"],
   summary: "List features",
-  query: z.object({ q: z.string().optional() }),
+  query: z.object({ q: z.string().optional(), type: z.enum(["task", "agents.md"]).optional() }),
   response: z.array(PromptFeatureResponseSchema),
   handler: async (req, res) => {
     const q = req.query.q;
+    const type = req.query.type;
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    if (type) {
+      // Absent `type` is treated as 'task' for backward compatibility.
+      filter.$and = [
+        type === "task"
+          ? { $or: [{ type: "task" }, { type: { $exists: false } }] }
+          : { type },
+      ];
+    }
     if (q) {
-      filter.$or = [
+      const search = [
         { id: { $regex: q, $options: "i" } },
         { prompt: { $regex: q, $options: "i" } },
       ];
+      if (filter.$and) {
+        (filter.$and as unknown[]).push({ $or: search });
+      } else {
+        filter.$or = search;
+      }
     }
     const features = await ctx.promptFeatureCollection.find(filter).toArray();
     features.sort((a, b) => a.id.localeCompare(b.id));
@@ -239,7 +262,7 @@ apiRoute(ctx.app, ctx.registry, {
     409: { description: "Feature already exists" },
   },
   handler: async (req, res) => {
-    const { id, prompt } = req.body;
+    const { id, prompt, type } = req.body;
 
     if (!id || typeof id !== "string") {
       res.status(400).json({ error: "id is required and must be a string" });
@@ -263,6 +286,7 @@ apiRoute(ctx.app, ctx.registry, {
     const doc: PromptFeatureDocument = {
       id,
       prompt: prompt.trim(),
+      ...(type ? { type } : {}),
       createdAt: new Date(),
     };
 

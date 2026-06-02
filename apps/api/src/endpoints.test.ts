@@ -914,6 +914,44 @@ describe("API Endpoints", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("persists type=agents.md when creating a feature", async () => {
+      (mocks.promptFeatureCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/api/v1/prompt-features")
+        .send({ id: "agents_feat", prompt: "Does AGENTS.md mention tests?", type: "agents.md" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("type", "agents.md");
+      const doc = (mocks.promptFeatureCollection.insertOne as any).mock.calls[0][0];
+      expect(doc).toHaveProperty("type", "agents.md");
+    });
+  });
+
+  describe("GET /api/v1/prompt-features?type=", () => {
+    it("scopes the query to agents.md features", async () => {
+      (mocks.promptFeatureCollection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      const res = await request(app).get("/api/v1/prompt-features?type=agents.md");
+      expect(res.status).toBe(200);
+      const filter = (mocks.promptFeatureCollection.find as any).mock.calls[0][0];
+      expect(JSON.stringify(filter)).toContain("agents.md");
+    });
+
+    it("treats task type as including legacy untyped features", async () => {
+      (mocks.promptFeatureCollection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+
+      await request(app).get("/api/v1/prompt-features?type=task");
+      const filter = (mocks.promptFeatureCollection.find as any).mock.calls[0][0];
+      const json = JSON.stringify(filter);
+      expect(json).toContain("$exists");
+      expect(json).toContain("task");
+    });
   });
 
   describe("GET /api/v1/prompt-features/:id", () => {

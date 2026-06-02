@@ -10,6 +10,7 @@ export const CreatePromptFeatureInputSchema = z
   .object({
     id: z.string().regex(/^[a-z][a-z0-9_]*$/),
     prompt: z.string(),
+    type: z.enum(["task", "agents.md"]).optional(),
   })
   .openapi("CreatePromptFeatureInput");
 
@@ -23,6 +24,7 @@ export const PromptFeatureResponseSchema = z
   .object({
     id: z.string(),
     prompt: z.string(),
+    type: z.enum(["task", "agents.md"]).optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     deletedAt: z.coerce.date().optional(),

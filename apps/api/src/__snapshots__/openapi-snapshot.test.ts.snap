@@ -606,6 +606,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "prompt": {
             "type": "string",
           },
+          "type": {
+            "enum": [
+              "task",
+              "agents.md",
+            ],
+            "type": "string",
+          },
         },
         "required": [
           "id",
@@ -1729,6 +1736,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "prompt": {
+            "type": "string",
+          },
+          "type": {
+            "enum": [
+              "task",
+              "agents.md",
+            ],
             "type": "string",
           },
           "updatedAt": {
@@ -5555,6 +5569,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "enum": [
+                "task",
+                "agents.md",
+              ],
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -5621,6 +5647,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "type": "string",
                   },
                   "text": {
+                    "type": "string",
+                  },
+                  "type": {
+                    "enum": [
+                      "task",
+                      "agents.md",
+                    ],
                     "type": "string",
                   },
                 },

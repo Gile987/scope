@@ -50,6 +50,7 @@ export class FileSystemPromptFeatureProvider implements PromptFeatureProvider {
         const feature: PromptFeatureConfig = {
           id: data.id.trim(),
           prompt: data.prompt.trim(),
+          ...(data.type === "task" || data.type === "agents.md" ? { type: data.type } : {}),
         };
 
         if (this.registry.has(feature.id)) {

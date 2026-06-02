@@ -249,7 +249,7 @@ apiRoute(ctx.app, ctx.registry, {
     // Scope candidate features to the prompt's own type: task prompts get task
     // features; AGENTS.md prompts get agents.md features. Absent type ⇒ task.
     const promptType = taskPrompt.type ?? "task";
-    const typeFilter =
+    const typeFilter: Record<string, unknown> =
       promptType === "task"
         ? { $or: [{ type: "task" }, { type: { $exists: false } }] }
         : { type: promptType };
