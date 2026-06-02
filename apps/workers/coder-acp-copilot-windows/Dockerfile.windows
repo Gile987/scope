@@ -86,6 +86,7 @@ RUN New-Item -ItemType Directory -Force -Path C:\workspace
 WORKDIR C:/app/apps/workers/coder-acp-copilot-windows
 
 # Expose component versions + build metadata at runtime (used by self-registration)
+ARG COPILOT_CLI_VERSION
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 ENV COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION
