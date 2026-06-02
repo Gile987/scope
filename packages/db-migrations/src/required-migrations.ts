@@ -30,4 +30,5 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "015-add-priority-and-scheduler-index.ts",
   "016-fix-scheduler-sort-index.ts",
   "017-add-post-processor-dispatch-index.ts",
+  "018-add-experiment-id-index.ts",
 ];
