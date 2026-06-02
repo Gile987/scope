@@ -18,37 +18,42 @@ from .scope_client import ScopeClient, SystemicScopeError
 DataInst = dict[str, Any]
 
 
-# A small seed AGENTS.md. GEPA mutates this via reflection.
-SEED_AGENTS_MD = (
-    "# Agent guidance\n\n"
-    "You are an expert software engineer. Implement the requested task fully "
-    "and correctly. Prefer simple, idiomatic solutions. Verify your work "
-    "before finishing.\n"
+# The seed AGENTS.md GEPA mutates. It starts EMPTY on purpose: the whole point of
+# this experiment is to discover, from scratch, the AGENTS.md guidance that makes
+# the agent reliably satisfy the task's criteria.
+SEED_AGENTS_MD = ""
+
+# The single task we optimize the AGENTS.md for.
+BLOG_TASK = (
+    "Create a blogging platform inspired by Medium using Python and Django, "
+    "utilizing a nonrelational database for data storage and management. "
+    "Must run in the Cloud."
 )
+
+# Criteria requested per run. We request the FULL ancestor closure of the target
+# leaf (uses_azure_documentdb), not just the leaf, so scoring is graded:
+#   uses_database -> uses_document_oriented_db -> uses_azure_documentdb
+#   uses_azure ----------------------------------^
+# Partial credit (e.g. "uses a document DB but not on Azure") gives GEPA a much
+# denser gradient than a single 0/1 leaf, while the leaf remains the real goal.
+BLOG_CRITERIA = [
+    "uses_database",
+    "uses_document_oriented_db",
+    "uses_azure",
+    "uses_azure_documentdb",
+]
 
 
 def default_dataset() -> tuple[list[DataInst], list[DataInst]]:
     """Return ``(trainset, valset)``.
 
-    Replace the criterion ids with ids that exist in your Scope instance
-    (``pnpm cli criteria list``). Kept deliberately small.
+    A single seed task (the Medium-style Django blog on Azure Cosmos DB). Both
+    splits point at the same example: GEPA reflects on it (train) and selects on
+    it (val). ``preflight_criteria`` validates the ids before any expensive run.
     """
-    trainset: list[DataInst] = [
-        {
-            "task": "Create an Express.js server with a GET / route that responds 'Hello, World!'.",
-            "criteria": ["server_starts", "responds_hello_world"],
-        },
-        {
-            "task": "Add a GET /health route to the Express server that returns JSON {\"status\":\"ok\"}.",
-            "criteria": ["server_starts", "health_route_ok"],
-        },
-    ]
-    valset: list[DataInst] = [
-        {
-            "task": "Create an Express.js server with a GET / route that responds 'Hello, World!'.",
-            "criteria": ["server_starts", "responds_hello_world"],
-        },
-    ]
+    example: DataInst = {"task": BLOG_TASK, "criteria": list(BLOG_CRITERIA)}
+    trainset: list[DataInst] = [example]
+    valset: list[DataInst] = [dict(example)]
     return trainset, valset
 
 
