@@ -62,7 +62,7 @@ export function TaskPromptPicker({ onSelect }: TaskPromptPickerProps) {
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (items[highlightIdx]) {
-        selectItem(items[highlightIdx].text);
+        selectItem(items[highlightIdx].text ?? "");
       }
     } else if (e.key === "Escape") {
       setOpen(false);
@@ -109,13 +109,13 @@ export function TaskPromptPicker({ onSelect }: TaskPromptPickerProps) {
                       ? "bg-accent text-accent-foreground"
                       : "hover:bg-accent/50"
                   }`}
-                  onClick={() => selectItem(tp.text)}
+                  onClick={() => selectItem(tp.text ?? "")}
                   onMouseEnter={() => setHighlightIdx(idx)}
                 >
                   <span className="font-mono text-xs text-muted-foreground mr-2">
                     {formatId(tp._id)}
                   </span>
-                  {truncate(tp.text.replace(/\n/g, " "), 80)}
+                  {truncate((tp.text ?? "").replace(/\n/g, " "), 80)}
                 </li>
               ))}
             </ul>

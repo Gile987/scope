@@ -164,7 +164,7 @@ export function TaskPromptList() {
       header: "Text",
       hidden: visibility.isHidden("text"),
       cell: (tp) => (
-        <span className="text-sm text-muted-foreground">{truncate(tp.text, 80)}</span>
+        <span className="text-sm text-muted-foreground">{truncate(tp.text ?? "", 80)}</span>
       ),
     },
     {

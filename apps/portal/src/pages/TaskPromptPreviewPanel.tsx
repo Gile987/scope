@@ -50,7 +50,7 @@ export function TaskPromptPreviewPanel() {
   return (
     <DetailPanel
       title={<span className="truncate font-mono text-sm">{formatId(taskPrompt._id)}</span>}
-      subtitle={truncate(taskPrompt.text, 80)}
+      subtitle={truncate(taskPrompt.text ?? "", 80)}
       onClose={closePanel}
       headerActions={
         <div className="flex flex-wrap justify-end gap-2">
@@ -74,7 +74,9 @@ export function TaskPromptPreviewPanel() {
           </CardHeader>
           <CardContent>
             <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
-              {truncate(taskPrompt.text, 1200)}
+              {taskPrompt.text !== undefined
+                ? truncate(taskPrompt.text, 1200)
+                : "(Stored in blob storage — open the full view to load the body.)"}
             </pre>
           </CardContent>
         </Card>
