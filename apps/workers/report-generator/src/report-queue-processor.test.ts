@@ -96,7 +96,7 @@ async function callRunCopilotSession(
   model = "gpt-4.1",
   timeoutMs = 5000,
 ) {
-  return (processor as any).runCopilotSession([], "Generate a report for run req-123", "You are an expert analyst.", model, timeoutMs, log);
+  return (processor as any).runCopilotSession([], "Generate a report for run req-123", "You are an expert analyst.", model, timeoutMs, "/tmp/test-archive", log);
 }
 
 function makeBaseEvent(type: string, data: Record<string, unknown> = {}): SessionEvent {

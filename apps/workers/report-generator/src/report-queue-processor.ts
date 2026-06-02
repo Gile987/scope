@@ -88,9 +88,8 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       const archiveDir = await this.downloadAndExtractArchive(requestId, workDir, log);
       await log("info", `Archive extracted to ${archiveDir}`);
 
-      // --- Create Copilot SDK tools (file-based only) ---
+      // --- Create Copilot SDK tools (insight API tools only) ---
       const tools = createReportTools({
-        archiveDir,
         apiBaseUrl: this.reportConfig.apiBaseUrl,
         reportId,
       });
@@ -147,6 +146,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         resolvedSystemPrompt,
         resolvedModel,
         resolvedTimeoutMs,
+        archiveDir,
         log
       );
 
@@ -195,6 +195,7 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     systemPrompt: string,
     model: string,
     timeoutMs: number,
+    workingDirectory: string,
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>
   ): Promise<string> {
     const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
@@ -212,6 +213,30 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         model,
         streaming: true,
         tools,
+        workingDirectory,
+        availableTools: [
+          // File reading (built-in, scoped to workingDirectory)
+          "view",
+          "grep",
+          "glob",
+          // Shell (scoped to workingDirectory)
+          "bash",
+          // Network (fetch documentation/reference material)
+          "web_fetch",
+          // Orchestration
+          "task",
+          "read_agent",
+          "write_agent",
+          "list_agents",
+          "skill",
+          "exit_plan_mode",
+          "report_intent",
+          "task_complete",
+          // Custom insight tools are included automatically
+          "search_insights",
+          "create_insight",
+          "reference_insight",
+        ],
         systemMessage: { mode: "replace", content: systemPrompt },
       });
 
