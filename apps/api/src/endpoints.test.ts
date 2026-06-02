@@ -502,6 +502,33 @@ describe("API Endpoints", () => {
       expect(res.body.data[0]).toHaveProperty("key", "sub-1");
     });
 
+    it("returns grouped results when groupBy=experiment", async () => {
+      const groupedDocs = [
+        { key: "exp-1", label: "exp-1", aggregates: { count: 4, turns: null, duration: null, promptTokens: null, completionTokens: null }, uniform: {} },
+      ];
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "exp-1" }]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue(groupedDocs) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) });
+
+      const res = await request(app).get("/api/v1/requests?groupBy=experiment");
+      expect(res.status).toBe(200);
+      expect(res.body.data[0]).toHaveProperty("key", "exp-1");
+    });
+
+    it("filters by experimentId", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+        }),
+      });
+
+      await request(app).get("/api/v1/requests?experimentId=exp-42");
+      const filter = (mocks.collection.find as any).mock.calls[0][0];
+      expect(filter).toHaveProperty("experimentId", "exp-42");
+    });
+
     it("calls aggregate pipeline when groupBy is provided", async () => {
       (mocks.collection.aggregate as any)
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // keys (empty)
@@ -975,6 +1002,62 @@ describe("API Endpoints", () => {
   });
 
   // ===================================================================
+  // Typed task prompts (task | agents.md) + content resolution
+  // ===================================================================
+
+  describe("Typed task prompts", () => {
+    it("passes ?type=agents.md through to the store getAll filter", async () => {
+      (mocks.taskPromptStore as any).getAll.mockResolvedValue({ items: [], total: 0 });
+
+      const res = await request(app).get("/api/v1/task-prompts?type=agents.md");
+      expect(res.status).toBe(200);
+      const arg = (mocks.taskPromptStore.getAll as any).mock.calls[0][0];
+      expect(arg).toHaveProperty("type", "agents.md");
+    });
+
+    it("creates a prompt with type=agents.md", async () => {
+      (mocks.taskPromptStore as any).findOrCreate.mockResolvedValue({
+        _id: "agents-1",
+        type: "agents.md",
+        text: "# AGENTS\nBe concise.",
+        createdAt: new Date(),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/task-prompts")
+        .send({ text: "# AGENTS\nBe concise.", type: "agents.md" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("type", "agents.md");
+      const arg = (mocks.taskPromptStore.findOrCreate as any).mock.calls[0];
+      expect(arg[0]).toBe("# AGENTS\nBe concise.");
+      expect(arg[1]).toHaveProperty("type", "agents.md");
+    });
+
+    it("GET /:id/content resolves the prompt body via resolvePromptText", async () => {
+      (mocks.taskPromptStore as any).get.mockResolvedValue({
+        _id: "agents-1",
+        type: "agents.md",
+        contentBlobUrl: "https://blob/prompts/agents-1.txt",
+        createdAt: new Date(),
+      });
+      (mocks.taskPromptStore as any).resolvePromptText.mockResolvedValue("resolved body");
+
+      const res = await request(app).get("/api/v1/task-prompts/agents-1/content");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ id: "agents-1", text: "resolved body" });
+      expect(mocks.taskPromptStore.resolvePromptText).toHaveBeenCalled();
+    });
+
+    it("GET /:id/content returns 404 when the prompt does not exist", async () => {
+      (mocks.taskPromptStore as any).get.mockResolvedValue(null);
+
+      const res = await request(app).get("/api/v1/task-prompts/missing/content");
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // ===================================================================
   // Submit with profile — server-side field resolution
   // ===================================================================
 
@@ -1178,6 +1261,105 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(201);
       expect(res.body.warnings).toBeDefined();
       expect(res.body.warnings.some((w: string) => w.includes("only supports reasoning effort"))).toBe(true);
+    });
+  });
+
+  // ===================================================================
+  // Experiment grouping + AGENTS.md on request creation
+  // ===================================================================
+
+  describe("POST /api/v1/requests?worker=... (experiment + AGENTS.md)", () => {
+    const setupCopilotAgent = () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
+        supportedModels: ["claude-haiku-4.5"],
+      });
+    };
+
+    it("persists experimentId on the request document", async () => {
+      setupCopilotAgent();
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          model: "claude-haiku-4.5",
+          experimentId: "exp-123",
+        });
+
+      expect(res.status).toBe(201);
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc).toHaveProperty("experimentId", "exp-123");
+    });
+
+    it("resolves agentsMd via findOrCreate(agents.md) and stores agentsMdPromptId", async () => {
+      setupCopilotAgent();
+      (mocks.taskPromptStore as any).findOrCreate.mockResolvedValue({
+        _id: "agents-xyz",
+        type: "agents.md",
+        text: "# AGENTS\nBe terse.",
+        createdAt: new Date(),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          model: "claude-haiku-4.5",
+          experimentId: "exp-123",
+          agentsMd: "# AGENTS\nBe terse.",
+        });
+
+      expect(res.status).toBe(201);
+      const foc = (mocks.taskPromptStore.findOrCreate as any).mock.calls.find(
+        (c: any[]) => c[1] && c[1].type === "agents.md"
+      );
+      expect(foc).toBeDefined();
+      expect(foc[0]).toBe("# AGENTS\nBe terse.");
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc).toHaveProperty("agentsMdPromptId", "agents-xyz");
+    });
+
+    it("persists agentsMdParentIds lineage on the request", async () => {
+      setupCopilotAgent();
+      (mocks.taskPromptStore as any).findOrCreate.mockResolvedValue({
+        _id: "agents-child",
+        type: "agents.md",
+        text: "child",
+        createdAt: new Date(),
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          model: "claude-haiku-4.5",
+          experimentId: "exp-123",
+          agentsMd: "child",
+          agentsMdParentIds: ["agents-p1", "agents-p2"],
+        });
+
+      expect(res.status).toBe(201);
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc).toHaveProperty("agentsMdParentIds", ["agents-p1", "agents-p2"]);
+    });
+
+    it("omits experiment fields when not provided", async () => {
+      setupCopilotAgent();
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          model: "claude-haiku-4.5",
+        });
+
+      expect(res.status).toBe(201);
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc.experimentId).toBeUndefined();
+      expect(doc.agentsMdPromptId).toBeUndefined();
+      expect(doc.agentsMdParentIds).toBeUndefined();
     });
   });
 

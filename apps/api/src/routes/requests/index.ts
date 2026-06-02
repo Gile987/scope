@@ -74,8 +74,37 @@ apiRoute(ctx.app, ctx.registry, {
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, experimentId: requestedExperimentId, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds } = req.body;
     let worker = req.query.worker as string | undefined;
+
+    // Experiment grouping + AGENTS.md lineage (used by the GEPA optimizer and
+    // any caller that wants to group requests / attach an AGENTS.md body).
+    const experimentId =
+      typeof requestedExperimentId === "string" && requestedExperimentId.trim()
+        ? requestedExperimentId
+        : undefined;
+    const agentsMdText =
+      typeof requestedAgentsMd === "string" && requestedAgentsMd.trim()
+        ? requestedAgentsMd
+        : undefined;
+    const agentsMdParentIds = Array.isArray(requestedAgentsMdParentIds)
+      ? requestedAgentsMdParentIds.filter((x: unknown): x is string => typeof x === "string")
+      : undefined;
+
+    // Resolve the AGENTS.md body to an `agents.md`-typed prompt id (idempotent,
+    // content-addressed; large bodies are offloaded to blob by the store).
+    const resolveAgentsMdPromptId = async (): Promise<string | undefined> => {
+      if (!agentsMdText) return undefined;
+      const p = await ctx.taskPromptStore.findOrCreate(agentsMdText, { type: "agents.md" });
+      return p._id;
+    };
+
+    // Common request fields for experiment grouping / AGENTS.md lineage.
+    const buildExperimentFields = (agentsMdPromptId?: string) => ({
+      ...(experimentId ? { experimentId } : {}),
+      ...(agentsMdPromptId ? { agentsMdPromptId } : {}),
+      ...(agentsMdParentIds && agentsMdParentIds.length ? { agentsMdParentIds } : {}),
+    });
 
     type VariationInput = {
       profileId: string;
@@ -343,6 +372,8 @@ apiRoute(ctx.app, ctx.registry, {
       const allNewIds: string[] = [];
       const newDocs: RequestDocument[] = [];
       const variationResults: Array<{ profileId: string; label?: string; ids: string[] }> = [];
+      const agentsMdPromptId = await resolveAgentsMdPromptId();
+      const experimentFields = buildExperimentFields(agentsMdPromptId);
 
       for (const r of resolved) {
         const newIds: string[] = [];
@@ -374,6 +405,7 @@ apiRoute(ctx.app, ctx.registry, {
             profileId: r.profile._id,
             profileVersionId: r.profileVersion._id,
             submissionId,
+            ...experimentFields,
             run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
           };
           newDocs.push(requestDoc);
@@ -719,6 +751,10 @@ apiRoute(ctx.app, ctx.registry, {
     const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
     const taskPromptId = taskPrompt._id;
 
+    // Resolve AGENTS.md lineage once for this submission (shared across count>1).
+    const agentsMdPromptId = await resolveAgentsMdPromptId();
+    const experimentFields = buildExperimentFields(agentsMdPromptId);
+
     // Generate a submission ID to group all runs from this request
     const submissionId = uuidv4();
 
@@ -752,6 +788,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(profileId ? { profileId } : {}),
           ...(profileVersionId ? { profileVersionId } : {}),
           submissionId,
+          ...experimentFields,
           // Mint a distinct run id for the first attempt. Blob artifacts
           // are scoped under `{requestId}/runs/{runId}/...` so retries
           // never overwrite a previous attempt's blobs.
@@ -810,6 +847,7 @@ apiRoute(ctx.app, ctx.registry, {
       ...(profileId ? { profileId } : {}),
       ...(profileVersionId ? { profileVersionId } : {}),
       submissionId,
+      ...experimentFields,
       // Mint a distinct run id for the first attempt. Blob artifacts
       // are scoped under `{requestId}/runs/{runId}/...` so retries
       // never overwrite a previous attempt's blobs.
@@ -887,6 +925,7 @@ apiRoute(ctx.app, ctx.registry, {
     const criteriaFilter = req.query.criteria as string;
     const submissionIdFilter = req.query.submissionId as string;
     const profileIdFilter = req.query.profileId as string;
+    const experimentIdFilter = req.query.experimentId as string;
     const statusFilter = req.query.status as string;
     const outcomeFilter = req.query.outcome as string;
     const turnsFilterRaw = req.query.turns as string | undefined;
@@ -894,7 +933,7 @@ apiRoute(ctx.app, ctx.registry, {
     const maxIterationsFilterRaw = req.query.maxIterations as string | undefined;
     const maxIterationsOpFilter = (req.query.maxIterationsOp as string | undefined) ?? "eq";
     const includeDeleted = req.query.includeDeleted === "true";
-    const groupByParam = req.query.groupBy as "task" | "submissionId" | "profile" | undefined;
+    const groupByParam = req.query.groupBy as "task" | "submissionId" | "profile" | "experiment" | undefined;
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
     const afterParam = req.query.after as string | undefined;
     const beforeParam = req.query.before as string | undefined;
@@ -925,6 +964,9 @@ apiRoute(ctx.app, ctx.registry, {
     }
     if (profileIdFilter) {
       filter.profileId = profileIdFilter;
+    }
+    if (experimentIdFilter) {
+      filter.experimentId = experimentIdFilter;
     }
     if (submissionIdFilter) {
       // Prefix-based matching: allow filtering by partial submission ID
@@ -982,7 +1024,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Grouped mode: paginated RunGroup[] via two-phase aggregation
     if (groupByParam) {
-      const groupByField = groupByParam === "task" ? "taskPromptId" : groupByParam === "profile" ? "profileId" : "submissionId";
+      const groupByField = groupByParam === "task" ? "taskPromptId" : groupByParam === "profile" ? "profileId" : groupByParam === "experiment" ? "experimentId" : "submissionId";
       const groupByAggField = `$${groupByField}`;
 
       // Decode group cursor
@@ -1445,6 +1487,10 @@ apiRoute(ctx.app, ctx.registry, {
           ...(original.taskPromptId ? { taskPromptId: original.taskPromptId } : {}),
           ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
           ...(effectiveProfileVersionId ? { profileVersionId: effectiveProfileVersionId } : {}),
+          // Preserve experiment grouping + AGENTS.md lineage across re-submits.
+          ...(original.experimentId ? { experimentId: original.experimentId } : {}),
+          ...(original.agentsMdPromptId ? { agentsMdPromptId: original.agentsMdPromptId } : {}),
+          ...(original.agentsMdParentIds && original.agentsMdParentIds.length > 0 ? { agentsMdParentIds: original.agentsMdParentIds } : {}),
           submissionId,
           // Bulk re-submit creates a brand-new request — mint a distinct
           // run id for the first attempt so blob artifacts live under
