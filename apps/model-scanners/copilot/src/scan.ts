@@ -54,6 +54,8 @@ export async function scanCopilotModels(token: string): Promise<ScanResult> {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       "Copilot-Integration-Id": "vscode-chat",
+      "Editor-Version": "vscode/1.100.0",
+      "Editor-Plugin-Version": "copilot-chat/0.26.0",
     },
     signal: AbortSignal.timeout(30_000),
   });

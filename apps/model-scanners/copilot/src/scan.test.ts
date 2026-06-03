@@ -131,12 +131,11 @@ describe("scanCopilotModels", () => {
 
     const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe("https://api.githubcopilot.com/models");
-    expect((init?.headers as Record<string, string>)["Authorization"]).toBe(
-      "Bearer my-github-token",
-    );
-    expect(
-      (init?.headers as Record<string, string>)["Copilot-Integration-Id"],
-    ).toBe("vscode-chat");
+    const headers = init?.headers as Record<string, string>;
+    expect(headers["Authorization"]).toBe("Bearer my-github-token");
+    expect(headers["Copilot-Integration-Id"]).toBe("vscode-chat");
+    expect(headers["Editor-Version"]).toBe("vscode/1.100.0");
+    expect(headers["Editor-Plugin-Version"]).toBe("copilot-chat/0.26.0");
   });
 
   it("should throw on 401 response", async () => {
