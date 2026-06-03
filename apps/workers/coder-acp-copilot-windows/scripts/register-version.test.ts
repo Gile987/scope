@@ -35,11 +35,12 @@ function runScript(
   apiUrl: string,
   env: Record<string, string>,
   cwd: string,
+  extraArgs: string[] = [],
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(
       "pwsh",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT_PATH, "-ApiUrl", apiUrl],
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT_PATH, "-ApiUrl", apiUrl, ...extraArgs],
       {
         env: { ...process.env, ...env },
         cwd,
@@ -178,7 +179,7 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
     expect(versionBody.components.COPILOT_CLI_VERSION).toBe("unknown");
   });
 
-  it("exits with non-zero code when version registration fails", async () => {
+  it("exits with non-zero code when version registration fails after retries", async () => {
     responseOverrides.set("/api/v1/agents/coder-acp-copilot-windows/versions", {
       status: 500,
       body: JSON.stringify({ error: "Internal Server Error" }),
@@ -190,9 +191,97 @@ describe.runIf(hasPwsh())("register-version.ps1", () => {
       GIT_COMMIT: "deadbeef",
     };
 
-    const { code } = await runScript(`http://127.0.0.1:${port}`, env, tmpDir);
+    const { code, stdout } = await runScript(
+      `http://127.0.0.1:${port}`,
+      env,
+      tmpDir,
+      ["-VersionRetries", "2"],
+    );
     expect(code).not.toBe(0);
-  });
+
+    // Verify it attempted retries
+    const versionRequests = requests.filter((r) => r.url?.includes("/versions"));
+    expect(versionRequests.length).toBe(2);
+  }, 30000);
+
+  it("succeeds when version registration fails transiently then succeeds", async () => {
+    let versionCallCount = 0;
+    // Replace the default handler: fail first 2 attempts, succeed on 3rd
+    server.removeAllListeners("request");
+    server.on("request", async (req: IncomingMessage, res: ServerResponse) => {
+      const body = await new Promise<string>((resolve) => {
+        let data = "";
+        req.on("data", (chunk) => (data += chunk));
+        req.on("end", () => resolve(data));
+      });
+
+      requests.push({
+        method: req.method ?? "GET",
+        url: req.url ?? "/",
+        body,
+        headers: req.headers as Record<string, string | string[] | undefined>,
+      });
+
+      if (req.url?.includes("/versions")) {
+        versionCallCount++;
+        if (versionCallCount < 3) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Transient failure" }));
+          return;
+        }
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("{}");
+    });
+
+    const env = {
+      COPILOT_CLI_VERSION: "1.0.0",
+      BUILD_TIME: "20260101T000000Z",
+      GIT_COMMIT: "deadbeef",
+    };
+
+    const { code, stdout, stderr } = await runScript(
+      `http://127.0.0.1:${port}`,
+      env,
+      tmpDir,
+      ["-VersionRetries", "3"],
+    );
+    expect(code, `Script failed.\nstdout: ${stdout}\nstderr: ${stderr}`).toBe(0);
+
+    const versionRequests = requests.filter((r) => r.url?.includes("/versions"));
+    expect(versionRequests.length).toBe(3); // 2 failures + 1 success
+  }, 45000);
+
+  it("exits with non-zero when health check exceeds max retries", async () => {
+    // Start a server that never returns healthy
+    const unhealthyServer = createServer((_req, res) => {
+      res.writeHead(503, { "Content-Type": "text/plain" });
+      res.end("Service Unavailable");
+    });
+
+    await new Promise<void>((resolve) => {
+      unhealthyServer.listen(0, "127.0.0.1", () => resolve());
+    });
+    const unhealthyPort = (unhealthyServer.address() as { port: number }).port;
+
+    const env = {
+      COPILOT_CLI_VERSION: "1.0.0",
+      BUILD_TIME: "20260101T000000Z",
+      GIT_COMMIT: "deadbeef",
+    };
+
+    const { code, stdout } = await runScript(
+      `http://127.0.0.1:${unhealthyPort}`,
+      env,
+      tmpDir,
+      ["-MaxHealthRetries", "2", "-MaxDnsRetries", "2"],
+    );
+
+    unhealthyServer.close();
+    expect(code).not.toBe(0);
+    expect(stdout).toContain("API not ready");
+  }, 30000);
 
   it("continues when agent upsert fails but version registration succeeds", async () => {
     responseOverrides.set("/api/v1/agents", {
