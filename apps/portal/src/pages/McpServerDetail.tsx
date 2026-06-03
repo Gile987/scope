@@ -62,6 +62,10 @@ export function McpServerDetail() {
       setVersion(server.version ?? "");
       setDescription(server.description ?? "");
       setHeaders(server.headers ? server.headers.map(h => ({ name: h.name, value: "" })) : []);
+    }
+  }, [server]);
+
+  const updateMutation = useMutation({
     mutationFn: (body: { name?: string; type?: McpTransportType; url?: string; command?: string; args?: string[]; env?: Record<string,string>; sessionMode?: McpSessionMode; version?: string; description?: string; headers?: McpServerHeader[] }) =>
       api.updateMcpServer(slug!, body),
     onSuccess: () => {
