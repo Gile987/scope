@@ -29,6 +29,7 @@ import {
   encodeCursor,
   mapId,
   parseExtensionSpec,
+  parseProfileSpec,
   resolveAgentVersion,
 } from "shared";
 import type { ProfileDocument, ProfileVersionDocument } from "shared";
@@ -56,6 +57,9 @@ export function registerRequestsRoutes(ctx: RouteContext): void {
 
 const upload = multer({ dest: tmpdir() });
 
+/** Maximum number of profile variations (including the base profile) allowed in one submit. */
+const MAX_PROFILE_VARIATIONS = 25;
+
 // Submit a request
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
@@ -66,20 +70,354 @@ apiRoute(ctx.app, ctx.registry, {
     count: z.number().min(1).max(10).default(1),
     promptFeatureExtractionId: z.string().optional(),
     skills: z.array(z.string()).optional(),
-    extensions: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
   }),
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileId, priority: requestedPriority } = req.body;
-    let worker = req.query.worker as string;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority } = req.body;
+    let worker = req.query.worker as string | undefined;
+
+    type VariationInput = {
+      profileId: string;
+      profileVersion?: number;
+      label?: string;
+    };
+
+    const typedProfileVariations: string[] = Array.isArray(profileVariations)
+      ? profileVariations.filter((v: unknown): v is string => typeof v === "string")
+      : [];
+    const isVariationSubmit = typedProfileVariations.length > 0;
+
+    if (isVariationSubmit) {
+      if (!requestedProfileSpec) {
+        res.status(400).json({ error: "profileId (the base profile) is required when profileVariations are provided" });
+        return;
+      }
+
+      // In variation mode, controlled fields come from the variation profiles themselves.
+      if (requestedModel !== undefined || mcpServerSlugs !== undefined || skillSlugs !== undefined || extensionIds !== undefined) {
+        res.status(400).json({
+          error: "In variation mode, model/mcpServers/skills/extensions must be set via the variation profile.",
+        });
+        return;
+      }
+
+      // In variation mode, the worker is derived per-variation from each profile's workerType.
+      // Reject the ?worker= query param so callers don't think it has any effect.
+      if (worker) {
+        res.status(400).json({
+          error: "The ?worker query parameter is not allowed in variation mode; worker is derived from each variation profile.",
+        });
+        return;
+      }
+
+      if (!scenarioObj || typeof scenarioObj !== "object" || !scenarioObj.task || typeof scenarioObj.task !== "string") {
+        res.status(400).json({ error: "scenario.task is required and must be a string" });
+        return;
+      }
+
+      if (scenarioObj.criteria !== undefined) {
+        if (!Array.isArray(scenarioObj.criteria) || !scenarioObj.criteria.every((c: unknown) => typeof c === "string")) {
+          res.status(400).json({ error: "scenario.criteria must be an array of strings" });
+          return;
+        }
+      }
+
+      const effectiveMaxIter = maxIterations ?? MULTI_TURN_DEFAULTS.MAX_ITERATIONS;
+      if (effectiveMaxIter !== 1) {
+        if (!scenarioObj.criteria || !Array.isArray(scenarioObj.criteria) || scenarioObj.criteria.length === 0) {
+          res.status(400).json({ error: "At least one criterion is required in scenario.criteria when maxIterations > 1" });
+          return;
+        }
+      }
+
+      const baseParsed = (() => {
+        try { return parseProfileSpec(requestedProfileSpec); }
+        catch (err) { res.status(400).json({ error: (err as Error).message }); return null; }
+      })();
+      if (!baseParsed) return;
+      const baseProfileId = baseParsed.profileId;
+      const baseProfile = await ctx.profileCollection.findOne({
+        _id: baseProfileId,
+        deletedAt: { $exists: false },
+      });
+      if (!baseProfile) {
+        res.status(404).json({ error: `Profile not found: ${baseProfileId}` });
+        return;
+      }
+
+      const variationEntries: VariationInput[] = [
+        { profileId: baseProfileId, profileVersion: baseParsed.version, label: "base" },
+      ];
+      for (const spec of typedProfileVariations) {
+        let parsed: { profileId: string; version?: number };
+        try { parsed = parseProfileSpec(spec); }
+        catch (err) { res.status(400).json({ error: (err as Error).message }); return; }
+        variationEntries.push({ profileId: parsed.profileId, profileVersion: parsed.version });
+      }
+
+      if (variationEntries.length > MAX_PROFILE_VARIATIONS) {
+        res.status(400).json({ error: `A maximum of ${MAX_PROFILE_VARIATIONS} variations (including base profile) is supported` });
+        return;
+      }
+
+      const scenario: RequestDocument["scenario"] = {
+        task: scenarioObj.task as string,
+        criteria: Array.isArray(scenarioObj.criteria) ? (scenarioObj.criteria as string[]) : [],
+        ...(scenarioObj.version === "v1" || scenarioObj.version === "v2" ? { version: scenarioObj.version } : {}),
+      };
+
+      const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
+      const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
+      const taskPromptId = taskPrompt._id;
+
+      // Per-variation resolved config — collected in pass 1 so we can fail
+      // the whole submit atomically before any insert.
+      type ResolvedVariation = {
+        entry: VariationInput;
+        profile: ProfileDocument;
+        profileVersion: ProfileVersionDocument;
+        workerType: WorkerType;
+        model?: string;
+        agentVersion?: string;
+        mcpServers?: string[];
+        skillRevisions?: string[];
+        extensions?: string[];
+      };
+
+      // Pass 1: validate and resolve every variation. No writes yet.
+      const resolved: ResolvedVariation[] = [];
+      for (const variationEntry of variationEntries) {
+        const variationProfile = await ctx.profileCollection.findOne({
+          _id: variationEntry.profileId,
+          deletedAt: { $exists: false },
+        });
+        if (!variationProfile) {
+          res.status(404).json({ error: `Profile not found: ${variationEntry.profileId}` });
+          return;
+        }
+
+        const variationProfileVersion = await ctx.profileVersionCollection.findOne({
+          profileId: variationProfile._id,
+          version: variationEntry.profileVersion ?? variationProfile.latestVersion,
+        });
+        if (!variationProfileVersion) {
+          res.status(404).json({
+            error: `Profile version not found for profile: ${variationEntry.profileId}`,
+            requestedVersion: variationEntry.profileVersion ?? variationProfile.latestVersion,
+          });
+          return;
+        }
+
+        const variationWorkerType = variationProfileVersion.workerType as WorkerType;
+        if (!VALID_WORKERS.includes(variationWorkerType)) {
+          res.status(400).json({ error: `Invalid worker in variation profile: ${variationWorkerType}` });
+          return;
+        }
+
+        let model = variationProfileVersion.model;
+        const effectiveMcpServers = variationProfileVersion.mcpServers ?? undefined;
+        const effectiveSkills = variationProfileVersion.skillRevisions ?? undefined;
+        const effectiveExtensions = variationProfileVersion.extensions ?? undefined;
+        const requestedVariationAgentVersion = variationProfileVersion.agentVersion ?? requestedAgentVersion;
+
+        const agentDoc = await ctx.agentCollection.findOne({ _id: variationWorkerType, deletedAt: { $exists: false } });
+        if (agentDoc && agentDoc.supportedModels.length > 0) {
+          if (model && !agentDoc.supportedModels.includes(model)) {
+            res.status(400).json({
+              error: `Invalid model "${model}" for agent "${variationWorkerType}"`,
+              supportedModels: agentDoc.supportedModels,
+              variationProfileId: variationEntry.profileId,
+            });
+            return;
+          }
+          if (!model && agentDoc.defaultModel) {
+            model = agentDoc.defaultModel;
+          }
+          if (!model) {
+            res.status(400).json({
+              error: `model is required for agent "${variationWorkerType}". Select one of supportedModels or set a defaultModel on the agent.`,
+              supportedModels: agentDoc.supportedModels,
+              variationProfileId: variationEntry.profileId,
+            });
+            return;
+          }
+        }
+
+        let resolvedAgentVersion: string | undefined;
+        if (agentDoc) {
+          const versionResult = resolveAgentVersion(agentDoc.versions, requestedVariationAgentVersion);
+          if ("error" in versionResult) {
+            res.status(400).json({
+              error: `${versionResult.error} for agent "${variationWorkerType}"`,
+              activeVersions: versionResult.activeVersions,
+              variationProfileId: variationEntry.profileId,
+            });
+            return;
+          }
+          resolvedAgentVersion = versionResult.agentVersion;
+        }
+
+        let validatedMcpServers: string[] | undefined;
+        if (effectiveMcpServers !== undefined && effectiveMcpServers.length > 0) {
+          const existingServers = await ctx.mcpServerCollection
+            .find({ _id: { $in: effectiveMcpServers }, deletedAt: { $exists: false } })
+            .toArray();
+          const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
+          const missingSlugs = effectiveMcpServers.filter((slug: string) => !existingSlugs.has(slug));
+          if (missingSlugs.length > 0) {
+            res.status(400).json({
+              error: `MCP server(s) not found: ${missingSlugs.join(", ")}`,
+              variationProfileId: variationEntry.profileId,
+            });
+            return;
+          }
+          validatedMcpServers = effectiveMcpServers;
+        }
+
+        let resolvedSkillRevisions: string[] | undefined;
+        if (effectiveSkills !== undefined && effectiveSkills.length > 0) {
+          const result = await resolveSkillSpecs(effectiveSkills, ctx);
+          if (result.error) {
+            const status = result.error.startsWith("Failed to resolve") ? 422 : 400;
+            res.status(status).json({ error: result.error, variationProfileId: variationEntry.profileId });
+            return;
+          }
+          resolvedSkillRevisions = result.refs;
+        }
+
+        let validatedExtensions: string[] | undefined;
+        if (effectiveExtensions !== undefined && effectiveExtensions.length > 0) {
+          const parsedSpecs = effectiveExtensions.map((spec: string) => parseExtensionSpec(spec));
+          const bareIds = parsedSpecs.map((s) => s.id);
+          const existingExtensions = await ctx.extensionCollection
+            .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
+            .toArray();
+          const existingIds = new Set(existingExtensions.map((e: ExtensionDocument) => e._id));
+          const missingIds = bareIds.filter((id: string) => !existingIds.has(id));
+          if (missingIds.length > 0) {
+            res.status(400).json({
+              error: `Extension(s) not found: ${missingIds.join(", ")}`,
+              variationProfileId: variationEntry.profileId,
+            });
+            return;
+          }
+
+          const extensionClient = new ExtensionClient("");
+          const resolvedSpecs: string[] = [];
+          for (const spec of parsedSpecs) {
+            if (spec.version) {
+              resolvedSpecs.push(`${spec.id}@${spec.version}`);
+            } else {
+              const versions = await extensionClient.getVersions(spec.id, false);
+              if (versions.length === 0) {
+                res.status(422).json({
+                  error: `No stable versions found for extension "${spec.id}"`,
+                  variationProfileId: variationEntry.profileId,
+                });
+                return;
+              }
+              resolvedSpecs.push(`${spec.id}@${versions[0].version}`);
+            }
+          }
+          validatedExtensions = resolvedSpecs;
+        }
+
+        resolved.push({
+          entry: variationEntry,
+          profile: variationProfile,
+          profileVersion: variationProfileVersion,
+          workerType: variationWorkerType,
+          model,
+          agentVersion: resolvedAgentVersion,
+          mcpServers: validatedMcpServers,
+          skillRevisions: resolvedSkillRevisions,
+          extensions: validatedExtensions,
+        });
+      }
+
+      // Pass 2: build documents and insert them under a single shared submissionId.
+      // All variations belong to the same comparative submission so consumers can
+      // group them via `submissionId` (matches docs/architecture/app-design.md).
+      const submissionId = uuidv4();
+      const allNewIds: string[] = [];
+      const newDocs: RequestDocument[] = [];
+      const variationResults: Array<{ profileId: string; label?: string; ids: string[] }> = [];
+
+      for (const r of resolved) {
+        const newIds: string[] = [];
+        for (let i = 0; i < count; i++) {
+          const requestId = uuidv4();
+          const runId = uuidv4();
+          newIds.push(requestId);
+          allNewIds.push(requestId);
+
+          const requestDoc: RequestDocument = {
+            _id: requestId,
+            scenario,
+            workerType: r.workerType,
+            taskPromptId,
+            createdAt: new Date(),
+            priority: requestedPriority ?? 0,
+            ...(r.model ? { model: r.model } : {}),
+            ...((r.profileVersion.reasoningEffort ?? requestedReasoningEffort)
+              ? { reasoningEffort: r.profileVersion.reasoningEffort ?? requestedReasoningEffort }
+              : {}),
+            ...(maxIterations ? { maxIterations } : {}),
+            ...(personaInstructions ? { personaInstructions } : {}),
+            ...(personaObj ? { persona: personaObj } : {}),
+            ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
+            ...(r.mcpServers ? { mcpServers: r.mcpServers } : {}),
+            ...(r.skillRevisions ? { skillRevisions: r.skillRevisions } : {}),
+            ...(r.extensions ? { extensions: r.extensions } : {}),
+            ...(r.agentVersion ? { agentVersion: r.agentVersion } : {}),
+            profileId: r.profile._id,
+            profileVersionId: r.profileVersion._id,
+            submissionId,
+            run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
+          };
+          newDocs.push(requestDoc);
+        }
+        variationResults.push({
+          profileId: r.profile._id,
+          label: r.entry.label,
+          ids: newIds,
+        });
+      }
+
+      await ctx.requestCollection.insertMany(newDocs);
+
+      res.status(201).json({
+        ids: allNewIds,
+        count: allNewIds.length,
+        submissionId,
+        variations: variationResults,
+        variationCount: variationEntries.length,
+        status: "pending",
+        mode,
+        message: `${allNewIds.length} request(s) submitted across ${variationResults.length} profile(s)`,
+        scenario,
+        ...(maxIterations ? { maxIterations } : {}),
+      });
+      return;
+    }
 
     // --- Profile resolution: if profileId is provided, resolve the version and use its values ---
     let profileId: string | undefined;
     let profileVersionId: string | undefined;
     let profileVersion: ProfileVersionDocument | null = null;
-    if (requestedProfileId) {
+    if (requestedProfileSpec) {
+      let requestedProfileId: string;
+      let requestedProfileVersion: number | undefined;
+      try {
+        const parsed = parseProfileSpec(requestedProfileSpec);
+        requestedProfileId = parsed.profileId;
+        requestedProfileVersion = parsed.version;
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+        return;
+      }
       const profile = await ctx.profileCollection.findOne({
         _id: requestedProfileId,
         deletedAt: { $exists: false },
@@ -90,10 +428,13 @@ apiRoute(ctx.app, ctx.registry, {
       }
       profileVersion = await ctx.profileVersionCollection.findOne({
         profileId: profile._id,
-        version: profile.latestVersion,
+        version: requestedProfileVersion ?? profile.latestVersion,
       });
       if (!profileVersion) {
-        res.status(404).json({ error: `Profile version not found for profile: ${requestedProfileId}` });
+        res.status(404).json({
+          error: `Profile version not found for profile: ${requestedProfileId}`,
+          requestedVersion: requestedProfileVersion ?? profile.latestVersion,
+        });
         return;
       }
       profileId = profile._id;
@@ -140,6 +481,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Effective values: profile overrides client inputs for controlled fields
     const effectiveModel = profileVersion ? profileVersion.model : requestedModel;
+    const effectiveReasoningEffort = profileVersion?.reasoningEffort ? profileVersion.reasoningEffort : requestedReasoningEffort;
     const effectiveMcpServers = profileVersion ? (profileVersion.mcpServers ?? undefined) : mcpServerSlugs;
     const effectiveSkills = profileVersion ? (profileVersion.skillRevisions ?? undefined) : skillSlugs;
     const effectiveExtensions = profileVersion ? (profileVersion.extensions ?? undefined) : extensionIds;
@@ -244,6 +586,44 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       resolvedAgentVersion = versionResult.agentVersion;
+    }
+
+    // Validate reasoning effort against model capabilities
+    const warnings: string[] = [];
+    let modelCapabilities: { reasoningEffort?: string[] } | undefined;
+    if (model) {
+      const compoundModelId = `${workerType}:${model}`;
+      const modelDoc = await ctx.modelCollection.findOne({ _id: compoundModelId });
+      if (modelDoc?.capabilities) {
+        modelCapabilities = modelDoc.capabilities;
+        const supportedEfforts = modelDoc.capabilities.reasoningEffort;
+        if (supportedEfforts && supportedEfforts.length > 0) {
+          if (effectiveReasoningEffort) {
+            if (!supportedEfforts.includes(effectiveReasoningEffort)) {
+              res.status(400).json({
+                error: `Reasoning effort "${effectiveReasoningEffort}" is not supported by model "${model}"`,
+                supportedReasoningEfforts: supportedEfforts,
+              });
+              return;
+            }
+          } else if (supportedEfforts.length === 1) {
+            warnings.push(
+              `Model "${model}" only supports reasoning effort "${supportedEfforts[0]}". The agent extension may send an incompatible effort level.`
+            );
+          } else if (supportedEfforts.length < 4) {
+            warnings.push(
+              `Model "${model}" supports limited reasoning efforts: ${supportedEfforts.join(", ")}. The agent extension may send an incompatible effort level.`
+            );
+          }
+        }
+      }
+    }
+
+    // Warn if reasoning effort is requested but the worker doesn't support it
+    if (effectiveReasoningEffort && agentDoc && !agentDoc.capabilities?.supportsReasoningEffort) {
+      warnings.push(
+        `Worker "${workerType}" does not declare support for reasoning effort. The effort setting "${effectiveReasoningEffort}" may be ignored.`
+      );
     }
 
     // Validate MCP server slugs if provided
@@ -361,6 +741,7 @@ apiRoute(ctx.app, ctx.registry, {
           createdAt: new Date(),
           priority: requestedPriority ?? 0,
           ...(model ? { model } : {}),
+          ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
@@ -385,7 +766,23 @@ apiRoute(ctx.app, ctx.registry, {
 
       console.log(`Created ${count} ${mode} requests for ${workerType} (priority: ${requestedPriority ?? 0})`);
 
-      res.status(201).json(newDocs.map(mapId));
+      res.status(201).json({
+        ids: newIds,
+        count,
+        submissionId,
+        workerType,
+        taskPromptId,
+        ...(model ? { model } : {}),
+        ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
+        ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+        status: "pending",
+        mode,
+        message: `${count} requests submitted successfully`,
+        scenario,
+        ...(maxIterations ? { maxIterations } : {}),
+        ...(warnings.length > 0 ? { warnings } : {}),
+        ...(modelCapabilities ? { modelCapabilities } : {}),
+      });
       return;
     }
 
@@ -402,6 +799,7 @@ apiRoute(ctx.app, ctx.registry, {
       createdAt: new Date(),
       priority: requestedPriority ?? 0,
       ...(model ? { model } : {}),
+      ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
@@ -424,7 +822,21 @@ apiRoute(ctx.app, ctx.registry, {
 
     console.log(`Created ${mode} request ${requestId} for ${workerType} (priority: ${requestedPriority ?? 0})`);
 
-    res.status(201).json(mapId(requestDoc));
+    res.status(201).json({
+      id: requestId,
+      submissionId,
+      workerType,
+      ...(model ? { model } : {}),
+      ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
+      ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+      status: requestDoc.run?.status ?? "pending",
+      mode,
+      message: "Request submitted successfully",
+      scenario,
+      ...(maxIterations ? { maxIterations } : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(modelCapabilities ? { modelCapabilities } : {}),
+    });
   },
 });
 
@@ -720,7 +1132,7 @@ apiRoute(ctx.app, ctx.registry, {
       resources.reverse();
     }
 
-    const data = resources.map(mapId) as any[];
+    const data = resources.map((r) => ({ ...r, id: r._id }));
 
     // Enrich `processing` runs with the latest liveness heartbeat from
     // Redis (single MGET; heartbeats live there, not Mongo).
@@ -746,9 +1158,9 @@ apiRoute(ctx.app, ctx.registry, {
     const first = data[0];
     const last = data[data.length - 1];
     const firstCreatedAt = new Date(first.createdAt).toISOString();
-    const firstId = String(first.id);
+    const firstId = String(first._id);
     const lastCreatedAt = new Date(last.createdAt).toISOString();
-    const lastId = String(last.id);
+    const lastId = String(last._id);
 
     // Check if there are more results in each direction
     const [hasMoreAfter, hasMoreBefore] = lastParam
@@ -903,6 +1315,9 @@ apiRoute(ctx.app, ctx.registry, {
       if (overrides?.model !== undefined && overrides.model !== overrideProfileVersion.model) {
         conflicts.push(`model: sent "${overrides.model}", profile requires "${overrideProfileVersion.model}"`);
       }
+      if (overrides?.reasoningEffort !== undefined && overrideProfileVersion.reasoningEffort && overrides.reasoningEffort !== overrideProfileVersion.reasoningEffort) {
+        conflicts.push(`reasoningEffort: sent "${overrides.reasoningEffort}", profile requires "${overrideProfileVersion.reasoningEffort}"`);
+      }
       if (overrides?.mcpServers !== undefined) {
         const profileMcp = overrideProfileVersion.mcpServers ?? [];
         if (JSON.stringify([...overrides.mcpServers!].sort()) !== JSON.stringify([...profileMcp].sort())) {
@@ -977,6 +1392,9 @@ apiRoute(ctx.app, ctx.registry, {
         const effectiveModel = activeProfileVersion
           ? activeProfileVersion.model
           : (overrides?.model !== undefined ? overrides.model : original.model);
+        const effectiveReasoningEffort = activeProfileVersion?.reasoningEffort
+          ? activeProfileVersion.reasoningEffort
+          : (overrides?.reasoningEffort !== undefined ? overrides.reasoningEffort : original.reasoningEffort);
         const effectiveMaxIterations = overrides?.maxIterations !== undefined ? overrides.maxIterations : original.maxIterations;
         const effectiveMcpServers = activeProfileVersion
           ? (activeProfileVersion.mcpServers ?? null)
@@ -1020,6 +1438,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(original.personaInstructions ? { personaInstructions: original.personaInstructions } : {}),
           ...(original.persona ? { persona: original.persona } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
+          ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
@@ -1364,7 +1783,7 @@ async function finalizePendingRun(
   const runState = runDoc.run;
 
   // The exporter always names the wrapping directory after the request's
-  // top-level `id`. If the prefix on the wire diverges, refuse — otherwise
+  // top-level `_id`. If the prefix on the wire diverges, refuse — otherwise
   // the blobs we just streamed live under the wrong requestId and the
   // inserted Mongo document would point at nothing.
   if (runDoc._id !== prefix) {
@@ -1461,21 +1880,17 @@ async function finalizePendingRun(
   // run.os, run.workerVersion, run.aiCallCount, run.startedAt,
   // run.finishedAt, …). The previous allowlist construction silently
   // dropped all of these on round-trip.
-  const { _id: docId, run: _parsedRun, ...restRunDoc } = runDoc as any;
-  const { _id: runId, ...restRunState } = runState as any;
   const docToInsert: RequestDocument = {
-    _id: docId,
-    ...restRunDoc,
+    ...(runDoc as unknown as RequestDocument),
     workerType: runDoc.workerType as WorkerType,
     createdAt: runDoc.createdAt ?? new Date(),
     priority: runDoc.priority ?? 0,
     taskPromptId: resolvedTaskPromptId,
     ...(runDoc.submissionId ? {} : { submissionId: uuidv4() }),
     run: {
-      _id: runId,
-      ...restRunState,
-      // Per-attempt `run.id` is preserved from the yaml (NOT clobbered
-      // with the request id) so retries / history demotion still work.
+      ...(runState as unknown as RunState),
+      // Per-attempt `run._id` is preserved from the yaml (NOT clobbered
+      // with the request `_id`) so retries / history demotion still work.
       logsUrl: newLogsUrl ?? runState.logsUrl,
       ...(runState.harUrl ? { harUrl: runState.harUrl } : {}),
       ...(runState.rawChatUrl ? { rawChatUrl: runState.rawChatUrl } : {}),

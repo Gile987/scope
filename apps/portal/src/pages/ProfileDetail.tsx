@@ -300,6 +300,12 @@ export function ProfileDetail() {
                     <FieldLabel>Model</FieldLabel>
                     <p className="font-mono text-sm">{displayVersion.model}</p>
                   </div>
+                  {displayVersion.reasoningEffort && (
+                    <div>
+                      <FieldLabel>Reasoning Effort</FieldLabel>
+                      <p className="font-mono text-sm">{displayVersion.reasoningEffort}</p>
+                    </div>
+                  )}
                   {displayVersion.agentVersion && (
                     <div>
                       <FieldLabel>Agent Version</FieldLabel>

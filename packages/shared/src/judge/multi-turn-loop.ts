@@ -50,6 +50,8 @@ export interface MultiTurnConfig {
   personaInstructions?: string;
   /** Model to pass to the coding agent */
   model?: string;
+  /** Reasoning effort level to pass to the coding agent (e.g. "low", "medium", "high") */
+  reasoningEffort?: string;
   /** Resolved MCP server configurations to pass to the coding agent */
   mcpServerConfigs?: McpServerConfig[];
   /** Resolved skill configurations to inject into the agent prompt */
@@ -94,6 +96,7 @@ export async function runMultiTurnLoop(
     onTurnComplete,
     personaInstructions,
     model,
+    reasoningEffort,
     mcpServerConfigs,
     skillConfigs,
     extensionConfigs,
@@ -148,7 +151,7 @@ export async function runMultiTurnLoop(
     let turnChatResultFormat: string | undefined;
     const turnVideoUrls: string[] = [];
     try {
-      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
+      const workerResult = await processor.processMessage(nextPrompt, iterLog, { model, reasoningEffort, mcpServerConfigs, skillConfigs, extensionConfigs, iteration });
       codingResponse = workerResult.response;
       turnTokenUsage = workerResult.tokenUsage;
       turnAiCallCount = workerResult.aiCallCount;

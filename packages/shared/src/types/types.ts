@@ -108,6 +108,11 @@ export interface AgentVersion {
   createdAt: Date;
 }
 
+// Capabilities declared by a coding agent (worker-level features)
+export interface AgentCapabilities {
+  supportsReasoningEffort?: boolean;  // Whether the worker can pass reasoning effort to the underlying agent
+}
+
 // Coding agent definition stored in MongoDB
 export interface CodingAgentDocument {
   _id: string;               // Agent ID (e.g. "coder-acp-copilot")
@@ -117,6 +122,7 @@ export interface CodingAgentDocument {
   supportedModels: string[];  // Empty array = model selection disabled
   defaultModel?: string;
   available?: boolean;        // Whether this agent is available for new submissions (default: true)
+  capabilities?: AgentCapabilities;  // Worker-level capabilities
   versions?: AgentVersion[];  // Registered agent versions (embedded array)
   createdAt: Date;
   updatedAt?: Date;
@@ -149,6 +155,7 @@ export interface RequestDocument {
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
   model?: string;              // Model selected for this run
+  reasoningEffort?: string;    // User-selected reasoning effort level (informational / validated)
   createdAt: Date;
   updatedAt?: Date;
   // Multi-turn fields
@@ -309,6 +316,8 @@ export const RUN_STATE_FIELD_NAMES = [
 // Options passed to worker processor
 export interface WorkerProcessorOptions {
   model?: string;
+  /** Reasoning effort level to apply (e.g. "low", "medium", "high"). */
+  reasoningEffort?: string;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
   extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation

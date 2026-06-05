@@ -9,6 +9,24 @@
  */
 
 /**
+ * Structured capability data discovered from a provider API.
+ */
+export interface ModelCapabilities {
+  /** Supported reasoning effort levels (e.g. ["low", "medium", "high"]). */
+  reasoningEffort?: string[];
+  /** Whether the model supports tool/function calls. */
+  toolCalls?: boolean;
+  /** Whether the model supports vision/image inputs. */
+  vision?: boolean;
+  /** Whether the model supports streaming responses. */
+  streaming?: boolean;
+  /** Whether the model supports adaptive thinking (extended thinking). */
+  adaptiveThinking?: boolean;
+  /** Maximum thinking budget in tokens, if applicable. */
+  maxThinkingBudget?: number;
+}
+
+/**
  * A model discovered by a provider scanner (before persistence).
  */
 export interface ScannedModel {
@@ -20,6 +38,8 @@ export interface ScannedModel {
   providerEndOfLife?: Date;
   /** Any additional provider-specific metadata worth keeping. */
   metadata?: Record<string, unknown>;
+  /** Structured capability data from the provider API. */
+  capabilities?: ModelCapabilities;
 }
 
 /**
@@ -58,6 +78,8 @@ export interface ModelDocument {
   providerEndOfLife?: Date;
   /** Any additional provider-specific metadata. */
   metadata?: Record<string, unknown>;
+  /** Structured capability data from the provider API. */
+  capabilities?: ModelCapabilities;
 }
 
 /**

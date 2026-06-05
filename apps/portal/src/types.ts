@@ -119,6 +119,7 @@ export interface Run {
   scenario?: Scenario;
   workerType: string;
   model?: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   /** Per-attempt mutable state for the current attempt. */
   run?: RunState;
@@ -153,7 +154,8 @@ export interface CursorPaginatedResponse<T> {
 
 export const WORKER_TYPES = [
   "coder-acp-claude-code",
-  "coder-acp-copilot"
+  "coder-acp-copilot",
+  "coder-acp-copilot-windows"
 ] as const;
 
 export type WorkerType = (typeof WORKER_TYPES)[number];
@@ -364,6 +366,7 @@ export interface BulkResubmitOverrides {
   profileId?: string | null;
   workerType?: string;
   model?: string | null;
+  reasoningEffort?: string | null;
   maxIterations?: number | null;
   mcpServers?: string[] | null;
   skillRevisions?: string[] | null;
@@ -640,6 +643,11 @@ export interface AgentVersion {
   createdAt: string;
 }
 
+// Agent capabilities declared at the worker level
+export interface AgentCapabilities {
+  supportsReasoningEffort?: boolean;
+}
+
 // Coding Agent types
 export interface CodingAgent {
   id: string;
@@ -649,6 +657,7 @@ export interface CodingAgent {
   supportedModels: string[];
   defaultModel?: string;
   available?: boolean;
+  capabilities?: AgentCapabilities;
   versions?: AgentVersion[];
   createdAt: string;
   updatedAt?: string;
@@ -749,6 +758,15 @@ export interface InsightWithReference extends Insight {
 // =============================================================================
 
 /** A scanned model tracked across agents and providers */
+export interface ModelCapabilities {
+  reasoningEffort?: string[];
+  toolCalls?: boolean;
+  vision?: boolean;
+  streaming?: boolean;
+  adaptiveThinking?: boolean;
+  maxThinkingBudget?: number;
+}
+
 export interface Model {
   id: string;
   modelId: string;
@@ -760,6 +778,7 @@ export interface Model {
   providerAvailableFrom?: string;
   providerEndOfLife?: string;
   metadata?: Record<string, unknown>;
+  capabilities?: ModelCapabilities;
 }
 
 // =============================================================================
@@ -890,6 +909,7 @@ export interface ProfileVersionDocument {
   version: number;
   workerType: string;
   model: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   mcpServers?: string[];
   skillRevisions?: string[];
@@ -916,6 +936,7 @@ export interface AggregateStats {
 export interface GroupUniformValues {
   workerType?: string;
   model?: string;
+  reasoningEffort?: string;
   agentVersion?: string;
   platform?: string;
   mcpServers?: string[];

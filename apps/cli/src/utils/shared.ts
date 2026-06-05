@@ -35,7 +35,8 @@ export function printFollowUpCommands(id: string): void {
 
 export const DEFAULT_WORKERS = [
   "coder-acp-claude-code",
-  "coder-acp-copilot"
+  "coder-acp-copilot",
+  "coder-acp-copilot-windows"
 ];
 
 /**

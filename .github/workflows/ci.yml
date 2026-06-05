@@ -569,6 +569,7 @@ jobs:
               - 'apps/gateway/**'
             coder-acp-copilot-windows:
               - 'apps/workers/coder-acp-copilot-windows/**'
+              - 'apps/workers/coder-acp-copilot/versions.env'
             typescript:
               - 'apps/**'
               - '!apps/gateway/**'
@@ -809,7 +810,7 @@ jobs:
         id: versions
         run: |
           EXTRA_ARGS=""
-          VERSION_FILE="apps/workers/coder-acp-copilot-windows/versions.env"
+          VERSION_FILE="apps/workers/coder-acp-copilot/versions.env"
           if [ -f "$VERSION_FILE" ]; then
             while IFS='=' read -r key value; do
               [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue

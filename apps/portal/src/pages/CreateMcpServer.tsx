@@ -137,7 +137,7 @@ export function CreateMcpServer() {
   const removeEnvPair = (index: number) => setEnvPairs(envPairs.filter((_, i) => i !== index));
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-2xl space-y-6">
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="icon" onClick={() => navigate("/mcp-servers")}>
           <ArrowLeft className="h-4 w-4" />
