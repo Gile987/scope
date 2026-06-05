@@ -56,7 +56,7 @@ export function ExtensionPreviewPanel() {
       onClose={closePanel}
       headerActions={
         <div className="flex justify-end">
-          <Link to={`/extensions/${extension._id}`}>
+          <Link to={`/extensions/${extension.id}`}>
             <Button variant="outline" size="sm" className="gap-1.5">
               <ExternalLink className="h-3.5 w-3.5" /> Open full view
             </Button>
@@ -73,7 +73,7 @@ export function ExtensionPreviewPanel() {
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <div className="col-span-2">
                 <dt className="text-xs text-muted-foreground">ID</dt>
-                <dd className="mt-0.5 break-all font-mono text-xs">{extension._id}</dd>
+                <dd className="mt-0.5 break-all font-mono text-xs">{extension.id}</dd>
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Publisher</dt>

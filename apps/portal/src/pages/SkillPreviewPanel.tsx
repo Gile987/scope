@@ -59,11 +59,11 @@ export function SkillPreviewPanel({ slug }: SkillPreviewPanelProps) {
           <span className="truncate">{skill.name}</span>
         </span>
       }
-      subtitle={<span className="font-mono">{skill._id}</span>}
+      subtitle={<span className="font-mono">{skill.id}</span>}
       onClose={closePanel}
       headerActions={
         <div className="flex justify-end">
-          <Link to={`/skills/${skill._id}`}>
+          <Link to={`/skills/${skill.id}`}>
             <Button variant="outline" size="sm" className="gap-1.5">
               <ExternalLink className="h-3.5 w-3.5" /> Open full view
             </Button>

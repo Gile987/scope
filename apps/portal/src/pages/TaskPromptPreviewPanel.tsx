@@ -49,17 +49,17 @@ export function TaskPromptPreviewPanel() {
 
   return (
     <DetailPanel
-      title={<span className="truncate font-mono text-sm">{formatId(taskPrompt._id)}</span>}
+      title={<span className="truncate font-mono text-sm">{formatId(taskPrompt.id)}</span>}
       subtitle={truncate(taskPrompt.text, 80)}
       onClose={closePanel}
       headerActions={
         <div className="flex flex-wrap justify-end gap-2">
-          <Link to={`/runs?taskPromptId=${encodeURIComponent(taskPrompt._id)}`}>
+          <Link to={`/runs?taskPromptId=${encodeURIComponent(taskPrompt.id)}`}>
             <Button variant="outline" size="sm" className="gap-1.5">
               <List className="h-3.5 w-3.5" /> View runs
             </Button>
           </Link>
-          <Link to={`/task-prompts/${taskPrompt._id}`}>
+          <Link to={`/task-prompts/${taskPrompt.id}`}>
             <Button variant="outline" size="sm" className="gap-1.5">
               <ExternalLink className="h-3.5 w-3.5" /> Open full view
             </Button>

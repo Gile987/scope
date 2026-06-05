@@ -52,11 +52,11 @@ export function McpServerPreviewPanel() {
           <span className="truncate">{server.name}</span>
         </span>
       }
-      subtitle={<span className="font-mono">{server._id}</span>}
+      subtitle={<span className="font-mono">{server.id}</span>}
       onClose={closePanel}
       headerActions={
         <div className="flex justify-end">
-          <Link to={`/mcp-servers/${server._id}`}>
+          <Link to={`/mcp-servers/${server.id}`}>
             <Button variant="outline" size="sm" className="gap-1.5">
               <ExternalLink className="h-3.5 w-3.5" /> Open full view
             </Button>

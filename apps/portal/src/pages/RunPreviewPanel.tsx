@@ -60,12 +60,12 @@ export function RunPreviewPanel() {
 
   return (
     <DetailPanel
-      title={<span className="truncate font-mono text-sm">{formatId(run._id)}</span>}
+      title={<span className="truncate font-mono text-sm">{formatId(run.id)}</span>}
       subtitle={run.scenario?.task ? truncate(run.scenario.task, 80) : run.workerType}
       onClose={closePanel}
       headerActions={
         <div className="flex justify-end gap-2">
-          <Link to={`/runs/${run._id}`}>
+          <Link to={`/runs/${run.id}`}>
             <Button variant="outline" size="sm" className="gap-1.5">
               <ExternalLink className="h-3.5 w-3.5" />
               Open full view

@@ -61,14 +61,14 @@ export function TokenPreviewPanel() {
       title={
         <span className="flex items-center gap-1.5 truncate">
           <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="truncate">{token.comment || formatId(token._id)}</span>
+          <span className="truncate">{token.comment || formatId(token.id)}</span>
         </span>
       }
-      subtitle={<span className="font-mono">{token._id}</span>}
+      subtitle={<span className="font-mono">{token.id}</span>}
       onClose={closePanel}
       headerActions={
         <div className="flex justify-end">
-          <Link to={`/secrets/keys/${token._id}`}>
+          <Link to={`/secrets/keys/${token.id}`}>
             <Button variant="outline" size="sm" className="gap-1.5">
               <ExternalLink className="h-3.5 w-3.5" /> Open full view
             </Button>

@@ -52,7 +52,7 @@ export function ReportPreviewPanel() {
 
   return (
     <DetailPanel
-      title={<span className="truncate font-mono text-sm">{formatId(report._id)}</span>}
+      title={<span className="truncate font-mono text-sm">{formatId(report.id)}</span>}
       subtitle={report.task ? truncate(report.task, 80) : "Report"}
       onClose={closePanel}
       headerActions={
@@ -62,7 +62,7 @@ export function ReportPreviewPanel() {
               <ExternalLink className="h-3.5 w-3.5" /> Open run
             </Button>
           </Link>
-          <Link to={`/reports/${report._id}`}>
+          <Link to={`/reports/${report.id}`}>
             <Button variant="outline" size="sm" className="gap-1.5">
               <ExternalLink className="h-3.5 w-3.5" /> Open full view
             </Button>

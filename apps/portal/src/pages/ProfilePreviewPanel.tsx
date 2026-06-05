@@ -57,13 +57,13 @@ export function ProfilePreviewPanel() {
       subtitle={
         <span className="flex items-center gap-1.5">
           <Badge variant="secondary" className="text-xs">v{v.version}</Badge>
-          <span className="font-mono text-xs">{profile._id}</span>
+          <span className="font-mono text-xs">{profile.id}</span>
         </span>
       }
       onClose={closePanel}
       headerActions={
         <div className="flex justify-end">
-          <Link to={`/profiles/${profile._id}`}>
+          <Link to={`/profiles/${profile.id}`}>
             <Button variant="outline" size="sm" className="gap-1.5">
               <ExternalLink className="h-3.5 w-3.5" /> Open full view
             </Button>

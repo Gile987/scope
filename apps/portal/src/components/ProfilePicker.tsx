@@ -32,7 +32,7 @@ export function ProfilePicker({
 
     return profiles.filter((profile) => {
       const name = profile.name.toLowerCase();
-      const id = profile._id.toLowerCase();
+      const id = profile.id.toLowerCase();
       const worker = profile.version.workerType.toLowerCase();
       const model = profile.version.model.toLowerCase();
       return (
@@ -83,7 +83,7 @@ export function ProfilePicker({
     if (event.key === "Enter") {
       event.preventDefault();
       const item = filteredProfiles[highlightIdx];
-      if (item) handleSelect(item._id);
+      if (item) handleSelect(item.id);
       return;
     }
 
@@ -118,10 +118,10 @@ export function ProfilePicker({
           ) : (
             <ul className="py-1">
               {filteredProfiles.map((profile, idx) => {
-                const isSelected = profile._id === selectedProfileId;
+                const isSelected = profile.id === selectedProfileId;
                 return (
                 <li
-                  key={profile._id}
+                  key={profile.id}
                   className={`cursor-pointer px-3 py-2 text-sm ${
                     idx === highlightIdx
                       ? "bg-accent text-accent-foreground"
@@ -131,7 +131,7 @@ export function ProfilePicker({
                   }`}
                   onMouseEnter={() => setHighlightIdx(idx)}
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => handleSelect(profile._id)}
+                  onClick={() => handleSelect(profile.id)}
                 >
                   <p className="flex items-center justify-between gap-2 font-medium">
                     {truncate(profile.name, 80)}
