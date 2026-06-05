@@ -6,6 +6,17 @@ import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 
 extendZodWithOpenApi(z);
 
+export const ModelCapabilitiesSchema = z
+  .object({
+    reasoningEffort: z.array(z.string()).optional(),
+    toolCalls: z.boolean().optional(),
+    vision: z.boolean().optional(),
+    streaming: z.boolean().optional(),
+    adaptiveThinking: z.boolean().optional(),
+    maxThinkingBudget: z.number().optional(),
+  })
+  .openapi("ModelCapabilities");
+
 export const ModelResponseSchema = z
   .object({
     _id: z.string(),
@@ -18,6 +29,7 @@ export const ModelResponseSchema = z
     providerAvailableFrom: z.coerce.date().optional(),
     providerEndOfLife: z.coerce.date().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
+    capabilities: ModelCapabilitiesSchema.optional(),
   })
   .openapi("ModelResponse");
 

@@ -26,6 +26,10 @@ export interface ACPClientOptions {
   sessionTimeoutMs?: number;
   /** Model to select after the session is created (e.g. "gpt-5.4"). */
   model?: string;
+  /** Reasoning effort level to apply via ACP config option (e.g. "low", "medium", "high"). */
+  reasoningEffort?: string;
+  /** Use shell to spawn the process (required on Windows for .cmd shim resolution). */
+  shell?: boolean;
 }
 
 export interface ACPSessionResult {
@@ -180,13 +184,53 @@ export async function selectModel(
 }
 
 /**
+ * Attempt to set the reasoning effort level via ACP session/set_config_option.
+ *
+ * Looks for a config option with `category: "thought_level"` (the category Copilot CLI
+ * uses for reasoning effort). If none is found, logs a warning and continues.
+ */
+export async function selectReasoningEffort(
+  connection: acp.ClientSideConnection,
+  sessionResult: acp.NewSessionResponse,
+  reasoningEffort: string,
+  onLog: (message: string) => void
+): Promise<string | undefined> {
+  if (!sessionResult.configOptions) {
+    onLog(`Warning: agent does not advertise config options; reasoning effort "${reasoningEffort}" may not be honoured`);
+    return undefined;
+  }
+
+  // Look for a config option with category "thought_level" (Copilot CLI's reasoning effort category)
+  const effortConfigOption = sessionResult.configOptions.find(
+    (o) => o.category === "thought_level"
+  );
+  if (!effortConfigOption) {
+    onLog(`Warning: agent does not advertise a "thought_level" config option; reasoning effort "${reasoningEffort}" may not be honoured`);
+    return undefined;
+  }
+
+  try {
+    await connection.setSessionConfigOption({
+      sessionId: sessionResult.sessionId,
+      configId: effortConfigOption.id,
+      value: reasoningEffort,
+    });
+    onLog(`Reasoning effort set to "${reasoningEffort}" via session/set_config_option (configId: ${effortConfigOption.id})`);
+    return reasoningEffort;
+  } catch (err) {
+    onLog(`Warning: session/set_config_option failed for reasoning effort "${reasoningEffort}": ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  }
+}
+
+/**
  * Run an ACP session with the Copilot CLI (or any ACP-compatible agent).
  */
 export async function runACPSession(
   prompt: string,
   options: ACPClientOptions
 ): Promise<ACPSessionResult> {
-  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [], model } = options;
+  const { command, args = [], env = {}, cwd, onLog = console.log, mcpServers = [], model, reasoningEffort, shell = false } = options;
   const sessionTimeoutMs = options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
 
   onLog(`Starting ACP agent: ${command} ${args.join(" ")}`);
@@ -196,6 +240,7 @@ export async function runACPSession(
     cwd,
     env: { ...process.env, ...env },
     stdio: ["pipe", "pipe", "pipe"],
+    shell,
   });
 
   if (!agentProcess.stdin || !agentProcess.stdout) {
@@ -309,6 +354,11 @@ export async function runACPSession(
     let confirmedModel: string | undefined;
     if (model) {
       confirmedModel = await selectModel(connection, sessionResult, model, onLog);
+    }
+
+    // Set reasoning effort if requested
+    if (reasoningEffort) {
+      await selectReasoningEffort(connection, sessionResult, reasoningEffort, onLog);
     }
 
     // Set permission mode to bypass all permission checks (yolo mode).

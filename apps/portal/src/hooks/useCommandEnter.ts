@@ -21,7 +21,10 @@ function isCommandEnter(e: KeyboardEvent | ReactKeyboardEvent): boolean {
  * Create an `onKeyDown` handler for Dialog / AlertDialog content elements.
  *
  * On `Cmd+Enter` (Mac) / `Ctrl+Enter` (Win/Linux), it finds the first
- * enabled `[data-command-enter]` button inside the container and clicks it.
+ * `[data-command-enter]` button inside the container. If the button is
+ * enabled it is clicked; if disabled the keystroke is swallowed (noop)
+ * so it cannot bubble up and trigger a page-level shortcut underneath
+ * the open dialog.
  *
  * Used by both `DialogContent` and `AlertDialogContent` to avoid
  * duplicating the same handler logic.
@@ -34,9 +37,15 @@ export function createCommandEnterKeyDown(
       const action = (e.currentTarget as HTMLElement).querySelector<HTMLButtonElement>(
         "[data-command-enter]",
       );
-      if (action && !action.disabled) {
+      if (action) {
+        // Always claim the keystroke when the dialog opts in via
+        // [data-command-enter], even if the button is currently
+        // disabled — otherwise a disabled state would let the event
+        // bubble out to page-level handlers.
         e.preventDefault();
-        action.click();
+        if (!action.disabled) {
+          action.click();
+        }
       }
     }
     onKeyDown?.(e);

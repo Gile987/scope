@@ -1,192 +1,276 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { useNavigate, useOutlet, useParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import type { Model } from "@/types";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { Eye, Cpu, Search } from "lucide-react";
+import { Cpu } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import {
+  ListLayout,
+  FilterRail,
+  FilterSection,
+  CheckboxFilterGroup,
+  ClearFiltersLink,
+  DataTable,
+  Pagination,
+  useListUrlState,
+  type DataTableColumn,
+} from "@/components/list-layout";
+
+const FILTER_KEYS = ["provider", "agent", "status"] as const;
 
 export function ModelList() {
-  const { data: models = [], isLoading } = useQuery({
+  const navigate = useNavigate();
+  const detailOutlet = useOutlet();
+  const { id: activeParam } = useParams<{ id?: string }>();
+  const activeId = activeParam ? decodeURIComponent(activeParam) : undefined;
+
+  const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
+
+  const { data: models = [], isLoading, isRefetching } = useQuery({
     queryKey: ["models"],
     queryFn: () => api.listModels(),
   });
 
-  // Filter state
-  const [providerFilter, setProviderFilter] = useState("all");
-  const [agentFilter, setAgentFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("active");
-  const [searchQuery, setSearchQuery] = useState("");
+  const providerOptions = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const m of models) map.set(m.provider, (map.get(m.provider) ?? 0) + 1);
+    return [...map.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([value, count]) => ({ value, label: value, count }));
+  }, [models]);
 
-  // Derive unique filter options from data
-  const uniqueProviders = useMemo(
-    () => [...new Set(models.map((m) => m.provider))].sort(),
-    [models],
-  );
-  const uniqueAgents = useMemo(
-    () => [...new Set(models.map((m) => m.agentId))].sort(),
-    [models],
-  );
+  const agentOptions = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const m of models) map.set(m.agentId, (map.get(m.agentId) ?? 0) + 1);
+    return [...map.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([value, count]) => ({ value, label: value, count }));
+  }, [models]);
 
-  // Apply filters
+  const statusOptions = useMemo(() => {
+    const active = models.filter((m) => !m.disappearedAt).length;
+    const disappeared = models.filter((m) => m.disappearedAt).length;
+    return [
+      { value: "active", label: "Active", count: active },
+      { value: "disappeared", label: "Disappeared", count: disappeared },
+    ];
+  }, [models]);
+
+  // Default to showing only active models unless the user picks something else.
+  const selectedStatuses = (() => {
+    const fromUrl = state.getFilterList("status");
+    return fromUrl.length > 0 ? fromUrl : ["active"];
+  })();
+
   const filteredModels = useMemo(() => {
-    return models.filter((m: Model) => {
-      if (providerFilter !== "all" && m.provider !== providerFilter) return false;
-      if (agentFilter !== "all" && m.agentId !== agentFilter) return false;
-      if (statusFilter === "active" && m.disappearedAt) return false;
-      if (statusFilter === "disappeared" && !m.disappearedAt) return false;
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        if (!m.modelId.toLowerCase().includes(q) && !m._id.toLowerCase().includes(q)) return false;
+    const providers = state.getFilterList("provider");
+    const agents = state.getFilterList("agent");
+    const q = state.search.trim().toLowerCase();
+
+    return models.filter((m) => {
+      const status = m.disappearedAt ? "disappeared" : "active";
+      if (!selectedStatuses.includes(status)) return false;
+      if (providers.length > 0 && !providers.includes(m.provider)) return false;
+      if (agents.length > 0 && !agents.includes(m.agentId)) return false;
+      if (q && !m.modelId.toLowerCase().includes(q) && !m._id.toLowerCase().includes(q)) {
+        return false;
       }
       return true;
     });
-  }, [models, providerFilter, agentFilter, statusFilter, searchQuery]);
+  }, [models, selectedStatuses, state]);
 
-  // Summary counts
-  const totalActive = models.filter((m) => !m.disappearedAt).length;
-  const totalDisappeared = models.filter((m) => m.disappearedAt).length;
+  const sortedModels = useMemo(() => {
+    if (!state.sort) return filteredModels;
+    const sorted = [...filteredModels];
+    sorted.sort((a, b) => {
+      const av = sortKey(a, state.sort!);
+      const bv = sortKey(b, state.sort!);
+      if (av < bv) return -1;
+      if (av > bv) return 1;
+      return 0;
+    });
+    if (state.sortDir === "desc") sorted.reverse();
+    return sorted;
+  }, [filteredModels, state.sort, state.sortDir]);
+
+  const total = sortedModels.length;
+  const pageStart = (state.page - 1) * state.pageSize;
+  const pageItems = sortedModels.slice(pageStart, pageStart + state.pageSize);
+
+  const columns: DataTableColumn<Model>[] = [
+    {
+      id: "modelId",
+      header: "Model ID",
+      sortable: true,
+      cell: (m) => (
+        <span className="flex items-center gap-1.5 font-mono text-xs">
+          <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+          {m.modelId}
+        </span>
+      ),
+    },
+    {
+      id: "provider",
+      header: "Provider",
+      sortable: true,
+      width: "140px",
+      cell: (m) => <Badge variant="outline">{m.provider}</Badge>,
+    },
+    {
+      id: "agent",
+      header: "Agent",
+      sortable: true,
+      width: "160px",
+      cell: (m) => <span className="font-mono text-xs">{m.agentId}</span>,
+    },
+    {
+      id: "status",
+      header: "Status",
+      width: "120px",
+      cell: (m) =>
+        m.disappearedAt ? (
+          <Badge variant="secondary">Disappeared</Badge>
+        ) : (
+          <Badge variant="default">Active</Badge>
+        ),
+    },
+    {
+      id: "reasoningEffort",
+      header: "Reasoning Effort",
+      width: "180px",
+      cell: (m) =>
+        m.capabilities?.reasoningEffort?.length ? (
+          <div className="flex flex-wrap gap-1">
+            {m.capabilities.reasoningEffort.map((level) => (
+              <Badge key={level} variant="outline" className="px-1.5 py-0 text-[10px]">
+                {level}
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "firstSeen",
+      header: "First Seen",
+      sortable: true,
+      width: "160px",
+      cell: (m) => (
+        <span className="text-xs text-muted-foreground">{formatDate(m.firstSeenAt)}</span>
+      ),
+    },
+    {
+      id: "lastSeen",
+      header: "Last Seen",
+      sortable: true,
+      width: "160px",
+      cell: (m) => (
+        <span className="text-xs text-muted-foreground">
+          {m.disappearedAt ? formatDate(m.disappearedAt) : formatDate(m.lastSeenAt)}
+        </span>
+      ),
+    },
+  ];
 
   return (
-    <div className="space-y-6">
-      {/* Page header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Models</h1>
-          <p className="text-muted-foreground">
-            {models.length} models ({totalActive} active, {totalDisappeared} disappeared)
-          </p>
-        </div>
+    <ListLayout
+      title="Models"
+      description={`${models.length} models discovered by scanners`}
+      railStorageKey="models"
+      filterRail={
+        <FilterRail
+          search={state.search}
+          onSearchChange={state.setSearch}
+          searchPlaceholder="Search model ID…"
+          refreshing={isRefetching}
+          footer={
+            <ClearFiltersLink
+              onClick={state.clearFilters}
+              disabled={!state.hasActiveFilters && state.getFilterList("status").length === 0}
+            />
+          }
+        >
+          <FilterSection title="Status" storageKey="models-status">
+            <CheckboxFilterGroup
+              options={statusOptions}
+              selected={selectedStatuses}
+              onToggle={(v) => {
+                const current = state.getFilterList("status");
+                const effective = current.length > 0 ? current : ["active"];
+                const next = effective.includes(v) ? effective.filter((x) => x !== v) : [...effective, v];
+                state.setFilter("status", next);
+              }}
+            />
+          </FilterSection>
+          <FilterSection title="Provider" storageKey="models-provider">
+            <CheckboxFilterGroup
+              options={providerOptions}
+              selected={state.getFilterList("provider")}
+              onToggle={(v) => state.toggleFilterValue("provider", v)}
+            />
+          </FilterSection>
+          <FilterSection title="Agent" storageKey="models-agent" defaultOpen={false}>
+            <CheckboxFilterGroup
+              options={agentOptions}
+              selected={state.getFilterList("agent")}
+              onToggle={(v) => state.toggleFilterValue("agent", v)}
+            />
+          </FilterSection>
+        </FilterRail>
+      }
+      detail={detailOutlet}
+      onDetailClose={() => navigate("/models")}
+    >
+      <div className="flex flex-col gap-3">
+        <DataTable
+          items={pageItems}
+          columns={columns}
+          getRowId={(m) => m._id}
+          activeId={activeId}
+          onRowClick={(m) => navigate(`/models/${encodeURIComponent(m._id)}`)}
+          sort={state.sort}
+          sortDir={state.sortDir}
+          onSortChange={state.toggleSort}
+          loading={isLoading}
+          loadingRows={state.pageSize}
+          emptyState={
+            models.length === 0
+              ? "No models found. Models are discovered automatically by model scanners."
+              : "No models match the current filters."
+          }
+        />
+        <Pagination
+          page={state.page}
+          pageSize={state.pageSize}
+          total={total}
+          onPageChange={state.setPage}
+          onPageSizeChange={state.setPageSize}
+          itemLabel="models"
+        />
       </div>
-
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search model ID..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 w-[250px]"
-          />
-        </div>
-        <Select value={providerFilter} onValueChange={setProviderFilter}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Provider" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All providers</SelectItem>
-            {uniqueProviders.map((p) => (
-              <SelectItem key={p} value={p}>{p}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={agentFilter} onValueChange={setAgentFilter}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Agent" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All agents</SelectItem>
-            {uniqueAgents.map((a) => (
-              <SelectItem key={a} value={a}>{a}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="disappeared">Disappeared</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Models table */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
-      ) : filteredModels.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          {models.length === 0
-            ? "No models found. Models are discovered automatically by model scanners."
-            : "No models match the current filters."}
-        </div>
-      ) : (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Model ID</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead>Agent</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>First Seen</TableHead>
-                <TableHead>Last Seen</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredModels.map((model: Model) => (
-                <TableRow key={model._id} className={model.disappearedAt ? "opacity-60" : ""}>
-                  <TableCell className="font-mono text-xs">
-                    <Link to={`/models/${encodeURIComponent(model._id)}`} className="hover:underline flex items-center gap-1.5">
-                      <Cpu className="h-3.5 w-3.5" />
-                      {model.modelId}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{model.provider}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Link to={`/agents/${model.agentId}`} className="hover:underline text-xs">
-                      {model.agentId}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    {model.disappearedAt
-                      ? <Badge variant="secondary">Disappeared</Badge>
-                      : <Badge variant="default">Active</Badge>}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatDate(model.firstSeenAt)}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {model.disappearedAt
-                      ? formatDate(model.disappearedAt)
-                      : formatDate(model.lastSeenAt)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Link to={`/models/${encodeURIComponent(model._id)}`}>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                    </Link>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-    </div>
+    </ListLayout>
   );
+}
+
+function sortKey(m: Model, col: string): string | number {
+  switch (col) {
+    case "modelId":
+      return m.modelId.toLowerCase();
+    case "provider":
+      return m.provider.toLowerCase();
+    case "agent":
+      return m.agentId.toLowerCase();
+    case "firstSeen":
+      return new Date(m.firstSeenAt).getTime();
+    case "lastSeen":
+      return new Date(m.disappearedAt ?? m.lastSeenAt).getTime();
+    default:
+      return "";
+  }
 }

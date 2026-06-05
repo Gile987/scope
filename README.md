@@ -1,8 +1,8 @@
 # Scope Core
 
-> **Measure the agentic coding experience. Across agents. At scale.**
+> **Measure the agentic coding experience. Across agents. Across product surfaces. At scale.**
 
-**Scope Core** is a self-service, Kubernetes-native platform for measuring the agentic experience of AI coding agents. Any team member can submit runs, manage criteria, and inspect results through the Portal or CLI without operator involvement. It orchestrates coding tasks across multiple agent workers (GitHub Copilot, Claude Code, VS Code Electron), evaluates results using a criteria DAG, captures upstream AI traffic through a Rust TLS-intercepting gateway, and streams logs in real time — all backed by MongoDB (CosmosDB-compatible), Redis, and Azure Storage Queues. The application is deployed via FluxCD GitOps with Kustomize overlays and runs on AKS.
+**Scope Core** measures the agentic experience of AI agents on Microsoft product surfaces at scale and drives their optimization, delivered as a self‑service, Kubernetes‑native platform supporting surfaces such as Skills, MCP, VS Code Extensions, and MS Learn, and observed across VS Code Copilot, GitHub Copilot CLI, and Claude Code CLI.
 
 ## Key Features
 
@@ -141,6 +141,52 @@ pnpm open:portal
 ```
 
 > **Worktree note:** In a [git worktree](#git-worktree-support), ports are offset for isolation so the portal may run on a different port (e.g. `5103`). Check `PORTAL_PORT` in your `.env` file for the actual port, or just run `pnpm open:portal` — it reads `.env` and opens the correct URL.
+
+### Enabling the Portal AI features (optional)
+
+The portal has three AI-assisted flows — criteria prompt generation,
+prompt-feature extract/generate, and task-prompt generate/variation. They
+need a chat-completions backend. Resolution order in
+[`apps/api/src/llm-token.ts`](apps/api/src/llm-token.ts) — first source
+that returns a credential wins, with no automatic failover at request
+time:
+
+| # | Source | Trigger |
+|---|--------|---------|
+| 1 | Azure AI Foundry via env vars | `AZURE_AI_INFERENCE_ENDPOINT` + `AZURE_AI_INFERENCE_API_KEY` (recommended for local dev, set in `.env.local`) |
+| 2 | Azure AI Foundry via Token Manager | `azure-ai-foundry` key at Portal `/secrets/keys/new` (recommended for integration / prod) |
+| 3 | GitHub Models via env var | `GITHUB_MODELS_API_KEY` |
+| 4 | GitHub Models via Token Manager | `github-models` key at `/secrets/keys/new` |
+| 5 | Bare GitHub token | `GITHUB_TOKEN` (slow public fallback) |
+
+Foundry always beats GitHub Models, and env vars beat the Token Manager
+within each backend. See
+[`ENV_VARIABLES.md`](ENV_VARIABLES.md#llm-configuration-portal-ai-features)
+for the full table and the no-failover semantics.
+
+Quick local setup with Foundry:
+
+```bash
+cp .env.local.example .env.local
+# fill in AZURE_AI_INFERENCE_ENDPOINT (must end in /models),
+# AZURE_AI_INFERENCE_API_KEY, and LLM_MODEL
+docker compose up -d --force-recreate --no-deps api
+```
+
+> Compose only re-reads `env_file:` on container **create**, so
+> `docker compose restart api` won't pick up `.env.local` edits — use
+> `--force-recreate` (or restart the whole stack).
+
+Each AI call logs the resolved provider, e.g.
+
+```
+[llm-token] inference provider: source=azure-ai-foundry via=azure-ai-foundry-env endpoint=… model=gpt-4.1-mini
+```
+
+If nothing is configured the portal renders a single actionable error
+("LLM not configured … register a key at /secrets/keys/new …"). See
+[`ENV_VARIABLES.md`](ENV_VARIABLES.md#llm-configuration-portal-ai-features)
+for full variable docs.
 
 ### Other useful commands
 

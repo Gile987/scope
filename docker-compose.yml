@@ -22,8 +22,8 @@
 # Shared environment blocks (YAML anchors)
 # ---------------------------------------------------------------------------
 x-common-env: &common-env
-  MONGO_CONNECTION_STRING: mongodb://mongodb:27017
-  MONGO_DATABASE: requests-db
+  MONGO_CONNECTION_STRING: ${MONGO_CONNECTION_STRING:-mongodb://mongodb:27017}
+  MONGO_DATABASE: ${MONGO_DATABASE:-requests-db}
   MONGO_COLLECTION: requests
   REDIS_HOST: redis
   REDIS_PORT: "6379"
@@ -40,6 +40,7 @@ x-worker-env: &worker-env
 x-worker-deps: &worker-deps
   mongodb:
     condition: service_healthy
+    required: false
   redis:
     condition: service_healthy
   azurite:
@@ -55,6 +56,7 @@ services:
   # MongoDB (compatible with CosmosDB MongoDB API)
   mongodb:
     image: mongo:7.0
+    profiles: [mongodb]
     ports:
       - "${MONGODB_PORT:-27000}:27017"
     environment:
@@ -160,11 +162,12 @@ services:
       dockerfile: apps/api/Dockerfile
       target: builder
     environment:
-      MONGO_CONNECTION_STRING: mongodb://mongodb:27017
-      MONGO_DATABASE: requests-db
+      MONGO_CONNECTION_STRING: ${MONGO_CONNECTION_STRING:-mongodb://mongodb:27017}
+      MONGO_DATABASE: ${MONGO_DATABASE:-requests-db}
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
     restart: "no"
     working_dir: /app
     command: ["pnpm", "--filter", "db-migrations", "migrate:up"]
@@ -177,6 +180,13 @@ services:
     restart: on-failure:5
     ports:
       - "${API_PORT:-3100}:80"
+    env_file:
+      # .env.local holds developer-managed values that worktree-env must not
+      # overwrite: AZURE_AI_INFERENCE_ENDPOINT, AZURE_AI_INFERENCE_API_KEY,
+      # and LLM_MODEL. Optional — the API falls back to GitHub Models when
+      # the Foundry vars aren't set, and uses gpt-4.1 when LLM_MODEL isn't.
+      - path: .env.local
+        required: false
     environment:
       <<: *common-env
       PORT: "80"
@@ -186,31 +196,33 @@ services:
       AZURE_STORAGE_QUEUE_REPORT: report-queue
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_MODELS_API_KEY: ${GITHUB_MODELS_API_KEY:-${GITHUB_TOKEN}}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4.1}
       GIT_COMMIT: ${GIT_COMMIT:-development}
       BUILD_TIME: ${BUILD_TIME:-}
       SCOPE_ENVIRONMENT: ${SCOPE_ENVIRONMENT:-}
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       redis:
         condition: service_healthy
       azurite:
         condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
-
-  # Register agent definitions and versions (local dev — no real version env vars)
   register-agents:
-    image: curlimages/curl:latest
+    image: alpine:3.21
     depends_on:
       api:
         condition: service_started
+    volumes:
+      - ./apps/workers:/workers:ro
     restart: "no"
     entrypoint:
       - /bin/sh
       - -c
       - |
+        apk add --no-cache curl yq > /dev/null 2>&1
+
         API_URL="http://api:80"
 
         # Retry wrapper: retries a curl up to 10 times with 3s delay
@@ -226,6 +238,13 @@ services:
           return 1
         }
 
+        # Register agent from its agent.yaml file
+        register_agent() {
+          WORKER_NAME="$$1"
+          AGENT_JSON=$$(yq -o=json /workers/$$WORKER_NAME/agent.yaml)
+          post "/api/v1/agents" "$$AGENT_JSON"
+        }
+
         echo "Waiting for API to be ready..."
         until curl -sf "$$API_URL/health" > /dev/null 2>&1; do
           echo "API not ready, retrying in 3s..."
@@ -233,21 +252,13 @@ services:
         done
         echo "API healthy, registering agents..."
 
+        # Upsert agents from agent.yaml files
+        register_agent "coder-acp-copilot"
+        register_agent "coder-acp-claude-code"
 
-
-        # Upsert agent: coder-acp-copilot
-        post "/api/v1/agents" '{"_id":"coder-acp-copilot","name":"GitHub Copilot CLI","description":"GitHub Copilot coding agent via ACP protocol","modelProvider":"github-copilot"}'
-
-        # Register dev version: coder-acp-copilot
+        # Register dev versions
         post "/api/v1/agents/coder-acp-copilot/versions" '{"agentVersion":"copilot-dev","workerVersion":"copilot-dev-local-dev","components":{"COPILOT_CLI_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-copilot"}'
-
-        # Upsert agent: coder-acp-claude-code
-        post "/api/v1/agents" '{"_id":"coder-acp-claude-code","name":"Claude Code CLI","description":"Anthropic Claude Code coding agent via ACP protocol","modelProvider":"anthropic"}'
-
-        # Register dev version: coder-acp-claude-code
         post "/api/v1/agents/coder-acp-claude-code/versions" '{"agentVersion":"claude-agent-acp-dev-sdk-dev","workerVersion":"claude-agent-acp-dev-sdk-dev-local-dev","components":{"CLAUDE_CODE_ACP_VERSION":"dev","CLAUDE_AGENT_SDK_VERSION":"dev"},"gitCommit":"local","buildTime":"local","imageTag":"dev","queueName":"queue-coder-acp-claude-code"}'
-
-
 
         echo ""
         echo "All agents and dev versions registered."
@@ -336,6 +347,7 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       lowkey-vault:
         condition: service_healthy
 
@@ -355,6 +367,7 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       azurite:
         condition: service_healthy
       db-migrate:
@@ -617,12 +630,49 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+        required: false
       redis:
         condition: service_healthy
       azurite:
         condition: service_healthy
       api:
         condition: service_started
+
+  register-version-post-processor:
+    build:
+      context: .
+      dockerfile: apps/workers/post-processor/Dockerfile
+    profiles: [post-processor]
+    environment:
+      <<: *common-env
+    depends_on:
+      mongodb:
+        condition: service_healthy
+        required: false
+    restart: "no"
+    entrypoint: ["npx", "tsx", "apps/workers/post-processor/src/register-version.ts"]
+
+  post-processor:
+    build:
+      context: .
+      dockerfile: apps/workers/post-processor/Dockerfile
+    profiles: [post-processor]
+    environment:
+      <<: *common-env
+      AZURE_STORAGE_QUEUE_POSTPROCESSOR: post-processor-queue
+      SCOPE_MT_API_URL: http://api:80
+    depends_on:
+      mongodb:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+      api:
+        condition: service_started
+      register-version-post-processor:
+        condition: service_completed_successfully
 
 volumes:
   mongodb_data:

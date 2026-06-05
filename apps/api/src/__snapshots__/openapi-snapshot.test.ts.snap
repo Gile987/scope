@@ -15,6 +15,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "properties": {},
         "type": "object",
       },
+      "AgentCapabilities": {
+        "properties": {
+          "supportsReasoningEffort": {
+            "type": "boolean",
+          },
+        },
+        "type": "object",
+      },
       "AgentResponse": {
         "properties": {
           "_id": {
@@ -22,6 +30,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "available": {
             "type": "boolean",
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/AgentCapabilities",
           },
           "createdAt": {
             "format": "date-time",
@@ -261,6 +272,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   "null",
                 ],
               },
+              "reasoningEffort": {
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
               "skillRevisions": {
                 "items": {
                   "type": "string",
@@ -416,6 +433,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "available": {
             "type": "boolean",
           },
+          "capabilities": {
+            "$ref": "#/components/schemas/AgentCapabilities",
+          },
           "defaultModel": {
             "type": "string",
           },
@@ -557,6 +577,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "minLength": 1,
             "type": "string",
           },
+          "reasoningEffort": {
+            "type": "string",
+          },
           "skillRevisions": {
             "items": {
               "type": "string",
@@ -648,7 +671,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "array",
           },
           "maxIterations": {
-            "type": "number",
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer",
           },
           "mcpServers": {
             "items": {
@@ -669,6 +694,15 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "integer",
           },
           "profileId": {
+            "type": "string",
+          },
+          "profileVariations": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "reasoningEffort": {
             "type": "string",
           },
           "scenario": {
@@ -1298,6 +1332,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "ModelCapabilities": {
+        "properties": {
+          "adaptiveThinking": {
+            "type": "boolean",
+          },
+          "maxThinkingBudget": {
+            "type": "number",
+          },
+          "reasoningEffort": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "streaming": {
+            "type": "boolean",
+          },
+          "toolCalls": {
+            "type": "boolean",
+          },
+          "vision": {
+            "type": "boolean",
+          },
+        },
+        "type": "object",
+      },
       "ModelResponse": {
         "properties": {
           "_id": {
@@ -1305,6 +1365,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "agentId": {
             "type": "string",
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/ModelCapabilities",
           },
           "disappearedAt": {
             "format": "date-time",
@@ -1555,6 +1618,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "profileId": {
+            "type": "string",
+          },
+          "reasoningEffort": {
             "type": "string",
           },
           "skillRevisions": {
@@ -2067,6 +2133,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "profileVersionId": {
+            "type": "string",
+          },
+          "reasoningEffort": {
             "type": "string",
           },
           "run": {
@@ -2626,6 +2695,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "available": {
             "type": "boolean",
           },
+          "capabilities": {
+            "$ref": "#/components/schemas/AgentCapabilities",
+          },
           "defaultModel": {
             "type": "string",
           },
@@ -2784,17 +2856,33 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "model": {
-            "type": "string",
+            "type": [
+              "string",
+              "null",
+            ],
           },
           "name": {
             "type": "string",
           },
           "systemPrompt": {
-            "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
+              },
+              {
+                "type": [
+                  "object",
+                  "null",
+                ],
+              },
+            ],
           },
           "timeoutMs": {
             "exclusiveMinimum": 0,
-            "type": "integer",
+            "type": [
+              "integer",
+              "null",
+            ],
           },
           "trigger": {
             "$ref": "#/components/schemas/ReportTrigger",
@@ -4993,6 +5081,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   "models": {
                     "items": {
                       "properties": {
+                        "capabilities": {
+                          "properties": {
+                            "adaptiveThinking": {
+                              "type": "boolean",
+                            },
+                            "maxThinkingBudget": {
+                              "type": "number",
+                            },
+                            "reasoningEffort": {
+                              "items": {
+                                "type": "string",
+                              },
+                              "type": "array",
+                            },
+                            "streaming": {
+                              "type": "boolean",
+                            },
+                            "toolCalls": {
+                              "type": "boolean",
+                            },
+                            "vision": {
+                              "type": "boolean",
+                            },
+                          },
+                          "type": "object",
+                        },
                         "id": {
                           "type": "string",
                         },
@@ -5262,6 +5376,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "type": "array",
                   },
                   "model": {
+                    "type": "string",
+                  },
+                  "reasoningEffort": {
                     "type": "string",
                   },
                   "skillRevisions": {
@@ -6816,6 +6933,85 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/bulk-cancel": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "ids",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "cancelled": {
+                      "type": "number",
+                    },
+                    "results": {
+                      "items": {
+                        "properties": {
+                          "cancelled": {
+                            "type": "boolean",
+                          },
+                          "error": {
+                            "type": "string",
+                          },
+                          "id": {
+                            "type": "string",
+                          },
+                          "previousStatus": {
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "id",
+                          "cancelled",
+                        ],
+                        "type": "object",
+                      },
+                      "type": "array",
+                    },
+                    "skipped": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "cancelled",
+                    "skipped",
+                    "results",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Cancel multiple requests",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/bulk-pause": {
       "post": {
         "requestBody": {
@@ -7192,6 +7388,85 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/{id}/atif": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "The iteration number (1-based)",
+            "in": "query",
+            "name": "iteration",
+            "required": true,
+            "schema": {
+              "description": "The iteration number (1-based)",
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "ATIF v1.7 trajectory JSON file",
+          },
+          "400": {
+            "description": "Missing or invalid iteration",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download ATIF trajectory file for a specific iteration",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/cancel": {
+      "post": {
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                    },
+                    "outcome": {
+                      "type": "string",
+                    },
+                    "previousStatus": {
+                      "type": "string",
+                    },
+                    "status": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "previousStatus",
+                    "status",
+                    "outcome",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Cancel a request (marks as done/failed and signals worker to exit)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/{id}/har": {
       "get": {
         "parameters": [
@@ -7534,6 +7809,265 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Get a single attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/archive": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Gzipped run archive",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download full run archive for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/atif": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "The iteration number (1-based)",
+            "in": "query",
+            "name": "iteration",
+            "required": true,
+            "schema": {
+              "description": "The iteration number (1-based)",
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "ATIF v1.7 trajectory JSON file",
+          },
+          "400": {
+            "description": "Missing or invalid iteration",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download ATIF trajectory file for a specific attempt and iteration",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/har": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "HAR-format JSON file",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download HAR file for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/logs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent event stream of log entries",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Stream logs for a specific attempt (SSE)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/snapshots/{iteration}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "iteration",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Gzipped snapshot archive",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download iteration snapshot for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/tool-calls": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "JSONL stream — one ToolCall per line",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download per-iteration tool-calls JSONL for a specific attempt",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/video": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "WebM video recording (supports Range requests)",
+          },
+          "404": {
+            "description": "Not found",
+          },
+        },
+        "summary": "Download session recording for a specific attempt",
         "tags": [
           "Requests",
         ],

@@ -1,0 +1,7 @@
+_id: coder-acp-copilot
+name: GitHub Copilot CLI
+description: GitHub Copilot coding agent via ACP protocol
+modelProvider: github-copilot
+available: true
+capabilities:
+  supportsReasoningEffort: true

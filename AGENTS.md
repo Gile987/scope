@@ -72,11 +72,44 @@ React 19 web UI with Vite, Tailwind CSS, Radix UI (shadcn/ui), TanStack Query, a
 
 - Real-time data flow: [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md)
 
+> **Storybook**: When adding or modifying portal components, update the corresponding Storybook stories. Use the `storybook` skill for guidance.
+
+#### Portal UX v2 implementation learnings (Runs + Submit Run)
+
+Use these patterns when extending list/detail or run-submission UX:
+
+1. **Keep interaction model consistent across entities.**
+   - Use the same layout contract: central list/table, right filter rail, contextual left detail/settings panel.
+   - Reuse shared list primitives (`ListLayout`, `FilterRail`, `DataTable`, `CustomizeColumnsPanel`, `Pagination`) instead of ad-hoc page layouts.
+
+2. **Prefer in-place creation over navigation breaks.**
+   - For `/runs/new`, create profiles in a dialog and keep users on the page.
+   - Reuse shared forms (e.g. `ProfileCreateForm`) between full-page and modal flows to avoid behavior drift.
+
+3. **Treat action counts as source-of-truth UX.**
+   - Any submit/CTA label must reflect the real backend effect (e.g. expanded run count, not just occurrence count).
+   - If composition/expansion is shown elsewhere on the page, the primary action label must match it exactly.
+
+4. **Composition UIs should make hierarchy explicit.**
+   - Show base profile and variations with distinct visual semantics (badges/labels such as `Base`, `Var N`).
+   - Prefer profile names over IDs in group headers and list cells; use IDs only as fallback.
+   - When grouped by profile, carry base/variation badges into group headers for scanability.
+
+5. **Long forms in dialogs require stable action affordances.**
+   - Use a constrained scroll container with a sticky footer for primary actions.
+   - Ensure dialog structure uses a non-growing shell (`grid-rows-[auto_minmax(0,1fr)]` + `min-h-0`/`overflow-y-auto`) so content scrolls without losing actions.
+
+6. **Inline control rows should align visually and behaviorally.**
+   - Keep `New…` actions on the same row as their picker/search control where possible.
+   - Match control heights and interaction patterns between similar pickers (task/profile/criteria) to reduce cognitive load.
+
 ### CLI (`apps/cli/`)
 
 Command-line interface built with Commander.js and Ink (React for terminals). Used for submitting runs, streaming logs, managing criteria, and CI/CD automation. Run `pnpm cli --help` to discover subcommands.
 
 > **CLI ↔ Portal parity**: Every feature available in the Portal must also be available in the CLI. The CLI is the primary interface for CI/CD and power users — it must never lag behind the Portal in capabilities.
+
+- Distribution and standalone installation: [docs/architecture/cli-distribution.md](docs/architecture/cli-distribution.md)
 
 ### Token Manager (`apps/token-manager/`)
 
@@ -137,6 +170,10 @@ pnpm dev:<worker-name>            # Individual worker (native)
 pnpm open:portal                  # Open portal in browser
 ```
 
+### Shared Dev Infrastructure (CosmosDB)
+
+For testing against real Azure CosmosDB (e.g. index behavior), a shared dev instance can be provisioned. Each worktree gets its own isolated database. See [docs/shared-dev-infra.md](docs/shared-dev-infra.md) for setup and usage.
+
 ## Rust Components
 
 When making changes to any Rust component (e.g. the AI gateway in `apps/gateway/`), follow the `rust-best-practices` skill. This skill is available at `.agents/skills/rust-best-practices/SKILL.md` and covers idiomatic Rust, ownership patterns, error handling with `Result`, and performance guidelines.
@@ -150,6 +187,8 @@ pnpm test                         # Unit tests
 pnpm test:coverage                # With coverage report
 pnpm test:integration             # Integration tests (requires .env + Docker)
 ```
+
+> **Portal Storybook stories run under Vitest**: `apps/portal/src/components/ui/stories.play.test.tsx` composes the `ui/*` stories and executes their `play` (interaction) functions inside the regular Vitest suite (no `@storybook/addon-vitest` required). It binds a Testing Library `canvas` to the rendered container, so story `play` functions must keep depending only on `canvas` plus values imported directly from `storybook/test` (`userEvent`, `screen`, `expect`). When you add a new `ui/*` story with a `play` function, register its module in that harness so it's covered.
 
 ## Documentation Workflow
 
@@ -169,6 +208,10 @@ pnpm test:integration             # Integration tests (requires .env + Docker)
 | [docs/architecture/skills.md](docs/architecture/skills.md) | Agent Skills spec, registration, resolution, delivery |
 | [docs/architecture/db-migrations.md](docs/architecture/db-migrations.md) | MongoDB migration framework |
 | [docs/architecture/deployment.md](docs/architecture/deployment.md) | Single-branch deployment, int→prod promotion |
+| [docs/architecture/cli-distribution.md](docs/architecture/cli-distribution.md) | CLI bundling, publishing, installation, update check |
+| [docs/architecture/retry.md](docs/architecture/retry.md) | Retry utilities: `withRetry` function and `@Retry` decorator |
+| [docs/architecture/post-processing.md](docs/architecture/post-processing.md) | Post-processing pipeline, ATIF generation, handler extensibility |
 | [docs/research/realtime-data-flow.md](docs/research/realtime-data-flow.md) | SSE + Change Streams, Redis pub/sub, polling patterns |
 | [docs/research/delta-storage.md](docs/research/delta-storage.md) | Space-efficient storage of iteration snapshots |
+| [docs/shared-dev-infra.md](docs/shared-dev-infra.md) | Shared dev infrastructure (CosmosDB) setup and worktree isolation |
 | [ENV_VARIABLES.md](ENV_VARIABLES.md) | Environment variable reference |

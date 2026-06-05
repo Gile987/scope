@@ -299,6 +299,72 @@ describe("API Endpoints", () => {
   });
 
   // ===================================================================
+  // Profiles endpoints
+  // ===================================================================
+
+  describe("POST /api/v1/profiles", () => {
+    it("returns 400 when the target agent has no supportedModels", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        name: "Copilot",
+        supportedModels: [],
+      });
+
+      const res = await request(app)
+        .post("/api/v1/profiles")
+        .send({
+          name: "test profile",
+          description: "",
+          workerType: "coder-acp-copilot",
+          model: "gpt-5",
+          agentVersion: "1.0.0",
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/does not declare any supportedModels/);
+    });
+
+    it("returns 400 when model is not in the agent's supportedModels", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        name: "Copilot",
+        supportedModels: ["gpt-5"],
+      });
+
+      const res = await request(app)
+        .post("/api/v1/profiles")
+        .send({
+          name: "test profile",
+          description: "",
+          workerType: "coder-acp-copilot",
+          model: "claude-3-opus",
+          agentVersion: "1.0.0",
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Invalid model/);
+      expect(res.body.supportedModels).toEqual(["gpt-5"]);
+    });
+
+    it("returns 404 when the target agent does not exist", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/api/v1/profiles")
+        .send({
+          name: "test profile",
+          description: "",
+          workerType: "ghost-agent",
+          model: "gpt-5",
+          agentVersion: "1.0.0",
+        });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toMatch(/Agent not found/);
+    });
+  });
+
+  // ===================================================================
   // Models endpoints
   // ===================================================================
 
@@ -999,7 +1065,204 @@ describe("API Endpoints", () => {
   });
 
   // ===================================================================
+  // Reasoning effort validation
+  // ===================================================================
+
+  describe("POST /api/v1/requests?worker=... (reasoning effort)", () => {
+    it("rejects when effort is incompatible with model capabilities", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
+        supportedModels: ["claude-opus-4.6"],
+      });
+      (mocks.modelCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot:claude-opus-4.6",
+        capabilities: { reasoningEffort: ["low", "medium", "high"] },
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          model: "claude-opus-4.6",
+          reasoningEffort: "ultra", // not in supported list
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("not supported by model");
+      expect(res.body.supportedReasoningEfforts).toEqual(["low", "medium", "high"]);
+    });
+
+    it("accepts valid effort and stores it on the run", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
+        supportedModels: ["claude-opus-4.6"],
+      });
+      (mocks.modelCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot:claude-opus-4.6",
+        capabilities: { reasoningEffort: ["low", "medium", "high"] },
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          model: "claude-opus-4.6",
+          reasoningEffort: "high",
+        });
+
+      expect(res.status).toBe(201);
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc).toHaveProperty("reasoningEffort", "high");
+    });
+
+    it("profile reasoningEffort takes precedence over client-provided effort", async () => {
+      (mocks.profileCollection.findOne as any).mockResolvedValue({
+        _id: "profile-1",
+        name: "My Profile",
+        latestVersion: 1,
+      });
+      (mocks.profileVersionCollection.findOne as any).mockResolvedValue({
+        _id: "pv-1",
+        profileId: "profile-1",
+        version: 1,
+        workerType: "coder-acp-copilot",
+        model: "claude-opus-4.6",
+        reasoningEffort: "low",
+        mcpServers: [],
+        skillRevisions: [],
+        extensions: [],
+      });
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
+        supportedModels: ["claude-opus-4.6"],
+      });
+      (mocks.modelCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot:claude-opus-4.6",
+        capabilities: { reasoningEffort: ["low", "medium", "high"] },
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          profileId: "profile-1",
+          // Client does not send reasoningEffort; profile has "low"
+        });
+
+      expect(res.status).toBe(201);
+      const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
+      expect(doc).toHaveProperty("reasoningEffort", "low");
+    });
+
+    it("returns warnings for models with limited effort support when no effort is specified", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [{ agentVersion: "v1", status: "active", queueName: "queue-coder-acp-copilot", createdAt: new Date() }],
+        supportedModels: ["claude-haiku"],
+      });
+      (mocks.modelCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot:claude-haiku",
+        capabilities: { reasoningEffort: ["low"] },
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests?worker=coder-acp-copilot")
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          model: "claude-haiku",
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.warnings).toBeDefined();
+      expect(res.body.warnings.some((w: string) => w.includes("only supports reasoning effort"))).toBe(true);
+    });
+  });
+
+  // ===================================================================
   // Bulk resubmit
+  // ===================================================================
+
+  describe("POST /api/v1/requests/bulk-resubmit (reasoning effort)", () => {
+    it("applies reasoning effort override in bulk resubmit", async () => {
+      const originalRun = {
+        _id: "run-original",
+        scenario: { task: "Build a form", criteria: ["has_react"] },
+        workerType: "coder-acp-copilot",
+        status: "completed",
+        model: "gpt-4o",
+        reasoningEffort: "low",
+        createdAt: new Date(),
+        maxIterations: 5,
+      };
+
+      const mockCursor = {
+        toArray: vi.fn().mockResolvedValue([originalRun]),
+        sort: vi.fn().mockReturnThis(),
+        skip: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+      };
+      (mocks.collection.find as any).mockReturnValue(mockCursor);
+
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [
+          { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
+        ],
+        supportedModels: ["gpt-4o"],
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-resubmit")
+        .send({ ids: ["run-original"], count: 1, overrides: { reasoningEffort: "high" } });
+
+      expect(res.status).toBe(201);
+      const insertCall = (mocks.collection.insertMany as any).mock.calls[0][0];
+      expect(insertCall[0]).toHaveProperty("reasoningEffort", "high");
+    });
+
+    it("clears reasoning effort when override is null", async () => {
+      const originalRun = {
+        _id: "run-original",
+        scenario: { task: "Build a form", criteria: ["has_react"] },
+        workerType: "coder-acp-copilot",
+        status: "completed",
+        model: "gpt-4o",
+        reasoningEffort: "high",
+        createdAt: new Date(),
+        maxIterations: 5,
+      };
+
+      const mockCursor = {
+        toArray: vi.fn().mockResolvedValue([originalRun]),
+        sort: vi.fn().mockReturnThis(),
+        skip: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+      };
+      (mocks.collection.find as any).mockReturnValue(mockCursor);
+
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        versions: [
+          { agentVersion: "copilot-0.0.420", queueName: "queue-coder-acp-copilot", status: "active", createdAt: new Date() },
+        ],
+        supportedModels: ["gpt-4o"],
+      });
+
+      const res = await request(app)
+        .post("/api/v1/requests/bulk-resubmit")
+        .send({ ids: ["run-original"], count: 1, overrides: { reasoningEffort: null } });
+
+      expect(res.status).toBe(201);
+      const insertCall = (mocks.collection.insertMany as any).mock.calls[0][0];
+      expect(insertCall[0].reasoningEffort).toBeUndefined();
+    });
+  });
+
+  // ===================================================================
+  // Bulk resubmit (original tests)
   // ===================================================================
 
   describe("POST /api/v1/requests/bulk-resubmit", () => {

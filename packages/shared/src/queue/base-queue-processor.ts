@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { LogEvent, BaseQueueProcessorConfig } from "../types/types.js";
 import { LogPublisher } from "../logging/log-publisher.js";
 import { BlobStorage } from "../storage/blob-storage.js";
+import { cancelExit } from "./cancel-exit.js";
 import { withRetry } from "../utils/retry.js";
 import {
   startVisibilityHeartbeat,
@@ -270,6 +271,15 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         // every active run.
         async () => {
           await this.heartbeatStore.set(logRunId, new Date());
+          // Fallback cancel check: if the Pub/Sub message was missed (e.g.
+          // Redis reconnect gap), the cancel key will be detected here within
+          // 15s of being set.
+          if (await this.heartbeatStore.isCancelled(logRunId)) {
+            console.log(
+              `[${this.workerName}] Run ${logRunId} cancel detected via key fallback — exiting process`,
+            );
+            cancelExit();
+          }
         },
       );
 
@@ -329,6 +339,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
             if (updated) {
               // Run is terminal — drop the Redis liveness heartbeat.
               await this.heartbeatStore.delete(runId);
+              await this.onRunTerminal(documentId, runId);
             }
           }
           if (!updated) {
@@ -386,6 +397,15 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void>;
+
+  /**
+   * Hook called when a run reaches terminal state ("done").
+   * Override in subclasses to trigger follow-up actions (e.g. post-processing).
+   * Default implementation is a no-op.
+   */
+  protected async onRunTerminal(_requestId: string, _runId: string): Promise<void> {
+    // No-op by default — subclasses can override
+  }
 
   /**
    * Delete a queue message, logging a warning instead of throwing on failure.

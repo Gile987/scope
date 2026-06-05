@@ -6,7 +6,7 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
 
 export function registerAgentCommands(program: Command): void {
 // ─── Agent management ────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ withOutputOption(
 agent
   .command("list")
   .description("List all coding agents")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -61,7 +61,7 @@ agent
   .command("get")
   .description("Get details of a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -107,7 +107,7 @@ agent
   .requiredOption("-i, --id <id>", "Agent ID")
   .option("--name <name>", "Display name")
   .option("--description <desc>", "Description")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const body: Record<string, unknown> = {};
@@ -139,7 +139,7 @@ agent
   .command("delete")
   .description("Delete a coding agent (soft-delete)")
   .requiredOption("-i, --id <id>", "Agent ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const response = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`, {
@@ -173,7 +173,7 @@ agentModel
   .command("list")
   .description("List supported models for a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
@@ -210,7 +210,7 @@ agentModel
   .description("Add a supported model to a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
   .requiredOption("--model <model>", "Model name to add")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       // Fetch current agent
@@ -249,7 +249,7 @@ agentModel
   .description("Remove a supported model from a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
   .requiredOption("--model <model>", "Model name to remove")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       const getResp = await fetch(`${normalizeUrl(options.url)}/api/v1/agents/${encodeURIComponent(options.id)}`);
@@ -293,7 +293,7 @@ agentModel
   .description("Set the default model for a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
   .requiredOption("--model <model>", "Model name to set as default")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
       // Verify the model is supported
@@ -343,7 +343,7 @@ agentVersion
   .description("List versions for a coding agent")
   .requiredOption("-i, --id <id>", "Agent ID")
   .option("--status <status>", "Filter by status (active, retired)")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 )
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;

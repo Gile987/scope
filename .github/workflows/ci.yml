@@ -42,6 +42,10 @@ permissions:
   pull-requests: write
   issues: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
 
 jobs:
@@ -382,6 +386,45 @@ jobs:
       - name: Build
         run: pnpm build
 
+  cli-bundle-test:
+    name: CLI Bundle Integration Tests
+    needs: [detect-changes]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.typescript == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.1 --activate
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI bundle
+        run: pnpm build:cli
+
+      - name: Run integration tests
+        run: pnpm vitest run --config vitest.integration.config.ts apps/cli/src/bundle.integration.test.ts apps/cli/src/utils/update-check.integration.test.ts
+
+      - name: Upload CLI bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: scope-cli-bundle
+          path: apps/cli/dist/scope.mjs
+          retention-days: 7
+
   gateway:
     name: "Gateway: lint, test & build"
     needs: [detect-changes]
@@ -473,10 +516,12 @@ jobs:
       model-scanner-copilot: ${{ steps.changes.outputs.model-scanner-copilot }}
       model-scanner-anthropic: ${{ steps.changes.outputs.model-scanner-anthropic }}
       report-generator: ${{ steps.changes.outputs.report-generator }}
+      post-processor: ${{ steps.changes.outputs.post-processor }}
       scheduler: ${{ steps.changes.outputs.scheduler }}
       db-migrations: ${{ steps.changes.outputs.db-migrations }}
       shared: ${{ steps.changes.outputs.shared }}
       gateway: ${{ steps.changes.outputs.gateway }}
+      coder-acp-copilot-windows: ${{ steps.changes.outputs.coder-acp-copilot-windows }}
       model-scanning: ${{ steps.changes.outputs.model-scanning }}
       typescript: ${{ steps.changes.outputs.typescript }}
     steps:
@@ -514,12 +559,17 @@ jobs:
               - 'apps/model-scanners/anthropic/**'
             report-generator:
               - 'apps/workers/report-generator/**'
+            post-processor:
+              - 'apps/workers/post-processor/**'
             scheduler:
               - 'apps/scheduler/**'
             db-migrations:
               - 'packages/db-migrations/**'
             gateway:
               - 'apps/gateway/**'
+            coder-acp-copilot-windows:
+              - 'apps/workers/coder-acp-copilot-windows/**'
+              - 'apps/workers/coder-acp-copilot/versions.env'
             typescript:
               - 'apps/**'
               - '!apps/gateway/**'
@@ -555,8 +605,10 @@ jobs:
           needs.detect-changes.outputs.model-scanner-copilot == 'true' ||
           needs.detect-changes.outputs.model-scanner-anthropic == 'true' ||
           needs.detect-changes.outputs.report-generator == 'true' ||
+          needs.detect-changes.outputs.post-processor == 'true' ||
           needs.detect-changes.outputs.scheduler == 'true' ||
           needs.detect-changes.outputs.db-migrations == 'true' ||
+          needs.detect-changes.outputs.gateway == 'true' ||
           needs.detect-changes.outputs.shared == 'true' ||
           needs.detect-changes.outputs.model-scanning == 'true'
         ))
@@ -595,12 +647,20 @@ jobs:
           - name: report-generator
             dockerfile: apps/workers/report-generator/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.report-generator == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
+          - name: post-processor
+            dockerfile: apps/workers/post-processor/Dockerfile
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.post-processor == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: scheduler
             dockerfile: apps/scheduler/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.scheduler == 'true' || needs.detect-changes.outputs.shared == 'true') && 'true' || 'false' }}
           - name: db-migrations
             dockerfile: packages/db-migrations/Dockerfile
             changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.db-migrations == 'true') && 'true' || 'false' }}
+          - name: gateway
+            dockerfile: apps/gateway/Dockerfile
+            context: apps/gateway
+            target: runtime
+            changed: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.gateway == 'true') && 'true' || 'false' }}
         exclude:
           - image:
               changed: "false"
@@ -627,10 +687,19 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Log in to ACR
+        if: steps.check.outputs.skip != 'true'
+        run: az acr login --name "${{ vars.ACR_NAME }}"
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
+
       - name: Compute image tags
         id: tags
         if: steps.check.outputs.skip != 'true'
         run: |
+          ACR_LOGIN_SERVER=$(az acr show --name "${{ vars.ACR_NAME }}" --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" --query loginServer -o tsv)
           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
 
@@ -658,67 +727,73 @@ jobs:
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             GIT_SHA="${{ github.event.pull_request.head.sha }}"
-            IMAGE_ARGS="--image scoped/${{ matrix.image.name }}:${GIT_SHA}"
-            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:pr-${{ github.event.pull_request.number }}-latest"
+            TAGS="${ACR_LOGIN_SERVER}/scoped/${{ matrix.image.name }}:${GIT_SHA}"
+            TAGS="${TAGS},${ACR_LOGIN_SERVER}/scoped/${{ matrix.image.name }}:pr-${{ github.event.pull_request.number }}-latest"
           else
             GIT_SHA="${{ github.sha }}"
             SHORT_SHA="${GIT_SHA:0:7}"
             TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
-            IMAGE_ARGS="--image scoped/${{ matrix.image.name }}:${GIT_SHA}"
-            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:${TIMESTAMP}-${SHORT_SHA}"
+            TAGS="${ACR_LOGIN_SERVER}/scoped/${{ matrix.image.name }}:${GIT_SHA}"
+            TAGS="${TAGS},${ACR_LOGIN_SERVER}/scoped/${{ matrix.image.name }}:${TIMESTAMP}-${SHORT_SHA}"
             if [ -n "$VERSION_PREFIX" ]; then
-              IMAGE_ARGS="${IMAGE_ARGS} --image scoped/${{ matrix.image.name }}:${VERSION_PREFIX}-${TIMESTAMP}-${SHORT_SHA}"
+              TAGS="${TAGS},${ACR_LOGIN_SERVER}/scoped/${{ matrix.image.name }}:${VERSION_PREFIX}-${TIMESTAMP}-${SHORT_SHA}"
             fi
           fi
 
           echo "git_sha=${GIT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "image_args=${IMAGE_ARGS}" >> "$GITHUB_OUTPUT"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Load pinned versions
         id: versions
         if: steps.check.outputs.skip != 'true'
         run: |
-          EXTRA_ARGS=""
+          BUILD_ARGS="GIT_COMMIT=${{ steps.tags.outputs.git_sha }}"
+          BUILD_ARGS="${BUILD_ARGS}"$'\n'"BUILD_TIME=${{ steps.tags.outputs.build_time }}"
           for f in apps/workers/${{ matrix.image.name }}/versions.env apps/${{ matrix.image.name }}/versions.env; do
             if [ -f "$f" ]; then
               while IFS='=' read -r key value; do
                 [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
-                EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+                BUILD_ARGS="${BUILD_ARGS}"$'\n'"${key}=${value}"
               done < "$f"
               break
             fi
           done
-          echo "extra_args=${EXTRA_ARGS}" >> $GITHUB_OUTPUT
+          # Use EOF delimiter for multiline output
+          {
+            echo "build_args<<EOF"
+            echo "$BUILD_ARGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Build and push to ACR
+      - name: Build and push image
         if: steps.check.outputs.skip != 'true'
-        run: |
-          az acr build \
-            --registry "${{ vars.ACR_NAME }}" \
-            --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
-            ${{ steps.tags.outputs.image_args }} \
-            --build-arg GIT_COMMIT=${{ steps.tags.outputs.git_sha }} \
-            --build-arg BUILD_TIME=${{ steps.tags.outputs.build_time }} \
-            ${{ steps.versions.outputs.extra_args }} \
-            ${{ matrix.image.target && format('--target {0}', matrix.image.target) || '' }} \
-            --file "${{ matrix.image.dockerfile }}" \
-            ${{ matrix.image.context || '.' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context || '.' }}
+          file: ${{ matrix.image.dockerfile }}
+          target: ${{ matrix.image.target || '' }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: ${{ steps.versions.outputs.build_args }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
 
   # ---------------------------------------------------------------------------
-  # Build gateway image — uses docker/build-push-action with GHA layer cache
+  # Build Windows image — uses az acr build --platform windows/amd64
   # ---------------------------------------------------------------------------
-  build-gateway-image:
-    name: "Build image: gateway"
+  build-windows-image:
+    name: "Build image: coder-acp-copilot-windows"
     if: >-
       always() &&
       !cancelled() &&
       github.repository == 'growth-ecosystems/scope-core' &&
-      (needs.gateway.result == 'success') &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
       (
-        (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || contains(github.event.inputs.images, 'gateway'))) ||
-        ((github.event_name == 'push' || github.event_name == 'pull_request') && needs.detect-changes.outputs.gateway == 'true')
+        (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || contains(github.event.inputs.images, 'coder-acp-copilot-windows'))) ||
+        ((github.event_name == 'push' || github.event_name == 'pull_request') && (needs.detect-changes.outputs.coder-acp-copilot-windows == 'true' || needs.detect-changes.outputs.shared == 'true'))
       )
-    needs: [gateway, detect-changes]
+    needs: [test, build, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
     steps:
@@ -731,47 +806,57 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Log in to ACR
-        run: az acr login --name "${{ vars.ACR_NAME }}"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Load pinned versions
+        id: versions
+        run: |
+          EXTRA_ARGS=""
+          VERSION_FILE="apps/workers/coder-acp-copilot/versions.env"
+          if [ -f "$VERSION_FILE" ]; then
+            while IFS='=' read -r key value; do
+              [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+              export "$key=$value"
+              EXTRA_ARGS="${EXTRA_ARGS} --build-arg ${key}=${value}"
+            done < "$VERSION_FILE"
+          fi
+          echo "extra_args=${EXTRA_ARGS}" >> "$GITHUB_OUTPUT"
+          echo "copilot_version=${COPILOT_CLI_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Compute image tags
         id: tags
         run: |
-          ACR_LOGIN_SERVER=$(az acr show --name "${{ vars.ACR_NAME }}" --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" --query loginServer -o tsv)
           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
 
+          VERSION_PREFIX="copilot-${{ steps.versions.outputs.copilot_version }}"
+
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             GIT_SHA="${{ github.event.pull_request.head.sha }}"
-            TAGS="${ACR_LOGIN_SERVER}/scoped/gateway:${GIT_SHA}"
-            TAGS="${TAGS},${ACR_LOGIN_SERVER}/scoped/gateway:pr-${{ github.event.pull_request.number }}-latest"
+            IMAGE_ARGS="--image scoped/coder-acp-copilot-windows:${GIT_SHA}"
+            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/coder-acp-copilot-windows:pr-${{ github.event.pull_request.number }}-latest"
           else
             GIT_SHA="${{ github.sha }}"
             SHORT_SHA="${GIT_SHA:0:7}"
             TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
-            TAGS="${ACR_LOGIN_SERVER}/scoped/gateway:${GIT_SHA}"
-            TAGS="${TAGS},${ACR_LOGIN_SERVER}/scoped/gateway:${TIMESTAMP}-${SHORT_SHA}"
+            IMAGE_ARGS="--image scoped/coder-acp-copilot-windows:${GIT_SHA}"
+            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/coder-acp-copilot-windows:${TIMESTAMP}-${SHORT_SHA}"
+            IMAGE_ARGS="${IMAGE_ARGS} --image scoped/coder-acp-copilot-windows:${VERSION_PREFIX}-${TIMESTAMP}-${SHORT_SHA}"
           fi
 
           echo "git_sha=${GIT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "image_args=${IMAGE_ARGS}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push gateway image
-        uses: docker/build-push-action@v6
-        with:
-          context: apps/gateway
-          file: apps/gateway/Dockerfile
-          target: runtime
-          push: true
-          tags: ${{ steps.tags.outputs.tags }}
-          build-args: |
-            GIT_COMMIT=${{ steps.tags.outputs.git_sha }}
-            BUILD_TIME=${{ steps.tags.outputs.build_time }}
-          cache-from: type=gha,scope=gateway
-          cache-to: type=gha,mode=max,scope=gateway
+      - name: Build and push to ACR (Windows)
+        run: |
+          az acr build \
+            --registry "${{ vars.ACR_NAME }}" \
+            --resource-group "${{ vars.ACR_RESOURCE_GROUP }}" \
+            --platform windows/amd64 \
+            ${{ steps.tags.outputs.image_args }} \
+            --build-arg GIT_COMMIT=${{ steps.tags.outputs.git_sha }} \
+            --build-arg BUILD_TIME=${{ steps.tags.outputs.build_time }} \
+            ${{ steps.versions.outputs.extra_args }} \
+            --file apps/workers/coder-acp-copilot-windows/Dockerfile.windows \
+            .
 
   # ---------------------------------------------------------------------------
   # Summary
@@ -779,7 +864,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [test, integration-test, lint, build, gateway]
+    needs: [test, integration-test, lint, build, cli-bundle-test, gateway]
     if: always()
 
     steps:
@@ -789,6 +874,7 @@ jobs:
              [ "${{ needs.integration-test.result }}" = "success" -o "${{ needs.integration-test.result }}" = "skipped" ] && \
              [ "${{ needs.lint.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ] && \
+             [ "${{ needs.cli-bundle-test.result }}" = "success" -o "${{ needs.cli-bundle-test.result }}" = "skipped" ] && \
              [ "${{ needs.gateway.result }}" = "success" -o "${{ needs.gateway.result }}" = "skipped" ]; then
             echo "✅ All checks passed!"
             exit 0
@@ -798,6 +884,7 @@ jobs:
             echo "  Integration Tests: ${{ needs.integration-test.result }}"
             echo "  Lint: ${{ needs.lint.result }}"
             echo "  Build: ${{ needs.build.result }}"
+            echo "  CLI Bundle Tests: ${{ needs.cli-bundle-test.result }}"
             echo "  Gateway: ${{ needs.gateway.result }}"
             exit 1
           fi

@@ -43,6 +43,8 @@ interface HarNetworkViewerProps {
   runId: string;
   /** If provided, fetches HAR for a specific iteration */
   iteration?: number;
+  /** If provided, uses per-run URL for a specific historical attempt */
+  attemptRunId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,11 +153,11 @@ function decodeBody(content: HarResponse["content"]): string | null {
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
+export function HarNetworkViewer({ runId, iteration, attemptRunId }: HarNetworkViewerProps) {
   const [filter, setFilter] = useState("");
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
 
-  const { data: har, isLoading, error } = useHarData<HarFile>(runId, iteration);
+  const { data: har, isLoading, error } = useHarData<HarFile>(runId, iteration, true, attemptRunId);
 
   const entries = useMemo(() => {
     if (!har) return [];
@@ -219,7 +221,7 @@ export function HarNetworkViewer({ runId, iteration }: HarNetworkViewerProps) {
           variant="outline"
           size="sm"
           className="gap-1.5"
-          onClick={() => window.open(api.harUrl(runId, iteration), "_blank")}
+          onClick={() => window.open(attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration), "_blank")}
         >
           <Download className="h-3 w-3" />
           Download HAR

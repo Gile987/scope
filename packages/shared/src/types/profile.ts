@@ -4,6 +4,26 @@
 // --- Profile types ---
 
 /**
+ * Parse a profile spec string ("id" or "id@version") into its components.
+ * Mirrors `parseExtensionSpec` but constrains the version to a positive integer.
+ *
+ * @example parseProfileSpec("abc-123") → { profileId: "abc-123" }
+ * @example parseProfileSpec("abc-123@3") → { profileId: "abc-123", version: 3 }
+ */
+export function parseProfileSpec(spec: string): { profileId: string; version?: number } {
+  const atIndex = spec.lastIndexOf("@");
+  if (atIndex > 0) {
+    const versionStr = spec.substring(atIndex + 1);
+    const version = Number.parseInt(versionStr, 10);
+    if (!Number.isInteger(version) || version <= 0 || String(version) !== versionStr) {
+      throw new Error(`Invalid profile version in spec "${spec}" — expected a positive integer after "@"`);
+    }
+    return { profileId: spec.substring(0, atIndex), version };
+  }
+  return { profileId: spec };
+}
+
+/**
  * Profile document stored in MongoDB (`profiles` collection).
  *
  * A mutable identity record for a profile. Holds name, description, and
@@ -33,6 +53,7 @@ export interface ProfileVersionDocument {
   version: number;                // Auto-incrementing per profileId (1, 2, 3, …)
   workerType: string;             // FK → CodingAgentDocument._id
   model: string;                  // Model identifier (required)
+  reasoningEffort?: string;       // Reasoning effort level (e.g. "low", "medium", "high")
   agentVersion?: string;          // Agent version string
   mcpServers?: string[];          // MCP server slugs
   skillRevisions?: string[];      // Pinned skill revision refs (e.g. "source/skillName@commitHash")
