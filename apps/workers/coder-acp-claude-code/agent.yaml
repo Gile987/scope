@@ -1,6 +1,7 @@
 _id: coder-acp-claude-code
 name: Claude Code CLI
 description: Anthropic Claude Code coding agent via ACP protocol
+modelProvider: anthropic
 available: true
 capabilities:
   supportsReasoningEffort: true

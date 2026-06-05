@@ -299,6 +299,72 @@ describe("API Endpoints", () => {
   });
 
   // ===================================================================
+  // Profiles endpoints
+  // ===================================================================
+
+  describe("POST /api/v1/profiles", () => {
+    it("returns 400 when the target agent has no supportedModels", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        name: "Copilot",
+        supportedModels: [],
+      });
+
+      const res = await request(app)
+        .post("/api/v1/profiles")
+        .send({
+          name: "test profile",
+          description: "",
+          workerType: "coder-acp-copilot",
+          model: "gpt-5",
+          agentVersion: "1.0.0",
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/does not declare any supportedModels/);
+    });
+
+    it("returns 400 when model is not in the agent's supportedModels", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue({
+        _id: "coder-acp-copilot",
+        name: "Copilot",
+        supportedModels: ["gpt-5"],
+      });
+
+      const res = await request(app)
+        .post("/api/v1/profiles")
+        .send({
+          name: "test profile",
+          description: "",
+          workerType: "coder-acp-copilot",
+          model: "claude-3-opus",
+          agentVersion: "1.0.0",
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Invalid model/);
+      expect(res.body.supportedModels).toEqual(["gpt-5"]);
+    });
+
+    it("returns 404 when the target agent does not exist", async () => {
+      (mocks.agentCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/api/v1/profiles")
+        .send({
+          name: "test profile",
+          description: "",
+          workerType: "ghost-agent",
+          model: "gpt-5",
+          agentVersion: "1.0.0",
+        });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toMatch(/Agent not found/);
+    });
+  });
+
+  // ===================================================================
   // Models endpoints
   // ===================================================================
 

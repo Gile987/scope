@@ -41,7 +41,7 @@ export function ConversationView({ turns, task, runId, attemptRunId }: Conversat
   }
 
   return (
-    <div className="space-y-4 max-w-4xl mx-auto py-2">
+    <div className="space-y-4 max-w-4xl py-2">
       {/* Task prompt */}
       {task && (
         <div className="flex justify-center">

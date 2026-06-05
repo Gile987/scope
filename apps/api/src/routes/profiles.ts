@@ -16,6 +16,7 @@ import type { ProfileDocument, ProfileVersionDocument } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
 import type { RouteContext } from "../route-context.js";
 import { resolveSkillSpecs } from "../utils/skill-helpers.js";
+import { validateAgentForModel } from "../utils/agent-helpers.js";
 
 export function registerProfilesRoutes(ctx: RouteContext): void {
 
@@ -38,6 +39,19 @@ apiRoute(ctx.app, ctx.registry, {
       // Extensions are only supported by VS Code workers
       if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
         res.status(400).json({ error: `Worker type "${workerType}" does not support VS Code extensions` });
+        return;
+      }
+
+      // A profile must be self-sufficient to submit a run, which requires a
+      // model. Agents that don't declare any supportedModels can't satisfy
+      // that contract, so creating a profile for them is rejected upfront.
+      const agentCheck = await validateAgentForModel(ctx.agentCollection, workerType, model, "profiles");
+      if (!agentCheck.ok) {
+        const payload: Record<string, unknown> = { error: agentCheck.error };
+        if ("supportedModels" in agentCheck && agentCheck.supportedModels) {
+          payload.supportedModels = agentCheck.supportedModels;
+        }
+        res.status(agentCheck.status).json(payload);
         return;
       }
 
@@ -251,6 +265,18 @@ apiRoute(ctx.app, ctx.registry, {
       // Extensions are only supported by VS Code workers
       if (extensions && extensions.length > 0 && !workerType.includes("vscode")) {
         res.status(400).json({ error: `Worker type "${workerType}" does not support VS Code extensions` });
+        return;
+      }
+
+      // Same self-sufficiency rule as POST /profiles: a profile (and any new
+      // version) must carry a model, so reject agents that don't expose any.
+      const agentCheck = await validateAgentForModel(ctx.agentCollection, workerType, model, "profile versions");
+      if (!agentCheck.ok) {
+        const payload: Record<string, unknown> = { error: agentCheck.error };
+        if ("supportedModels" in agentCheck && agentCheck.supportedModels) {
+          payload.supportedModels = agentCheck.supportedModels;
+        }
+        res.status(agentCheck.status).json(payload);
         return;
       }
 

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import EventSource from "eventsource";
 import { execSync } from "child_process";
 import { mkdtempSync, mkdirSync, createWriteStream, rmSync, readFileSync, readdirSync, existsSync, statSync } from "fs";
@@ -43,10 +43,16 @@ run
   .option("--skills <slugs...>", "Skill slugs to use for this run (e.g. vercel-labs/agent-skills/my-skill)")
   .option("--extensions <ids...>", "VS Code extension IDs to install for this run (e.g. ms-python.python)")
   .option("--agent-version <version>", "Agent version to target (e.g. copilot-0.0.415); defaults to latest active")
-  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--profile <id>", "Saved profile to apply (supplies worker, model, extensions, etc.)")
+  .addOption(new Option("--base-profile <id>", "Deprecated alias for --profile.").hideHelp())
+  .option("--profile-variations-file <path>", "Path to JSON file containing profile variation entries")
+  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
   .option("--no-stream", "Don't stream logs, just submit")
-  .action(async (options) => {
-    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion } = options;
+  .action(async (options, command) => {
+    const { scenario, persona, traits, worker, url, stream, maxIterations, model, reasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion, profile, baseProfile, profileVariationsFile } = options;
+    // `--profile` is the documented flag; `--base-profile` is kept as a hidden
+    // back-compat alias. Both resolve to the same request `profileId`.
+    const profileId = profile ?? baseProfile;
 
     try {
       // Resolve scenario + persona YAML if provided
@@ -109,8 +115,39 @@ run
       if (agentVersion) {
         body.agentVersion = agentVersion;
       }
+      if (profileId) {
+        body.profileId = profileId;
+      }
 
-      const response = await fetch(`${normalizeUrl(url)}/api/v1/requests?worker=${worker}`, {
+      if (profileVariationsFile) {
+        if (!profileId) {
+          console.error(errorText("Error: --profile is required when --profile-variations-file is provided"));
+          process.exit(1);
+        }
+
+        const raw = readFileSync(resolve(profileVariationsFile), "utf8");
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) {
+          console.error(errorText("Error: profile variations file must be a JSON array"));
+          process.exit(1);
+        }
+
+        body.profileVariations = parsed;
+      }
+
+      // In variation mode the API derives the worker per-variation from each
+      // profile's workerType, and explicitly rejects `?worker=`. Skip the
+      // query param so the request isn't 400'd, and warn if --worker was
+      // explicitly passed (default values are silently ignored).
+      const isVariationSubmit = Array.isArray(body.profileVariations) && body.profileVariations.length > 0;
+      if (isVariationSubmit && command.getOptionValueSource("worker") === "cli") {
+        console.warn(label("Warning:"), "--worker is ignored in variation mode; worker is derived per-variation from each profile's workerType.");
+      }
+      const submitUrl = isVariationSubmit
+        ? `${normalizeUrl(url)}/api/v1/requests`
+        : `${normalizeUrl(url)}/api/v1/requests?worker=${worker}`;
+
+      const response = await fetch(submitUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

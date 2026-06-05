@@ -92,13 +92,14 @@ export const CreateRequestInputSchema = z
     scenario: ScenarioSchema,
     model: z.string().optional(),
     reasoningEffort: z.string().optional(),
-    maxIterations: z.number().optional(),
+    maxIterations: z.number().int().min(1).max(50).optional(),
     personaInstructions: z.string().optional(),
     persona: PersonaSchema.optional(),
     mcpServers: z.array(z.string()).optional(),
     skillRevisions: z.array(z.string()).optional(),
     extensions: z.array(z.string()).optional(),
     profileId: z.string().optional(),
+    profileVariations: z.array(z.string()).optional(),
     priority: z.number().int().optional(),
   })
   .openapi("CreateRequestInput");
