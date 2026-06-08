@@ -27,7 +27,7 @@ html, body, #root { width: 100%; height: 100%; overflow: hidden; background: #0d
 import React from "https://esm.sh/react@18.3.1";
 import ReactDOM from "https://esm.sh/react-dom@18.3.1/client?external=react&alias=react:https://esm.sh/react@18.3.1";
 import { ReactFlow, Background, Controls, useNodesState, useEdgesState, Position, MarkerType } from "https://esm.sh/@xyflow/react@12.6.0?external=react,react-dom&alias=react:https://esm.sh/react@18.3.1,react-dom:https://esm.sh/react-dom@18.3.1";
-import dagre from "https://esm.sh/dagre@0.8.5";
+import ELK from "https://esm.sh/elkjs@0.9.3/lib/elk.bundled.js";
 
 const { createElement: h } = React;
 
@@ -75,26 +75,28 @@ const initialEdges = [
   { id: "e17", source: "report_agent", target: "mongodb", markerEnd: { type: MarkerType.ArrowClosed, color: "#8b949e" }, style: { stroke: "#8b949e", strokeDasharray: "5 5" } },
 ];
 
-function getLayoutedElements(nodes, edges, direction = "TB") {
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: direction, nodesep: 50, ranksep: 70 });
+async function getLayoutedElements(nodes, edges) {
+  const elk = new ELK();
+  const graph = {
+    id: "root",
+    layoutOptions: {
+      "elk.algorithm": "layered",
+      "elk.direction": "DOWN",
+      "elk.spacing.nodeNode": "40",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "60",
+      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+    },
+    children: nodes.map((n) => ({ id: n.id, width: nodeWidth, height: nodeHeight })),
+    edges: edges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
+  };
 
-  nodes.forEach((node) => {
-    g.setNode(node.id, { width: nodeWidth, height: nodeHeight });
-  });
-
-  edges.forEach((edge) => {
-    g.setEdge(edge.source, edge.target);
-  });
-
-  dagre.layout(g);
+  const layout = await elk.layout(graph);
 
   const layoutedNodes = nodes.map((node) => {
-    const pos = g.node(node.id);
+    const elkNode = layout.children.find((n) => n.id === node.id);
     return {
       ...node,
-      position: { x: pos.x - nodeWidth / 2, y: pos.y - nodeHeight / 2 },
+      position: { x: elkNode.x, y: elkNode.y },
       sourcePosition: Position.Bottom,
       targetPosition: Position.Top,
     };
@@ -103,7 +105,7 @@ function getLayoutedElements(nodes, edges, direction = "TB") {
   return { nodes: layoutedNodes, edges };
 }
 
-const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(initialNodes, initialEdges);
+const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(initialNodes, initialEdges);
 
 function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
