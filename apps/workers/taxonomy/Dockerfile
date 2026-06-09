@@ -15,6 +15,7 @@ COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
 COPY apps/workers/taxonomy/tsconfig.json ./apps/workers/taxonomy/
 COPY apps/workers/taxonomy/src ./apps/workers/taxonomy/src/
+COPY apps/workers/taxonomy/handler.yaml ./apps/workers/taxonomy/
 
 RUN pnpm --filter shared build && pnpm --filter taxonomy-handler build
 
@@ -42,6 +43,7 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/apps/workers/taxonomy/dist ./apps/workers/taxonomy/dist/
+COPY --from=builder /app/apps/workers/taxonomy/handler.yaml ./apps/workers/taxonomy/handler.yaml
 
 WORKDIR /app/apps/workers/taxonomy
 

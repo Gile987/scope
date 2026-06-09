@@ -196,15 +196,15 @@ services:
         - action: rebuild
           path: ./pnpm-lock.yaml
 
-  register-version-post-processor:
+  register-handler-post-processor:
     build:
       target: dev
 
-  register-version-taxonomy:
+  register-handler-taxonomy:
     build:
       target: dev
 
-  register-version-report-generator:
+  register-handler-report-generator:
     build:
       target: dev
 

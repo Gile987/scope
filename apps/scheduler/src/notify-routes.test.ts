@@ -52,6 +52,7 @@ describe("createHttpServer", () => {
     const handler: NotifyHandler = {
       onRunTerminal: vi.fn().mockResolvedValue(undefined),
       onHandlerComplete: vi.fn().mockResolvedValue(undefined),
+      registerHandler: vi.fn().mockResolvedValue(undefined),
     };
     const { server, baseUrl } = await startServer(handler);
     servers.push(server);
@@ -66,6 +67,7 @@ describe("createHttpServer", () => {
     const handler: NotifyHandler = {
       onRunTerminal: vi.fn().mockResolvedValue(undefined),
       onHandlerComplete: vi.fn().mockResolvedValue(undefined),
+      registerHandler: vi.fn().mockResolvedValue(undefined),
     };
     const { server, baseUrl } = await startServer(handler);
     servers.push(server);
@@ -86,6 +88,7 @@ describe("createHttpServer", () => {
     const handler: NotifyHandler = {
       onRunTerminal: vi.fn().mockResolvedValue(undefined),
       onHandlerComplete: vi.fn().mockResolvedValue(undefined),
+      registerHandler: vi.fn().mockResolvedValue(undefined),
     };
     const { server, baseUrl } = await startServer(handler);
     servers.push(server);
@@ -111,6 +114,7 @@ describe("createHttpServer", () => {
     const handler: NotifyHandler = {
       onRunTerminal: vi.fn().mockResolvedValue(undefined),
       onHandlerComplete: vi.fn().mockResolvedValue(undefined),
+      registerHandler: vi.fn().mockResolvedValue(undefined),
     };
     const { server, baseUrl } = await startServer(handler);
     servers.push(server);
@@ -133,6 +137,7 @@ describe("createHttpServer", () => {
     const handler: NotifyHandler = {
       onRunTerminal: vi.fn().mockResolvedValue(undefined),
       onHandlerComplete: vi.fn().mockResolvedValue(undefined),
+      registerHandler: vi.fn().mockResolvedValue(undefined),
     };
     const { server, baseUrl } = await startServer(handler);
     servers.push(server);
@@ -145,5 +150,55 @@ describe("createHttpServer", () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Not found" });
+  });
+
+  it("calls registerHandler for valid handler registrations", async () => {
+    const handler: NotifyHandler = {
+      onRunTerminal: vi.fn().mockResolvedValue(undefined),
+      onHandlerComplete: vi.fn().mockResolvedValue(undefined),
+      registerHandler: vi.fn().mockResolvedValue(undefined),
+    };
+    const { server, baseUrl } = await startServer(handler);
+    servers.push(server);
+
+    const doc = {
+      _id: "pp-taxonomy",
+      type: "post-process-handler",
+      version: 1,
+      queue: "pp-taxonomy-queue",
+      selector: "taxonomy",
+      autoBackfill: false,
+      dependsOn: ["pp-atif"],
+    };
+
+    const response = await fetch(`${baseUrl}/handlers/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(doc),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, handlerId: "pp-taxonomy" });
+    expect(handler.registerHandler).toHaveBeenCalledWith(doc);
+  });
+
+  it("returns 400 for invalid handler registrations", async () => {
+    const handler: NotifyHandler = {
+      onRunTerminal: vi.fn().mockResolvedValue(undefined),
+      onHandlerComplete: vi.fn().mockResolvedValue(undefined),
+      registerHandler: vi.fn().mockResolvedValue(undefined),
+    };
+    const { server, baseUrl } = await startServer(handler);
+    servers.push(server);
+
+    const response = await fetch(`${baseUrl}/handlers/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Missing queue/selector, wrong type, dependsOn not array
+      body: JSON.stringify({ _id: "bad", type: "wrong", version: "x" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(handler.registerHandler).not.toHaveBeenCalled();
   });
 });

@@ -639,7 +639,7 @@ services:
         condition: service_healthy
       api:
         condition: service_started
-      register-version-report-generator:
+      register-handler-report-generator:
         condition: service_completed_successfully
 
   taxonomy-handler:
@@ -669,50 +669,53 @@ services:
         condition: service_started
       scheduler:
         condition: service_started
-      register-version-taxonomy:
+      register-handler-taxonomy:
         condition: service_completed_successfully
 
-  register-version-taxonomy:
+  register-handler-taxonomy:
     build:
       context: .
       dockerfile: apps/workers/taxonomy/Dockerfile
     profiles: [taxonomy, all]
     environment:
       <<: *common-env
+      HANDLER_YAML_PATH: apps/workers/taxonomy/handler.yaml
+      SCHEDULER_URL: http://scheduler:8080
     depends_on:
-      mongodb:
-        condition: service_healthy
-        required: false
+      scheduler:
+        condition: service_started
     restart: "no"
-    entrypoint: ["npx", "tsx", "apps/workers/taxonomy/src/register-version.ts"]
+    entrypoint: ["npx", "tsx", "packages/shared/src/scripts/register-handler.ts"]
 
-  register-version-report-generator:
+  register-handler-report-generator:
     build:
       context: .
       dockerfile: apps/workers/report-generator/Dockerfile
     profiles: [report]
     environment:
       <<: *common-env
+      HANDLER_YAML_PATH: apps/workers/report-generator/handler.yaml
+      SCHEDULER_URL: http://scheduler:8080
     depends_on:
-      mongodb:
-        condition: service_healthy
-        required: false
+      scheduler:
+        condition: service_started
     restart: "no"
-    entrypoint: ["npx", "tsx", "apps/workers/report-generator/src/register-version.ts"]
+    entrypoint: ["npx", "tsx", "packages/shared/src/scripts/register-handler.ts"]
 
-  register-version-post-processor:
+  register-handler-post-processor:
     build:
       context: .
       dockerfile: apps/workers/post-processor/Dockerfile
     profiles: [post-processor]
     environment:
       <<: *common-env
+      HANDLER_YAML_PATH: apps/workers/post-processor/handler.yaml
+      SCHEDULER_URL: http://scheduler:8080
     depends_on:
-      mongodb:
-        condition: service_healthy
-        required: false
+      scheduler:
+        condition: service_started
     restart: "no"
-    entrypoint: ["npx", "tsx", "apps/workers/post-processor/src/register-version.ts"]
+    entrypoint: ["npx", "tsx", "packages/shared/src/scripts/register-handler.ts"]
 
   post-processor:
     build:
@@ -734,7 +737,7 @@ services:
         condition: service_healthy
       api:
         condition: service_started
-      register-version-post-processor:
+      register-handler-post-processor:
         condition: service_completed_successfully
 
 volumes:

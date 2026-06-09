@@ -107,6 +107,33 @@ export class HandlerDispatcher implements NotifyHandler {
     }
   }
 
+  async registerHandler(doc: HandlerServiceDocument): Promise<void> {
+    // Validate the resulting topology has no cycles before persisting.
+    const existing = await this.loadHandlers();
+    const merged = [
+      ...existing.filter((h) => h._id !== doc._id),
+      doc,
+    ];
+    // Throws on cycle — rejects invalid registrations.
+    this.buildGraph(merged);
+
+    const { _id, ...fields } = doc;
+    await this.db.collection("services").updateOne(
+      { _id } as any,
+      {
+        $set: {
+          ...fields,
+          dependsOn: [...fields.dependsOn],
+          updatedAt: new Date(),
+        },
+      } as any,
+      { upsert: true },
+    );
+    console.log(
+      `[HandlerDispatcher] Registered handler ${_id} (version=${doc.version}, queue=${doc.queue}, dependsOn=[${doc.dependsOn.join(", ")}])`,
+    );
+  }
+
   // ── Poll safety net ─────────────────────────────────────────────────
 
   private async pollDispatch(): Promise<void> {

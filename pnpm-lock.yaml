@@ -691,9 +691,6 @@ importers:
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1
-      mongodb:
-        specifier: ^6.10.0
-        version: 6.21.0
       shared:
         specifier: workspace:*
         version: link:../../../packages/shared
@@ -719,9 +716,6 @@ importers:
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1
-      mongodb:
-        specifier: ^6.10.0
-        version: 6.21.0
       shared:
         specifier: workspace:*
         version: link:../../../packages/shared

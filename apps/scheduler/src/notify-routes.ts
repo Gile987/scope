@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import http from "node:http";
+import type { HandlerServiceDocument } from "shared";
 
 export interface NotifyHandler {
   onRunTerminal(requestId: string, runId: string): Promise<void>;
@@ -11,6 +12,7 @@ export interface NotifyHandler {
     handlerId: string,
     status: "done" | "failed",
   ): Promise<void>;
+  registerHandler(doc: HandlerServiceDocument): Promise<void>;
 }
 
 interface RunTerminalRequest {
@@ -75,6 +77,46 @@ function parseHandlerCompleteRequest(body: unknown): HandlerCompleteRequest | nu
   };
 }
 
+function parseHandlerRegisterRequest(body: unknown): HandlerServiceDocument | null {
+  if (!isRecord(body)) {
+    return null;
+  }
+
+  const {
+    _id,
+    type,
+    version,
+    queue,
+    selector,
+    autoBackfill,
+    dependsOn,
+  } = body;
+
+  if (
+    !isNonEmptyString(_id) ||
+    type !== "post-process-handler" ||
+    typeof version !== "number" ||
+    !Number.isFinite(version) ||
+    !isNonEmptyString(queue) ||
+    !isNonEmptyString(selector) ||
+    typeof autoBackfill !== "boolean" ||
+    !Array.isArray(dependsOn) ||
+    !dependsOn.every((d) => isNonEmptyString(d))
+  ) {
+    return null;
+  }
+
+  return {
+    _id,
+    type,
+    version,
+    queue,
+    selector,
+    autoBackfill,
+    dependsOn: dependsOn as string[],
+  };
+}
+
 async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
 
@@ -129,6 +171,21 @@ export function createHttpServer(handler: NotifyHandler): http.Server {
           parsedBody.status,
         );
         sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/handlers/register") {
+        const parsedBody = parseHandlerRegisterRequest(await readJsonBody(req));
+        if (!parsedBody) {
+          sendJson(res, 400, {
+            error:
+              "Invalid handler registration: _id, type='post-process-handler', version (number), queue, selector, autoBackfill (boolean), and dependsOn (string[]) are required",
+          });
+          return;
+        }
+
+        await handler.registerHandler(parsedBody);
+        sendJson(res, 200, { ok: true, handlerId: parsedBody._id });
         return;
       }
     } catch (error) {

@@ -16,7 +16,7 @@ Two paths trigger post-processing:
 
 1. **Event-driven (primary):** Coder workers enqueue a post-processing message immediately when a run completes, currently setting the deprecated `run.postProcessorStatus: "queued"` compatibility field atomically in the same DB write while the system migrates to per-handler status.
 2. **Scheduler backfill:** The `PostProcessorDispatcher` polls every 30 seconds for runs that have `status: "done"` but no post-processing marker set (or a stale handler version). During the migration window this may consult the deprecated flat fields; the long-term source of truth is `run.handlerStatus[handlerId]`. This catches runs that completed before the event-driven dispatch was deployed, or that need re-processing after a version bump.
-3. **Scheduler notify server:** The scheduler also exposes `GET /health`, `POST /notify/run-terminal`, and `POST /notify/handler-complete` on a lightweight `node:http` server. Workers and post-process handlers use these endpoints to notify the scheduler when terminal states are reached so it can re-evaluate which root or downstream handlers are ready to dispatch.
+3. **Scheduler notify & registration server:** The scheduler also exposes `GET /health`, `POST /notify/run-terminal`, `POST /notify/handler-complete`, and `POST /handlers/register` on a lightweight `node:http` server. Workers and post-process handlers use the notify endpoints to signal terminal states so the scheduler can re-evaluate which root or downstream handlers are ready to dispatch. The `/handlers/register` endpoint is the single writer to the `services` collection — see [Handler Registration](#handler-registration).
 
 ## ATIF Generation
 
@@ -127,6 +127,38 @@ The post-processor uses a version-based re-processing scheme:
 
 This allows deploying handler improvements and having them automatically applied to historical data.
 
+## Handler Registration
+
+Each post-process handler declares its DAG metadata in a `handler.yaml` file colocated with the worker (e.g. `apps/workers/taxonomy/handler.yaml`). This mirrors the coding-agent `agent.yaml` registration pattern.
+
+```yaml
+# apps/workers/taxonomy/handler.yaml
+_id: pp-taxonomy
+type: post-process-handler
+version: 1
+queue: pp-taxonomy-queue
+selector: taxonomy
+autoBackfill: false
+dependsOn:
+  - pp-atif
+```
+
+On deploy, a generic registration script — `packages/shared/src/scripts/register-handler.ts` — reads the `handler.yaml` pointed to by `HANDLER_YAML_PATH`, waits for the scheduler's `/health`, and POSTs the parsed document to `${SCHEDULER_URL}/handlers/register` (with retry). The scheduler validates the document, runs a cycle check against the existing topology, and upserts it into the `services` collection via `HandlerDispatcher.registerHandler`. **Workers never write to the `services` collection directly** — the scheduler is the sole owner.
+
+```mermaid
+flowchart LR
+    YAML[handler.yaml] --> SCRIPT[register-handler.ts]
+    SCRIPT -->|"POST /handlers/register"| SCH[Scheduler]
+    SCH -->|"validate + cycle check + upsert"| SVC[(services collection)]
+```
+
+**Where it runs:**
+
+- **Docker Compose:** one `register-handler-<worker>` init service per handler (`pp-atif`, `pp-taxonomy`, `pp-report`) runs the generic script via `tsx`, gated on the scheduler being up. The worker waits for its registration service to complete.
+- **Kubernetes:** a `register-handler-post-processor` Job runs the compiled script (`node packages/shared/dist/scripts/register-handler.js`) on each deploy. Only `pp-atif` is registered in K8s today because it is the only post-process handler deployed to the cluster; `pp-taxonomy` and `pp-report` are registered in Compose only until the taxonomy worker is deployed to K8s and report generation moves onto the DAG. The scheduler exposes a `Service` (`scheduler.scoped.svc.cluster.local:8080`) so Jobs and workers can reach `/handlers/register` and the notify endpoints.
+
+To **add or change a handler**, edit its `handler.yaml` (bump `version`, adjust `dependsOn`, etc.) — no code or migration changes are needed for registration.
+
 ## Status Lifecycle
 
 ```mermaid
@@ -157,7 +189,8 @@ stateDiagram-v2
 | `SCOPE_MT_API_URL` / `API_BASE_URL` | `http://localhost:3001` | API URL used by report/taxonomy Copilot tools |
 | `TAXONOMY_MODEL` | `gpt-4.1` | Copilot SDK model used by the taxonomy handler |
 | `SESSION_TIMEOUT_MS` | `300000` | Timeout for report/taxonomy Copilot SDK sessions |
-| `SCHEDULER_URL` | _(unset)_ | Optional scheduler notify base URL for downstream handler dispatch |
+| `SCHEDULER_URL` | _(unset)_ | Scheduler base URL — used by handlers to notify completion and by the register-handler script to reach `/handlers/register` |
+| `HANDLER_YAML_PATH` | _(unset)_ | Path to a handler's `handler.yaml`, read by the generic `register-handler` script |
 
 ## Infrastructure
 
@@ -165,4 +198,4 @@ stateDiagram-v2
 - **Blob Storage:** `snapshots` container (shared with HAR, tool-calls, and other artifacts)
 - **Database:** MongoDB `requests` collection (`run.handlerStatus` map keyed by handler ID, with deprecated `run.postProcessorStatus` / `run.postProcessorVersion` compatibility fields during migration)
 - **KEDA:** ScaledObject scales the worker to zero when queue is empty
-- **Version registration:** Kubernetes Job runs on each deploy; Docker Compose uses an init service
+- **Handler registration:** declarative `handler.yaml` per worker → generic `register-handler` script → scheduler `POST /handlers/register` (sole writer to the `services` collection). A Kubernetes Job runs the script on each deploy; Docker Compose uses per-handler init services. See [Handler Registration](#handler-registration).
