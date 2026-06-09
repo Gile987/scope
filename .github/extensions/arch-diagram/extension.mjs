@@ -273,7 +273,10 @@ function App() {
     await fetch("/refresh", { method: "POST" });
   };
 
+  const [selection, setSelection] = React.useState(null);
+
   const handleNodeClick = (event, node) => {
+    setSelection({ type: "node", label: node.data.label });
     fetch("/selection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -282,6 +285,7 @@ function App() {
   };
 
   const handleEdgeClick = (event, edge) => {
+    setSelection({ type: "edge", label: edge.label || (edge.source + " → " + edge.target) });
     fetch("/selection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -290,6 +294,7 @@ function App() {
   };
 
   const handlePaneClick = () => {
+    setSelection(null);
     fetch("/selection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -340,7 +345,24 @@ function App() {
         background: refreshing ? "#30363d" : "#238636",
         display: "flex", alignItems: "center", gap: 6,
       },
-    }, refreshing ? "⏳ Analyzing..." : "🔄 Refresh from codebase")
+    }, refreshing ? "⏳ Analyzing..." : "🔄 Refresh from codebase"),
+    selection && h("div", {
+      style: {
+        position: "absolute", bottom: 12, left: 12, zIndex: 10,
+        background: "#161b22", color: "#e6edf3",
+        border: "1px solid #58a6ff", borderRadius: 6, padding: "8px 12px",
+        fontSize: 12, display: "flex", alignItems: "center", gap: 8,
+      },
+    },
+      "📌 ", h("strong", null, selection.label), " (", selection.type, ")",
+      h("button", {
+        onClick: () => fetch("/ask", { method: "POST" }),
+        style: {
+          background: "#1f6feb", color: "#fff", border: "none", borderRadius: 4,
+          padding: "4px 10px", fontSize: 11, cursor: "pointer", marginLeft: 8,
+        },
+      }, "💬 Ask Copilot")
+    )
   );
 }
 
@@ -388,6 +410,13 @@ async function startServer(instanceId) {
             return;
         }
 
+        if (url.pathname === "/ask" && req.method === "POST") {
+            res.writeHead(202, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+            res.end(JSON.stringify({ status: "asking" }));
+            triggerAsk(instanceId);
+            return;
+        }
+
         if (url.pathname === "/refresh" && req.method === "POST") {
             // Trigger agent to analyze codebase
             res.writeHead(202, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
@@ -421,6 +450,27 @@ async function triggerRefresh(instanceId) {
     diagramData = loadDiagramData();
     // Push update to all SSE clients for this instance
     pushUpdate(instanceId);
+}
+
+async function triggerAsk(instanceId) {
+    const sel = selections.get(instanceId);
+    if (!sel) return;
+    let prompt;
+    if (sel.type === "node") {
+        const node = diagramData.nodes.find(n => n.id === sel.id);
+        const group = node?.group ? diagramData.groups.find(g => g.id === node.group) : null;
+        const inEdges = diagramData.edges.filter(e => e.target === sel.id || e.target === node?.group);
+        const outEdges = diagramData.edges.filter(e => e.source === sel.id || e.source === node?.group);
+        prompt = `The user selected the "${sel.label}" component in the architecture diagram.${group ? ` It belongs to the "${group.label}" group.` : ""} Incoming: ${inEdges.map(e => `${e.source} → ${sel.id} (${e.label})`).join(", ") || "none"}. Outgoing: ${outEdges.map(e => `${sel.id} → ${e.target} (${e.label})`).join(", ") || "none"}. Tell the user about this component: what it does, how it fits in the system, and key implementation details.`;
+    } else if (sel.type === "edge") {
+        const edge = diagramData.edges.find(e => e.id === sel.id);
+        const sourceNode = diagramData.nodes.find(n => n.id === sel.source) || diagramData.groups.find(g => g.id === sel.source);
+        const targetNode = diagramData.nodes.find(n => n.id === sel.target) || diagramData.groups.find(g => g.id === sel.target);
+        prompt = `The user selected the edge "${sel.label || edge?.label}" connecting "${sourceNode?.label || sel.source}" → "${targetNode?.label || sel.target}" (type: ${edge?.type}). Tell the user about this connection: what data flows through it, how it's implemented, and any important details.`;
+    } else {
+        return;
+    }
+    session.send(prompt);
 }
 
 function pushUpdate(instanceId) {
@@ -472,7 +522,6 @@ session = await joinSession({
                     description: "Reload the diagram from docs/architecture/diagram.json and push the update to all open canvas instances.",
                     handler: async (ctx) => {
                         diagramData = loadDiagramData();
-                        // Push to the specific instance if open, otherwise all
                         if (ctx.instanceId && sseClients.has(ctx.instanceId)) {
                             pushUpdate(ctx.instanceId);
                         } else {
@@ -481,6 +530,28 @@ session = await joinSession({
                             }
                         }
                         return { status: "reloaded", title: diagramData.title, nodes: diagramData.nodes.length, edges: diagramData.edges.length };
+                    },
+                },
+                {
+                    name: "get_selection",
+                    description: "Get the currently selected node or edge in the architecture diagram, including its connections and metadata.",
+                    handler: async (ctx) => {
+                        const sel = selections.get(ctx.instanceId) || [...selections.values()].pop();
+                        if (!sel) return { selection: null, message: "Nothing selected. Click a node or edge in the diagram first." };
+                        if (sel.type === "node") {
+                            const node = diagramData.nodes.find(n => n.id === sel.id);
+                            const group = node?.group ? diagramData.groups.find(g => g.id === node.group) : null;
+                            const inEdges = diagramData.edges.filter(e => e.target === sel.id || e.target === node?.group);
+                            const outEdges = diagramData.edges.filter(e => e.source === sel.id || e.source === node?.group);
+                            return { selection: sel, group: group?.label || null, incomingEdges: inEdges, outgoingEdges: outEdges };
+                        }
+                        if (sel.type === "edge") {
+                            const edge = diagramData.edges.find(e => e.id === sel.id);
+                            const sourceNode = diagramData.nodes.find(n => n.id === sel.source) || diagramData.groups.find(g => g.id === sel.source);
+                            const targetNode = diagramData.nodes.find(n => n.id === sel.target) || diagramData.groups.find(g => g.id === sel.target);
+                            return { selection: sel, edge, sourceLabel: sourceNode?.label, targetLabel: targetNode?.label };
+                        }
+                        return { selection: sel };
                     },
                 },
             ],
