@@ -379,6 +379,24 @@ session = await joinSession({
             id: "arch-diagram",
             displayName: "Architecture Diagram",
             description: "Interactive architecture diagram with ELK.js auto-layout showing system components and their relationships.",
+            actions: [
+                {
+                    name: "reload",
+                    description: "Reload the diagram from docs/architecture/diagram.json and push the update to all open canvas instances.",
+                    handler: async (ctx) => {
+                        diagramData = loadDiagramData();
+                        // Push to the specific instance if open, otherwise all
+                        if (ctx.instanceId && sseClients.has(ctx.instanceId)) {
+                            pushUpdate(ctx.instanceId);
+                        } else {
+                            for (const id of sseClients.keys()) {
+                                pushUpdate(id);
+                            }
+                        }
+                        return { status: "reloaded", title: diagramData.title, nodes: diagramData.nodes.length, edges: diagramData.edges.length };
+                    },
+                },
+            ],
             open: async (ctx) => {
                 let entry = servers.get(ctx.instanceId);
                 if (!entry) {
