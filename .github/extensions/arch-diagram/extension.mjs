@@ -22,6 +22,8 @@ let diagramData = loadDiagramData();
 const servers = new Map();
 // SSE clients per instance for pushing updates
 const sseClients = new Map(); // instanceId → Set<res>
+// Selection state per instance
+const selections = new Map(); // instanceId → { type: "node"|"edge", id, label, ...details }
 
 // Watch diagram.json for changes and push updates to all clients
 let debounceTimer = null;
@@ -271,6 +273,30 @@ function App() {
     await fetch("/refresh", { method: "POST" });
   };
 
+  const handleNodeClick = (event, node) => {
+    fetch("/selection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "node", id: node.id, label: node.data.label }),
+    });
+  };
+
+  const handleEdgeClick = (event, edge) => {
+    fetch("/selection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "edge", id: edge.id, source: edge.source, target: edge.target, label: edge.label }),
+    });
+  };
+
+  const handlePaneClick = () => {
+    fetch("/selection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(null),
+    });
+  };
+
   const controlStyle = {
     position: "absolute", top: 12, zIndex: 10,
     background: "#161b22", color: "#e6edf3",
@@ -284,6 +310,9 @@ function App() {
       edges,
       onNodesChange,
       onEdgesChange,
+      onNodeClick: handleNodeClick,
+      onEdgeClick: handleEdgeClick,
+      onPaneClick: handlePaneClick,
       fitView: true,
       colorMode: "dark",
       proOptions: { hideAttribution: true },
@@ -343,6 +372,22 @@ async function startServer(instanceId) {
             return;
         }
 
+        if (url.pathname === "/selection" && req.method === "POST") {
+            let body = "";
+            req.on("data", (chunk) => body += chunk);
+            req.on("end", () => {
+                const selection = JSON.parse(body);
+                if (selection) {
+                    selections.set(instanceId, selection);
+                } else {
+                    selections.delete(instanceId);
+                }
+                res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                res.end(JSON.stringify({ ok: true }));
+            });
+            return;
+        }
+
         if (url.pathname === "/refresh" && req.method === "POST") {
             // Trigger agent to analyze codebase
             res.writeHead(202, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
@@ -388,6 +433,34 @@ function pushUpdate(instanceId) {
 }
 
 session = await joinSession({
+    hooks: {
+        onUserPromptSubmitted: async () => {
+            // Find the most recently active selection across all instances
+            let sel = null;
+            for (const [, s] of selections) {
+                sel = s;
+            }
+            if (!sel) return {};
+            if (sel.type === "node") {
+                const node = diagramData.nodes.find(n => n.id === sel.id);
+                const group = node?.group ? diagramData.groups.find(g => g.id === node.group) : null;
+                const inEdges = diagramData.edges.filter(e => e.target === sel.id || e.target === node?.group);
+                const outEdges = diagramData.edges.filter(e => e.source === sel.id || e.source === node?.group);
+                return {
+                    additionalContext: `[Architecture Diagram Selection] The user has selected the "${sel.label}" node in the architecture diagram.${group ? ` It belongs to the "${group.label}" group.` : ""} Incoming connections: ${inEdges.map(e => `${e.source} → ${sel.id} (${e.label})`).join(", ") || "none"}. Outgoing connections: ${outEdges.map(e => `${sel.id} → ${e.target} (${e.label})`).join(", ") || "none"}.`,
+                };
+            }
+            if (sel.type === "edge") {
+                const edge = diagramData.edges.find(e => e.id === sel.id);
+                const sourceNode = diagramData.nodes.find(n => n.id === sel.source) || diagramData.groups.find(g => g.id === sel.source);
+                const targetNode = diagramData.nodes.find(n => n.id === sel.target) || diagramData.groups.find(g => g.id === sel.target);
+                return {
+                    additionalContext: `[Architecture Diagram Selection] The user has selected the edge "${sel.label || edge?.label}" connecting "${sourceNode?.label || sel.source}" → "${targetNode?.label || sel.target}" (type: ${edge?.type || "unknown"}).`,
+                };
+            }
+            return {};
+        },
+    },
     canvases: [
         createCanvas({
             id: "arch-diagram",
