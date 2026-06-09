@@ -1,5 +1,5 @@
 {
-  "$schema": "./diagram.schema.json",
+  "$schema": "../../.github/extensions/arch-diagram/diagram.schema.json",
   "title": "Scope Architecture",
   "groups": [
     { "id": "grp_clients", "label": "Clients", "color": "#58a6ff" },
