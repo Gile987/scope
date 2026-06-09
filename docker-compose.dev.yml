@@ -200,6 +200,14 @@ services:
     build:
       target: dev
 
+  register-version-taxonomy:
+    build:
+      target: dev
+
+  register-version-report-generator:
+    build:
+      target: dev
+
   post-processor:
     build:
       target: dev

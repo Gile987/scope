@@ -3,13 +3,14 @@
 
 /**
  * Standalone script run by the K8s Job on each deployment.
- * Registers the post-processor (pp-atif handler) in the services collection
+ * Registers the taxonomy handler in the services collection
  * with its version, queue, and dependency information so the scheduler
  * can orchestrate the DAG-based post-processing pipeline.
  */
 import "dotenv/config";
 import { MongoClient } from "mongodb";
-import { POST_PROCESSOR_VERSION } from "./version.js";
+
+const TAXONOMY_HANDLER_VERSION = 1;
 
 const MONGO_URI =
   process.env.MONGO_CONNECTION_STRING ||
@@ -25,15 +26,15 @@ async function main(): Promise<void> {
     .db(MONGO_DATABASE)
     .collection("services")
     .updateOne(
-      { _id: "pp-atif" } as any,
+      { _id: "pp-taxonomy" } as any,
       {
         $set: {
           type: "post-process-handler",
-          version: POST_PROCESSOR_VERSION,
-          queue: "post-processor-queue",
-          selector: "atif",
-          autoBackfill: true,
-          dependsOn: [],
+          version: TAXONOMY_HANDLER_VERSION,
+          queue: "pp-taxonomy-queue",
+          selector: "taxonomy",
+          autoBackfill: false,
+          dependsOn: ["pp-atif"],
           updatedAt: new Date(),
         },
       },
@@ -41,7 +42,7 @@ async function main(): Promise<void> {
     );
 
   await mongo.close();
-  console.log(`[register-version] Registered pp-atif handler version: ${POST_PROCESSOR_VERSION}`);
+  console.log(`[register-version] Registered pp-taxonomy handler version: ${TAXONOMY_HANDLER_VERSION}`);
 }
 
 main().catch((err) => {

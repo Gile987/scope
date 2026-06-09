@@ -140,7 +140,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Creates the 'har' blob container and handler queues in Azurite.
+  # Creates the 'har' blob container in Azurite.
   azurite-init:
     image: mcr.microsoft.com/azure-cli:2.68.0
     restart: "no"
@@ -148,12 +148,9 @@ services:
       azurite:
         condition: service_healthy
     environment:
-      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;QueueEndpoint=http://azurite:10001/devstoreaccount1;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
     command: >
-      sh -c "az storage container create --name har --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true &&
-      az storage queue create --name report-queue --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true &&
-      az storage queue create --name post-processor-queue --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true &&
-      az storage queue create --name pp-taxonomy-queue --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true"
+      sh -c "az storage container create --name har --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true"
 
   # ===========================================================================
   # Application services
@@ -642,6 +639,8 @@ services:
         condition: service_healthy
       api:
         condition: service_started
+      register-version-report-generator:
+        condition: service_completed_successfully
 
   taxonomy-handler:
     build:
@@ -670,6 +669,36 @@ services:
         condition: service_started
       scheduler:
         condition: service_started
+      register-version-taxonomy:
+        condition: service_completed_successfully
+
+  register-version-taxonomy:
+    build:
+      context: .
+      dockerfile: apps/workers/taxonomy/Dockerfile
+    profiles: [taxonomy, all]
+    environment:
+      <<: *common-env
+    depends_on:
+      mongodb:
+        condition: service_healthy
+        required: false
+    restart: "no"
+    entrypoint: ["npx", "tsx", "apps/workers/taxonomy/src/register-version.ts"]
+
+  register-version-report-generator:
+    build:
+      context: .
+      dockerfile: apps/workers/report-generator/Dockerfile
+    profiles: [report]
+    environment:
+      <<: *common-env
+    depends_on:
+      mongodb:
+        condition: service_healthy
+        required: false
+    restart: "no"
+    entrypoint: ["npx", "tsx", "apps/workers/report-generator/src/register-version.ts"]
 
   register-version-post-processor:
     build:
