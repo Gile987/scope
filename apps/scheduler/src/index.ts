@@ -30,6 +30,7 @@ const POLL_INTERVAL_MS = parseInt(
   10,
 );
 const HEALTH_PORT = parseInt(process.env.PORT || "8080", 10);
+const API_URL = process.env.API_URL || "http://api:80";
 
 /**
  * Parse per-worker-type queue depth config from environment.
@@ -142,6 +143,8 @@ async function main(): Promise<void> {
     db,
     createQueueClient,
     ppPollIntervalMs,
+    30,
+    API_URL,
   );
   handlerDispatcher.start();
   console.log("[Scheduler] Handler dispatcher (DAG) started");

@@ -21,14 +21,6 @@ const HANDLER_STATUS_INDEXES = [
       updatedAt: -1 as const,
     },
   },
-  {
-    name: "idx_handler_dispatch_report",
-    key: {
-      "run.handlerStatus.pp-report.status": 1 as const,
-      "run.status": 1 as const,
-      updatedAt: -1 as const,
-    },
-  },
 ] as const;
 
 export class AddHandlerStatusIndex implements MigrationInterface {

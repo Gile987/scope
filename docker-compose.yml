@@ -366,6 +366,7 @@ services:
       SCHEDULER_QUEUE_DEPTH_CODER_ACP_COPILOT: "2"
       SCHEDULER_POLL_INTERVAL_MS: "2000"
       PORT: "8080"
+      API_URL: http://api:80
     depends_on:
       mongodb:
         condition: service_healthy
@@ -639,8 +640,6 @@ services:
         condition: service_healthy
       api:
         condition: service_started
-      register-handler-report-generator:
-        condition: service_completed_successfully
 
   taxonomy-handler:
     build:
@@ -680,21 +679,6 @@ services:
     environment:
       <<: *common-env
       HANDLER_YAML_PATH: apps/workers/taxonomy/handler.yaml
-      SCHEDULER_URL: http://scheduler:8080
-    depends_on:
-      scheduler:
-        condition: service_started
-    restart: "no"
-    entrypoint: ["npx", "tsx", "packages/shared/src/scripts/register-handler.ts"]
-
-  register-handler-report-generator:
-    build:
-      context: .
-      dockerfile: apps/workers/report-generator/Dockerfile
-    profiles: [report]
-    environment:
-      <<: *common-env
-      HANDLER_YAML_PATH: apps/workers/report-generator/handler.yaml
       SCHEDULER_URL: http://scheduler:8080
     depends_on:
       scheduler:

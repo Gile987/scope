@@ -4,7 +4,8 @@
 import { Collection, Db } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import type { RequestDocument, HandlerServiceDocument, HandlerRunStatus } from "shared";
-import { DependencyGraph } from "shared";
+import { DependencyGraph, withRetry } from "shared";
+import type { RetryOptions } from "shared";
 import type { NotifyHandler } from "./notify-routes.js";
 
 /**
@@ -24,12 +25,22 @@ export class HandlerDispatcher implements NotifyHandler {
   private dispatching = false;
   private queueClients = new Map<string, QueueClient>();
 
+  /** Retry policy for the report-trigger POST. The 30s poll net is the durable
+   *  backstop, so in-call retries are modest. Overridable in tests. */
+  private reportRetryOptions: RetryOptions = {
+    maxRetries: 4,
+    baseDelayMs: 250,
+    maxDelayMs: 2_000,
+    isRetryable: () => true,
+  };
+
   constructor(
     private readonly collection: Collection<RequestDocument>,
     private readonly db: Db,
     private readonly createQueueClient: (queueName: string) => QueueClient,
     private readonly pollIntervalMs: number = 30_000,
     private readonly batchSize: number = 30,
+    private readonly apiUrl: string = process.env.API_URL || "http://api:80",
   ) {}
 
   start(): void {
@@ -54,14 +65,18 @@ export class HandlerDispatcher implements NotifyHandler {
   async onRunTerminal(requestId: string, runId: string): Promise<void> {
     console.log(`[HandlerDispatcher] Notify: run-terminal ${requestId} (run=${runId})`);
     const handlers = await this.loadHandlers();
-    if (handlers.length === 0) return;
 
-    const graph = this.buildGraph(handlers);
-    const roots = handlers.filter((h) => !h.dependsOn || h.dependsOn.length === 0);
+    if (handlers.length > 0) {
+      const graph = this.buildGraph(handlers);
+      const roots = handlers.filter((h) => !h.dependsOn || h.dependsOn.length === 0);
 
-    for (const handler of roots) {
-      await this.dispatchIfEligible(requestId, runId, handler, graph, handlers);
+      for (const handler of roots) {
+        await this.dispatchIfEligible(requestId, runId, handler, graph, handlers);
+      }
     }
+
+    // A run with no handlers (or an already-drained DAG) triggers reports now.
+    await this.maybeTriggerReports(requestId, runId);
   }
 
   async onHandlerComplete(
@@ -86,7 +101,9 @@ export class HandlerDispatcher implements NotifyHandler {
     );
 
     if (status === "failed") {
-      // Don't dispatch downstream on failure
+      // Don't dispatch downstream on failure, but the failure may have drained
+      // the DAG (descendants are now permanently blocked) — check for reports.
+      await this.maybeTriggerReports(requestId, runId);
       return;
     }
 
@@ -105,6 +122,9 @@ export class HandlerDispatcher implements NotifyHandler {
     for (const child of children) {
       await this.dispatchIfEligible(requestId, runId, child, graph, handlers);
     }
+
+    // Completing this handler may have drained the DAG (e.g. it was the leaf).
+    await this.maybeTriggerReports(requestId, runId);
   }
 
   async registerHandler(doc: HandlerServiceDocument): Promise<void> {
@@ -134,6 +154,119 @@ export class HandlerDispatcher implements NotifyHandler {
     );
   }
 
+  // ── Report trigger on DAG drain ─────────────────────────────────────
+
+  /**
+   * A handler is "terminal" for a run when it can produce no further work:
+   * it has succeeded (`done`), failed (`failed`), or is permanently blocked
+   * because one of its transitive dependencies failed (so it can never run).
+   */
+  private isHandlerTerminal(
+    handlerId: string,
+    graph: DependencyGraph,
+    handlerStatus: Record<string, HandlerRunStatus> | undefined,
+  ): boolean {
+    const status = handlerStatus?.[handlerId]?.status;
+    if (status === "done" || status === "failed") return true;
+
+    // Not yet dispatched/processed — terminal only if blocked by a failed
+    // ancestor (any transitive dependency that failed).
+    if (status === undefined) {
+      for (const ancestorId of graph.getAncestors(handlerId)) {
+        if (handlerStatus?.[ancestorId]?.status === "failed") return true;
+      }
+    }
+
+    // "queued" or "processing" — still active.
+    return false;
+  }
+
+  /**
+   * The DAG is drained for a run when every registered handler is terminal.
+   * Vacuously true when there are no handlers.
+   */
+  private isDagDrained(
+    handlers: HandlerServiceDocument[],
+    graph: DependencyGraph,
+    handlerStatus: Record<string, HandlerRunStatus> | undefined,
+  ): boolean {
+    return handlers.every((h) =>
+      this.isHandlerTerminal(h._id, graph, handlerStatus),
+    );
+  }
+
+  /**
+   * If the run's handler DAG has drained and reports have not yet been
+   * triggered, atomically claim the exactly-once guard and POST to the API's
+   * report-trigger endpoint. Rolls the guard back on failure so the poll
+   * safety net retries.
+   *
+   * All reads/writes are scoped to the specific attempt (`run._id === runId`)
+   * so a stale notify or a concurrent retry can never trigger reports for, or
+   * roll back the guard of, a different attempt.
+   */
+  private async maybeTriggerReports(requestId: string, runId: string): Promise<void> {
+    const doc = await this.collection.findOne({ _id: requestId } as any);
+    const run = doc?.run;
+    if (!run || run._id !== runId || run.status !== "done") return;
+    if ((run as any).reportsTriggeredAt) return;
+
+    const handlers = await this.loadHandlers();
+    const graph = this.buildGraph(handlers);
+    const handlerStatus = (run as any).handlerStatus as
+      | Record<string, HandlerRunStatus>
+      | undefined;
+
+    if (!this.isDagDrained(handlers, graph, handlerStatus)) return;
+
+    // Atomically claim the trigger so concurrent notify/poll paths fire once.
+    const claimed = await this.collection.findOneAndUpdate(
+      {
+        _id: requestId,
+        "run._id": runId,
+        "run.status": "done",
+        "run.reportsTriggeredAt": { $exists: false },
+      } as any,
+      { $set: { "run.reportsTriggeredAt": new Date() } } as any,
+      { returnDocument: "after" },
+    );
+    if (!claimed) return; // Another path already claimed it.
+
+    try {
+      await this.triggerReports(requestId);
+      console.log(
+        `[HandlerDispatcher] Triggered report generation for ${requestId} (DAG drained)`,
+      );
+    } catch (err) {
+      // Roll back the guard so a later poll retries — scoped to this attempt so
+      // a concurrent retry's valid guard is never cleared.
+      await this.collection.updateOne(
+        { _id: requestId, "run._id": runId } as any,
+        { $unset: { "run.reportsTriggeredAt": "" } } as any,
+      );
+      console.error(
+        `[HandlerDispatcher] Report trigger failed for ${requestId}, rolled back guard:`,
+        err,
+      );
+    }
+  }
+
+  /** POSTs to the API's report-trigger endpoint with retry on transient errors. */
+  private async triggerReports(requestId: string): Promise<void> {
+    const url = `${this.apiUrl}/api/v1/reports/trigger`;
+    await withRetry(async () => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`POST ${url} -> ${res.status} ${text}`.trim());
+      }
+    }, this.reportRetryOptions);
+  }
+
   // ── Poll safety net ─────────────────────────────────────────────────
 
   private async pollDispatch(): Promise<void> {
@@ -141,37 +274,63 @@ export class HandlerDispatcher implements NotifyHandler {
     this.dispatching = true;
     try {
       const handlers = await this.loadHandlers();
-      if (handlers.length === 0) return;
 
-      const graph = this.buildGraph(handlers);
+      if (handlers.length > 0) {
+        const graph = this.buildGraph(handlers);
 
-      for (const handler of handlers) {
-        // Find runs that need this handler dispatched
-        for (let i = 0; i < this.batchSize; i++) {
-          const filter = this.buildDispatchFilter(handler, handlers, graph);
-          if (!filter) break;
+        for (const handler of handlers) {
+          // Find runs that need this handler dispatched
+          for (let i = 0; i < this.batchSize; i++) {
+            const filter = this.buildDispatchFilter(handler, handlers, graph);
+            if (!filter) break;
 
-          const claimed = await this.collection.findOneAndUpdate(
-            filter as any,
-            {
-              $set: {
-                [`run.handlerStatus.${handler._id}.status`]: "queued",
-                [`run.handlerStatus.${handler._id}.updatedAt`]: new Date(),
-              },
-            } as any,
-            { sort: { updatedAt: -1 }, returnDocument: "after" },
-          );
+            const claimed = await this.collection.findOneAndUpdate(
+              filter as any,
+              {
+                $set: {
+                  [`run.handlerStatus.${handler._id}.status`]: "queued",
+                  [`run.handlerStatus.${handler._id}.updatedAt`]: new Date(),
+                },
+              } as any,
+              { sort: { updatedAt: -1 }, returnDocument: "after" },
+            );
 
-          if (!claimed) break;
+            if (!claimed) break;
 
-          await this.enqueueToHandler(handler, claimed._id, (claimed as any).run?._id);
-          console.log(`[HandlerDispatcher] Poll-dispatched ${handler._id} for ${claimed._id}`);
+            await this.enqueueToHandler(handler, claimed._id, (claimed as any).run?._id);
+            console.log(`[HandlerDispatcher] Poll-dispatched ${handler._id} for ${claimed._id}`);
+          }
         }
       }
+
+      // Safety net: trigger reports for any done run whose DAG has drained but
+      // whose report trigger was missed (e.g. a dropped notify).
+      await this.pollTriggerReports();
     } catch (err) {
       console.error("[HandlerDispatcher] Error during poll dispatch:", err);
     } finally {
       this.dispatching = false;
+    }
+  }
+
+  /**
+   * Scans for `done` runs whose reports have not yet been triggered and runs
+   * the drain check on each. Bounded by `batchSize` per poll.
+   */
+  private async pollTriggerReports(): Promise<void> {
+    const candidates = await this.collection
+      .find({
+        "run.status": "done",
+        "run.reportsTriggeredAt": { $exists: false },
+        deletedAt: { $exists: false },
+      } as any)
+      .limit(this.batchSize)
+      .toArray();
+
+    for (const doc of candidates) {
+      const runId = (doc as any).run?._id as string | undefined;
+      if (!runId) continue;
+      await this.maybeTriggerReports(doc._id, runId);
     }
   }
 

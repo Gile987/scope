@@ -333,6 +333,15 @@ Optional base URL for the scheduler's HTTP notification endpoints. When set, cod
 - **Kubernetes:** `http://scheduler-service.scoped.svc.cluster.local:8080`
 - **Local dev:** Leave unset to rely on legacy queue fallback unless you are also running the scheduler locally
 
+### API_URL
+**Default:** `http://api:80`
+**Type:** URL string
+
+Base URL the **scheduler** uses to reach the API's `POST /api/v1/reports/trigger` endpoint. When a run's post-processing handler DAG drains (every registered handler reaches a terminal state), the scheduler calls this endpoint so the API can evaluate each report template's trigger and create the templated report job(s). Reports are deliberately not DAG handlers — see [docs/architecture/post-processing.md](docs/architecture/post-processing.md#report-triggering-on-dag-drain).
+
+- **Docker Compose:** `http://api:80`
+- **Kubernetes:** `http://api.scoped.svc.cluster.local:80`
+
 ## Worker Configuration
 
 ### SCOPE_RUN_HEARTBEAT_STALE_MS

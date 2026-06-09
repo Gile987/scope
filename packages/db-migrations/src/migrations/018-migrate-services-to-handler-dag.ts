@@ -7,8 +7,11 @@ import type { MigrationInterface } from "mongo-migrate-ts";
 /**
  * Migration 018: Remove the legacy "post-processor" service entry.
  *
- * Handler service registration (pp-atif, pp-taxonomy, pp-report) is now owned
- * by each worker's register-version.ts script, run as a K8s Job on deploy.
+ * Handler service registration (pp-atif, pp-taxonomy) is now owned
+ * by each worker's handler.yaml + the generic register-handler script,
+ * which POSTs to the scheduler's POST /handlers/register endpoint on deploy.
+ * Reports are not a DAG handler — the scheduler triggers report generation
+ * (POST /api/v1/reports/trigger) once the DAG drains.
  * This migration only cleans up the old single-entry format.
  */
 export class MigrateServicesToHandlerDag implements MigrationInterface {

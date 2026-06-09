@@ -34,7 +34,7 @@ Two paths trigger post-processing:
     - Updates `run.turns.$.atifUrl` in the request document
 
 4. On success, stamps `run.handlerStatus["pp-atif"] = { status: "done", version: N }` (while legacy `run.postProcessorVersion` / `run.postProcessorStatus` may still be mirrored during the transition)
-5. Triggers downstream taxonomy/report handlers once the scheduler sees the dependency graph is satisfied
+5. Triggers the downstream taxonomy handler once the scheduler sees the dependency graph is satisfied. (Reports are **not** a DAG handler — see [Report Triggering](#report-triggering-on-dag-drain).)
 
 ## Taxonomy Generation
 
@@ -120,7 +120,7 @@ processor.start();
 
 The post-processor uses a version-based re-processing scheme:
 
-- Each handler is registered independently in the `services` collection using a `post-process-handler` document keyed by handler ID (for example `pp-atif`, `pp-taxonomy`, `pp-report`)
+- Each handler is registered independently in the `services` collection using a `post-process-handler` document keyed by handler ID (for example `pp-atif`, `pp-taxonomy`)
 - Each registration stores the handler `version`, queue name, selector, `autoBackfill` behavior, and `dependsOn` DAG edges
 - The scheduler compares each request's per-handler status/version state (for example `run.handlerStatus["pp-atif"]`) against the registered handler entry for that selector
 - Requests with missing or outdated handler state are re-dispatched for that specific handler once its dependencies are satisfied
@@ -154,10 +154,60 @@ flowchart LR
 
 **Where it runs:**
 
-- **Docker Compose:** one `register-handler-<worker>` init service per handler (`pp-atif`, `pp-taxonomy`, `pp-report`) runs the generic script via `tsx`, gated on the scheduler being up. The worker waits for its registration service to complete.
-- **Kubernetes:** a `register-handler-post-processor` Job runs the compiled script (`node packages/shared/dist/scripts/register-handler.js`) on each deploy. Only `pp-atif` is registered in K8s today because it is the only post-process handler deployed to the cluster; `pp-taxonomy` and `pp-report` are registered in Compose only until the taxonomy worker is deployed to K8s and report generation moves onto the DAG. The scheduler exposes a `Service` (`scheduler.scoped.svc.cluster.local:8080`) so Jobs and workers can reach `/handlers/register` and the notify endpoints.
+- **Docker Compose:** one `register-handler-<worker>` init service per handler (`pp-atif`, `pp-taxonomy`) runs the generic script via `tsx`, gated on the scheduler being up. The worker waits for its registration service to complete.
+- **Kubernetes:** a `register-handler-post-processor` Job runs the compiled script (`node packages/shared/dist/scripts/register-handler.js`) on each deploy. Only `pp-atif` is registered in K8s today because it is the only post-process handler deployed to the cluster; `pp-taxonomy` is registered in Compose only until the taxonomy worker is deployed to K8s. The scheduler exposes a `Service` (`scheduler.scoped.svc.cluster.local:8080`) so Jobs and workers can reach `/handlers/register` and the notify endpoints.
 
 To **add or change a handler**, edit its `handler.yaml` (bump `version`, adjust `dependsOn`, etc.) — no code or migration changes are needed for registration.
+
+## Report Triggering on DAG Drain
+
+Reports are intentionally **not** modeled as a DAG handler. The report-generator
+worker is keyed by `reportId` and requires a `templateId`, whereas the DAG
+dispatches a generic `{ type, requestId, runId }` message — so a report node
+could never process a DAG message. Reports are also fundamentally different from
+post-process handlers: they are parameterized (per `templateId`), N-per-run (one
+per matching template), and trigger-gated (each template has its own
+`ReportTrigger`).
+
+Instead, the scheduler watches for a run's handler DAG to **drain** and then
+calls the existing `POST /api/v1/reports/trigger` endpoint, which evaluates every
+active template's trigger and creates the properly-templated `ReportDocument`(s).
+
+```mermaid
+flowchart LR
+    RT["run done"] --> DAG["scheduler dispatches DAG<br/>(pp-atif → pp-taxonomy)"]
+    DAG -->|"all handlers terminal"| DR{DAG drained?}
+    DR -->|yes| TRIG["POST /api/v1/reports/trigger<br/>{ requestId }"]
+    TRIG --> API["API evaluates each template trigger<br/>→ ReportDocument + report-queue {reportId}"]
+    API --> RG["report-generator (unchanged)"]
+```
+
+**Drain definition.** A handler is _terminal_ when its status is `done` or
+`failed`, **or** when its status is absent but a transitive dependency `failed`
+(so it can never run — effectively blocked). The DAG is drained when every
+registered handler is terminal. A run with **zero** registered handlers is
+vacuously drained, so reports trigger immediately on run completion.
+
+**Trigger regardless of handler success.** A flaky taxonomy must not block report
+generation (reports analyze the run/ATIF), so the scheduler triggers reports
+whenever the DAG drains — not only when every handler succeeded.
+
+**Exactly-once, attempt-scoped.** Before POSTing, the scheduler atomically claims
+a per-attempt guard (`run.reportsTriggeredAt`) via `findOneAndUpdate` filtered by
+`{ _id: requestId, "run._id": runId, "run.status": "done", "run.reportsTriggeredAt": { $exists: false } }`.
+Scoping by `run._id` ensures a stale notify or a concurrent retry can never fire
+reports for — or roll back the guard of — a different attempt. If the POST fails,
+the guard is rolled back (also `run._id`-scoped) so the 30s poll safety net
+retries.
+
+**Where it fires.** `maybeTriggerReports(requestId, runId)` runs at the end of
+`onRunTerminal` (handles zero-handler / already-drained runs), both branches of
+`onHandlerComplete` (success **and** the failure early-return, since a failure can
+drain the DAG by blocking descendants), and a `pollTriggerReports()` scan in the
+scheduler's 30s poll loop (durable backstop for dropped notifications).
+
+The scheduler reaches the API via the `API_URL` env var (`http://api:80` in
+Compose, `http://api.scoped.svc.cluster.local:80` in K8s).
 
 ## Status Lifecycle
 
@@ -190,6 +240,7 @@ stateDiagram-v2
 | `TAXONOMY_MODEL` | `gpt-4.1` | Copilot SDK model used by the taxonomy handler |
 | `SESSION_TIMEOUT_MS` | `300000` | Timeout for report/taxonomy Copilot SDK sessions |
 | `SCHEDULER_URL` | _(unset)_ | Scheduler base URL — used by handlers to notify completion and by the register-handler script to reach `/handlers/register` |
+| `API_URL` | `http://api:80` | API base URL the **scheduler** uses to call `POST /api/v1/reports/trigger` when a run's handler DAG drains |
 | `HANDLER_YAML_PATH` | _(unset)_ | Path to a handler's `handler.yaml`, read by the generic `register-handler` script |
 
 ## Infrastructure

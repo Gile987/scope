@@ -204,10 +204,6 @@ services:
     build:
       target: dev
 
-  register-handler-report-generator:
-    build:
-      target: dev
-
   post-processor:
     build:
       target: dev

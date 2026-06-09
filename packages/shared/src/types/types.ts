@@ -279,8 +279,13 @@ export interface RunState {
   aiCallCount?: number;
   rawChatUrl?: string;
   rawChatFormat?: string;
-  /** Per-handler post-processing status. Keys are handler IDs (e.g. "pp-atif", "pp-taxonomy", "pp-report"). */
+  /** Per-handler post-processing status. Keys are handler IDs (e.g. "pp-atif", "pp-taxonomy"). */
   handlerStatus?: Record<string, HandlerRunStatus>;
+  /** Set once the scheduler has triggered report generation for this run after
+   *  the handler DAG drained (every handler reached a terminal state). Acts as
+   *  an exactly-once guard so the scheduler POSTs /api/v1/reports/trigger at
+   *  most once per run, even under notify/poll races. */
+  reportsTriggeredAt?: Date;
   /** @deprecated Use handlerStatus["pp-atif"].version instead. Kept for migration compatibility. */
   postProcessorVersion?: number;
   /** @deprecated Use handlerStatus["pp-atif"].status instead. Kept for migration compatibility. */

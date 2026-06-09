@@ -15,7 +15,6 @@ COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
 COPY apps/workers/report-generator/tsconfig.json ./apps/workers/report-generator/
 COPY apps/workers/report-generator/src ./apps/workers/report-generator/src/
-COPY apps/workers/report-generator/handler.yaml ./apps/workers/report-generator/
 
 RUN pnpm --filter shared build && pnpm --filter report-generator build
 
@@ -44,7 +43,6 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
 COPY --from=builder /app/apps/workers/report-generator/dist ./apps/workers/report-generator/dist/
-COPY --from=builder /app/apps/workers/report-generator/handler.yaml ./apps/workers/report-generator/handler.yaml
 
 WORKDIR /app/apps/workers/report-generator
 
