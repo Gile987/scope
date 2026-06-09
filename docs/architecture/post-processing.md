@@ -61,7 +61,10 @@ The taxonomy handler (`apps/workers/taxonomy/`) consumes messages from the dedic
       atif.trajectory.json
     iteration-2/
       atif.trajectory.json
+    taxonomy.json
 ```
+
+The completed run stores the taxonomy blob URL on `run.taxonomyUrl`.
 
 ### API Endpoints
 
@@ -69,8 +72,10 @@ The taxonomy handler (`apps/workers/taxonomy/`) consumes messages from the dedic
 | --- | --- |
 | `GET /api/v1/requests/:id/atif?iteration=N` | Download ATIF for the latest run |
 | `GET /api/v1/requests/:id/runs/:runId/atif?iteration=N` | Download ATIF for a specific run |
+| `GET /api/v1/requests/:id/taxonomy` | Download taxonomy JSON for the latest run |
+| `GET /api/v1/requests/:id/runs/:runId/taxonomy` | Download taxonomy JSON for a specific run |
 
-The `iteration` query parameter is mandatory. ATIF files are also included in archive exports as `iteration-{N}.atif.trajectory.json`.
+The `iteration` query parameter is mandatory only for the ATIF endpoints. ATIF files are also included in archive exports as `iteration-{N}.atif.trajectory.json`.
 
 ## Handler Interface
 

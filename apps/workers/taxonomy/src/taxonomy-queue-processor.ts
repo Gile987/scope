@@ -107,6 +107,7 @@ export class TaxonomyQueueProcessor extends BaseQueueProcessor<RequestDocument> 
         { _id: requestId } as never,
         {
           $set: {
+            [`run.taxonomyUrl`]: taxonomyUrl,
             [`run.handlerStatus.${HANDLER_ID}.status`]: "done",
             [`run.handlerStatus.${HANDLER_ID}.version`]: HANDLER_VERSION,
             [`run.handlerStatus.${HANDLER_ID}.updatedAt`]: new Date(),

@@ -272,6 +272,7 @@ export interface RunState {
     podName?: string;
   };
   harUrl?: string;
+  taxonomyUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
   tokenUsage?: TokenUsage;
@@ -323,6 +324,7 @@ export const RUN_STATE_FIELD_NAMES = [
   "lastHeartbeatAt",
   "worker",
   "harUrl",
+  "taxonomyUrl",
   "videoUrls",
   "setupVideoUrls",
   "tokenUsage",

@@ -99,6 +99,17 @@ describe("rewriteHarUrlsForArchive", () => {
     expect(result.run!.turns![1].toolCallsUrl).toBe("iteration-2.tool-calls.jsonl");
     expect(result.run!.turns![2].toolCallsUrl).toBeUndefined();
   });
+
+  it("rewrites run.taxonomyUrl to taxonomy.json", () => {
+    const resource = {
+      run: {
+        taxonomyUrl: "https://storage.blob.core.windows.net/snapshots/abc123/runs/attempt-1/taxonomy.json",
+        turns: [],
+      },
+    };
+    const result = rewriteHarUrlsForArchive(resource);
+    expect(result.run!.taxonomyUrl).toBe("taxonomy.json");
+  });
 });
 
 // --- blobNameFromSnapshotsUrl ---
@@ -842,6 +853,36 @@ describe("packRunIntoTar", () => {
 
     const yaml = entries.find(e => e.name === "run-009/run.yaml")!.data.toString();
     expect(yaml).toContain("iteration-1.chat-result.json");
+    expect(yaml).not.toContain("blob.core.windows.net");
+  });
+
+  it("bundles run-level taxonomy.json and rewrites taxonomyUrl", async () => {
+    const { pack } = await import("tar-stream");
+    const p = pack();
+    const taxonomyData = Buffer.from('{"topics":["agent"]}');
+    const container = makeMockBlobContainer({
+      "run-010/runs/attempt-1/taxonomy.json": { body: taxonomyData, length: taxonomyData.length },
+    });
+
+    const run: ArchivableRun = {
+      _id: "run-010",
+      run: {
+        taxonomyUrl: "https://storage.blob.core.windows.net/snapshots/run-010/runs/attempt-1/taxonomy.json",
+        turns: [],
+      },
+    };
+
+    const entriesPromise = collectPackEntries(p);
+    await packRunIntoTar(p, run, container, "run-010", () => true);
+    p.finalize();
+
+    const entries = await entriesPromise;
+    const names = entries.map(e => e.name);
+    expect(names).toContain("run-010/taxonomy.json");
+    expect(entries.find(e => e.name === "run-010/taxonomy.json")!.data).toEqual(taxonomyData);
+
+    const yaml = entries.find(e => e.name === "run-010/run.yaml")!.data.toString();
+    expect(yaml).toContain("taxonomy.json");
     expect(yaml).not.toContain("blob.core.windows.net");
   });
 });
