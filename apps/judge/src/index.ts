@@ -21,6 +21,50 @@ const storageConnectionString =
   process.env.AZURE_STORAGE_CONNECTION_STRING ||
   "";
 
+/** Maximum concurrent evaluate requests processed simultaneously.
+ *  Queued requests wait FIFO until a slot opens. Prevents batch-wide
+ *  rate-limit failures when many runs finish evaluation at the same time. */
+const JUDGE_GLOBAL_CONCURRENCY = parseInt(process.env.JUDGE_GLOBAL_CONCURRENCY || "5", 10);
+
+/**
+ * Simple async semaphore for limiting concurrent evaluations.
+ */
+class Semaphore {
+  private running = 0;
+  private queue: Array<() => void> = [];
+
+  constructor(private readonly maxConcurrency: number) {}
+
+  async acquire(): Promise<void> {
+    if (this.running < this.maxConcurrency) {
+      this.running++;
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+
+  release(): void {
+    this.running--;
+    const next = this.queue.shift();
+    if (next) {
+      this.running++;
+      next();
+    }
+  }
+
+  get pending(): number {
+    return this.queue.length;
+  }
+
+  get active(): number {
+    return this.running;
+  }
+}
+
+const evaluateSemaphore = new Semaphore(JUDGE_GLOBAL_CONCURRENCY);
+
 const blobStorage = new BlobStorage({
   storageAccountName,
   storageConnectionString: storageConnectionString || undefined,
@@ -41,7 +85,16 @@ if (redisHost) {
 
 // Health check
 app.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "healthy", service: "judge", version: "1.0.0" });
+  res.json({
+    status: "healthy",
+    service: "judge",
+    version: "1.0.0",
+    concurrency: {
+      active: evaluateSemaphore.active,
+      pending: evaluateSemaphore.pending,
+      max: JUDGE_GLOBAL_CONCURRENCY,
+    },
+  });
 });
 
 // Evaluate endpoint — called by coding workers after each iteration
@@ -77,8 +130,11 @@ app.post(
       }
 
       console.log(
-        `[judge] Evaluating snapshot: ${snapshotUrl} (${criteria.length} criteria, ${conversationHistory?.length || 0} prior turns)`
+        `[judge] Evaluating snapshot: ${snapshotUrl} (${criteria.length} criteria, ${conversationHistory?.length || 0} prior turns, queue: ${evaluateSemaphore.pending} pending, ${evaluateSemaphore.active}/${JUDGE_GLOBAL_CONCURRENCY} active)`
       );
+
+      // Acquire semaphore slot — waits FIFO if at capacity
+      await evaluateSemaphore.acquire();
 
       // Download and extract workspace snapshot to temp directory
       const workDir = mkdtempSync(join(tmpdir(), "judge-workspace-"));
@@ -120,6 +176,7 @@ app.post(
       } finally {
         // Clean up extracted workspace
         rmSync(workDir, { recursive: true, force: true });
+        evaluateSemaphore.release();
       }
     } catch (error) {
       console.error("[judge] Evaluation error:", error);
@@ -136,7 +193,7 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 async function main(): Promise<void> {
   app.listen(port, () => {
-    console.log(`[judge] Judge service listening on port ${port}`);
+    console.log(`[judge] Judge service listening on port ${port} (max concurrency: ${JUDGE_GLOBAL_CONCURRENCY})`);
   });
 }
 

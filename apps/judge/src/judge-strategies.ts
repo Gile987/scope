@@ -233,7 +233,7 @@ export abstract class JudgeStrategy {
   }
 
   /**
-   * Run a Copilot session with given prompt and tools, retrying on timeout.
+   * Run a Copilot session with given prompt and tools, retrying on timeout and rate limits.
    */
   protected async runCopilotSession(
     workspacePath: string,
@@ -247,7 +247,7 @@ export abstract class JudgeStrategy {
       {
         maxRetries: this.maxRetries,
         baseDelayMs: 10_000,
-        maxDelayMs: 30_000,
+        maxDelayMs: 5 * 60 * 1000, // 5 minutes max for rate-limit backoff
         isRetryable: (error) => {
           const msg = error instanceof Error ? error.message : String(error);
           return (
@@ -255,14 +255,25 @@ export abstract class JudgeStrategy {
             msg.includes("Timeout") ||
             msg.includes("aborted") ||
             msg.includes("ECONNRESET") ||
-            msg.includes("socket hang up")
+            msg.includes("socket hang up") ||
+            msg.includes("rate limit") ||
+            msg.includes("rate-limit") ||
+            msg.includes("Too Many Requests") ||
+            (msg.includes("429") && msg.includes("rate"))
           );
         },
         onRetry: (error, attempt) => {
           const msg = error instanceof Error ? error.message : String(error);
-          console.warn(
-            `[judge-strategy] sendAndWait attempt ${attempt} failed (retrying in ≤30s): ${msg.substring(0, 200)}`
-          );
+          const isRateLimit = msg.includes("rate limit") || msg.includes("rate-limit") || msg.includes("Too Many Requests");
+          if (isRateLimit) {
+            console.warn(
+              `[judge-strategy] Rate limit hit on attempt ${attempt} (will retry with backoff): ${msg.substring(0, 200)}`
+            );
+          } else {
+            console.warn(
+              `[judge-strategy] sendAndWait attempt ${attempt} failed (retrying in ≤30s): ${msg.substring(0, 200)}`
+            );
+          }
         },
       }
     );

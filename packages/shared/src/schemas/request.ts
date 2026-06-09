@@ -148,12 +148,22 @@ export const RequestResponseSchema = z
  * RunState `_id` is unique per attempt — when demoted to history it becomes
  * the `runs` collection's document `_id`.
  */
+export const FailureReasonSchema = z.enum([
+  "agent_error",
+  "judge_error",
+  "judge_rate_limited",
+  "timeout",
+  "cancelled",
+  "snapshot_error",
+]);
+
 export const RunStateSchema = z
   .object({
     _id: z.string(),                                     // Unique per attempt
     attemptNumber: z.number().int().min(1),              // 1, 2, 3…
     status: RequestStatusSchema,
     outcome: RequestOutcomeSchema.optional(),
+    failureReason: FailureReasonSchema.optional(),
     result: z.string().optional(),
     error: z.string().optional(),
     logsUrl: z.string().optional(),
@@ -251,6 +261,7 @@ export const GroupAggregatesSchema = z
     completionTokens: AggregateStatsSchema.nullable(),
     statusCounts: z.record(z.string(), z.number()),
     outcomeCounts: z.record(z.string(), z.number()),
+    failureReasonCounts: z.record(z.string(), z.number()).optional(),
   })
   .openapi("GroupAggregates");
 

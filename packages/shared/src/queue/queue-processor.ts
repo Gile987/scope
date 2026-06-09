@@ -563,6 +563,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       passed: result.passed,
       totalIterations: result.turns.length,
       final: true,
+      ...(result.failureReason && { failureReason: result.failureReason }),
     });
 
     const totalAiCallCount = result.turns.reduce((sum, t) => sum + (t.aiCallCount ?? 0), 0);
@@ -581,6 +582,7 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
           updatedAt: new Date(),
           ...(totalAiCallCount > 0 && { "run.aiCallCount": totalAiCallCount }),
           ...(result.passed ? {} : { "run.error": result.finalResult }),
+          ...(result.failureReason && { "run.failureReason": result.failureReason }),
           // Claim for post-processing atomically so polling dispatcher won't re-enqueue
           ...(this.postProcessorQueueClient ? { "run.postProcessorStatus": "queued" } : {}),
         },

@@ -137,6 +137,12 @@ export function buildGroupingPipeline(
         _outcomeSucceeded: { $sum: { $cond: [{ $eq: ["$run.outcome", "succeeded"] }, 1, 0] } },
         _outcomeFailed: { $sum: { $cond: [{ $eq: ["$run.outcome", "failed"] }, 1, 0] } },
         _outcomeFinished: { $sum: { $cond: [{ $eq: ["$run.outcome", "finished"] }, 1, 0] } },
+        _failureAgent: { $sum: { $cond: [{ $eq: ["$run.failureReason", "agent_error"] }, 1, 0] } },
+        _failureJudge: { $sum: { $cond: [{ $eq: ["$run.failureReason", "judge_error"] }, 1, 0] } },
+        _failureRateLimit: { $sum: { $cond: [{ $eq: ["$run.failureReason", "judge_rate_limited"] }, 1, 0] } },
+        _failureTimeout: { $sum: { $cond: [{ $eq: ["$run.failureReason", "timeout"] }, 1, 0] } },
+        _failureSnapshot: { $sum: { $cond: [{ $eq: ["$run.failureReason", "snapshot_error"] }, 1, 0] } },
+        _failureCancelled: { $sum: { $cond: [{ $eq: ["$run.failureReason", "cancelled"] }, 1, 0] } },
         // Keep first run's array values for uniform fields
         _firstMcpServers: { $first: "$mcpServers" },
         _firstSkillRevisions: { $first: "$skillRevisions" },
@@ -167,6 +173,7 @@ export function buildGroupingPipeline(
           llmCalls: { $let: { vars: { vals: { $filter: { input: "$_llmCallCounts", cond: { $ne: ["$$this", null] } } } }, in: { $cond: { if: { $eq: [{ $size: "$$vals" }, 0] }, then: null, else: { min: { $min: "$$vals" }, max: { $max: "$$vals" }, mean: { $avg: "$$vals" }, stdDev: { $cond: { if: { $lte: [{ $size: "$$vals" }, 1] }, then: 0, else: { $sqrt: { $avg: { $map: { input: "$$vals", in: { $pow: [{ $subtract: ["$$this", { $avg: "$$vals" }] }, 2] } } } } } } } } } } } },
           statusCounts: { pending: "$_statusPending", queued: "$_statusQueued", processing: "$_statusProcessing", paused: "$_statusPaused", done: "$_statusDone" },
           outcomeCounts: { succeeded: "$_outcomeSucceeded", failed: "$_outcomeFailed", finished: "$_outcomeFinished" },
+          failureReasonCounts: { agent_error: "$_failureAgent", judge_error: "$_failureJudge", judge_rate_limited: "$_failureRateLimit", timeout: "$_failureTimeout", snapshot_error: "$_failureSnapshot", cancelled: "$_failureCancelled" },
         },
         uniform: {
           workerType: { $cond: { if: { $eq: [{ $size: "$_workerTypes" }, 1] }, then: { $arrayElemAt: ["$_workerTypes", 0] }, else: "$$REMOVE" } },
