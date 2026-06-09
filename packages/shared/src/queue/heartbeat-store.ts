@@ -28,6 +28,17 @@ export interface HeartbeatStore {
   delete(runId: string): Promise<void>;
   close(): Promise<void>;
 
+  /**
+   * Liveness probe for the backend. Returns `true` when the store is reachable.
+   *
+   * Used by the stuck-run reaper to distinguish "Redis is down" (skip the
+   * sweep — `mget` would return an empty map and a missing heartbeat would be
+   * misread as a dead worker) from "Redis is healthy but the key is absent"
+   * (a genuinely dead worker). Implementations must never throw — return
+   * `false` on any error.
+   */
+  ping(): Promise<boolean>;
+
   // --- Cancellation signal ---
 
   /** Set a cancel signal for a run (key + pub/sub publish). */
@@ -171,6 +182,16 @@ export class RedisHeartbeatStore implements HeartbeatStore {
     }
   }
 
+  async ping(): Promise<boolean> {
+    try {
+      const res = await this.redis.ping();
+      return res === "PONG";
+    } catch (err) {
+      console.warn(`[heartbeat-store] ping failed:`, (err as Error).message);
+      return false;
+    }
+  }
+
   async close(): Promise<void> {
     try {
       if (this.subscriber) {
@@ -274,6 +295,10 @@ export class InMemoryHeartbeatStore implements HeartbeatStore {
 
   async delete(runId: string): Promise<void> {
     this.map.delete(runId);
+  }
+
+  async ping(): Promise<boolean> {
+    return true;
   }
 
   async close(): Promise<void> {

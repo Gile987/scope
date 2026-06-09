@@ -169,6 +169,12 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
       const staleThresholdMs =
         Number(process.env.SCOPE_RUN_HEARTBEAT_STALE_MS) ||
         2 * HEARTBEAT_VISIBILITY_SECONDS * 1000;
+      // How far to push a duplicate's visibility when the original worker is
+      // still alive. Defaults to the staleness threshold so the message
+      // resurfaces for another liveness re-check right around the time the
+      // run would be declared dead if the worker stopped beating.
+      const redeliverDeferMs =
+        Number(process.env.SCOPE_RUN_REDELIVER_DEFER_MS) || staleThresholdMs;
       const heartbeatAt = await this.heartbeatStore.get(requestDoc.run._id);
       const startedAt = requestDoc.run.startedAt instanceof Date
         ? requestDoc.run.startedAt
@@ -189,19 +195,31 @@ export class CodingAgentQueueProcessor extends BaseQueueProcessor<RequestDocumen
         : "unknown worker";
 
       if (!isStale) {
-        // Original worker is still beating — drop the duplicate, keep run state.
+        // Original worker is still beating. Do NOT delete the duplicate —
+        // that would destroy the only at-least-once recovery trigger if the
+        // original worker later dies hard (the scheduler only dispatches
+        // `pending` runs, never `processing`). Instead, re-defer the message
+        // so it resurfaces later for another liveness re-check: if the worker
+        // is still alive then, we re-defer again (cheap); if it died, the
+        // next dequeue sees a stale heartbeat and marks the run failed.
         const beatDesc = heartbeatAt
           ? `last beat ${Math.round(ageMs / 1000)}s ago`
           : `no heartbeat yet, picked up ${startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : "?"}s ago`;
+        const deferSeconds = Math.max(1, Math.round(redeliverDeferMs / 1000));
         console.warn(
-          `[${this.workerName}] Duplicate message for ${requestDoc._id} (runId=${requestDoc.run._id}) — original worker still alive (${workerDesc}, ${beatDesc}); dropping`,
+          `[${this.workerName}] Duplicate message for ${requestDoc._id} (runId=${requestDoc.run._id}) — original worker still alive (${workerDesc}, ${beatDesc}); re-deferring ${deferSeconds}s`,
         );
         await log(
           "warn",
-          `Duplicate queue message dropped — original worker still heart-beating (${workerDesc}, ${beatDesc})`,
+          `Duplicate queue message re-deferred — original worker still heart-beating (${workerDesc}, ${beatDesc})`,
           { runId: requestDoc.run._id },
         );
-        await this.safeDeleteMessage(message.messageId, heartbeat.popReceipt);
+        // Stop THIS (duplicate) worker's visibility heartbeat first so the pop
+        // receipt is frozen — otherwise a concurrent heartbeat tick could
+        // rotate it out from under our re-defer. safeDeferMessage swallows
+        // failures so a stale receipt never falls through to the error path.
+        const frozenReceipt = heartbeat.stop();
+        await this.safeDeferMessage(message.messageId, frozenReceipt, deferSeconds);
         return;
       }
 
