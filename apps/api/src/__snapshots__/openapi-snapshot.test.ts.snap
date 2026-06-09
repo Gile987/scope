@@ -1043,6 +1043,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "duration": {
             "$ref": "#/components/schemas/AggregateStats",
           },
+          "failureReasonCounts": {
+            "additionalProperties": {
+              "type": "number",
+            },
+            "type": "object",
+          },
           "outcomeCounts": {
             "additionalProperties": {
               "type": "number",
@@ -2218,6 +2224,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "integer",
           },
           "error": {
+            "type": "string",
+          },
+          "failureReason": {
+            "enum": [
+              "agent_error",
+              "judge_error",
+              "judge_rate_limited",
+              "timeout",
+              "cancelled",
+              "snapshot_error",
+            ],
             "type": "string",
           },
           "finishedAt": {
@@ -7100,6 +7117,83 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/requests/bulk-re-evaluate": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "ids": {
+                    "description": "Request IDs to re-evaluate",
+                    "items": {
+                      "type": "string",
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "ids",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "queued": {
+                      "type": "number",
+                    },
+                    "results": {
+                      "items": {
+                        "properties": {
+                          "error": {
+                            "type": "string",
+                          },
+                          "id": {
+                            "type": "string",
+                          },
+                          "queued": {
+                            "type": "boolean",
+                          },
+                        },
+                        "required": [
+                          "id",
+                          "queued",
+                        ],
+                        "type": "object",
+                      },
+                      "type": "array",
+                    },
+                    "skipped": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "queued",
+                    "skipped",
+                    "results",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Bulk re-run judge evaluation for multiple failed runs",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
     "/api/v1/requests/bulk-resubmit": {
       "post": {
         "requestBody": {
@@ -7934,6 +8028,46 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Stream logs for a specific attempt (SSE)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/{id}/runs/{runId}/re-evaluate": {
+      "post": {
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                    },
+                    "message": {
+                      "type": "string",
+                    },
+                    "runId": {
+                      "type": "string",
+                    },
+                    "status": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "runId",
+                    "status",
+                    "message",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "Re-run judge evaluation for a failed run without re-running the agent",
         "tags": [
           "Requests",
         ],
