@@ -27,7 +27,8 @@
   "edges": [
     { "id": "e1", "source": "grp_clients", "target": "api", "label": "REST (sync)", "type": "sync" },
     { "id": "e2", "source": "scheduler", "target": "grp_workers", "label": "Queue (async)", "type": "async" },
-    { "id": "e3", "source": "scheduler", "target": "post_proc", "label": "Queue (async)", "type": "async" },
+    { "id": "e3", "source": "scheduler", "target": "post_proc", "label": "Queue (async, backfill)", "type": "async" },
+    { "id": "e3b", "source": "grp_workers", "target": "post_proc", "label": "Queue (async, on completion)", "type": "async" },
     { "id": "e4", "source": "api", "target": "scheduler", "label": "Queue (async, submit run)", "type": "async" },
     { "id": "e7", "source": "grp_workers", "target": "judge", "label": "REST (sync)", "type": "sync" },
     { "id": "e8", "source": "grp_workers", "target": "token_manager", "label": "REST (sync)", "type": "sync" },
