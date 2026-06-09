@@ -5,7 +5,7 @@
 // Architecture diagram canvas with ELK.js auto-layout
 
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, watch } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
@@ -22,6 +22,20 @@ let diagramData = loadDiagramData();
 const servers = new Map();
 // SSE clients per instance for pushing updates
 const sseClients = new Map(); // instanceId → Set<res>
+
+// Watch diagram.json for changes and push updates to all clients
+let debounceTimer = null;
+watch(diagramPath, () => {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    try {
+      diagramData = loadDiagramData();
+      for (const instanceId of sseClients.keys()) {
+        pushUpdate(instanceId);
+      }
+    } catch (e) { /* ignore parse errors during mid-write */ }
+  }, 200);
+});
 
 function renderHtml() {
     return `<!doctype html>
