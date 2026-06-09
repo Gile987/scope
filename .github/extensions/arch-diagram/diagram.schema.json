@@ -15,6 +15,12 @@
       "type": "string",
       "description": "Diagram title displayed in the canvas header."
     },
+    "layout": {
+      "type": "string",
+      "enum": ["layered", "stress", "force", "mrtree"],
+      "default": "layered",
+      "description": "ELK layout algorithm: 'layered' (hierarchical DAG), 'stress' (organic), 'force' (force-directed), 'mrtree' (tree)."
+    },
     "groups": {
       "type": "array",
       "description": "Visual groups that contain related nodes (rendered as sub-flows).",

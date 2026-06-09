@@ -1,6 +1,7 @@
 {
   "$schema": "../../.github/extensions/arch-diagram/diagram.schema.json",
   "title": "Scope Architecture",
+  "layout": "layered",
   "groups": [
     { "id": "grp_clients", "label": "Clients", "color": "#58a6ff" },
     { "id": "grp_workers", "label": "Coder Workers", "color": "#7ee787" },

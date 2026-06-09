@@ -93,7 +93,7 @@ const initialEdges = diagramData.edges.map(e => ({
   style: { stroke: edgeColors[e.type], ...(e.type === "storage" ? { strokeDasharray: "5 5" } : {}) },
 }));
 
-async function getLayoutedElements(nodes, edges) {
+async function getLayoutedElements(nodes, edges, algorithm = "layered") {
   const elk = new ELK();
 
   // Build ELK compound graph with groups
@@ -122,22 +122,43 @@ async function getLayoutedElements(nodes, edges) {
       children: groupChildren[g.id],
     });
   }
-  // Add ungrouped nodes (like API)
+  // Add ungrouped nodes
   for (const n of leafNodes) {
     if (!n.parentId) {
       topLevelChildren.push({ id: n.id, width: nodeWidth, height: nodeHeight });
     }
   }
 
-  const graph = {
-    id: "root",
-    layoutOptions: {
+  // Algorithm-specific layout options
+  const algoOptions = {
+    layered: {
       "elk.algorithm": "layered",
       "elk.direction": "DOWN",
       "elk.spacing.nodeNode": "40",
       "elk.layered.spacing.nodeNodeBetweenLayers": "80",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
     },
+    stress: {
+      "elk.algorithm": "stress",
+      "elk.stress.desiredEdgeLength": "150",
+      "elk.spacing.nodeNode": "60",
+    },
+    force: {
+      "elk.algorithm": "force",
+      "elk.force.iterations": "300",
+      "elk.spacing.nodeNode": "60",
+    },
+    mrtree: {
+      "elk.algorithm": "mrtree",
+      "elk.direction": "DOWN",
+      "elk.spacing.nodeNode": "40",
+      "elk.mrtree.weighting": "CONSTRAINT",
+    },
+  };
+
+  const graph = {
+    id: "root",
+    layoutOptions: algoOptions[algorithm] || algoOptions.layered,
     children: topLevelChildren,
     edges: edges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
   };
@@ -180,12 +201,25 @@ async function getLayoutedElements(nodes, edges) {
   return { nodes: layoutedNodes, edges };
 }
 
-const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(initialNodes, initialEdges);
+const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(initialNodes, initialEdges, diagramData.layout || "layered");
 
 function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [algorithm, setAlgorithm] = React.useState(diagramData.layout || "layered");
+
+  const relayout = async (algo) => {
+    const layout = await getLayoutedElements(initialNodes, initialEdges, algo);
+    setNodes(layout.nodes);
+    setEdges(layout.edges);
+  };
+
+  const handleAlgoChange = async (e) => {
+    const algo = e.target.value;
+    setAlgorithm(algo);
+    await relayout(algo);
+  };
 
   React.useEffect(() => {
     const es = new EventSource("/events");
@@ -210,17 +244,24 @@ function App() {
         markerEnd: { type: MarkerType.ArrowClosed, color: edgeColors[e.type] },
         style: { stroke: edgeColors[e.type], ...(e.type === "storage" ? { strokeDasharray: "5 5" } : {}) },
       }));
-      const layout = await getLayoutedElements(newNodes, newEdges);
+      const layout = await getLayoutedElements(newNodes, newEdges, algorithm);
       setNodes(layout.nodes);
       setEdges(layout.edges);
       setRefreshing(false);
     };
     return () => es.close();
-  }, []);
+  }, [algorithm]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetch("/refresh", { method: "POST" });
+  };
+
+  const controlStyle = {
+    position: "absolute", top: 12, zIndex: 10,
+    background: "#161b22", color: "#e6edf3",
+    border: "1px solid #3d444d", borderRadius: 6, padding: "6px 12px",
+    fontSize: 12, cursor: "pointer",
   };
 
   return h("div", { style: { width: "100%", height: "100%", position: "relative" } },
@@ -238,14 +279,22 @@ function App() {
       h(Background, { color: "#30363d", gap: 20 }),
       h(Controls, { showInteractive: false })
     ),
+    h("select", {
+      value: algorithm,
+      onChange: handleAlgoChange,
+      style: { ...controlStyle, right: 200 },
+    },
+      h("option", { value: "layered" }, "Layered"),
+      h("option", { value: "stress" }, "Stress"),
+      h("option", { value: "force" }, "Force"),
+      h("option", { value: "mrtree" }, "MR Tree")
+    ),
     h("button", {
       onClick: handleRefresh,
       disabled: refreshing,
       style: {
-        position: "absolute", top: 12, right: 12, zIndex: 10,
-        background: refreshing ? "#30363d" : "#238636", color: "#fff",
-        border: "1px solid #3d444d", borderRadius: 6, padding: "6px 12px",
-        fontSize: 12, cursor: refreshing ? "wait" : "pointer",
+        ...controlStyle, right: 12,
+        background: refreshing ? "#30363d" : "#238636",
         display: "flex", alignItems: "center", gap: 6,
       },
     }, refreshing ? "⏳ Analyzing..." : "🔄 Refresh from codebase")
