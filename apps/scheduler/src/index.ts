@@ -2,12 +2,13 @@
 // Licensed under the MIT License.
 
 import "dotenv/config";
-import http from "node:http";
 import { MongoClient } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
 import { RequestScheduler, WorkerTypeConfig } from "./request-scheduler.js";
 import { PostProcessorDispatcher } from "./post-processor-dispatcher.js";
+import { HandlerDispatcher } from "./handler-dispatcher.js";
+import { createHttpServer, type NotifyHandler } from "./notify-routes.js";
 import type { RequestDocument } from "shared";
 
 // ── Configuration ────────────────────────────────────────────────────
@@ -77,16 +78,6 @@ function createQueueClient(queueName: string): QueueClient {
   return new QueueClient(queueUrl, credential);
 }
 
-// ── Health Check Server ──────────────────────────────────────────────
-
-function createHealthServer(): http.Server {
-  const server = http.createServer((_req, res) => {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok", service: "scheduler" }));
-  });
-  return server;
-}
-
 // ── Main ─────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -145,10 +136,20 @@ async function main(): Promise<void> {
   postProcessorDispatcher.start();
   console.log("[Scheduler] Post-processor dispatch loop started");
 
-  // Start health check server
-  const healthServer = createHealthServer();
-  healthServer.listen(HEALTH_PORT, () => {
-    console.log(`[Scheduler] Health check listening on :${HEALTH_PORT}`);
+  // Start the DAG-aware handler dispatcher (replaces legacy PostProcessorDispatcher)
+  const handlerDispatcher = new HandlerDispatcher(
+    collection,
+    db,
+    createQueueClient,
+    ppPollIntervalMs,
+  );
+  handlerDispatcher.start();
+  console.log("[Scheduler] Handler dispatcher (DAG) started");
+
+  // Wire notify handler to the HandlerDispatcher
+  const httpServer = createHttpServer(handlerDispatcher);
+  httpServer.listen(HEALTH_PORT, () => {
+    console.log(`[Scheduler] HTTP server listening on :${HEALTH_PORT}`);
   });
 
   // Graceful shutdown
@@ -156,7 +157,8 @@ async function main(): Promise<void> {
     console.log("[Scheduler] Shutting down...");
     await scheduler.stop();
     await postProcessorDispatcher.stop();
-    healthServer.close();
+    await handlerDispatcher.stop();
+    httpServer.close();
     await mongoClient.close();
     console.log("[Scheduler] Shutdown complete");
     process.exit(0);

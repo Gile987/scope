@@ -9,6 +9,7 @@
 #   docker compose --profile vscode-web up               # + VS Code Web worker
 #   docker compose --profile claude-code --profile copilot up  # multiple workers
 #   docker compose --profile report up                   # + Report Generator worker
+#   docker compose --profile taxonomy up                 # + Taxonomy handler worker
 #   docker compose up mongodb redis azurite              # infra only (run app services natively)
 #
 # Host-native debugging:
@@ -35,6 +36,7 @@ x-worker-env: &worker-env
   <<: *common-env
   JUDGE_SERVICE_URL: http://judge:80
   SCOPE_MT_API_URL: http://api:80
+  SCHEDULER_URL: http://scheduler:8080
   TOKEN_MANAGER_URL: http://token-manager:80
 
 x-worker-deps: &worker-deps
@@ -138,7 +140,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Creates the 'har' blob container in Azurite for the gateway HAR plugin.
+  # Creates the 'har' blob container and handler queues in Azurite.
   azurite-init:
     image: mcr.microsoft.com/azure-cli:2.68.0
     restart: "no"
@@ -146,9 +148,12 @@ services:
       azurite:
         condition: service_healthy
     environment:
-      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;QueueEndpoint=http://azurite:10001/devstoreaccount1;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
     command: >
-      sh -c "az storage container create --name har --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true"
+      sh -c "az storage container create --name har --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true &&
+      az storage queue create --name report-queue --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true &&
+      az storage queue create --name post-processor-queue --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true &&
+      az storage queue create --name pp-taxonomy-queue --connection-string \"$$AZURE_STORAGE_CONNECTION_STRING\" || true"
 
   # ===========================================================================
   # Application services
@@ -638,6 +643,34 @@ services:
       api:
         condition: service_started
 
+  taxonomy-handler:
+    build:
+      context: .
+      dockerfile: apps/workers/taxonomy/Dockerfile
+    profiles: [taxonomy, all]
+    environment:
+      <<: *common-env
+      AZURE_STORAGE_QUEUE_TAXONOMY: pp-taxonomy-queue
+      TAXONOMY_MODEL: ${TAXONOMY_MODEL:-gpt-4.1}
+      SCOPE_MT_API_URL: http://api:80
+      SCHEDULER_URL: http://scheduler:8080
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      TOKEN_MANAGER_URL: http://token-manager:80
+      GIT_COMMIT: ${GIT_COMMIT:-development}
+      SESSION_TIMEOUT_MS: ${SESSION_TIMEOUT_MS:-300000}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+      api:
+        condition: service_started
+      scheduler:
+        condition: service_started
+
   register-version-post-processor:
     build:
       context: .
@@ -661,6 +694,7 @@ services:
       <<: *common-env
       AZURE_STORAGE_QUEUE_POSTPROCESSOR: post-processor-queue
       SCOPE_MT_API_URL: http://api:80
+      SCHEDULER_URL: http://scheduler:8080
     depends_on:
       mongodb:
         condition: service_healthy

@@ -705,6 +705,31 @@ importers:
         specifier: ^5.6.2
         version: 5.9.3
 
+  apps/workers/taxonomy:
+    dependencies:
+      '@azure/storage-queue':
+        specifier: ^12.25.0
+        version: 12.29.0
+      '@github/copilot-sdk':
+        specifier: ^0.1.17
+        version: 0.1.23
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      shared:
+        specifier: workspace:*
+        version: link:../../../packages/shared
+    devDependencies:
+      '@types/node':
+        specifier: ^22.7.0
+        version: 22.19.10
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
+
   packages/copilot-driver-ext:
     devDependencies:
       '@types/node':

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import type { DequeuedMessageItem } from "@azure/storage-queue";
-import { BaseQueueProcessor, BlobStorage, Retry, type BaseQueueProcessorConfig, type LogEvent, type VisibilityHeartbeat } from "shared";
+import { BaseQueueProcessor, BlobStorage, type BaseQueueProcessorConfig, type LogEvent, type VisibilityHeartbeat } from "shared";
 import { POST_PROCESSOR_VERSION } from "./version.js";
 import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from "./types.js";
 
@@ -86,34 +86,44 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
 
       await handler.process(msg, ctx);
 
-      // Stamp version and status on success
+      // Stamp version and status on success (legacy fields + new handlerStatus)
+      const handlerId = `pp-${msg.type}`; // e.g., "pp-atif"
       await this.collection.updateOne(
         { _id: doc._id } as any,
         {
           $set: {
             "run.postProcessorVersion": POST_PROCESSOR_VERSION,
             "run.postProcessorStatus": "done",
+            [`run.handlerStatus.${handlerId}.status`]: "done",
+            [`run.handlerStatus.${handlerId}.version`]: POST_PROCESSOR_VERSION,
+            [`run.handlerStatus.${handlerId}.updatedAt`]: new Date(),
           },
         } as any,
       );
 
       await log("info", `Post-processing complete (v${POST_PROCESSOR_VERSION})`);
 
-      // Trigger report generation now that enrichment is done (best-effort)
-      try {
-        await this.triggerReportGeneration(doc._id, log);
-      } catch (error) {
-        await log("warn", `Failed to trigger report generation after retries: ${error}`);
-      }
+      // Notify the scheduler that this handler is done (best-effort)
+      await this.notifyHandlerComplete(doc._id, doc.run?._id ?? "", handlerId, "done");
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       await log("error", `Handler '${msg.type}' failed: ${errMsg}`);
 
       // Mark as failed so scheduler doesn't immediately re-dispatch
+      const handlerId = `pp-${msg.type}`;
       await this.collection.updateOne(
         { _id: doc._id } as any,
-        { $set: { "run.postProcessorStatus": "failed" } } as any,
+        {
+          $set: {
+            "run.postProcessorStatus": "failed",
+            [`run.handlerStatus.${handlerId}.status`]: "failed",
+            [`run.handlerStatus.${handlerId}.updatedAt`]: new Date(),
+          },
+        } as any,
       );
+
+      // Notify scheduler of failure (best-effort — don't dispatch downstream)
+      await this.notifyHandlerComplete(doc._id, doc.run?._id ?? "", handlerId, "failed");
 
       throw err;
     }
@@ -124,27 +134,31 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
   }
 
   /**
-   * Trigger report generation via REST API.
-   * Called after post-processing succeeds so reports can use enriched data.
+   * Notify the scheduler that a handler completed (or failed).
+   * Best-effort — the scheduler's poll safety net will catch up if this fails.
    */
-  @Retry({ maxRetries: 3, baseDelayMs: 1000, isRetryable: () => true })
-  private async triggerReportGeneration(requestId: string, log: (level: LogEvent["level"], message: string) => Promise<void>): Promise<void> {
-    if (!this.apiBaseUrl) return;
+  private async notifyHandlerComplete(
+    requestId: string,
+    runId: string,
+    handlerId: string,
+    status: "done" | "failed",
+  ): Promise<void> {
+    const schedulerUrl = process.env.SCHEDULER_URL;
+    if (!schedulerUrl) return;
 
-    const response = await fetch(`${this.apiBaseUrl}/api/v1/reports/trigger`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId }),
-    });
-    if (response.ok) {
-      const result = await response.json() as { triggered: number };
-      await log("info", `Triggered report generation: ${result.triggered} report(s) created`);
-      return;
+    try {
+      const response = await fetch(`${schedulerUrl}/notify/handler-complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, runId, handlerId, status }),
+      });
+      if (response.ok) {
+        console.log(`[post-processor] Notified scheduler: ${handlerId} ${status} for ${requestId}`);
+      } else {
+        console.warn(`[post-processor] Scheduler notify failed: ${response.status}`);
+      }
+    } catch (err) {
+      console.warn(`[post-processor] Scheduler notify error for ${handlerId}/${requestId}:`, err);
     }
-    if (response.status >= 400 && response.status < 500) {
-      await log("warn", `Failed to trigger report generation (${response.status}), not retrying`);
-      return;
-    }
-    throw new Error(`Report trigger returned ${response.status} ${response.statusText}`);
   }
 }

@@ -21,4 +21,5 @@ export * from "./devproxy/index.js";
 export * from "./har/index.js";
 export * from "./utils/index.js";
 export * from "./schemas/index.js";
+export * from "./schemas/taxonomy.js";
 export * from "./cursor.js";

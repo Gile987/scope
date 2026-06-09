@@ -277,6 +277,32 @@ Timeout for the Copilot SDK session used by the report-generator worker. If the 
 
 Git commit hash embedded in reporter metadata. Automatically set during CI/CD builds. Used to track which version of the report-generator produced a given report.
 
+## Taxonomy Handler Configuration
+
+### AZURE_STORAGE_QUEUE_TAXONOMY
+**Default:** `pp-taxonomy-queue`
+**Type:** string
+
+Azure Storage Queue name for taxonomy-generation jobs. The scheduler enqueues `{ type: "taxonomy", requestId, runId }` messages here after the `pp-atif` dependency completes, and the taxonomy worker polls this queue.
+
+### TAXONOMY_MODEL
+**Default:** `gpt-4.1`
+**Type:** string
+
+The LLM model used by the taxonomy worker (via the Copilot SDK) to generate structured taxonomy JSON from run metadata and ATIF trajectories.
+
+### SCOPE_MT_API_URL
+**Default:** `http://localhost:3001` (local), `http://api:80` (Docker)
+**Type:** URL string
+
+Base URL of the Scope API. The taxonomy worker calls this to fetch the request document and active run state through its Copilot tools.
+
+### SESSION_TIMEOUT_MS
+**Default:** `300000` (5 minutes)
+**Type:** integer (milliseconds)
+
+Timeout for the Copilot SDK session used by the taxonomy worker. If the model does not finish generating a valid taxonomy JSON document within this window, the worker marks `run.handlerStatus.pp-taxonomy` as failed.
+
 ## Scheduler Configuration
 
 ### SCHEDULER_POLL_INTERVAL_MS
@@ -296,6 +322,16 @@ How often the post-processor dispatcher polls for completed runs needing post-pr
 **Type:** string
 
 Azure Storage Queue name used by both the scheduler (to enqueue post-processing work) and the post-processor worker (to dequeue). Must match between the two services.
+
+### SCHEDULER_URL
+**Default:** (not set)
+**Type:** URL string
+
+Optional base URL for the scheduler's HTTP notification endpoints. When set, coder workers call `POST /notify/run-terminal` after a run reaches a terminal state, and post-processing handlers call `POST /notify/handler-complete` after a handler finishes. If unset, workers fall back to the legacy direct post-processor queue enqueue path and the scheduler's polling loop catches up.
+
+- **Docker Compose:** `http://scheduler:8080`
+- **Kubernetes:** `http://scheduler-service.scoped.svc.cluster.local:8080`
+- **Local dev:** Leave unset to rely on legacy queue fallback unless you are also running the scheduler locally
 
 ## Worker Configuration
 
