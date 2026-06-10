@@ -286,10 +286,12 @@ Git commit hash embedded in reporter metadata. Automatically set during CI/CD bu
 Azure Storage Queue name for taxonomy-generation jobs. The scheduler enqueues `{ type: "taxonomy", requestId, runId }` messages here after the `pp-atif` dependency completes, and the taxonomy worker polls this queue.
 
 ### TAXONOMY_MODEL
-**Default:** `gpt-4.1`
+**Default:** `gpt-5.4`
 **Type:** string
 
 The LLM model used by the taxonomy worker (via the Copilot SDK) to generate structured taxonomy JSON from run metadata and ATIF trajectories.
+
+> **Model choice matters for taxonomy quality.** A/B testing across nine models on a multi-iteration run with a real defect (agent lost context in iteration 2) showed the verdict ranged from 72 to 100 depending on the model. `gpt-4.1` (the previous default) missed action items and, on harder runs, produced the thinnest output; weaker models rubber-stamped a buggy run with a perfect score. `gpt-5.4` was the best value: it correctly caught the critical defect while using the fewest tokens and lowest cost of the models tested. Stronger alternatives (e.g. `claude-opus-4-7`) yield richer evidence at higher token cost; avoid `gpt-5.3-codex` as a default (≈1M tokens / ~7 min per run).
 
 ### SCOPE_MT_API_URL
 **Default:** `http://localhost:3001` (local), `http://api:80` (Docker)

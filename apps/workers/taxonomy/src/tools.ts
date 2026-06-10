@@ -2,20 +2,10 @@
 // Licensed under the MIT License.
 
 import { defineTool } from "@github/copilot-sdk";
-import { BlobStorage, type ConversationTurn, type RequestDocument } from "shared";
+import { type ConversationTurn, type RequestDocument } from "shared";
 
 interface GetAtifTrajectoryArgs {
   iteration?: number;
-}
-
-function resolveSnapshotsBlobName(blobUrl: string): string {
-  const url = new URL(blobUrl);
-  const containerPrefix = "/snapshots/";
-  const containerIndex = url.pathname.indexOf(containerPrefix);
-  if (containerIndex === -1) {
-    throw new Error(`Blob URL does not contain the snapshots container: ${blobUrl}`);
-  }
-  return decodeURIComponent(url.pathname.substring(containerIndex + containerPrefix.length));
 }
 
 function selectTurnWithAtif(turns: ConversationTurn[] | undefined, requestedIteration?: number): ConversationTurn | undefined {
@@ -33,7 +23,6 @@ function selectTurnWithAtif(turns: ConversationTurn[] | undefined, requestedIter
 export function createTaxonomyTools(
   apiBaseUrl: string,
   requestId: string,
-  blobStorage: BlobStorage,
 ) {
   const getRunData = defineTool("get_run_data", {
     description:
@@ -138,12 +127,21 @@ export function createTaxonomyTools(
           };
         }
 
-        const blobName = resolveSnapshotsBlobName(selectedTurn.atifUrl);
-        const buffer = await blobStorage.downloadBlobToBuffer(blobName);
-        const trajectory: unknown = JSON.parse(buffer.toString("utf-8"));
+        const runId = request.run?._id;
+        const iteration = selectedTurn.iteration;
+        const atifUrl = runId
+          ? `${apiBaseUrl}/api/v1/requests/${requestId}/runs/${runId}/atif?iteration=${iteration}`
+          : `${apiBaseUrl}/api/v1/requests/${requestId}/atif?iteration=${iteration}`;
+
+        const atifResponse = await fetch(atifUrl);
+        if (!atifResponse.ok) {
+          return { error: `Failed to fetch ATIF trajectory: ${atifResponse.status} ${atifResponse.statusText}` };
+        }
+
+        const trajectory: unknown = await atifResponse.json();
 
         return {
-          iteration: selectedTurn.iteration,
+          iteration,
           trajectory,
         };
       } catch (err) {

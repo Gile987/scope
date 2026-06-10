@@ -38,7 +38,7 @@ Two paths trigger post-processing:
 
 ## Taxonomy Generation
 
-The taxonomy handler (`apps/workers/taxonomy/`) consumes messages from the dedicated `pp-taxonomy-queue` and produces a structured JSON artifact for a completed run. It uses the GitHub Copilot SDK with a tool-backed session to fetch run metadata from the API and ATIF trajectories from blob storage, then validates the generated JSON against the shared taxonomy Zod schema.
+The taxonomy handler (`apps/workers/taxonomy/`) consumes messages from the dedicated `pp-taxonomy-queue` and produces a structured JSON artifact for a completed run. It uses the GitHub Copilot SDK with a tool-backed session to fetch run metadata and ATIF trajectories from the API, then validates the generated JSON against the shared taxonomy Zod schema.
 
 ### Flow
 
@@ -46,7 +46,7 @@ The taxonomy handler (`apps/workers/taxonomy/`) consumes messages from the dedic
 2. Worker fetches the request document from MongoDB and marks `run.handlerStatus["pp-taxonomy"].status = "processing"`
 3. Copilot SDK session calls:
    - `get_run_data` to fetch the request + active run from the API
-   - `get_atif_trajectory` to fetch per-iteration ATIF JSON from blob storage
+   - `get_atif_trajectory` to fetch per-iteration ATIF JSON from the API (`GET /api/v1/requests/:id/runs/:runId/atif?iteration=N`)
 4. The worker validates the assistant response with `taxonomySchema.safeParse()`
 5. If validation fails, the worker feeds the schema errors back into the same session and retries up to 3 total attempts
 6. On success, the worker uploads `taxonomy.json` to `{requestId}/runs/{runId}/taxonomy.json`
@@ -76,6 +76,37 @@ The completed run stores the taxonomy blob URL on `run.taxonomyUrl`.
 | `GET /api/v1/requests/:id/runs/:runId/taxonomy` | Download taxonomy JSON for a specific run |
 
 The `iteration` query parameter is mandatory only for the ATIF endpoints. ATIF files are also included in archive exports as `iteration-{N}.atif.trajectory.json`.
+
+### Local troubleshooting: taxonomy CLI
+
+The Copilot SDK generation loop lives in `apps/workers/taxonomy/src/taxonomy-generator.ts` (`generateTaxonomy()`), shared by both the queue processor and a standalone developer CLI (`src/cli.ts`). The CLI invokes generation directly against an existing `requestId`, streams the session events live, and saves the validated taxonomy to a local file — **it never writes to MongoDB, blob storage, or the scheduler** (read-only). It is a developer tool and is intentionally not part of the Scope CLI.
+
+Because both taxonomy tools (`get_run_data` and `get_atif_trajectory`) read through the API, the CLI needs only an API URL and a Copilot token — no storage connection string. This lets it run against any environment (local or a remote deployment such as integration) given a reachable API.
+
+```bash
+# Local stack (use your worktree's host-mapped API port):
+SCOPE_MT_API_URL=http://localhost:3001 \
+GITHUB_TOKEN=$(gh auth token) \
+pnpm taxonomy <requestId> [--run <runId>] [--model <model>] [--timeout <ms>] [-o out.json] [--stdout] [--quiet]
+
+# Integration (read-only against the deployed API):
+SCOPE_MT_API_URL=https://msscope-int.azurewebsites.net \
+GITHUB_TOKEN=$(gh auth token) \
+pnpm taxonomy <requestId> -o taxonomy-int.json
+```
+
+The root `pnpm taxonomy` script proxies to `pnpm --filter taxonomy-handler taxonomy` (i.e. `tsx src/cli.ts`).
+
+| Option | Description |
+| --- | --- |
+| `--run, -r <runId>` | Run id used in the prompt/logging (default: active run resolved from the API) |
+| `--model <model>` | Override `TAXONOMY_MODEL` (e.g. A/B a reasoning model vs the `gpt-5.4` default) |
+| `--timeout <ms>` | Override `SESSION_TIMEOUT_MS` (per-attempt session timeout) |
+| `--output, -o <file>` | Output file path (default: `taxonomy-<requestId>.json` in the cwd) |
+| `--stdout` | Also print the taxonomy JSON to stdout |
+| `--quiet` | Suppress live session-event streaming on stderr |
+
+Live progress (tool calls, errors, deltas) is written to stderr so the saved JSON file stays clean. The CLI exits non-zero on failure (empty response, JSON/schema validation failure after 3 attempts, timeout, or model rate limit) and surfaces the underlying error message — making it well suited to diagnosing the oversized-`get_atif_trajectory` paging loop and Copilot model rate limits.
 
 ## Handler Interface
 
@@ -237,7 +268,7 @@ stateDiagram-v2
 | `BATCH_SIZE` | `1` | Messages to process per poll (worker-side) |
 | `POLL_INTERVAL_MS` | `5000` | Worker queue polling interval |
 | `SCOPE_MT_API_URL` / `API_BASE_URL` | `http://localhost:3001` | API URL used by report/taxonomy Copilot tools |
-| `TAXONOMY_MODEL` | `gpt-4.1` | Copilot SDK model used by the taxonomy handler |
+| `TAXONOMY_MODEL` | `gpt-5.4` | Copilot SDK model used by the taxonomy handler |
 | `SESSION_TIMEOUT_MS` | `300000` | Timeout for report/taxonomy Copilot SDK sessions |
 | `SCHEDULER_URL` | _(unset)_ | Scheduler base URL — used by handlers to notify completion and by the register-handler script to reach `/handlers/register` |
 | `API_URL` | `http://api:80` | API base URL the **scheduler** uses to call `POST /api/v1/reports/trigger` when a run's handler DAG drains |

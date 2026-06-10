@@ -17,6 +17,7 @@
     "dev:coder-acp-claude-code": "pnpm --filter coder-acp-claude-code dev",
     "dev:coder-acp-copilot": "pnpm --filter coder-acp-copilot dev",
     "dev:report-generator": "pnpm --filter report-generator dev",
+    "taxonomy": "pnpm --filter taxonomy-handler taxonomy",
     "docker:up": "scripts/worktree-env.sh && scripts/dev-compose.sh up --build",
     "docker:up:claude-code": "scripts/worktree-env.sh && scripts/dev-compose.sh --env-file .env --env-file apps/workers/coder-acp-claude-code/versions.env --profile claude-code --profile report up --build",
     "docker:up:copilot": "scripts/worktree-env.sh && scripts/dev-compose.sh --env-file .env --env-file apps/workers/coder-acp-copilot/versions.env --profile copilot --profile report up --build",
