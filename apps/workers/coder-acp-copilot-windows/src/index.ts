@@ -37,12 +37,9 @@ export function buildSubprocessEnv(
   return {
     GITHUB_TOKEN: githubToken,
     ...(proxyEnabled ? {
-      // The Copilot CLI bundles its own Node.js which blocks --use-env-proxy
-      // in NODE_OPTIONS. However, undici respects HTTP_PROXY when the flag is
-      // passed on the command line (which we can't control). As a workaround,
-      // disable TLS verification so the MITM cert is accepted, and set proxy
-      // env vars which newer undici versions respect automatically.
-      ...(currentNodeOptions ? { NODE_OPTIONS: currentNodeOptions } : {}),
+      // Node.js 22.21+ supports --use-env-proxy in NODE_OPTIONS, which makes
+      // undici/fetch route through HTTP_PROXY env vars.
+      NODE_OPTIONS: [currentNodeOptions, "--use-env-proxy"].filter(Boolean).join(" "),
       NODE_TLS_REJECT_UNAUTHORIZED: "0",
       ...(certPath ? { NODE_EXTRA_CA_CERTS: certPath } : {}),
       NO_PROXY: noProxy,
@@ -138,22 +135,13 @@ class CopilotWindowsProcessor implements WorkerProcessor {
         preview: `${githubToken.substring(0, 7)}...(${githubToken.length} chars)`,
       });
 
-      // On Windows, NODE_OPTIONS doesn't allow --use-env-proxy (security
-      // restriction). Instead, invoke node directly with the flag on the
-      // command line so undici respects HTTP_PROXY env vars.
-      const command = devProxy ? "node" : "copilot";
-      const copilotArgs = ["--acp", "--yolo"];
+      const args = ["--acp", "--yolo"];
       if (options?.model) {
-        copilotArgs.push("--model", options.model);
+        args.push("--model", options.model);
       }
-      // When calling node directly, prepend --use-env-proxy and the copilot
-      // script path (npm global install at C:\tools\node_modules\@github\copilot)
-      const args = devProxy
-        ? ["--use-env-proxy", "C:\\tools\\node_modules\\@github\\copilot\\npm-loader.js", ...copilotArgs]
-        : copilotArgs;
 
       const result = await runACPSession(message, {
-        command,
+        command: "copilot",
         args,
         env: buildSubprocessEnv(
           githubToken,
