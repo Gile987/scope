@@ -320,6 +320,73 @@ jobs:
           path: test-videos/
           if-no-files-found: ignore
 
+  # ---------------------------------------------------------------------------
+  # Queue recovery integration tests (stuck-run fix). Self-provision their own
+  # MongoDB/Redis/Azurite via testcontainers — no docker-compose infra needed.
+  # ---------------------------------------------------------------------------
+  integration-test-queue:
+    name: Integration Tests (queue recovery)
+    needs: [detect-changes]
+    if: >-
+      github.repository == 'growth-ecosystems/scope-core' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        needs.detect-changes.outputs.shared == 'true' ||
+        needs.detect-changes.outputs.scheduler == 'true'
+      )
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # pnpm/action-setup@v4 is not allowed on EMU
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.1 --activate
+          pnpm --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The scheduler reaper test imports CodingAgentQueueProcessor from the
+      # built `shared` dist (the integration config resolves bare imports to
+      # dist, not source), so shared must be built first.
+      - name: Build shared packages
+        run: pnpm --filter shared build
+
+      # mongo:7.0 and redis are pulled from Docker Hub; authenticate to avoid
+      # anonymous pull-rate limits. (Azurite comes from mcr.microsoft.com.)
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Run queue recovery integration tests
+        run: pnpm vitest run --config vitest.integration.config.ts --silent=false packages/shared/src/queue/redelivery.integration.test.ts apps/scheduler/src/stuck-run-reaper.integration.test.ts
+
+      - name: Generate GitHub test summary from CTRF
+        if: always()
+        run: |
+          pnpm exec github-actions-ctrf "ctrf/*-integration-ctrf-report.json" --title "Integration Test Results (queue recovery)" || true
+
+      - name: Upload CTRF integration test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ctrf-integration-test-results-queue-recovery
+          path: ctrf/
+          if-no-files-found: ignore
+
   lint:
     name: Lint Code
     needs: [detect-changes]
@@ -593,6 +660,7 @@ jobs:
       (needs.build.result == 'success' || needs.build.result == 'skipped') &&
       (needs.gateway.result == 'success' || needs.gateway.result == 'skipped') &&
       (needs.integration-test.result == 'success' || needs.integration-test.result == 'skipped') &&
+      (needs.integration-test-queue.result == 'success' || needs.integration-test-queue.result == 'skipped') &&
       (
         (github.event_name == 'workflow_dispatch' && github.event.inputs.images != '') ||
         ((github.event_name == 'push' || github.event_name == 'pull_request') && (
@@ -613,7 +681,7 @@ jobs:
           needs.detect-changes.outputs.model-scanning == 'true'
         ))
       )
-    needs: [test, integration-test, build, gateway, detect-changes]
+    needs: [test, integration-test, integration-test-queue, build, gateway, detect-changes]
     runs-on: ubuntu-latest
     environment: integration
     strategy:
@@ -933,7 +1001,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [test, integration-test, lint, build, cli-bundle-test, gateway]
+    needs: [test, integration-test, integration-test-queue, lint, build, cli-bundle-test, gateway]
     if: always()
 
     steps:
@@ -941,6 +1009,7 @@ jobs:
         run: |
           if [ "${{ needs.test.result }}" = "success" ] && \
              [ "${{ needs.integration-test.result }}" = "success" -o "${{ needs.integration-test.result }}" = "skipped" ] && \
+             [ "${{ needs.integration-test-queue.result }}" = "success" -o "${{ needs.integration-test-queue.result }}" = "skipped" ] && \
              [ "${{ needs.lint.result }}" = "success" ] && \
              [ "${{ needs.build.result }}" = "success" ] && \
              [ "${{ needs.cli-bundle-test.result }}" = "success" -o "${{ needs.cli-bundle-test.result }}" = "skipped" ] && \
@@ -951,6 +1020,7 @@ jobs:
             echo "❌ Some checks failed:"
             echo "  Unit Tests: ${{ needs.test.result }}"
             echo "  Integration Tests: ${{ needs.integration-test.result }}"
+            echo "  Integration Tests (queue recovery): ${{ needs.integration-test-queue.result }}"
             echo "  Lint: ${{ needs.lint.result }}"
             echo "  Build: ${{ needs.build.result }}"
             echo "  CLI Bundle Tests: ${{ needs.cli-bundle-test.result }}"

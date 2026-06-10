@@ -273,3 +273,122 @@ describe("BaseQueueProcessor visibility heartbeat lifecycle", () => {
     expect(updateMessage.mock.calls.length).toBe(callsAfterThrow);
   });
 });
+
+/**
+ * Re-defer helper used by the redelivery handler (Part 1). The single most
+ * important property is that failures are SWALLOWED — a stale pop receipt must
+ * never bubble into the base error path and false-fail a healthy in-flight run.
+ */
+describe("BaseQueueProcessor.safeDeferMessage", () => {
+  function makeProc(updateMessage: any) {
+    class P extends BaseQueueProcessor<{ _id: string }> {
+      protected async handleRequest(): Promise<void> {}
+      protected override async cleanup(): Promise<void> {}
+    }
+    const proc = new P(testConfig, "test-worker");
+    (proc as any).queueClient = { updateMessage };
+    return proc;
+  }
+
+  it("extends visibility via updateMessage with no text change", async () => {
+    const updateMessage = vi.fn().mockResolvedValue({ popReceipt: "r2" });
+    const proc = makeProc(updateMessage);
+    await (proc as any).safeDeferMessage("msg-1", "pop-1", 120);
+    expect(updateMessage).toHaveBeenCalledWith("msg-1", "pop-1", undefined, 120);
+  });
+
+  it("swallows updateMessage failures (never throws)", async () => {
+    const updateMessage = vi.fn().mockRejectedValue(new Error("stale receipt"));
+    const proc = makeProc(updateMessage);
+    await expect(
+      (proc as any).safeDeferMessage("msg-1", "pop-1", 120),
+    ).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * Part 1b — the error-path failure write is gated on run.status="processing"
+ * (mirroring the success path) so a worker that throws after a wrongful reap or
+ * a concurrent cancel/retry no-ops instead of clobbering the terminal state.
+ */
+describe("BaseQueueProcessor error-path failure write", () => {
+  function setup(payloadObj: Record<string, unknown>, updateResult: any) {
+    class P extends BaseQueueProcessor<{ _id: string }> {
+      protected async handleRequest(): Promise<void> {
+        throw new Error("handler boom");
+      }
+      protected override async cleanup(): Promise<void> {}
+    }
+    const proc = new P(testConfig, "test-worker");
+    const updateMessage = vi.fn().mockResolvedValue({ popReceipt: "r1" });
+    const deleteMessage = vi.fn().mockResolvedValue(undefined);
+    (proc as any).queueClient = { updateMessage, deleteMessage };
+    const updateOne = vi.fn().mockResolvedValue(updateResult);
+    (proc as any).collection = {
+      findOne: vi
+        .fn()
+        .mockResolvedValue({ _id: "doc-1", run: { _id: "run-1", status: "processing" } }),
+      updateOne,
+    };
+    (proc as any).logPublisher = {
+      publish: vi.fn().mockResolvedValue(undefined),
+      evictRun: vi.fn(),
+    };
+    (proc as any).heartbeatStore = {
+      set: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+      isCancelled: vi.fn().mockResolvedValue(false),
+    };
+    const onRunTerminal = vi.fn().mockResolvedValue(undefined);
+    (proc as any).onRunTerminal = onRunTerminal;
+    const msg = {
+      messageId: "msg-1",
+      popReceipt: "receipt-0",
+      messageText: Buffer.from(JSON.stringify(payloadObj)).toString("base64"),
+    } as any;
+    return { proc, updateOne, onRunTerminal, msg };
+  }
+
+  it("gates the failure write on run.status=processing when runId is present", async () => {
+    const { proc, updateOne, onRunTerminal, msg } = setup(
+      { requestId: "doc-1", runId: "run-1" },
+      { matchedCount: 1 },
+    );
+    await (proc as any).processMessage(msg);
+
+    expect(updateOne).toHaveBeenCalledTimes(1);
+    const [filter, update] = updateOne.mock.calls[0];
+    expect(filter).toMatchObject({
+      _id: "doc-1",
+      "run._id": "run-1",
+      "run.status": "processing",
+    });
+    expect(update.$set["run.status"]).toBe("done");
+    expect(update.$set["run.outcome"]).toBe("failed");
+    expect(onRunTerminal).toHaveBeenCalledWith("doc-1", "run-1");
+  });
+
+  it("does NOT fall through to a legacy top-level write when the gated update no-ops", async () => {
+    const { proc, updateOne, onRunTerminal, msg } = setup(
+      { requestId: "doc-1", runId: "run-1" },
+      { matchedCount: 0 },
+    );
+    await (proc as any).processMessage(msg);
+
+    // Only the gated update is attempted — no second top-level {_id} write that
+    // would overwrite a terminal state set by a cancel/retry/reaper.
+    expect(updateOne).toHaveBeenCalledTimes(1);
+    expect(updateOne.mock.calls[0][0]).toHaveProperty("run.status", "processing");
+    expect(onRunTerminal).not.toHaveBeenCalled();
+  });
+
+  it("uses the legacy top-level write when no runId is in the payload", async () => {
+    const { proc, updateOne, msg } = setup({ requestId: "doc-1" }, {});
+    await (proc as any).processMessage(msg);
+
+    const [filter, update] = updateOne.mock.calls[0];
+    expect(filter).toEqual({ _id: "doc-1" });
+    expect(update.$set.status).toBe("done");
+    expect(update.$set.outcome).toBe("failed");
+  });
+});

@@ -297,6 +297,26 @@ How often the post-processor dispatcher polls for completed runs needing post-pr
 
 Azure Storage Queue name used by both the scheduler (to enqueue post-processing work) and the post-processor worker (to dequeue). Must match between the two services.
 
+### SCOPE_REAPER_ENABLED
+**Default:** `true`
+**Type:** boolean (`false` to disable)
+
+Kill-switch for the scheduler's stuck-run reaper. When enabled (and `REDIS_HOST` is set), the scheduler runs a periodic backstop sweep that fails `processing` runs whose worker died without writing a terminal state and whose queue message no longer triggers recovery. Set to `false` to disable the sweep entirely (the queue redelivery path still operates). Redis is **non-fatal**: if `REDIS_HOST` is absent or the heartbeat store can't be constructed, the reaper self-disables and the dispatch loop keeps running.
+
+### SCOPE_REAPER_POLL_INTERVAL_MS
+**Default:** `60000`
+**Type:** integer (milliseconds)
+
+How often the stuck-run reaper sweeps MongoDB for stale `processing` runs. A run must look stale in **two consecutive** sweeps before it is reaped, so the effective time-to-reap after the staleness threshold is roughly one extra poll interval. Invalid/non-positive values fall back to the default.
+
+### SCOPE_REAPER_MAX_PER_SWEEP
+**Default:** `30`
+**Type:** integer
+
+Circuit-breaker bound on how many runs a single reaper sweep may fail. If a sweep would reap more than this, it **skips and logs loudly** instead — a high count implies a systemic slowdown (e.g. CosmosDB 429 storm lagging heartbeats fleet-wide) rather than that many independent worker deaths. Invalid/non-positive values fall back to the default.
+
+The reaper reuses `SCOPE_RUN_HEARTBEAT_STALE_MS` (Worker Configuration, below) as its staleness threshold. The scheduler must therefore have Redis credentials (`redis-secrets`) to read per-run heartbeats; see [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#stuck-run-reaper-scheduler-backstop).
+
 ## Worker Configuration
 
 ### ACP_SESSION_TIMEOUT_MS
@@ -311,11 +331,17 @@ Maximum time the `coder-acp-copilot` worker waits for a Copilot CLI ACP session 
 
 Threshold used by the queue-processor redelivery handler to decide whether an in-flight `processing` run is still alive. When a worker dequeues a duplicate message for a run already in `processing`, it reads the per-run liveness heartbeat from Redis (`run-heartbeat:<runId>`) and compares `Date.now() - lastBeat`:
 
-- **≤ threshold** → original worker is alive; drop the duplicate, leave the run untouched.
+- **≤ threshold** → original worker is alive; **re-defer** the duplicate (push its visibility out by `SCOPE_RUN_REDELIVER_DEFER_MS`), leave the run untouched. The message is **not** deleted — it is the recovery token if the original worker later dies hard.
 - **> threshold** → worker presumed dead; mark the run failed atomically.
-- **missing key** → fall back to `run.startedAt`. If picked up ≤ threshold ago, drop (transient race / Redis blip); otherwise mark failed.
+- **missing key** → fall back to `run.startedAt`. If picked up ≤ threshold ago, re-defer (transient race / Redis blip); otherwise mark failed.
 
-Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+Lower values fail crashed runs faster but increase the risk of false positives if the heartbeat is briefly delayed (network, throttling, GC). The default gives the per-run heartbeat (every 15s) a generous 8× margin. This value is also the staleness threshold used by the scheduler's stuck-run reaper — keep the scheduler and workers on the same value so both recovery paths agree on "worker dead". See [docs/architecture/queue-scheduler.md](docs/architecture/queue-scheduler.md#liveness-heartbeat--redelivery).
+
+### SCOPE_RUN_REDELIVER_DEFER_MS
+**Default:** value of `SCOPE_RUN_HEARTBEAT_STALE_MS` (`120000`)
+**Type:** integer (milliseconds)
+
+How far the queue-processor pushes out a duplicate message's visibility when the original worker is still alive (fresh heartbeat). The duplicate is re-deferred rather than deleted so the message survives as the at-least-once recovery token; each time it resurfaces, a fresh heartbeat re-defers it (cheap) and a stale heartbeat marks the run failed. Defaulting to the staleness threshold makes the re-check cadence match the staleness window.
 
 ### SCOPE_RUN_HEARTBEAT_REDIS_TTL_MS
 **Default:** `300000` (5 × `HEARTBEAT_VISIBILITY_SECONDS`)
