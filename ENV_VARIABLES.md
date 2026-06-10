@@ -299,6 +299,12 @@ Azure Storage Queue name used by both the scheduler (to enqueue post-processing 
 
 ## Worker Configuration
 
+### ACP_SESSION_TIMEOUT_MS
+**Default:** `3600000` (60 minutes)
+**Type:** integer (milliseconds)
+
+Maximum time the `coder-acp-copilot` worker waits for a Copilot CLI ACP session to complete before terminating it. If the agent takes longer than this to produce a response, the session is killed and the iteration fails with a timeout error. Increase for complex tasks that require extended processing. Set to `0` to disable the timeout entirely (not recommended in production).
+
 ### SCOPE_RUN_HEARTBEAT_STALE_MS
 **Default:** `120000` (2 × `HEARTBEAT_VISIBILITY_SECONDS`)
 **Type:** integer (milliseconds)

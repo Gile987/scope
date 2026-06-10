@@ -12,8 +12,8 @@ import { spawn, ChildProcess } from "node:child_process";
 import * as acp from "@agentclientprotocol/sdk";
 import type { McpServerConfig } from "shared";
 
-/** Default ACP session timeout: 30 minutes */
-const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+/** Default ACP session timeout: 60 minutes */
+const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
 
 export interface ACPClientOptions {
   command: string;
